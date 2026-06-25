@@ -790,9 +790,12 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
     CURRENT_CHARACTER_SCHEMA_VERSION,
   );
   try {
+    // display_owner: true MUST match writeLumirealm. The host gates FE-owned display on
+    // character.extensions.lumirealm.display_owner, so omitting it imports an unowned
+    // character that silently dead-zones (quirks §1.44).
     await args.spindle.characters.update(
       characterId,
-      { extensions: { [LUMIREALM_EXT_KEY]: lumirealmData } },
+      { extensions: { [LUMIREALM_EXT_KEY]: { ...lumirealmData, display_owner: true } } },
       args.userId,
     );
   } catch (err) {

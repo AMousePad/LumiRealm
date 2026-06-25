@@ -25854,7 +25854,7 @@ async function importCard(args) {
   };
   const lumirealmData = buildLumirealmData(bundle.risuPayload, args.extensionVersion, storedRegexScripts, assetIndex, emotionIndex, Date.now(), userOverrides, storedSource, CURRENT_CHARACTER_SCHEMA_VERSION);
   try {
-    await args.spindle.characters.update(characterId, { extensions: { [LUMIREALM_EXT_KEY]: lumirealmData } }, args.userId);
+    await args.spindle.characters.update(characterId, { extensions: { [LUMIREALM_EXT_KEY]: { ...lumirealmData, display_owner: true } } }, args.userId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logError(`(9) characters.update extensions write failed: ${msg}`);
@@ -38993,23 +38993,26 @@ function createMassMigrationsRunner(deps) {
       return;
     massCharacterMigrationStartedThisBoot.add(userId);
     let state = await readMigrationState(spindle.userStorage, userId);
-    if (!state.display_owner_backfilled) {
+    {
       const owned = await listLumirealmCharacters2(userId);
+      const unstamped = owned.filter((entry) => entry.data.display_owner !== true);
+      const failures = [];
       let stamped = 0;
-      let failed2 = 0;
-      for (const entry of owned) {
-        if (entry.data.display_owner === true)
-          continue;
+      for (const entry of unstamped) {
         try {
           await writeLumirealm2(userId, entry.character.id, entry.data);
           stamped++;
         } catch (err) {
-          failed2++;
-          log8.warn(`display-owner-backfill: character=${entry.character.id} threw: ${errMsg2(err)}`);
+          failures.push(`${entry.character.name ?? entry.character.id}: ${errMsg2(err)}`);
         }
       }
-      log8.info(`display-owner-backfill: user=${userId} stamped=${stamped} failed=${failed2} of ${owned.length}`);
-      if (failed2 === 0) {
+      if (unstamped.length > 0) {
+        log8.info(`display-owner-backfill: user=${userId} stamped=${stamped} failed=${failures.length} of ${unstamped.length} unstamped`);
+      }
+      if (failures.length > 0) {
+        log8.warn(`display-owner-backfill: stamp FAILED for ${failures.length} character(s): ${failures.join(" | ")}`);
+        toastFor(userId, "error", `${failures.length} character(s) could not claim display ownership and will render broken: ${failures.slice(0, 3).join("; ")}`, { title: "LumiRealm display ownership failed", duration: 15000 });
+      } else if (!state.display_owner_backfilled) {
         state = { ...state, display_owner_backfilled: true };
         await writeMigrationState(spindle.userStorage, userId, state);
       }

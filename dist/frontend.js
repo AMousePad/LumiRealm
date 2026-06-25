@@ -43973,6 +43973,10 @@ function setup(ctx) {
   hydrateLogStateFromLocalStorage();
   flog3.info("frontend setup: begin");
   const cleanups = [];
+  const readiness = ctx;
+  const hasReadiness = typeof readiness.deferReady === "function" && typeof readiness.ready === "function";
+  if (hasReadiness)
+    readiness.deferReady();
   const displayRegistered = Boolean(ctx.display);
   if (ctx.display) {
     cleanups.push(ctx.display.registerResolver(createDisplayResolver((chatId, vars) => ctx.sendToBackend({ type: "display_writeback", chatId, vars }))));
@@ -44544,6 +44548,8 @@ function setup(ctx) {
     handshake();
   }, HANDSHAKE_RETRY_MS);
   cleanups.push(() => window.clearInterval(retry));
+  if (hasReadiness)
+    readiness.ready();
   flog3.info("frontend setup: done");
   return () => {
     flog3.info("frontend teardown");

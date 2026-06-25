@@ -271,22 +271,30 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     if (blockingPermissionsMissing('characters')) return;
     massCharacterMigrationStartedThisBoot.add(userId);
     let state = await readMigrationState(spindle.userStorage, userId);
-    if (!state.display_owner_backfilled) {
+    // Self-healing every boot, not one-shot. A character imported before the
+    // import-path stamp fix (or any future slip) is unowned, which silently
+    // dead-zones its display, so re-stamp any unstamped character and surface
+    // failures loudly rather than leaving a broken card.
+    {
       const owned = await listLumirealmCharacters(userId);
+      const unstamped = owned.filter((entry) => entry.data.display_owner !== true);
+      const failures: string[] = [];
       let stamped = 0;
-      let failed = 0;
-      for (const entry of owned) {
-        if (entry.data.display_owner === true) continue;
+      for (const entry of unstamped) {
         try {
           await writeLumirealm(userId, entry.character.id, entry.data);
           stamped++;
         } catch (err) {
-          failed++;
-          log.warn(`display-owner-backfill: character=${entry.character.id} threw: ${errMsg(err)}`);
+          failures.push(`${entry.character.name ?? entry.character.id}: ${errMsg(err)}`);
         }
       }
-      log.info(`display-owner-backfill: user=${userId} stamped=${stamped} failed=${failed} of ${owned.length}`);
-      if (failed === 0) {
+      if (unstamped.length > 0) {
+        log.info(`display-owner-backfill: user=${userId} stamped=${stamped} failed=${failures.length} of ${unstamped.length} unstamped`);
+      }
+      if (failures.length > 0) {
+        log.warn(`display-owner-backfill: stamp FAILED for ${failures.length} character(s): ${failures.join(' | ')}`);
+        toastFor(userId, 'error', `${failures.length} character(s) could not claim display ownership and will render broken: ${failures.slice(0, 3).join('; ')}`, { title: 'LumiRealm display ownership failed', duration: 15000 });
+      } else if (!state.display_owner_backfilled) {
         state = { ...state, display_owner_backfilled: true };
         await writeMigrationState(spindle.userStorage, userId, state);
       }
