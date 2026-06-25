@@ -11,6 +11,7 @@ import { getTranslateEnabled, subscribeTranslateEnabled } from './translate-togg
 import { translateModuleName, translateModuleDescription, translateCharacterName, setModuleScopeLang, setCharacterScopeLang } from './translate-orchestrator.js';
 import { dominantScriptLang } from './browser-translator.js';
 import { createSearchableSelect, type SearchableSelectHandle } from './searchable-select.js';
+import { sendImportText } from './import-text-upload.js';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
@@ -260,11 +261,21 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   const rxDesc = document.createElement('div');
   rxDesc.className = 'lrm-section-desc';
   rxDesc.textContent =
-    'Upload a Risu regex export (.json). Rules install as global regex (apply to every chat) grouped under a folder named after the file.';
+    'Upload a Risu regex export (.json). Choose Global (applies to every chat) or a character. Rules group under a folder named after the file.';
   regexBody.appendChild(rxDesc);
 
   const rxToolbar = document.createElement('div');
   rxToolbar.className = 'lrm-toolbar';
+  const regexTargetSelect = createSearchableSelect({
+    className: 'lrm-regex-target',
+    placeholder: 'Global (all chats)',
+    searchPlaceholder: 'Search characters…',
+    emptyMessage: 'No characters',
+    items: [{ value: '', label: 'Global (all chats)' }],
+    value: '',
+    onChange: () => { /* read on upload */ },
+  });
+  rxToolbar.appendChild(regexTargetSelect.root);
   const rxUploadBtn = document.createElement('button');
   rxUploadBtn.type = 'button';
   rxUploadBtn.className = 'lrm-btn lrm-btn-primary';
@@ -650,6 +661,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   }
 
   function render(): void {
+    populateRegexTarget();
     renderModuleList();
     renderCharacterList();
     if (lastError) setStatus(lastError, true);
@@ -681,9 +693,8 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     sendToBackend({ type: 'request_modules' });
   });
 
-  // Standalone lorebook import. Reads the JSON file inline (single-message
-  // upload , Lumi's 64KB inbound guard limits big books; for now we accept
-  // that limit, matches the existing per-character `import_lorebook` path).
+  // Standalone lorebook import. Large files chunk automatically (sendImportText)
+  // so they survive the 4MB single-frame WS cap.
   let lorebookImportInFlight = false;
   lbUploadBtn.addEventListener('click', () => { void onLorebookUploadClicked(); });
 
@@ -707,13 +718,8 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     lorebookImportInFlight = true;
     lbUploadBtn.disabled = true;
     setLorebookStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    log.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length}`);
-    sendToBackend({
-      type: 'import_lorebook',
-      characterId: null,
-      json: text,
-      filename: file.name,
-    });
+    const sent = sendImportText(sendToBackend, { kind: 'lorebook', text, filename: file.name, characterId: null });
+    log.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length} chunked=${sent.chunked} chunks=${sent.chunks}`);
   }
 
   function setLorebookStatus(msg: string, isError: boolean): void {
@@ -721,10 +727,20 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     lbStatus.classList.toggle('lrm-lorebook-status-error', isError);
   }
 
-  // Backend parses + translates, the FE POSTs the resulting global rows since
-  // only the FE carries the session cookie.
+  // Backend parses + translates, the FE POSTs the resulting rows since only the
+  // FE carries the session cookie. Large files chunk via sendImportText.
   let regexImportInFlight = false;
   rxUploadBtn.addEventListener('click', () => { void onRegexUploadClicked(); });
+
+  // Rebuilds the target dropdown (Global + each character). setItems keeps the
+  // prior value if still present, else falls back to Global.
+  function populateRegexTarget(): void {
+    regexTargetSelect.setItems([
+      { value: '', label: 'Global (all chats)' },
+      ...cards.map((c) => ({ value: c.character_id, label: c.character_name ?? c.character_id })),
+    ]);
+    if (regexTargetSelect.getValue() === null) regexTargetSelect.setValue('');
+  }
 
   async function onRegexUploadClicked(): Promise<void> {
     if (regexImportInFlight) return;
@@ -743,11 +759,12 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       setRegexStatus(`Read failed: ${errMsg(err)}`, true);
       return;
     }
+    const targetId = regexTargetSelect.getValue() || null;
     regexImportInFlight = true;
     rxUploadBtn.disabled = true;
     setRegexStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    log.info(`modules-panel: import_regex standalone file=${file.name} bytes=${text.length}`);
-    sendToBackend({ type: 'import_regex', json: text, filename: file.name });
+    const sent = sendImportText(sendToBackend, { kind: 'regex', text, filename: file.name, characterId: targetId });
+    log.info(`modules-panel: import_regex file=${file.name} target=${targetId ?? 'global'} bytes=${text.length} chunked=${sent.chunked} chunks=${sent.chunks}`);
   }
 
   function setRegexStatus(msg: string, isError: boolean): void {
@@ -782,12 +799,15 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       const skipped = body?.skipped ?? 0;
       const dropSuffix = msg.dropped > 0 ? `, ${msg.dropped} runtime-only rule(s) dropped` : '';
       const skipSuffix = skipped > 0 ? `, ${skipped} rejected by Lumiverse` : '';
+      const where = msg.characterId
+        ? `for "${cards.find((c) => c.character_id === msg.characterId)?.character_name ?? msg.characterId}"`
+        : 'global';
       log.info(
         `modules-panel: regex import imported=${imported} skipped=${skipped} ` +
-          `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length}`,
+          `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length} target=${msg.characterId ?? 'global'}`,
       );
       setRegexStatus(
-        `Installed ${imported} global rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`,
+        `Installed ${imported} ${where} rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`,
         imported === 0,
       );
     } catch (err) {
@@ -1060,6 +1080,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   function destroy(): void {
     log.info('modules-panel: destroy');
     destroyAttachSelects();
+    try { regexTargetSelect.destroy(); } catch { void 0; }
     if (charHeaderHandle) {
       try { charHeaderHandle.destroy(); } catch { void 0; }
     }

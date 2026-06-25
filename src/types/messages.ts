@@ -138,6 +138,22 @@ export type FrontendToBackend =
     }
   | { type: 'import_card_commit'; sessionId: string }
   | { type: 'import_card_abort'; sessionId: string; reason?: string }
+  // Chunked transport for large lorebook / regex JSON imports. A single
+  // SPINDLE_BACKEND_MSG frame is capped at 4MB and silently dropped past that,
+  // so files over ~1MB are split across chunks and reassembled on the backend.
+  | {
+      type: 'import_text_init';
+      uploadId: string;
+      kind: 'lorebook' | 'regex';
+      filename?: string;
+      /** Target character for the reassembled import (regex/lorebook scope). */
+      characterId: string | null;
+      totalChunks: number;
+      /** Total UTF-8 bytes across all chunks (for validation). */
+      totalBytes: number;
+    }
+  | { type: 'import_text_chunk'; uploadId: string; seq: number; data: string }
+  | { type: 'import_text_commit'; uploadId: string }
   | {
       type: 'consent_response';
       requestId: string;
@@ -324,15 +340,16 @@ export type FrontendToBackend =
       /** Original filename — used as the new world_book name in standalone mode. */
       filename?: string;
     }
-  // Standalone regex import (Import tab, Regex subtab). Risu's `importRegex`
-  // parity: installs a Risu regex export as global-scoped rules (apply across
-  // every chat, like Risu's globalscript), grouped under a folder.
+  // Risu regex import (Import tab, Regex subtab). `characterId` null/absent →
+  // global rules (Risu globalscript parity), a character id → character-scoped.
   | {
       type: 'import_regex';
       /** File contents as UTF-8 string (FE has already read the file). */
       json: string;
       /** Original filename, used as the regex folder name. */
       filename?: string;
+      /** `null`/absent → global. A character id → character-scoped install. */
+      characterId?: string | null;
     }
   // `triggerIndex` is position in `ViewerData.triggers[]`. Backend replaces all
   // `triggerlua`-typed entries in the trigger's `effect[]` with a single `triggerlua`
@@ -456,7 +473,7 @@ export type BackendToFrontend =
       characterName: string;
       scripts: readonly PendingRegexScriptMsg[];
     }
-  // Result of a standalone regex import. FE POSTs `scripts` to
+  // Result of a regex import. FE POSTs `scripts` to
   // `/api/v1/regex-scripts/import` (only FE has the cookie) and reports the count.
   | {
       type: 'standalone_regex_install';
@@ -468,6 +485,8 @@ export type BackendToFrontend =
       dropped: number;
       /** Folder the rules are grouped under (source filename stem). */
       folder: string;
+      /** `null` for global, else the target character (for status + cascade). */
+      characterId: string | null;
       reason?: string;
     }
   // Lazy-migration trigger for legacy cards imported before raw-source storage.

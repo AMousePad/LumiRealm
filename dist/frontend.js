@@ -33330,7 +33330,7 @@ function mountCardsPanel(opts) {
       const existingResp = await fetch(`/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=1000`, { credentials: "include" });
       if (existingResp.ok) {
         const body = await existingResp.json();
-        const existingIds = (body.data ?? []).filter((r) => r.scope === "character" && r.scope_id === msg.characterId && !r.metadata?._risu?.module_id).map((r) => r.id);
+        const existingIds = (body.data ?? []).filter((r) => r.scope === "character" && r.scope_id === msg.characterId && !r.metadata?._risu?.module_id && !r.metadata?._risu?.imported_regex).map((r) => r.id);
         if (existingIds.length > 0) {
           log6.info(`drawer: pre-clean removing ${existingIds.length} existing character-scoped rule(s) for char=${msg.characterId}`);
           const delResp = await fetch("/api/v1/regex-scripts/bulk-delete", {
@@ -36748,6 +36748,45 @@ function setupTranslateOrchestrator(opts) {
   };
 }
 
+// src/ui/import-text-upload.ts
+var SINGLE_MAX_BYTES = 1e6;
+var CHUNK_CHARS = 600000;
+function uuid() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    return crypto.randomUUID();
+  return `up-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+}
+function sendImportText(send, args) {
+  const bytes = new TextEncoder().encode(args.text).length;
+  if (bytes <= SINGLE_MAX_BYTES) {
+    if (args.kind === "lorebook") {
+      send({ type: "import_lorebook", characterId: args.characterId, json: args.text, ...args.filename ? { filename: args.filename } : {} });
+    } else {
+      send({ type: "import_regex", json: args.text, characterId: args.characterId, ...args.filename ? { filename: args.filename } : {} });
+    }
+    return { chunked: false, chunks: 1 };
+  }
+  const uploadId = uuid();
+  const parts = [];
+  for (let i = 0;i < args.text.length; i += CHUNK_CHARS) {
+    parts.push(args.text.slice(i, i + CHUNK_CHARS));
+  }
+  send({
+    type: "import_text_init",
+    uploadId,
+    kind: args.kind,
+    characterId: args.characterId,
+    totalChunks: parts.length,
+    totalBytes: bytes,
+    ...args.filename ? { filename: args.filename } : {}
+  });
+  for (let seq = 0;seq < parts.length; seq++) {
+    send({ type: "import_text_chunk", uploadId, seq, data: parts[seq] });
+  }
+  send({ type: "import_text_commit", uploadId });
+  return { chunked: true, chunks: parts.length };
+}
+
 // src/ui/modules-tab.ts
 var CHUNK_BYTES2 = 2500 * 1024;
 var CHUNK_WIRE_WARN_BYTES2 = 3800000;
@@ -36913,10 +36952,20 @@ function mountModulesPanel(opts) {
   regexBody.className = "lrm-section-body lrm-tab-body";
   const rxDesc = document.createElement("div");
   rxDesc.className = "lrm-section-desc";
-  rxDesc.textContent = "Upload a Risu regex export (.json). Rules install as global regex (apply to every chat) grouped under a folder named after the file.";
+  rxDesc.textContent = "Upload a Risu regex export (.json). Choose Global (applies to every chat) or a character. Rules group under a folder named after the file.";
   regexBody.appendChild(rxDesc);
   const rxToolbar = document.createElement("div");
   rxToolbar.className = "lrm-toolbar";
+  const regexTargetSelect = createSearchableSelect({
+    className: "lrm-regex-target",
+    placeholder: "Global (all chats)",
+    searchPlaceholder: "Search characters…",
+    emptyMessage: "No characters",
+    items: [{ value: "", label: "Global (all chats)" }],
+    value: "",
+    onChange: () => {}
+  });
+  rxToolbar.appendChild(regexTargetSelect.root);
   const rxUploadBtn = document.createElement("button");
   rxUploadBtn.type = "button";
   rxUploadBtn.className = "lrm-btn lrm-btn-primary";
@@ -37279,6 +37328,7 @@ filename: ${m.filename}`;
     return det;
   }
   function render() {
+    populateRegexTarget();
     renderModuleList();
     renderCharacterList();
     if (lastError)
@@ -37336,13 +37386,8 @@ filename: ${m.filename}`;
     lorebookImportInFlight = true;
     lbUploadBtn.disabled = true;
     setLorebookStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    log6.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length}`);
-    sendToBackend({
-      type: "import_lorebook",
-      characterId: null,
-      json: text,
-      filename: file.name
-    });
+    const sent = sendImportText(sendToBackend, { kind: "lorebook", text, filename: file.name, characterId: null });
+    log6.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length} chunked=${sent.chunked} chunks=${sent.chunks}`);
   }
   function setLorebookStatus(msg, isError) {
     lbStatus.textContent = msg;
@@ -37352,6 +37397,14 @@ filename: ${m.filename}`;
   rxUploadBtn.addEventListener("click", () => {
     onRegexUploadClicked();
   });
+  function populateRegexTarget() {
+    regexTargetSelect.setItems([
+      { value: "", label: "Global (all chats)" },
+      ...cards.map((c) => ({ value: c.character_id, label: c.character_name ?? c.character_id }))
+    ]);
+    if (regexTargetSelect.getValue() === null)
+      regexTargetSelect.setValue("");
+  }
   async function onRegexUploadClicked() {
     if (regexImportInFlight)
       return;
@@ -37371,11 +37424,12 @@ filename: ${m.filename}`;
       setRegexStatus(`Read failed: ${errMsg(err)}`, true);
       return;
     }
+    const targetId = regexTargetSelect.getValue() || null;
     regexImportInFlight = true;
     rxUploadBtn.disabled = true;
     setRegexStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    log6.info(`modules-panel: import_regex standalone file=${file.name} bytes=${text.length}`);
-    sendToBackend({ type: "import_regex", json: text, filename: file.name });
+    const sent = sendImportText(sendToBackend, { kind: "regex", text, filename: file.name, characterId: targetId });
+    log6.info(`modules-panel: import_regex file=${file.name} target=${targetId ?? "global"} bytes=${text.length} chunked=${sent.chunked} chunks=${sent.chunks}`);
   }
   function setRegexStatus(msg, isError) {
     rxStatus.textContent = msg;
@@ -37408,8 +37462,9 @@ filename: ${m.filename}`;
       const skipped = body?.skipped ?? 0;
       const dropSuffix = msg.dropped > 0 ? `, ${msg.dropped} runtime-only rule(s) dropped` : "";
       const skipSuffix = skipped > 0 ? `, ${skipped} rejected by Lumiverse` : "";
-      log6.info(`modules-panel: regex import imported=${imported} skipped=${skipped} ` + `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length}`);
-      setRegexStatus(`Installed ${imported} global rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`, imported === 0);
+      const where = msg.characterId ? `for "${cards.find((c) => c.character_id === msg.characterId)?.character_name ?? msg.characterId}"` : "global";
+      log6.info(`modules-panel: regex import imported=${imported} skipped=${skipped} ` + `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length} target=${msg.characterId ?? "global"}`);
+      setRegexStatus(`Installed ${imported} ${where} rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`, imported === 0);
     } catch (err) {
       log6.error("modules-panel: regex import POST failed", err);
       setRegexStatus(`Install failed: ${errMsg(err)}`, true);
@@ -37657,6 +37712,9 @@ filename: ${m.filename}`;
   function destroy() {
     log6.info("modules-panel: destroy");
     destroyAttachSelects();
+    try {
+      regexTargetSelect.destroy();
+    } catch {}
     if (charHeaderHandle) {
       try {
         charHeaderHandle.destroy();

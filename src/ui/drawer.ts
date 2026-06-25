@@ -328,14 +328,16 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
             id: string;
             scope?: string;
             scope_id?: string;
-            metadata?: { _risu?: { module_id?: string } };
+            metadata?: { _risu?: { module_id?: string; imported_regex?: boolean } };
           }>;
         };
         const existingIds = (body.data ?? [])
           .filter((r) =>
             r.scope === 'character'
               && r.scope_id === msg.characterId
-              && !r.metadata?._risu?.module_id,
+              && !r.metadata?._risu?.module_id
+              // User-imported regex (Import → Regex) has its own lifecycle.
+              && !r.metadata?._risu?.imported_regex,
           )
           .map((r) => r.id);
         if (existingIds.length > 0) {

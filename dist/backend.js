@@ -31351,6 +31351,7 @@ function parseDirectRegex(json) {
 
 // src/state/regex-import.ts
 function toPendingMsg(row) {
+  const risu = row.metadata?.["_risu"] ?? {};
   return {
     name: row.name,
     script_id: row.script_id,
@@ -31370,71 +31371,64 @@ function toPendingMsg(row) {
     sort_order: row.sort_order,
     description: row.description,
     folder: row.folder,
-    metadata: row.metadata
+    metadata: { ...row.metadata, _risu: { ...risu, imported_regex: true } }
   };
 }
 function createRegexImporter(deps) {
   async function handle(msg, userId) {
     const t0 = Date.now();
+    const characterId = msg.characterId ?? null;
     const folder = (msg.filename ?? "regex").replace(/\.[^.]+$/, "").trim() || "regex";
-    const parsed = deps.parseDirectRegex(msg.json);
-    if (parsed.format === "unknown") {
+    const fail = (parsed2, dropped2, reason) => {
       deps.send({
         type: "standalone_regex_install",
         ok: false,
         scripts: [],
-        parsed: 0,
-        dropped: parsed.dropped,
+        parsed: parsed2,
+        dropped: dropped2,
         folder,
-        reason: 'unrecognized regex format (expected Risu regex export `{type:"regex",data:[\u2026]}`)'
+        characterId,
+        reason
       }, userId);
+    };
+    const parsed = deps.parseDirectRegex(msg.json);
+    if (parsed.format === "unknown") {
+      fail(0, parsed.dropped, 'unrecognized regex format (expected Risu regex export `{type:"regex",data:[\u2026]}`)');
       return;
     }
     if (parsed.scripts.length === 0) {
-      deps.send({
-        type: "standalone_regex_install",
-        ok: false,
-        scripts: [],
-        parsed: 0,
-        dropped: parsed.dropped,
-        folder,
-        reason: "no regex scripts found in file"
-      }, userId);
+      fail(0, parsed.dropped, "no regex scripts found in file");
       return;
     }
     let result;
     try {
       result = deps.mapRegex(parsed.scripts, {
-        characterId: "",
+        characterId: characterId ?? "",
         userId,
-        scope: "global",
-        scopeId: null,
+        scope: characterId ? "character" : "global",
+        scopeId: characterId,
         folder,
         catalog: deps.loadCatalog()
       });
     } catch (err) {
-      deps.send({
-        type: "standalone_regex_install",
-        ok: false,
-        scripts: [],
-        parsed: parsed.scripts.length,
-        dropped: parsed.dropped,
-        folder,
-        reason: `regex translation failed: ${deps.errMsg(err)}`
-      }, userId);
+      fail(parsed.scripts.length, parsed.dropped, `regex translation failed: ${deps.errMsg(err)}`);
       return;
     }
     const dropped = parsed.dropped + result.skipped.length;
     const scripts = result.rows.map(toPendingMsg);
-    deps.log.info(`import_regex: format=${parsed.format} scripts=${parsed.scripts.length} rows=${scripts.length} ` + `skipped=${result.skipped.length} issues=${result.issues.length} dropped=${dropped} ` + `elapsed=${Date.now() - t0}ms file=${msg.filename ?? "<unnamed>"} folder="${folder}"`);
+    deps.log.info(`import_regex: scope=${characterId ? `character(${characterId})` : "global"} format=${parsed.format} ` + `scripts=${parsed.scripts.length} rows=${scripts.length} skipped=${result.skipped.length} ` + `issues=${result.issues.length} dropped=${dropped} elapsed=${Date.now() - t0}ms ` + `file=${msg.filename ?? "<unnamed>"} folder="${folder}"`);
+    if (scripts.length === 0) {
+      fail(parsed.scripts.length, dropped, "all regex rules were runtime-only or invalid");
+      return;
+    }
     deps.send({
       type: "standalone_regex_install",
-      ok: scripts.length > 0,
+      ok: true,
       scripts,
       parsed: parsed.scripts.length,
       dropped,
       folder,
-      ...scripts.length === 0 ? { reason: "all regex rules were runtime-only or invalid" } : {}
+      characterId
     }, userId);
   }
   return { handle };
@@ -34452,6 +34446,82 @@ function createRegexHandlers(deps) {
   return {
     import_regex: async (msg, ctx) => {
       await deps.regexImporter.handle(msg, ctx.userId);
+    }
+  };
+}
+
+// src/handlers/import-text.ts
+var SESSION_TTL_MS = 120000;
+var MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+var MAX_CHUNKS = 4096;
+function createImportTextHandlers(deps) {
+  const sessions = new Map;
+  function pruneStale(now) {
+    for (const [id, s] of sessions) {
+      if (now - s.startedAt > SESSION_TTL_MS)
+        sessions.delete(id);
+    }
+  }
+  return {
+    import_text_init: async (msg, ctx) => {
+      pruneStale(Date.now());
+      if (msg.totalChunks <= 0 || msg.totalChunks > MAX_CHUNKS || msg.totalBytes > MAX_TOTAL_BYTES) {
+        ctx.log.warn(`import_text_init: rejected uploadId=${msg.uploadId} chunks=${msg.totalChunks} bytes=${msg.totalBytes}`);
+        ctx.send({ type: "error", message: `import_text_init: upload too large or malformed` }, ctx.userId);
+        return;
+      }
+      sessions.set(msg.uploadId, {
+        kind: msg.kind,
+        filename: msg.filename,
+        characterId: msg.characterId,
+        totalChunks: msg.totalChunks,
+        totalBytes: msg.totalBytes,
+        parts: new Array(msg.totalChunks).fill(null),
+        received: 0,
+        ownerUserId: ctx.userId,
+        startedAt: Date.now()
+      });
+      ctx.log.info(`import_text_init: uploadId=${msg.uploadId} kind=${msg.kind} chunks=${msg.totalChunks} bytes=${msg.totalBytes}`);
+    },
+    import_text_chunk: async (msg, ctx) => {
+      const s = sessions.get(msg.uploadId);
+      if (!s || s.ownerUserId !== ctx.userId) {
+        ctx.log.warn(`import_text_chunk: unknown/foreign uploadId=${msg.uploadId} seq=${msg.seq}`);
+        return;
+      }
+      if (msg.seq < 0 || msg.seq >= s.totalChunks) {
+        ctx.log.warn(`import_text_chunk: seq=${msg.seq} out of range (total=${s.totalChunks})`);
+        return;
+      }
+      if (s.parts[msg.seq] === null)
+        s.received += 1;
+      s.parts[msg.seq] = msg.data;
+    },
+    import_text_commit: async (msg, ctx) => {
+      const s = sessions.get(msg.uploadId);
+      if (!s || s.ownerUserId !== ctx.userId) {
+        ctx.log.warn(`import_text_commit: unknown/foreign uploadId=${msg.uploadId}`);
+        return;
+      }
+      sessions.delete(msg.uploadId);
+      if (s.received !== s.totalChunks) {
+        const reason = `upload incomplete: ${s.received}/${s.totalChunks} chunks received`;
+        ctx.log.error(`import_text_commit: ${reason} uploadId=${msg.uploadId}`);
+        if (s.kind === "lorebook") {
+          ctx.send({ type: "lorebook_import_result", characterId: s.characterId, ok: false, written: 0, dropped: 0, reason }, ctx.userId);
+        } else {
+          const folder = (s.filename ?? "regex").replace(/\.[^.]+$/, "").trim() || "regex";
+          ctx.send({ type: "standalone_regex_install", ok: false, scripts: [], parsed: 0, dropped: 0, folder, characterId: s.characterId, reason }, ctx.userId);
+        }
+        return;
+      }
+      const json = s.parts.join("");
+      ctx.log.info(`import_text_commit: uploadId=${msg.uploadId} kind=${s.kind} assembled=${json.length} chars`);
+      if (s.kind === "lorebook") {
+        await deps.lorebookImporter.handle({ type: "import_lorebook", characterId: s.characterId, json, ...s.filename ? { filename: s.filename } : {} }, ctx.userId);
+      } else {
+        await deps.regexImporter.handle({ type: "import_regex", json, characterId: s.characterId, ...s.filename ? { filename: s.filename } : {} }, ctx.userId);
+      }
     }
   };
 }
@@ -43889,6 +43959,7 @@ var dispatchHandlers = createDispatchHandlers({
 });
 var lorebookHandlers = createLorebookHandlers({ lorebookImporter });
 var regexHandlers = createRegexHandlers({ regexImporter });
+var importTextHandlers = createImportTextHandlers({ lorebookImporter, regexImporter });
 var assetsHandlers = createAssetsHandlers({
   blockedByRepair,
   mutateAssetIndex,
@@ -44023,6 +44094,7 @@ var handlerRegistry = {
   ...viewerHandlers,
   ...lorebookHandlers,
   ...regexHandlers,
+  ...importTextHandlers,
   ...screenHandlers,
   ...logHandlers,
   ...orphanHandlers,
