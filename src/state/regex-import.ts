@@ -19,7 +19,10 @@ export interface RegexImporter {
   handle(msg: ImportRegexMsg, userId: string): Promise<void>;
 }
 
+// Marks rows as user-imported so the card-install pre-clean (which wipes
+// character-scoped rows on re-translate / migration) leaves them alone.
 function toPendingMsg(row: LumiRegexScript): PendingRegexScriptMsg {
+  const risu = (row.metadata?.['_risu'] ?? {}) as Record<string, unknown>;
   return {
     name: row.name,
     script_id: row.script_id,
@@ -39,83 +42,68 @@ function toPendingMsg(row: LumiRegexScript): PendingRegexScriptMsg {
     sort_order: row.sort_order,
     description: row.description,
     folder: row.folder,
-    metadata: row.metadata,
+    metadata: { ...row.metadata, _risu: { ...risu, imported_regex: true } },
   };
 }
 
 export function createRegexImporter(deps: RegexImporterDeps): RegexImporter {
   async function handle(msg: ImportRegexMsg, userId: string): Promise<void> {
     const t0 = Date.now();
+    const characterId = msg.characterId ?? null;
     const folder = (msg.filename ?? 'regex').replace(/\.[^.]+$/, '').trim() || 'regex';
+
+    const fail = (parsed: number, dropped: number, reason: string): void => {
+      deps.send({
+        type: 'standalone_regex_install',
+        ok: false, scripts: [], parsed, dropped, folder, characterId, reason,
+      }, userId);
+    };
 
     const parsed = deps.parseDirectRegex(msg.json);
     if (parsed.format === 'unknown') {
-      deps.send({
-        type: 'standalone_regex_install',
-        ok: false,
-        scripts: [],
-        parsed: 0,
-        dropped: parsed.dropped,
-        folder,
-        reason: 'unrecognized regex format (expected Risu regex export `{type:"regex",data:[…]}`)',
-      }, userId);
+      fail(0, parsed.dropped, 'unrecognized regex format (expected Risu regex export `{type:"regex",data:[…]}`)');
       return;
     }
     if (parsed.scripts.length === 0) {
-      deps.send({
-        type: 'standalone_regex_install',
-        ok: false,
-        scripts: [],
-        parsed: 0,
-        dropped: parsed.dropped,
-        folder,
-        reason: 'no regex scripts found in file',
-      }, userId);
+      fail(0, parsed.dropped, 'no regex scripts found in file');
       return;
     }
 
     let result: ReturnType<typeof deps.mapRegex>;
     try {
       result = deps.mapRegex(parsed.scripts, {
-        characterId: '',
+        characterId: characterId ?? '',
         userId,
-        scope: 'global',
-        scopeId: null,
+        scope: characterId ? 'character' : 'global',
+        scopeId: characterId,
         folder,
         catalog: deps.loadCatalog(),
       });
     } catch (err) {
-      deps.send({
-        type: 'standalone_regex_install',
-        ok: false,
-        scripts: [],
-        parsed: parsed.scripts.length,
-        dropped: parsed.dropped,
-        folder,
-        reason: `regex translation failed: ${deps.errMsg(err)}`,
-      }, userId);
+      fail(parsed.scripts.length, parsed.dropped, `regex translation failed: ${deps.errMsg(err)}`);
       return;
     }
 
-    // @@emo / @@repeat_back need card runtime context and can't run as global
-    // standalone rules, so they're surfaced as dropped.
+    // @@emo / @@repeat_back need card runtime context and can't run as plain
+    // regex rows, so they're surfaced as dropped.
     const dropped = parsed.dropped + result.skipped.length;
     const scripts = result.rows.map(toPendingMsg);
 
     deps.log.info(
-      `import_regex: format=${parsed.format} scripts=${parsed.scripts.length} rows=${scripts.length} ` +
-        `skipped=${result.skipped.length} issues=${result.issues.length} dropped=${dropped} ` +
-        `elapsed=${Date.now() - t0}ms file=${msg.filename ?? '<unnamed>'} folder="${folder}"`,
+      `import_regex: scope=${characterId ? `character(${characterId})` : 'global'} format=${parsed.format} ` +
+        `scripts=${parsed.scripts.length} rows=${scripts.length} skipped=${result.skipped.length} ` +
+        `issues=${result.issues.length} dropped=${dropped} elapsed=${Date.now() - t0}ms ` +
+        `file=${msg.filename ?? '<unnamed>'} folder="${folder}"`,
     );
+
+    if (scripts.length === 0) {
+      fail(parsed.scripts.length, dropped, 'all regex rules were runtime-only or invalid');
+      return;
+    }
 
     deps.send({
       type: 'standalone_regex_install',
-      ok: scripts.length > 0,
-      scripts,
-      parsed: parsed.scripts.length,
-      dropped,
-      folder,
-      ...(scripts.length === 0 ? { reason: 'all regex rules were runtime-only or invalid' } : {}),
+      ok: true, scripts, parsed: parsed.scripts.length, dropped, folder, characterId,
     }, userId);
   }
 

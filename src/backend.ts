@@ -103,6 +103,7 @@ import { createTogglesHandlers } from './handlers/toggles.js';
 import { createDispatchHandlers } from './handlers/dispatch.js';
 import { createLorebookHandlers } from './handlers/lorebook.js';
 import { createRegexHandlers } from './handlers/regex.js';
+import { createImportTextHandlers } from './handlers/import-text.js';
 import { createAssetsHandlers } from './handlers/assets.js';
 import { createViewerHandlers } from './handlers/viewer.js';
 import { createModuleHandlers } from './handlers/module.js';
@@ -1647,6 +1648,7 @@ const dispatchHandlers = createDispatchHandlers({
 });
 const lorebookHandlers = createLorebookHandlers({ lorebookImporter });
 const regexHandlers = createRegexHandlers({ regexImporter });
+const importTextHandlers = createImportTextHandlers({ lorebookImporter, regexImporter });
 const assetsHandlers = createAssetsHandlers({
   blockedByRepair,
   mutateAssetIndex,
@@ -1772,6 +1774,7 @@ const handlerRegistry: HandlerRegistry = {
   ...viewerHandlers,
   ...lorebookHandlers,
   ...regexHandlers,
+  ...importTextHandlers,
   ...screenHandlers,
   ...logHandlers,
   ...orphanHandlers,
