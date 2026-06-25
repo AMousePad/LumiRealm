@@ -142,8 +142,8 @@ export function diffSnapshotVars(prev: DisplaySnapshot, next: DisplaySnapshot): 
 }
 
 export function isDisplayResolutionReady(chatId: string): boolean {
-  // Host decides ownership from chat.metadata.display_owner. ready() means a
-  // snapshot landed so we can resolve, else the host shows raw until invalidate.
+  // Host decides ownership per-character from character.extensions.lumirealm.display_owner.
+  // ready() means a snapshot landed so we can resolve, else the host shows raw until invalidate.
   return mode !== 'off' && snapshots.has(chatId);
 }
 

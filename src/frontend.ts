@@ -102,16 +102,19 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   flog.info('frontend setup: begin');
   const cleanups: (() => void)[] = [];
 
+  const readiness = ctx as unknown as { deferReady?: () => void; ready?: () => void };
+  const hasReadiness = typeof readiness.deferReady === 'function' && typeof readiness.ready === 'function';
+  if (hasReadiness) readiness.deferReady!();
+
   const displayRegistered = Boolean(ctx.display);
   if (ctx.display) {
     cleanups.push(ctx.display.registerResolver(createDisplayResolver(
       (chatId, vars) => ctx.sendToBackend({ type: 'display_writeback', chatId, vars }),
     )));
   }
-  // Ownership is carried on chat.metadata.display_owner (stamped by our backend),
-  // which the host reads at first render. display_authority only tells the
-  // backend whether to keep producing output: 'on' = we own and resolve in the
-  // browser so the backend can short-circuit, 'shadow'/'off' = let it run.
+  // Ownership is per-character: the host reads character.extensions.lumirealm.display_owner
+  // (stamped by writeLumirealm + the boot backfill). display_authority is a separate signal
+  // telling the backend to short-circuit ('on') or keep resolving ('shadow'/'off').
   const sendDisplayAuthority = (chatId: string | null): void => {
     if (!chatId) return;
     ctx.sendToBackend({
@@ -695,6 +698,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }, HANDSHAKE_RETRY_MS);
   cleanups.push(() => window.clearInterval(retry));
 
+  if (hasReadiness) readiness.ready!();
   flog.info('frontend setup: done');
   return () => {
     flog.info('frontend teardown');
