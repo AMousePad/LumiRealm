@@ -29272,8 +29272,9 @@ async function getSnapshotOrWait(chatId) {
 }
 function buildInput(snap, content, context2) {
   const dyn = context2.dynamicMacros;
+  const lastIdx = snap.chat.messages.length - 1;
   const chatIndexStr = dyn?.chat_index;
-  const idxOverride = typeof chatIndexStr === "string" && /^-?\d+$/.test(chatIndexStr) ? parseInt(chatIndexStr, 10) - 1 : undefined;
+  const idxOverride = typeof context2.depth === "number" && context2.depth >= 0 ? lastIdx - context2.depth : typeof chatIndexStr === "string" && /^-?\d+$/.test(chatIndexStr) ? parseInt(chatIndexStr, 10) - 1 : undefined;
   const role = context2.role ?? dyn?.role;
   return {
     template: content,
