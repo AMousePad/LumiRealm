@@ -49,10 +49,17 @@ function buildInput(
   context: SpindleDisplayContext,
 ): RunPipelineInput {
   const dyn = context.dynamicMacros;
+  // The host's dynamicMacros.chat_index is its chunked-render-window position,
+  // which drifts below our full-history lastmessageid on long chats. Reconstruct
+  // the absolute index from our own count + depth so chat_index/lastmessageid
+  // gates (Risu cbs.ts indexes both off chat.message[]) hold at any length.
+  const lastIdx = snap.chat.messages.length - 1;
   const chatIndexStr = dyn?.chat_index;
-  const idxOverride = typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)
-    ? parseInt(chatIndexStr, 10) - 1
-    : undefined;
+  const idxOverride = typeof context.depth === 'number' && context.depth >= 0
+    ? lastIdx - context.depth
+    : (typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)
+      ? parseInt(chatIndexStr, 10) - 1
+      : undefined);
   const role = context.role ?? dyn?.role;
   return {
     template: content,
