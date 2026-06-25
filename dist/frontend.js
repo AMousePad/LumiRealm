@@ -36815,7 +36815,8 @@ function mountModulesPanel(opts) {
   const SUB_TABS2 = [
     { id: "characters", label: "Characters", title: "Imported Risu cards. Click any row to manage attached modules." },
     { id: "modules", label: "Modules", title: "Module library. Click any row for details / delete." },
-    { id: "lorebooks", label: "Lorebooks", title: "Standalone lorebook import. Creates an unattached world_book; attach via Lumiverse." }
+    { id: "lorebooks", label: "Lorebooks", title: "Standalone lorebook import. Creates an unattached world_book; attach via Lumiverse." },
+    { id: "regex", label: "Regex", title: "Standalone Risu regex import. Installs global regex rules grouped under a folder." }
   ];
   const subnav = document.createElement("div");
   subnav.className = "lr-subtabs";
@@ -36908,11 +36909,30 @@ function mountModulesPanel(opts) {
   const lbStatus = document.createElement("div");
   lbStatus.className = "lrm-lorebook-status";
   lorebooksBody.appendChild(lbStatus);
+  const regexBody = document.createElement("section");
+  regexBody.className = "lrm-section-body lrm-tab-body";
+  const rxDesc = document.createElement("div");
+  rxDesc.className = "lrm-section-desc";
+  rxDesc.textContent = "Upload a Risu regex export (.json). Rules install as global regex (apply to every chat) grouped under a folder named after the file.";
+  regexBody.appendChild(rxDesc);
+  const rxToolbar = document.createElement("div");
+  rxToolbar.className = "lrm-toolbar";
+  const rxUploadBtn = document.createElement("button");
+  rxUploadBtn.type = "button";
+  rxUploadBtn.className = "lrm-btn lrm-btn-primary";
+  rxUploadBtn.textContent = "Upload regex…";
+  rxUploadBtn.title = "Pick a Risu regex export JSON file.";
+  rxToolbar.appendChild(rxUploadBtn);
+  regexBody.appendChild(rxToolbar);
+  const rxStatus = document.createElement("div");
+  rxStatus.className = "lrm-lorebook-status";
+  regexBody.appendChild(rxStatus);
   const panelsHost = document.createElement("div");
   panelsHost.className = "lr-subtab-panels";
   panelsHost.appendChild(charBody);
   panelsHost.appendChild(libBody);
   panelsHost.appendChild(lorebooksBody);
+  panelsHost.appendChild(regexBody);
   root.appendChild(panelsHost);
   function activateSubTab(id) {
     activeSubTab = id;
@@ -36924,6 +36944,7 @@ function mountModulesPanel(opts) {
     charBody.hidden = id !== "characters";
     libBody.hidden = id !== "modules";
     lorebooksBody.hidden = id !== "lorebooks";
+    regexBody.hidden = id !== "regex";
   }
   activateSubTab(activeSubTab);
   function setStatus(_msg, _isError = false) {}
@@ -37327,6 +37348,76 @@ filename: ${m.filename}`;
     lbStatus.textContent = msg;
     lbStatus.classList.toggle("lrm-lorebook-status-error", isError);
   }
+  let regexImportInFlight = false;
+  rxUploadBtn.addEventListener("click", () => {
+    onRegexUploadClicked();
+  });
+  async function onRegexUploadClicked() {
+    if (regexImportInFlight)
+      return;
+    let file;
+    try {
+      file = await pickLorebookFile();
+    } catch (err) {
+      setRegexStatus(`File pick failed: ${errMsg(err)}`, true);
+      return;
+    }
+    if (!file)
+      return;
+    let text;
+    try {
+      text = await file.text();
+    } catch (err) {
+      setRegexStatus(`Read failed: ${errMsg(err)}`, true);
+      return;
+    }
+    regexImportInFlight = true;
+    rxUploadBtn.disabled = true;
+    setRegexStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
+    log6.info(`modules-panel: import_regex standalone file=${file.name} bytes=${text.length}`);
+    sendToBackend({ type: "import_regex", json: text, filename: file.name });
+  }
+  function setRegexStatus(msg, isError) {
+    rxStatus.textContent = msg;
+    rxStatus.classList.toggle("lrm-lorebook-status-error", isError);
+  }
+  async function onStandaloneRegexInstall(msg) {
+    if (!msg.ok || msg.scripts.length === 0) {
+      regexImportInFlight = false;
+      rxUploadBtn.disabled = false;
+      setRegexStatus(msg.reason ?? "Import failed.", true);
+      return;
+    }
+    setRegexStatus(`Installing ${msg.scripts.length} rule(s)…`, false);
+    try {
+      const resp = await fetch("/api/v1/regex-scripts/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scripts: msg.scripts, folder: msg.folder }),
+        credentials: "include"
+      });
+      if (!resp.ok) {
+        let detail = "";
+        try {
+          detail = " — " + (await resp.text()).slice(0, 200);
+        } catch {}
+        throw new Error(`HTTP ${resp.status}${detail}`);
+      }
+      const body = await resp.json();
+      const imported = body?.imported ?? 0;
+      const skipped = body?.skipped ?? 0;
+      const dropSuffix = msg.dropped > 0 ? `, ${msg.dropped} runtime-only rule(s) dropped` : "";
+      const skipSuffix = skipped > 0 ? `, ${skipped} rejected by Lumiverse` : "";
+      log6.info(`modules-panel: regex import imported=${imported} skipped=${skipped} ` + `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length}`);
+      setRegexStatus(`Installed ${imported} global rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`, imported === 0);
+    } catch (err) {
+      log6.error("modules-panel: regex import POST failed", err);
+      setRegexStatus(`Install failed: ${errMsg(err)}`, true);
+    } finally {
+      regexImportInFlight = false;
+      rxUploadBtn.disabled = false;
+    }
+  }
   async function onUploadClicked() {
     if (uploadBtn.disabled)
       return;
@@ -37548,6 +37639,9 @@ filename: ${m.filename}`;
             setLorebookStatus(msg.reason ?? "Import failed.", true);
           }
         }
+        break;
+      case "standalone_regex_install":
+        onStandaloneRegexInstall(msg);
         break;
       case "error":
         if (activeUpload && msg.sessionId === activeUpload.sessionId) {
