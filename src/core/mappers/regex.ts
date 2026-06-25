@@ -4,6 +4,7 @@ import type {
   LumiRegexPlacement,
   LumiRegexTarget,
   LumiRegexMacroMode,
+  LumiRegexScope,
 } from "../lumiverse/types.js";
 import type { CatalogIndex } from "../cbs/catalog/loader.js";
 import { rewriteText } from "../cbs/rewrite/text.js";
@@ -66,6 +67,13 @@ export interface MapRegexOptions {
   readonly userId?: string;
   readonly origin?: "character" | "module";
   readonly catalog?: CatalogIndex;
+  // "global" makes rules apply across every chat (Risu globalscript parity),
+  // used by standalone regex import. Defaults to "character".
+  readonly scope?: LumiRegexScope;
+  // scope_id for emitted rows, `null` for global scope. Defaults to characterId.
+  readonly scopeId?: string | null;
+  // Lumi regex folder for grouping in the UI. Defaults to "".
+  readonly folder?: string;
 }
 
 export interface MapRegexResult {
@@ -81,6 +89,9 @@ export function mapRegex(
   const now = (opts.now ?? nowMs)();
   const uuid = opts.uuid ?? newUuid;
   const origin = opts.origin ?? "character";
+  const scope: LumiRegexScope = opts.scope ?? "character";
+  const scopeId = opts.scopeId !== undefined ? opts.scopeId : opts.characterId;
+  const folder = opts.folder ?? "";
 
   const rows: LumiRegexScript[] = [];
   const skipped: AtAtAction[] = [];
@@ -106,8 +117,8 @@ export function mapRegex(
         replace_string: "",
         flags: "g",
         placement: ["ai_output"] as LumiRegexPlacement[],
-        scope: "character",
-        scope_id: opts.characterId,
+        scope,
+        scope_id: scopeId,
         target: "display",
         min_depth: null,
         max_depth: null,
@@ -117,7 +128,7 @@ export function mapRegex(
         disabled: true,
         sort_order: i * 10,
         description: dividerLabel,
-        folder: "",
+        folder,
         pack_id: null,
         metadata: { _risu: { phase: s.type, origin, order_index: i, source_type: "divider" } },
         created_at: now,
@@ -260,8 +271,8 @@ export function mapRegex(
       replace_string: overrides.replace,
       flags: overrides.flags ?? baseFlags,
       placement: (overrides.placement ?? effectivePhase.placement) as LumiRegexPlacement[],
-      scope: "character",
-      scope_id: opts.characterId,
+      scope,
+      scope_id: scopeId,
       target: overrides.target ?? effectivePhase.target,
       min_depth: null,
       max_depth: overrides.maxDepth !== undefined ? overrides.maxDepth : (effectivePhase.maxDepth ?? null),
@@ -271,7 +282,7 @@ export function mapRegex(
       disabled: effectivePhase.disabled,
       sort_order: overrides.sortOrder,
       description: baseDescription,
-      folder: "",
+      folder,
       pack_id: null,
       metadata: baseMetadata,
       created_at: now,

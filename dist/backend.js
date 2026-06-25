@@ -22063,6 +22063,9 @@ function mapRegex(scripts, opts) {
   const now = (opts.now ?? nowMs)();
   const uuid = opts.uuid ?? newUuid;
   const origin = opts.origin ?? "character";
+  const scope = opts.scope ?? "character";
+  const scopeId = opts.scopeId !== undefined ? opts.scopeId : opts.characterId;
+  const folder = opts.folder ?? "";
   const rows = [];
   const skipped = [];
   const issues = [];
@@ -22085,8 +22088,8 @@ function mapRegex(scripts, opts) {
         replace_string: "",
         flags: "g",
         placement: ["ai_output"],
-        scope: "character",
-        scope_id: opts.characterId,
+        scope,
+        scope_id: scopeId,
         target: "display",
         min_depth: null,
         max_depth: null,
@@ -22096,7 +22099,7 @@ function mapRegex(scripts, opts) {
         disabled: true,
         sort_order: i * 10,
         description: dividerLabel,
-        folder: "",
+        folder,
         pack_id: null,
         metadata: { _risu: { phase: s.type, origin, order_index: i, source_type: "divider" } },
         created_at: now,
@@ -22202,8 +22205,8 @@ function mapRegex(scripts, opts) {
       replace_string: overrides.replace,
       flags: overrides.flags ?? baseFlags,
       placement: overrides.placement ?? effectivePhase.placement,
-      scope: "character",
-      scope_id: opts.characterId,
+      scope,
+      scope_id: scopeId,
       target: overrides.target ?? effectivePhase.target,
       min_depth: null,
       max_depth: overrides.maxDepth !== undefined ? overrides.maxDepth : effectivePhase.maxDepth ?? null,
@@ -22213,7 +22216,7 @@ function mapRegex(scripts, opts) {
       disabled: effectivePhase.disabled,
       sort_order: overrides.sortOrder,
       description: baseDescription,
-      folder: "",
+      folder,
       pack_id: null,
       metadata: baseMetadata,
       created_at: now,
@@ -31307,6 +31310,136 @@ function parseDirectLorebook(json) {
   return { entries: [], dropped: 0, format: "unknown" };
 }
 
+// src/payload/regex-direct-import.ts
+function coerceList(raw) {
+  const scripts = [];
+  let dropped = 0;
+  for (const e of raw) {
+    const parsed = customscriptSchema.safeParse(e);
+    if (parsed.success)
+      scripts.push(parsed.data);
+    else
+      dropped += 1;
+  }
+  return { scripts, dropped };
+}
+function parseDirectRegex(json) {
+  let parsed;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return { scripts: [], dropped: 0, format: "unknown" };
+  }
+  if (Array.isArray(parsed)) {
+    const { scripts, dropped } = coerceList(parsed);
+    return { scripts, dropped, format: "array" };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { scripts: [], dropped: 0, format: "unknown" };
+  }
+  const obj = parsed;
+  if (obj["type"] === "regex" && Array.isArray(obj["data"])) {
+    const { scripts, dropped } = coerceList(obj["data"]);
+    return { scripts, dropped, format: "risu" };
+  }
+  if (Array.isArray(obj["regex"])) {
+    const { scripts, dropped } = coerceList(obj["regex"]);
+    return { scripts, dropped, format: "risu" };
+  }
+  return { scripts: [], dropped: 0, format: "unknown" };
+}
+
+// src/state/regex-import.ts
+function toPendingMsg(row) {
+  return {
+    name: row.name,
+    script_id: row.script_id,
+    find_regex: row.find_regex,
+    replace_string: row.replace_string,
+    flags: row.flags,
+    placement: row.placement,
+    scope: row.scope,
+    scope_id: row.scope_id,
+    target: row.target,
+    min_depth: row.min_depth,
+    max_depth: row.max_depth,
+    trim_strings: row.trim_strings,
+    run_on_edit: row.run_on_edit,
+    substitute_macros: row.substitute_macros,
+    disabled: row.disabled,
+    sort_order: row.sort_order,
+    description: row.description,
+    folder: row.folder,
+    metadata: row.metadata
+  };
+}
+function createRegexImporter(deps) {
+  async function handle(msg, userId) {
+    const t0 = Date.now();
+    const folder = (msg.filename ?? "regex").replace(/\.[^.]+$/, "").trim() || "regex";
+    const parsed = deps.parseDirectRegex(msg.json);
+    if (parsed.format === "unknown") {
+      deps.send({
+        type: "standalone_regex_install",
+        ok: false,
+        scripts: [],
+        parsed: 0,
+        dropped: parsed.dropped,
+        folder,
+        reason: 'unrecognized regex format (expected Risu regex export `{type:"regex",data:[\u2026]}`)'
+      }, userId);
+      return;
+    }
+    if (parsed.scripts.length === 0) {
+      deps.send({
+        type: "standalone_regex_install",
+        ok: false,
+        scripts: [],
+        parsed: 0,
+        dropped: parsed.dropped,
+        folder,
+        reason: "no regex scripts found in file"
+      }, userId);
+      return;
+    }
+    let result;
+    try {
+      result = deps.mapRegex(parsed.scripts, {
+        characterId: "",
+        userId,
+        scope: "global",
+        scopeId: null,
+        folder,
+        catalog: deps.loadCatalog()
+      });
+    } catch (err) {
+      deps.send({
+        type: "standalone_regex_install",
+        ok: false,
+        scripts: [],
+        parsed: parsed.scripts.length,
+        dropped: parsed.dropped,
+        folder,
+        reason: `regex translation failed: ${deps.errMsg(err)}`
+      }, userId);
+      return;
+    }
+    const dropped = parsed.dropped + result.skipped.length;
+    const scripts = result.rows.map(toPendingMsg);
+    deps.log.info(`import_regex: format=${parsed.format} scripts=${parsed.scripts.length} rows=${scripts.length} ` + `skipped=${result.skipped.length} issues=${result.issues.length} dropped=${dropped} ` + `elapsed=${Date.now() - t0}ms file=${msg.filename ?? "<unnamed>"} folder="${folder}"`);
+    deps.send({
+      type: "standalone_regex_install",
+      ok: scripts.length > 0,
+      scripts,
+      parsed: parsed.scripts.length,
+      dropped,
+      folder,
+      ...scripts.length === 0 ? { reason: "all regex rules were runtime-only or invalid" } : {}
+    }, userId);
+  }
+  return { handle };
+}
+
 // src/interpreter/macros.ts
 init_handlers();
 init_registry();
@@ -34310,6 +34443,15 @@ function createLorebookHandlers(deps) {
   return {
     import_lorebook: async (msg, ctx) => {
       await deps.lorebookImporter.handle(msg, ctx.userId);
+    }
+  };
+}
+
+// src/handlers/regex.ts
+function createRegexHandlers(deps) {
+  return {
+    import_regex: async (msg, ctx) => {
+      await deps.regexImporter.handle(msg, ctx.userId);
     }
   };
 }
@@ -43578,6 +43720,14 @@ var lorebookImporter = createLorebookImporter({
   parseDirectLorebook,
   mapLoreBook
 });
+var regexImporter = createRegexImporter({
+  send,
+  log: log8,
+  errMsg,
+  parseDirectRegex,
+  mapRegex,
+  loadCatalog
+});
 var migrationsRunner = createMigrationsRunner({
   extensionVersion: EXTENSION_VERSION,
   currentModuleSchemaVersion: CURRENT_MODULE_SCHEMA_VERSION,
@@ -43738,6 +43888,7 @@ var dispatchHandlers = createDispatchHandlers({
   log: log8
 });
 var lorebookHandlers = createLorebookHandlers({ lorebookImporter });
+var regexHandlers = createRegexHandlers({ regexImporter });
 var assetsHandlers = createAssetsHandlers({
   blockedByRepair,
   mutateAssetIndex,
@@ -43871,6 +44022,7 @@ var handlerRegistry = {
   ...assetsHandlers,
   ...viewerHandlers,
   ...lorebookHandlers,
+  ...regexHandlers,
   ...screenHandlers,
   ...logHandlers,
   ...orphanHandlers,

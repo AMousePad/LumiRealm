@@ -324,6 +324,16 @@ export type FrontendToBackend =
       /** Original filename — used as the new world_book name in standalone mode. */
       filename?: string;
     }
+  // Standalone regex import (Import tab, Regex subtab). Risu's `importRegex`
+  // parity: installs a Risu regex export as global-scoped rules (apply across
+  // every chat, like Risu's globalscript), grouped under a folder.
+  | {
+      type: 'import_regex';
+      /** File contents as UTF-8 string (FE has already read the file). */
+      json: string;
+      /** Original filename, used as the regex folder name. */
+      filename?: string;
+    }
   // `triggerIndex` is position in `ViewerData.triggers[]`. Backend replaces all
   // `triggerlua`-typed entries in the trigger's `effect[]` with a single `triggerlua`
   // carrying the new code. Non-lua effects are preserved in order.
@@ -445,6 +455,20 @@ export type BackendToFrontend =
       characterId: string;
       characterName: string;
       scripts: readonly PendingRegexScriptMsg[];
+    }
+  // Result of a standalone regex import. FE POSTs `scripts` to
+  // `/api/v1/regex-scripts/import` (only FE has the cookie) and reports the count.
+  | {
+      type: 'standalone_regex_install';
+      ok: boolean;
+      scripts: readonly PendingRegexScriptMsg[];
+      /** customScripts seen in the file. */
+      parsed: number;
+      /** Rules dropped (invalid shape, or runtime-only @@emo/@@repeat_back). */
+      dropped: number;
+      /** Folder the rules are grouped under (source filename stem). */
+      folder: string;
+      reason?: string;
     }
   // Lazy-migration trigger for legacy cards imported before raw-source storage.
   // Translator changes can't auto-apply without source, FE shows a one-time toast.

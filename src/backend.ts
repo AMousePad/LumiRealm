@@ -47,6 +47,9 @@ import {
 } from './interpreter/dispatch.js';
 import { type CompiledTriggerEntry, prepareTriggers } from './interpreter/dispatcher.js';
 import { parseDirectLorebook } from './payload/lorebook-direct-import.js';
+import { parseDirectRegex } from './payload/regex-direct-import.js';
+import { mapRegex } from './core/mappers/regex.js';
+import { createRegexImporter } from './state/regex-import.js';
 import { mapLoreBook } from './core/mappers/lorebook.js';
 import { registerAll as registerAllMacros, clearMacroVarOverlay } from './interpreter/macros.js';
 import { setActiveAssetIndexes, clearActiveAssetIndexes } from './interpreter/asset-cache.js';
@@ -99,6 +102,7 @@ import { createVariablesHandlers } from './handlers/variables.js';
 import { createTogglesHandlers } from './handlers/toggles.js';
 import { createDispatchHandlers } from './handlers/dispatch.js';
 import { createLorebookHandlers } from './handlers/lorebook.js';
+import { createRegexHandlers } from './handlers/regex.js';
 import { createAssetsHandlers } from './handlers/assets.js';
 import { createViewerHandlers } from './handlers/viewer.js';
 import { createModuleHandlers } from './handlers/module.js';
@@ -170,7 +174,7 @@ import { userIdAls, currentUserId } from './interpreter/runtime/als.js';
 import { checkHostVersion, type HostVersionCheckResult } from './util/version-check.js';
 import { decodeRisum } from './core/risum/index.js';
 import { risuModuleSchema } from './core/schemas/module.js';
-import { guessMimeType, sniffImageMime } from './payload/import.js';
+import { guessMimeType, sniffImageMime, loadCatalog } from './payload/import.js';
 import {
   type ModuleEnvelope,
   deleteModule as deleteModuleFromStore,
@@ -1455,6 +1459,15 @@ const lorebookImporter = createLorebookImporter({
   mapLoreBook,
 });
 
+const regexImporter = createRegexImporter({
+  send,
+  log,
+  errMsg,
+  parseDirectRegex,
+  mapRegex,
+  loadCatalog,
+});
+
 
 
 
@@ -1633,6 +1646,7 @@ const dispatchHandlers = createDispatchHandlers({
   log,
 });
 const lorebookHandlers = createLorebookHandlers({ lorebookImporter });
+const regexHandlers = createRegexHandlers({ regexImporter });
 const assetsHandlers = createAssetsHandlers({
   blockedByRepair,
   mutateAssetIndex,
@@ -1757,6 +1771,7 @@ const handlerRegistry: HandlerRegistry = {
   ...assetsHandlers,
   ...viewerHandlers,
   ...lorebookHandlers,
+  ...regexHandlers,
   ...screenHandlers,
   ...logHandlers,
   ...orphanHandlers,
