@@ -13,6 +13,7 @@ export interface ImportOverlayHandle {
     onCancel?: () => void,
     totalBytes?: number,
   ): void;
+  setUploadProgress(sent: number, total: number): void;
   destroy(): void;
 }
 
@@ -289,6 +290,18 @@ export function setupImportOverlay(
     cancelBtn.hidden = !pendingCancel;
   }
 
+  function setUploadProgress(sent: number, total: number): void {
+    if (!visible) showOverlay(label || 'character');
+    if (lastPhase !== '') return;
+    phaseEl.textContent = 'Uploading';
+    if (total > 0) {
+      messageEl.textContent = `Sent ${formatBytes(Math.min(sent, total))} of ${formatBytes(total)}…`;
+      setFraction(sent / total);
+    } else {
+      messageEl.textContent = `Sent ${formatBytes(sent)}…`;
+    }
+  }
+
   function handleBackendMessage(msg: BackendToFrontend): void {
     switch (msg.type) {
       case 'realm_download_started': {
@@ -302,7 +315,6 @@ export function setupImportOverlay(
         }
         break;
       }
-      case 'import_upload_ack':
       case 'module_upload_ack': {
         if (!visible && msg.seq === -1) {
           showOverlay(label || 'character');
@@ -355,7 +367,7 @@ export function setupImportOverlay(
     overlay.remove();
   }
 
-  return { handleBackendMessage, notifyImportStart, destroy };
+  return { handleBackendMessage, notifyImportStart, setUploadProgress, destroy };
 }
 
 function formatBytes(n: number): string {

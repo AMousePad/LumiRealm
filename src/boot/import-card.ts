@@ -34,7 +34,7 @@ export interface ImportCardOrchestratorDeps {
 
 export interface ImportCardOrchestrator {
   readonly importCardFromBytes: (
-    bytesB64: string,
+    bytes: Uint8Array,
     fileName: string,
     userId: string,
   ) => Promise<void>;
@@ -60,12 +60,12 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
   } = deps;
 
   async function importCardFromBytes(
-    bytesB64: string,
+    bytes: Uint8Array,
     fileName: string,
     userId: string,
   ): Promise<void> {
     const tStart = Date.now();
-    log.info(`importCardFromBytes: start file=${fileName} b64-bytes=${bytesB64.length} (~${Math.round(bytesB64.length * 0.75)}B decoded) userId=${userId}`);
+    log.info(`importCardFromBytes: start file=${fileName} bytes=${bytes.byteLength} userId=${userId}`);
 
     const hasSetAvatar = typeof (spindle.characters as { setAvatar?: unknown }).setAvatar === 'function';
     if (!spindle.images?.upload) {
@@ -144,7 +144,7 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
     enterAssetUpload();
     try {
       const result = await importCard({
-        bytesB64,
+        bytes,
         fileName,
         extensionVersion,
         userId,

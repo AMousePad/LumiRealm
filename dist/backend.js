@@ -18948,9 +18948,6 @@ function toStr(v) {
   }
 }
 
-// src/realm/backend.ts
-init_base64();
-
 // src/realm/messages.ts
 var REALM_HUB_API_URL = "https://sv.risuai.xyz";
 var REALM_DOWNLOAD_URL = "https://realm.risuai.net";
@@ -19577,8 +19574,7 @@ function setupRealmBackend(deps) {
             contentType: dl.contentType,
             bytes: conv.bytes.byteLength
           }, userId);
-          const bytesB64 = bytesToBase642(conv.bytes);
-          await importCardFromBytes(bytesB64, conv.fileName, userId);
+          await importCardFromBytes(conv.bytes, conv.fileName, userId);
         } catch (err) {
           const error = errMessage(err);
           log.error(`realm_download failed req=${msg.requestId} id=${msg.id}: ${error}`);
@@ -19594,8 +19590,7 @@ function setupRealmBackend(deps) {
       }
     }
   }
-  async function importAnyFormat(bytesB64, fileName, userId) {
-    const bytes = base64ToBytes(bytesB64);
+  async function importAnyFormat(bytes, fileName, userId) {
     let conv;
     try {
       conv = convertToCharx(bytes, fileName);
@@ -19606,12 +19601,11 @@ function setupRealmBackend(deps) {
     for (const note of conv.notes)
       log.info(`importAnyFormat: ${note}`);
     if (!conv.synthesized) {
-      await importCardFromBytes(bytesB64, fileName, userId);
+      await importCardFromBytes(bytes, fileName, userId);
       return;
     }
     log.info(`importAnyFormat: converted ${conv.originalFormat} \u2192 charx file=${fileName} \u2192 ${conv.fileName} bytes=${conv.bytes.byteLength}`);
-    const convB64 = bytesToBase642(conv.bytes);
-    await importCardFromBytes(convB64, conv.fileName, userId);
+    await importCardFromBytes(conv.bytes, conv.fileName, userId);
   }
   return { handle, importAnyFormat };
 }
@@ -19625,19 +19619,6 @@ function errMessage(err) {
   } catch {
     return String(err);
   }
-}
-function bytesToBase642(bytes) {
-  const g = globalThis;
-  if (g.Buffer && typeof g.Buffer.from === "function") {
-    return g.Buffer.from(bytes).toString("base64");
-  }
-  let bin = "";
-  const CHUNK = 32768;
-  for (let i = 0;i < bytes.length; i += CHUNK) {
-    const slice = bytes.subarray(i, i + CHUNK);
-    bin += String.fromCharCode.apply(null, Array.from(slice));
-  }
-  return btoa(bin);
 }
 
 // src/core/errors.ts
@@ -24920,7 +24901,6 @@ function detectMacrosInText(c) {
   return false;
 }
 // src/payload/import.ts
-init_base64();
 init_cbs();
 
 // src/payload/codec.ts
@@ -25409,11 +25389,9 @@ function pickAvatar(assets) {
 async function importCard(args) {
   const progress = args.onProgress ?? (() => {});
   const tImport = Date.now();
-  logInfo(`start file=${args.fileName} b64-bytes=${args.bytesB64.length} userId=${args.userId ?? "<none>"}`);
+  logInfo(`start file=${args.fileName} bytes=${args.bytes.byteLength} userId=${args.userId ?? "<none>"}`);
   progress("decoding", `Decoding ${args.fileName}\u2026`, 0.05);
-  const tDecode = Date.now();
-  const bytes = base64ToBytes(args.bytesB64);
-  logInfo(`(1) decoded base64 -> ${bytes.byteLength} bytes in ${Date.now() - tDecode}ms`);
+  const bytes = args.bytes;
   progress("translating", "Translating Risu card\u2026", 0.15);
   const tTranslate = Date.now();
   const catalog2 = loadCatalog();
@@ -33572,7 +33550,7 @@ async function listModules(storage, userId) {
   const index = await readIndex(storage, userId);
   return index.entries;
 }
-function pairModuleAssetsForUpload(manifest, bytesList, bytesToBase643, mimeFor) {
+function pairModuleAssetsForUpload(manifest, bytesList, bytesToBase642, mimeFor) {
   const out = [];
   const pairCount = Math.min(manifest.length, bytesList.length);
   for (let i = 0;i < pairCount; i++) {
@@ -33585,7 +33563,7 @@ function pairModuleAssetsForUpload(manifest, bytesList, bytesToBase643, mimeFor)
       continue;
     out.push({
       path: name,
-      base64: bytesToBase643(bytes),
+      base64: bytesToBase642(bytes),
       mimeType: mimeFor(name),
       sourceIndex: i
     });
@@ -34996,7 +34974,6 @@ function createModuleHandlers(deps) {
 }
 
 // src/handlers/import.ts
-init_base64();
 var getCardsInFlight = new Set;
 function createImportHandlers(deps) {
   return {
@@ -35067,124 +35044,27 @@ function createImportHandlers(deps) {
           getCardsInFlight.delete(ctx.userId);
       }
     },
-    import_card_init: async (msg, ctx) => {
-      deps.log.info(`import_card_init: sessionId=${msg.sessionId} file=${msg.fileName} ` + `totalBytes=${msg.totalBytes} totalChunks=${msg.totalChunks}`);
-      const shape = deps.validateUploadShape(msg.totalBytes, msg.totalChunks);
-      if (!shape.ok) {
-        deps.log.warn(`import_card_init: rejected sessionId=${msg.sessionId} userId=${ctx.userId}: ${shape.reason}`);
-        ctx.send({ type: "error", message: `import_card_init: ${shape.reason}`, sessionId: msg.sessionId }, ctx.userId);
+    import_card_from_upload: async (msg, ctx) => {
+      deps.log.info(`import_card_from_upload: uploadId=${msg.uploadId} file=${msg.fileName} userId=${ctx.userId}`);
+      let upload;
+      try {
+        upload = await deps.getUpload(msg.uploadId, ctx.userId);
+      } catch (err) {
+        deps.log.error(`import_card_from_upload: getUpload threw: ${deps.errMsg(err)}`);
+        ctx.send({ type: "import_progress", phase: "error", message: "Upload retrieval failed", fraction: null, error: deps.errMsg(err) }, ctx.userId);
         return;
       }
-      const existing = deps.importSessions.get(msg.sessionId);
-      if (existing) {
-        if (existing.ownerUserId !== ctx.userId) {
-          deps.log.warn(`import_card_init: sessionId=${msg.sessionId} owned by ${existing.ownerUserId}, rejecting cross-user reuse from ${ctx.userId}`);
-          ctx.send({ type: "error", message: `Session id collision; pick a fresh id` }, ctx.userId);
-          return;
-        }
-        deps.log.warn(`import_card_init: replacing existing session ${msg.sessionId}`);
-      }
-      deps.importSessions.set(msg.sessionId, {
-        fileName: msg.fileName,
-        totalBytes: msg.totalBytes,
-        totalChunks: msg.totalChunks,
-        buffer: new Array(msg.totalChunks).fill(null),
-        ownerUserId: ctx.userId,
-        receivedBytes: 0,
-        receivedChunks: 0,
-        startedAt: Date.now(),
-        lastActivity: Date.now()
-      });
-      ctx.send({ type: "import_upload_ack", sessionId: msg.sessionId, seq: -1, receivedBytes: 0 }, ctx.userId);
-    },
-    import_card_chunk: async (msg, ctx) => {
-      const session = deps.importSessions.get(msg.sessionId);
-      if (!session) {
-        deps.log.warn(`import_card_chunk: unknown sessionId=${msg.sessionId} seq=${msg.seq},dropping`);
-        ctx.send({ type: "error", message: `Unknown upload session ${msg.sessionId}. Re-import the card.` }, ctx.userId);
+      if (!upload) {
+        deps.log.warn(`import_card_from_upload: uploadId=${msg.uploadId} not found or expired`);
+        ctx.send({ type: "import_progress", phase: "error", message: "Upload not found or expired. Re-import the card.", fraction: null, error: "upload_missing" }, ctx.userId);
         return;
       }
-      if (session.ownerUserId !== ctx.userId) {
-        deps.log.warn(`import_card_chunk: ownership mismatch sessionId=${msg.sessionId} owner=${session.ownerUserId} sender=${ctx.userId ?? "<none>"}`);
-        ctx.send({ type: "error", message: `Unknown upload session ${msg.sessionId}. Re-import the card.` }, ctx.userId);
-        return;
+      deps.log.info(`import_card_from_upload: got ${upload.data.byteLength} bytes, running importCard`);
+      try {
+        await deps.importAnyFormat(upload.data, msg.fileName || upload.fileName, ctx.userId);
+      } finally {
+        deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
       }
-      if (msg.seq < 0 || msg.seq >= session.totalChunks) {
-        deps.log.warn(`import_card_chunk: seq=${msg.seq} out of range (total=${session.totalChunks})`);
-        return;
-      }
-      if (session.buffer[msg.seq] !== null) {
-        deps.log.warn(`import_card_chunk: duplicate seq=${msg.seq} on session ${msg.sessionId},overwriting`);
-      }
-      const chunkBytes = base64ToBytes(msg.bytesB64Chunk);
-      session.buffer[msg.seq] = chunkBytes;
-      session.receivedBytes += chunkBytes.byteLength;
-      session.receivedChunks += 1;
-      session.lastActivity = Date.now();
-      ctx.send({
-        type: "import_upload_ack",
-        sessionId: msg.sessionId,
-        seq: msg.seq,
-        receivedBytes: session.receivedBytes
-      }, ctx.userId);
-    },
-    import_card_commit: async (msg, ctx) => {
-      const session = deps.importSessions.get(msg.sessionId);
-      if (!session) {
-        deps.log.warn(`import_card_commit: unknown sessionId=${msg.sessionId}`);
-        ctx.send({ type: "error", message: `Unknown upload session ${msg.sessionId}. Re-import the card.` }, ctx.userId);
-        return;
-      }
-      if (session.ownerUserId !== ctx.userId) {
-        deps.log.warn(`import_card_commit: ownership mismatch sessionId=${msg.sessionId} owner=${session.ownerUserId} sender=${ctx.userId ?? "<none>"}`);
-        ctx.send({ type: "error", message: `Unknown upload session ${msg.sessionId}. Re-import the card.` }, ctx.userId);
-        return;
-      }
-      deps.log.info(`import_card_commit: sessionId=${msg.sessionId} received=${session.receivedChunks}/${session.totalChunks} ` + `bytes=${session.receivedBytes}/${session.totalBytes} elapsed=${Date.now() - session.startedAt}ms`);
-      if (session.receivedChunks !== session.totalChunks) {
-        const missing = [];
-        for (let i = 0;i < session.totalChunks; i++) {
-          if (session.buffer[i] === null)
-            missing.push(i);
-        }
-        deps.importSessions.delete(msg.sessionId);
-        const missingList = missing.length > 12 ? `${missing.slice(0, 12).join(",")}\u2026(+${missing.length - 12})` : missing.join(",");
-        deps.log.error(`import_card_commit: missing chunks=[${missingList}],aborting`);
-        ctx.send({
-          type: "import_progress",
-          phase: "error",
-          message: `Upload incomplete: ${missing.length} of ${session.totalChunks} chunks missing`,
-          fraction: null,
-          error: `Missing chunks: ${missingList}`
-        }, ctx.userId);
-        return;
-      }
-      if (session.receivedBytes !== session.totalBytes) {
-        deps.log.warn(`import_card_commit: byte count mismatch received=${session.receivedBytes} expected=${session.totalBytes},proceeding anyway`);
-      }
-      const assembled = new Uint8Array(session.receivedBytes);
-      let offset = 0;
-      for (const chunk of session.buffer) {
-        if (!chunk)
-          continue;
-        assembled.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      const fileName = session.fileName;
-      deps.importSessions.delete(msg.sessionId);
-      ctx.send({ type: "import_upload_ack", sessionId: msg.sessionId, seq: -2, receivedBytes: session.receivedBytes }, ctx.userId);
-      deps.log.info(`import_card_commit: assembled ${assembled.byteLength} bytes, running importCard`);
-      const bytesB64 = Buffer.from(assembled).toString("base64");
-      await deps.importAnyFormat(bytesB64, fileName, session.ownerUserId);
-    },
-    import_card_abort: async (msg, ctx) => {
-      const session = deps.importSessions.get(msg.sessionId);
-      if (session && session.ownerUserId !== ctx.userId) {
-        deps.log.warn(`import_card_abort: ownership mismatch sessionId=${msg.sessionId} owner=${session.ownerUserId} sender=${ctx.userId ?? "<none>"},ignoring`);
-        return;
-      }
-      const existed = deps.importSessions.delete(msg.sessionId);
-      deps.log.info(`import_card_abort: sessionId=${msg.sessionId} existed=${existed} reason=${msg.reason ?? "<none>"}`);
     },
     register_svg_raster_index: async (msg, ctx) => {
       const pendingForSvgCheck = deps.pendingImportCompletions.get(msg.characterId);
@@ -40352,9 +40232,9 @@ function createImportCardOrchestrator(deps) {
     log: log8,
     errMsg: errMsg2
   } = deps;
-  async function importCardFromBytes(bytesB64, fileName, userId) {
+  async function importCardFromBytes(bytes, fileName, userId) {
     const tStart = Date.now();
-    log8.info(`importCardFromBytes: start file=${fileName} b64-bytes=${bytesB64.length} (~${Math.round(bytesB64.length * 0.75)}B decoded) userId=${userId}`);
+    log8.info(`importCardFromBytes: start file=${fileName} bytes=${bytes.byteLength} userId=${userId}`);
     const hasSetAvatar = typeof spindle.characters.setAvatar === "function";
     if (!spindle.images?.upload) {
       throw new Error("spindle.images.upload is unavailable,Lumi 0.9.6+ required.");
@@ -40408,7 +40288,7 @@ function createImportCardOrchestrator(deps) {
     enterAssetUpload();
     try {
       const result = await importCard({
-        bytesB64,
+        bytes,
         fileName,
         extensionVersion,
         userId,
@@ -43138,8 +43018,6 @@ function emitOperationProgress(userId, operationId, phase, title, message, fract
     ...error !== undefined ? { error } : {}
   }, userId);
 }
-var importSessions = new Map;
-var IMPORT_SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 var MAX_UPLOAD_CHUNKS = 250000;
 var MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024;
 function validateUploadShape(totalBytes, totalChunks) {
@@ -43150,23 +43028,6 @@ function validateUploadShape(totalBytes, totalChunks) {
     return { ok: false, reason: `totalChunks out of range (max ${MAX_UPLOAD_CHUNKS})` };
   }
   return { ok: true };
-}
-function sweepStaleSessions() {
-  const now = Date.now();
-  let dropped = 0;
-  for (const [sid, s] of importSessions) {
-    if (now - s.lastActivity > IMPORT_SESSION_TIMEOUT_MS) {
-      importSessions.delete(sid);
-      dropped += 1;
-      log8.warn(`import session ${sid} expired (inactive ${Math.round((now - s.lastActivity) / 1000)}s); dropping ${s.receivedChunks}/${s.totalChunks} chunks`);
-    }
-  }
-  if (dropped > 0)
-    log8.info(`sweepStaleSessions: dropped ${dropped} expired session(s)`);
-}
-var sweepTimer = setInterval(sweepStaleSessions, 60000);
-if (typeof sweepTimer.unref === "function") {
-  sweepTimer.unref();
 }
 function userStorage() {
   return spindle.userStorage;
@@ -43909,10 +43770,9 @@ var realmHandle = setupRealmBackend({
     warn: (m) => log8.warn(m),
     error: (m) => log8.error(m)
   },
-  importCardFromBytes: (bytesB64, fileName, userId) => importCardFromBytes(bytesB64, fileName, userId)
+  importCardFromBytes: (bytes, fileName, userId) => importCardFromBytes(bytes, fileName, userId)
 });
 var HIGH_VOLUME_FRONTEND_MSG_TYPES = new Set([
-  "import_card_chunk",
   "upload_module_chunk"
 ]);
 var screenHandlers = createScreenHandlers({ setScreenDims, log: log8 });
@@ -43988,7 +43848,6 @@ var viewerHandlers = createViewerHandlers({
   errMsg
 });
 var importHandlers = createImportHandlers({
-  importSessions,
   pendingImportCompletions,
   lastSentBgHtmlByChat,
   activeCardByChat,
@@ -43998,7 +43857,6 @@ var importHandlers = createImportHandlers({
   } },
   getMissingPermissions,
   permissionPurpose: PERMISSION_PURPOSE,
-  validateUploadShape,
   listCards: async (uid) => listCards(uid),
   pushCards,
   ensureActiveCardForChat,
@@ -44007,7 +43865,17 @@ var importHandlers = createImportHandlers({
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
   refreshVariables,
-  importAnyFormat: (b64, name, uid) => realmHandle.importAnyFormat(b64, name, uid),
+  importAnyFormat: (bytes, name, uid) => realmHandle.importAnyFormat(bytes, name, uid),
+  getUpload: (uploadId, uid) => {
+    if (!spindle.uploads?.get)
+      throw new Error("spindle.uploads unavailable; host update required");
+    return spindle.uploads.get(uploadId, uid);
+  },
+  deleteUpload: (uploadId, uid) => {
+    if (!spindle.uploads?.delete)
+      return Promise.resolve(false);
+    return spindle.uploads.delete(uploadId, uid);
+  },
   applySvgRasterIndex,
   maybeFinalizeImport,
   characterGet: async (cid, uid) => {

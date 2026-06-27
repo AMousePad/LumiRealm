@@ -62,6 +62,7 @@ export interface CreateSidebarOptions {
   readonly log: FrontendLog;
   readonly initialTab?: SidebarTabId;
   readonly onImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => void;
+  readonly onUploadProgress?: (sent: number, total: number) => void;
   readonly onModuleImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => void;
 }
 
@@ -149,6 +150,7 @@ export function createSidebar(opts: CreateSidebarOptions): SidebarHandle {
               sendToBackend,
               log,
               ...(opts.onImportStart ? { onImportStart: opts.onImportStart } : {}),
+              ...(opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}),
             }),
           ...(opts.onModuleImportStart ? { onImportStart: opts.onModuleImportStart } : {}),
         });
