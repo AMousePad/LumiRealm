@@ -1,3 +1,4 @@
+import * as tus from 'tus-js-client';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend, CardSummary, ImportProgress } from '../types/messages.js';
 import { errMsg } from '../util/coerce.js';
@@ -6,16 +7,11 @@ import { errMsg } from '../util/coerce.js';
 
 const ACCEPT_EXTENSIONS = ['.charx', '.png', '.json', '.jpg', '.jpeg'];
 
-// 2.5 MB raw base64s to ~3.34 MB, fits under Lumi's 4 MB SPINDLE_BACKEND_MSG
-// ceiling with envelope room. 3 MB raw alone base64s to exactly 4 MB.
-const CHUNK_BYTES = 2500 * 1024;
-const CHUNK_WIRE_WARN_BYTES = 3_800_000;
-// Commit timeout is long because translation + world-book creation can
-// take many seconds on a large card.
-const INIT_ACK_TIMEOUT_MS = 15_000;
-const CHUNK_ACK_TIMEOUT_MS = 20_000;
-const COMMIT_FIRST_PROGRESS_TIMEOUT_MS = 60_000;
-const UPLOAD_WINDOW_SIZE = 30;
+const UPLOAD_ENDPOINT = '/api/v1/spindle-uploads';
+const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+// Server processing (translate + world-book creation) can take many seconds.
+const PROCESSING_TIMEOUT_MS = 60_000;
+const EXTENSION_IDENTIFIER = 'lumirealm';
 
 interface DrawerState {
   /** Latest cards list pushed by backend. `null` = not yet received (pre-handshake). */
@@ -26,21 +22,6 @@ interface DrawerState {
   notices: string[];
   /** True between "pick file" click and first backend response; recovery arrives as progress push. */
   optimistic: boolean;
-}
-
-interface PendingAck {
-  resolve: () => void;
-  reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
-interface UploadSession {
-  readonly sessionId: string;
-  /** Most-recent ack seq (-1=init, -2=commit-received, else chunk seq). */
-  lastAckSeq: number;
-  receivedBytesOnBackend: number;
-  pendingAcks: Map<number, PendingAck>;
-  aborted: boolean;
 }
 
 export interface DrawerHandle {
@@ -62,6 +43,7 @@ export interface MountCardsPanelOptions {
   readonly sendToBackend: (msg: FrontendToBackend) => void;
   readonly log: FrontendLog;
   readonly onImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => void;
+  readonly onUploadProgress?: (sent: number, total: number) => void;
 }
 
 export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
@@ -86,7 +68,8 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     notices: [],
     optimistic: false,
   };
-  let activeUpload: UploadSession | null = null;
+  let activeTus: tus.Upload | null = null;
+  let noProgressTimer: ReturnType<typeof setTimeout> | undefined;
 
   function render(): void { /* no-op */ }
 
@@ -114,160 +97,87 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     importBtn.disabled = true;
     render();
 
-    const sessionId = generateSessionId();
+    const fileName = file.name;
     const totalBytes = file.bytes.byteLength;
-    const totalChunks = Math.max(1, Math.ceil(totalBytes / CHUNK_BYTES));
-    log.info(`drawer: upload session=${sessionId} file=${file.name} bytes=${totalBytes} chunks=${totalChunks} chunkSize=${CHUNK_BYTES}`);
+    log.info(`drawer: upload file=${fileName} bytes=${totalBytes}`);
 
-    activeUpload = {
-      sessionId,
-      lastAckSeq: -999,
-      receivedBytesOnBackend: 0,
-      pendingAcks: new Map(),
-      aborted: false,
-    };
-    const session = activeUpload;
-    opts.onImportStart?.(file.name, () => {
-      if (!session.aborted) {
-        session.aborted = true;
-        log.info(`drawer: cancel requested session=${sessionId}`);
-        rejectAllPending(session, new Error('upload cancelled'));
-      }
+    let cancelled = false;
+    opts.onImportStart?.(fileName, () => {
+      cancelled = true;
+      if (activeTus) { void activeTus.abort(true).catch(() => {}); activeTus = null; }
+      clearNoProgress();
+      log.info('drawer: upload cancel requested');
     }, totalBytes);
 
-    try {
-      state.progress = { phase: 'decoding', message: `Starting upload (0/${totalChunks})…`, fraction: 0 };
-      render();
-      const tInit = performance.now();
-      sendToBackend({
-        type: 'import_card_init',
-        sessionId,
-        fileName: file.name,
-        totalBytes,
-        totalChunks,
-      });
-      await trackAck(session, -1, INIT_ACK_TIMEOUT_MS, 'init');
-      log.info(`drawer: init acked in ${Math.round(performance.now() - tInit)}ms`);
+    state.progress = { phase: 'decoding', message: 'Starting upload…', fraction: 0 };
+    render();
 
-      const tAllChunks = performance.now();
-      let completed = 0;
-      let nextSeq = 0;
-      const errors: Error[] = [];
-      const sendOne = async (): Promise<void> => {
-        while (true) {
-          if (session.aborted || errors.length > 0) return;
-          const seq = nextSeq++;
-          if (seq >= totalChunks) return;
-          const start = seq * CHUNK_BYTES;
-          const end = Math.min(start + CHUNK_BYTES, totalBytes);
-          const slice = file.bytes.subarray(start, end);
-          const b64 = bytesToBase64(slice);
-          const chunkMsg: FrontendToBackend = {
-            type: 'import_card_chunk',
-            sessionId,
-            seq,
-            bytesB64Chunk: b64,
-          };
-          const wireSize = JSON.stringify(chunkMsg).length;
-          if (wireSize > CHUNK_WIRE_WARN_BYTES) {
-            log.warn(
-              `drawer: chunk wire size ${wireSize}B approaches Lumi's 64KB inbound guard ` +
-                `(seq=${seq} of ${totalChunks}, raw_chunk=${slice.byteLength}B, b64=${b64.length}B). ` +
-                `Reduce CHUNK_BYTES if this happens.`,
-            );
-          }
-          const ack = trackAck(session, seq, CHUNK_ACK_TIMEOUT_MS, `chunk ${seq}`);
-          sendToBackend(chunkMsg);
-          try {
-            await ack;
-          } catch (err) {
-            errors.push(err as Error);
-            return;
-          }
-          completed += 1;
-          state.progress = {
-            phase: 'decoding',
-            message: `Uploading (${completed}/${totalChunks})…`,
-            fraction: completed / totalChunks,
-          };
+    const upload = new tus.Upload(new Blob([file.bytes as BlobPart]), {
+      endpoint: UPLOAD_ENDPOINT,
+      chunkSize: UPLOAD_CHUNK_BYTES,
+      retryDelays: [0, 1000, 3000, 5000, 10000],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER },
+      onError: (err) => {
+        activeTus = null;
+        if (cancelled) return;
+        log.error('drawer: tus upload failed', err);
+        state.optimistic = false;
+        state.progress = { phase: 'error', message: `Upload failed: ${errMsg(err)}`, fraction: null };
+        state.notices = [errMsg(err)];
+        importBtn.disabled = false;
+        render();
+      },
+      onProgress: (sent, total) => {
+        const frac = total > 0 ? sent / total : null;
+        state.progress = {
+          phase: 'decoding',
+          message: `Uploading (${frac != null ? Math.round(frac * 100) : 0}%)…`,
+          fraction: frac,
+        };
+        opts.onUploadProgress?.(sent, total);
+        render();
+      },
+      onSuccess: () => {
+        activeTus = null;
+        const uploadId = (upload.url ?? '').split('/').filter(Boolean).pop() ?? '';
+        if (!uploadId) {
+          state.optimistic = false;
+          state.progress = { phase: 'error', message: 'Upload finished but no id was returned', fraction: null };
+          importBtn.disabled = false;
           render();
+          return;
         }
-      };
-      const workers: Promise<void>[] = [];
-      for (let w = 0; w < Math.min(UPLOAD_WINDOW_SIZE, totalChunks); w++) {
-        workers.push(sendOne());
-      }
-      await Promise.all(workers);
-      if (errors.length > 0) throw errors[0];
-      if (session.aborted) throw new Error('upload aborted');
-      log.info(`drawer: all ${totalChunks} chunks acked in ${Math.round(performance.now() - tAllChunks)}ms`);
-
-      state.progress = { phase: 'translating', message: 'Processing on server…', fraction: null };
-      render();
-      const tCommit = performance.now();
-      sendToBackend({ type: 'import_card_commit', sessionId });
-      await trackAck(session, -2, CHUNK_ACK_TIMEOUT_MS, 'commit-ack');
-      log.info(`drawer: commit acked in ${Math.round(performance.now() - tCommit)}ms — awaiting import_progress`);
-
-      armNoProgressTimeout(session, COMMIT_FIRST_PROGRESS_TIMEOUT_MS);
-    } catch (err) {
-      log.error('drawer: upload failed', err);
-      try { sendToBackend({ type: 'import_card_abort', sessionId, reason: errMsg(err) }); } catch { /* */ }
-      rejectAllPending(session, err instanceof Error ? err : new Error(String(err)));
-      if (activeUpload?.sessionId === sessionId) activeUpload = null;
-      state.optimistic = false;
-      state.progress = {
-        phase: 'error',
-        message: `Upload failed: ${errMsg(err)}`,
-        fraction: null,
-      };
-      state.notices = [errMsg(err)];
-      importBtn.disabled = false;
-      render();
-    }
-  }
-
-  function trackAck(
-    session: UploadSession,
-    seq: number,
-    timeoutMs: number,
-    label: string,
-  ): Promise<void> {
-    if (session.lastAckSeq === seq) return Promise.resolve();
-    return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (session.pendingAcks.delete(seq)) {
-          session.aborted = true;
-          reject(new Error(`timeout waiting for ${label} ack after ${timeoutMs}ms`));
-        }
-      }, timeoutMs);
-      session.pendingAcks.set(seq, { resolve, reject, timer });
+        log.info(`drawer: upload complete uploadId=${uploadId} — requesting import`);
+        state.progress = { phase: 'translating', message: 'Processing on server…', fraction: null };
+        render();
+        sendToBackend({ type: 'import_card_from_upload', uploadId, fileName });
+        armProcessingTimeout(PROCESSING_TIMEOUT_MS);
+      },
     });
+    activeTus = upload;
+
+    try {
+      const prev = await upload.findPreviousUploads();
+      if (cancelled) return;
+      if (prev[0]) upload.resumeFromPreviousUpload(prev[0]);
+    } catch { /* no resumable state, start fresh */ }
+    if (!cancelled) upload.start();
   }
 
-  function rejectAllPending(session: UploadSession, err: Error): void {
-    for (const [seq, p] of session.pendingAcks) {
-      clearTimeout(p.timer);
-      p.reject(err);
-      session.pendingAcks.delete(seq);
-    }
-  }
-
-  let noProgressTimer: ReturnType<typeof setTimeout> | undefined;
-  function clearAckTimer(_session: UploadSession): void {
+  function clearNoProgress(): void {
     if (noProgressTimer) {
       clearTimeout(noProgressTimer);
       noProgressTimer = undefined;
     }
   }
 
-  function armNoProgressTimeout(session: UploadSession, timeoutMs: number): void {
-    clearAckTimer(session);
+  function armProcessingTimeout(timeoutMs: number): void {
+    clearNoProgress();
     noProgressTimer = setTimeout(() => {
-      if (activeUpload !== session) return;
-      log.error(`drawer: no import_progress within ${timeoutMs}ms after commit — failing`);
-      session.aborted = true;
-      activeUpload = null;
+      noProgressTimer = undefined;
+      log.error(`drawer: no import_progress within ${timeoutMs}ms after upload — failing`);
+      state.optimistic = false;
       state.progress = {
         phase: 'error',
         message: `Server didn't respond within ${Math.round(timeoutMs / 1000)}s after upload. The backend may have crashed.`,
@@ -276,22 +186,6 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
       importBtn.disabled = false;
       render();
     }, timeoutMs);
-  }
-
-  function onUploadAck(sessionId: string, seq: number, receivedBytes: number): void {
-    const session = activeUpload;
-    if (!session || session.sessionId !== sessionId) {
-      log.warn(`drawer: stray upload ack session=${sessionId} seq=${seq} — ignoring`);
-      return;
-    }
-    session.lastAckSeq = seq;
-    session.receivedBytesOnBackend = receivedBytes;
-    const p = session.pendingAcks.get(seq);
-    if (p) {
-      session.pendingAcks.delete(seq);
-      clearTimeout(p.timer);
-      p.resolve();
-    }
   }
 
   importBtn.addEventListener('click', () => { void onImportClicked(); });
@@ -730,8 +624,8 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   }
 
   function handleBackendMessage(msg: BackendToFrontend): void {
-    // Skip per-chunk ack logging to avoid flooding on large imports.
-    if (msg.type !== 'import_upload_ack' && msg.type !== 'module_upload_ack') {
+    // Skip per-chunk ack logging to avoid flooding on large module uploads.
+    if (msg.type !== 'module_upload_ack') {
       log.info(`drawer.handle: ${msg.type}`);
     }
     switch (msg.type) {
@@ -749,15 +643,9 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
       case 'uninstall_module_artifacts':
         void uninstallModuleArtifacts(msg);
         break;
-      case 'import_upload_ack':
-        onUploadAck(msg.sessionId, msg.seq, msg.receivedBytes);
-        break;
       case 'import_progress':
         log.info(`drawer.import_progress: phase=${msg.phase} frac=${msg.fraction ?? '?'}`);
-        if (activeUpload) {
-          clearAckTimer(activeUpload);
-          if (msg.phase === 'done' || msg.phase === 'error') activeUpload = null;
-        }
+        clearNoProgress();
         state.progress = {
           phase: msg.phase,
           message: msg.message,
@@ -781,9 +669,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
         break;
       case 'error':
         log.error(`drawer.error: ${msg.message}`);
-        if (activeUpload && msg.sessionId === activeUpload.sessionId) {
-          rejectAllPending(activeUpload, new Error(msg.message));
-        }
+        clearNoProgress();
         state.progress = {
           phase: 'error',
           message: msg.message,
@@ -808,18 +694,3 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   };
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  // Chunked to avoid call-stack argument-list limits on large files.
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
-function generateSessionId(): string {
-  const c = typeof globalThis !== 'undefined' ? (globalThis as { crypto?: { randomUUID?: () => string } }).crypto : undefined;
-  if (c?.randomUUID) return c.randomUUID();
-  return `rc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}

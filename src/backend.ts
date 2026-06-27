@@ -109,7 +109,6 @@ import { createViewerHandlers } from './handlers/viewer.js';
 import { createModuleHandlers } from './handlers/module.js';
 import {
   createImportHandlers,
-  type ImportSession,
   type PendingImportCompletion,
 } from './handlers/import.js';
 import { createOrphanHandlers } from './handlers/orphan.js';
@@ -643,13 +642,8 @@ function emitOperationProgress(
 
 
 
-// Chunked .charx upload: accumulate chunks by sessionId, assemble on commit.
-// Stale sessions are GC'd after IMPORT_SESSION_TIMEOUT_MS.
-const importSessions = new Map<string, ImportSession>();
-const IMPORT_SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
-
-// Bound FE-supplied counts so a malicious init can't OOM the worker via
-// `new Array(totalChunks).fill(null)`. 250k slots is ~2MB of Array storage.
+// Bounds module-upload FE-supplied counts so a malicious init can't OOM the
+// worker via `new Array(totalChunks).fill(null)`. 250k slots is ~2MB.
 const MAX_UPLOAD_CHUNKS = 250_000;
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024; // 8 GB
 
@@ -664,23 +658,6 @@ function validateUploadShape(
     return { ok: false, reason: `totalChunks out of range (max ${MAX_UPLOAD_CHUNKS})` };
   }
   return { ok: true };
-}
-
-function sweepStaleSessions(): void {
-  const now = Date.now();
-  let dropped = 0;
-  for (const [sid, s] of importSessions) {
-    if (now - s.lastActivity > IMPORT_SESSION_TIMEOUT_MS) {
-      importSessions.delete(sid);
-      dropped += 1;
-      log.warn(`import session ${sid} expired (inactive ${Math.round((now - s.lastActivity) / 1000)}s); dropping ${s.receivedChunks}/${s.totalChunks} chunks`);
-    }
-  }
-  if (dropped > 0) log.info(`sweepStaleSessions: dropped ${dropped} expired session(s)`);
-}
-const sweepTimer = setInterval(sweepStaleSessions, 60_000);
-if (typeof (sweepTimer as { unref?: () => void }).unref === 'function') {
-  (sweepTimer as { unref: () => void }).unref();
 }
 
 function userStorage(): UserStorageLike {
@@ -1595,12 +1572,11 @@ const realmHandle: RealmBackendHandle = setupRealmBackend({
     warn: (m: string) => log.warn(m),
     error: (m: string) => log.error(m),
   },
-  importCardFromBytes: (bytesB64: string, fileName: string, userId: string) =>
-    importCardFromBytes(bytesB64, fileName, userId),
+  importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) =>
+    importCardFromBytes(bytes, fileName, userId),
 });
 
 const HIGH_VOLUME_FRONTEND_MSG_TYPES: ReadonlySet<string> = new Set([
-  'import_card_chunk',
   'upload_module_chunk',
 ]);
 
@@ -1675,7 +1651,6 @@ const viewerHandlers = createViewerHandlers({
   errMsg,
 });
 const importHandlers = createImportHandlers({
-  importSessions,
   pendingImportCompletions,
   lastSentBgHtmlByChat,
   activeCardByChat,
@@ -1683,7 +1658,6 @@ const importHandlers = createImportHandlers({
   hostVersionCheckRef: { get current() { return hostVersionCheck; } } as { current: HostVersionCheckResult | null },
   getMissingPermissions,
   permissionPurpose: PERMISSION_PURPOSE,
-  validateUploadShape,
   listCards: async (uid) => listCards(uid),
   pushCards,
   ensureActiveCardForChat,
@@ -1692,7 +1666,15 @@ const importHandlers = createImportHandlers({
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
   refreshVariables,
-  importAnyFormat: (b64, name, uid) => realmHandle.importAnyFormat(b64, name, uid),
+  importAnyFormat: (bytes, name, uid) => realmHandle.importAnyFormat(bytes, name, uid),
+  getUpload: (uploadId, uid) => {
+    if (!spindle.uploads?.get) throw new Error('spindle.uploads unavailable; host update required');
+    return spindle.uploads.get(uploadId, uid);
+  },
+  deleteUpload: (uploadId, uid) => {
+    if (!spindle.uploads?.delete) return Promise.resolve(false);
+    return spindle.uploads.delete(uploadId, uid);
+  },
   applySvgRasterIndex,
   maybeFinalizeImport,
   characterGet: async (cid, uid) => {

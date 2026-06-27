@@ -115,29 +115,9 @@ export type FrontendToBackend =
   | { type: 'get_cards' }
   | { type: 'display_writeback'; chatId: string; vars: Record<string, string> }
   | { type: 'display_authority'; chatId: string; authoritative: boolean }
-  // Large cards exceed ~1MB WS frame limits; chunked upload avoids close 1006.
-  // Send init → N chunks → commit.
-  | {
-      type: 'import_card_init';
-      /** Client-generated uuid tying init/chunks/commit together. */
-      sessionId: string;
-      /** Display name for UI + logs. */
-      fileName: string;
-      /** Total raw bytes across all chunks. */
-      totalBytes: number;
-      /** Number of chunks the frontend will send. */
-      totalChunks: number;
-    }
-  | {
-      type: 'import_card_chunk';
-      sessionId: string;
-      /** Zero-based chunk index. */
-      seq: number;
-      /** Base64-encoded raw bytes for this chunk only. */
-      bytesB64Chunk: string;
-    }
-  | { type: 'import_card_commit'; sessionId: string }
-  | { type: 'import_card_abort'; sessionId: string; reason?: string }
+  // Card bytes are streamed to the host tus endpoint (resumable, no WS frame
+  // cap), then the worker reads them by id via spindle.uploads.
+  | { type: 'import_card_from_upload'; uploadId: string; fileName: string }
   // Chunked transport for large lorebook / regex JSON imports. A single
   // SPINDLE_BACKEND_MSG frame is capped at 4MB and silently dropped past that,
   // so files over ~1MB are split across chunks and reassembled on the backend.
@@ -447,15 +427,6 @@ export type BackendToFrontend =
       characterId?: string;
       /** Filled on phase === 'error'. */
       error?: string;
-    }
-  | {
-      // Acks init/chunk/commit so the FE knows the WS is still live.
-      // Absent acks within a window signal silent CF/WS drop and let the UI fail fast.
-      type: 'import_upload_ack';
-      sessionId: string;
-      /** -1 for init, N for chunk seq=N, -2 for commit-received. */
-      seq: number;
-      receivedBytes: number;
     }
   | {
       type: 'consent_prompt';

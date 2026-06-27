@@ -1,5 +1,4 @@
 import type { RealmFrontendToBackend, RealmBackendToFrontend } from './messages.js';
-import { base64ToBytes } from '../util/base64.js';
 import { searchRealm, getRealmInfo, downloadRealmCard } from './api.js';
 import { convertToCharx, type ImportFormatConversion } from './import-formats/index.js';
 
@@ -12,12 +11,12 @@ export interface RealmBackendLog {
 export interface RealmBackendDeps {
   readonly send: (msg: RealmBackendToFrontend, userId: string | undefined) => void;
   readonly log: RealmBackendLog;
-  readonly importCardFromBytes: (bytesB64: string, fileName: string, userId: string) => Promise<void>;
+  readonly importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) => Promise<void>;
 }
 
 export interface RealmBackendHandle {
   handle(msg: RealmFrontendToBackend, userId: string | undefined): Promise<void>;
-  importAnyFormat(bytesB64: string, fileName: string, userId: string): Promise<void>;
+  importAnyFormat(bytes: Uint8Array, fileName: string, userId: string): Promise<void>;
 }
 
 export function isRealmFrontendMessage(msg: { type: string }): msg is RealmFrontendToBackend {
@@ -115,8 +114,7 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
             contentType: dl.contentType,
             bytes: conv.bytes.byteLength,
           }, userId);
-          const bytesB64 = bytesToBase64(conv.bytes);
-          await importCardFromBytes(bytesB64, conv.fileName, userId);
+          await importCardFromBytes(conv.bytes, conv.fileName, userId);
         } catch (err) {
           const error = errMessage(err);
           log.error(`realm_download failed req=${msg.requestId} id=${msg.id}: ${error}`);
@@ -133,8 +131,7 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     }
   }
 
-  async function importAnyFormat(bytesB64: string, fileName: string, userId: string): Promise<void> {
-    const bytes = base64ToBytes(bytesB64);
+  async function importAnyFormat(bytes: Uint8Array, fileName: string, userId: string): Promise<void> {
     let conv: ImportFormatConversion;
     try {
       conv = convertToCharx(bytes, fileName);
@@ -144,14 +141,13 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     }
     for (const note of conv.notes) log.info(`importAnyFormat: ${note}`);
     if (!conv.synthesized) {
-      await importCardFromBytes(bytesB64, fileName, userId);
+      await importCardFromBytes(bytes, fileName, userId);
       return;
     }
     log.info(
       `importAnyFormat: converted ${conv.originalFormat} → charx file=${fileName} → ${conv.fileName} bytes=${conv.bytes.byteLength}`,
     );
-    const convB64 = bytesToBase64(conv.bytes);
-    await importCardFromBytes(convB64, conv.fileName, userId);
+    await importCardFromBytes(conv.bytes, conv.fileName, userId);
   }
 
   return { handle, importAnyFormat };
@@ -167,17 +163,4 @@ function errMessage(err: unknown): string {
   }
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  const g = globalThis as { Buffer?: { from(b: Uint8Array): { toString(enc: string): string } } };
-  if (g.Buffer && typeof g.Buffer.from === 'function') {
-    return g.Buffer.from(bytes).toString('base64');
-  }
-  let bin = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    const slice = bytes.subarray(i, i + CHUNK);
-    bin += String.fromCharCode.apply(null, Array.from(slice));
-  }
-  return btoa(bin);
-}
 

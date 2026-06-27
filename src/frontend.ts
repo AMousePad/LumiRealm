@@ -304,7 +304,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   // Mute high-frequency chunk types from the send log.
   const QUIET_SEND_TYPES = new Set<string>([
-    'import_card_chunk',
     'upload_module_chunk',
   ]);
   const sendToBackend = (msg: FrontendToBackend): void => {
@@ -328,6 +327,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       log: flog,
       onImportStart: (fileName, onCancel, totalBytes) =>
         importOverlay.notifyImportStart(fileName, 'drawer', onCancel, totalBytes),
+      onUploadProgress: (sent, total) => importOverlay.setUploadProgress(sent, total),
       onModuleImportStart: (fileName, onCancel, totalBytes) =>
         importOverlay.notifyImportStart(fileName, 'module', onCancel, totalBytes),
     });
@@ -528,7 +528,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   // Mute high-frequency chunk acks from the recv log.
   const QUIET_RECV_TYPES = new Set<string>([
-    'import_upload_ack',
     'module_upload_ack',
   ]);
   const unsub = ctx.onBackendMessage((raw) => {

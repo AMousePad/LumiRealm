@@ -1,6 +1,6 @@
 {
   "name": "lumirealm",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-or-later",
@@ -24,6 +24,7 @@
   "dependencies": {
     "fengari-web": "^0.1.4",
     "fflate": "^0.8.2",
+    "tus-js-client": "^4.3.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -31,7 +32,7 @@
     "fengari": "^0.1.5",
     "happy-dom": "^15.0.0",
     "juice": "^11.0.0",
-    "lumiverse-spindle-types": "0.5.22",
+    "lumiverse-spindle-types": "file:../lumiverse-spindle-types",
     "playwright": "^1.59.1",
     "tsx": "^4.21.0",
     "typescript": "^5.5.0",

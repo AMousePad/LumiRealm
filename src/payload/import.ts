@@ -1,5 +1,4 @@
 import { translateFromCharxBundle } from '../core/pipeline/index.js';
-import { base64ToBytes } from '../util/base64.js';
 import { readCharx } from '../core/charx/reader.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import { CURRENT_CHARACTER_SCHEMA_VERSION } from '../state/translator-migrations.js';
@@ -208,7 +207,7 @@ export interface SpindleImportApi {
 }
 
 export interface ImportCardArgs {
-  readonly bytesB64: string;
+  readonly bytes: Uint8Array;
   readonly fileName: string;
   readonly sourceId?: string;
   readonly extensionVersion: string;
@@ -221,12 +220,10 @@ export interface ImportCardArgs {
 export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   const progress = args.onProgress ?? (() => {});
   const tImport = Date.now();
-  logInfo(`start file=${args.fileName} b64-bytes=${args.bytesB64.length} userId=${args.userId ?? '<none>'}`);
+  logInfo(`start file=${args.fileName} bytes=${args.bytes.byteLength} userId=${args.userId ?? '<none>'}`);
 
   progress('decoding', `Decoding ${args.fileName}…`, 0.05);
-  const tDecode = Date.now();
-  const bytes = base64ToBytes(args.bytesB64);
-  logInfo(`(1) decoded base64 -> ${bytes.byteLength} bytes in ${Date.now() - tDecode}ms`);
+  const bytes = args.bytes;
 
   progress('translating', 'Translating Risu card…', 0.15);
   const tTranslate = Date.now();
