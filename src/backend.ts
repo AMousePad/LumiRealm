@@ -51,7 +51,7 @@ import { parseDirectRegex } from './payload/regex-direct-import.js';
 import { mapRegex } from './core/mappers/regex.js';
 import { createRegexImporter } from './state/regex-import.js';
 import { mapLoreBook } from './core/mappers/lorebook.js';
-import { registerAll as registerAllMacros, clearMacroVarOverlay } from './interpreter/macros.js';
+import { clearMacroVarOverlay } from './interpreter/macros.js';
 import { setActiveAssetIndexes, clearActiveAssetIndexes } from './interpreter/asset-cache.js';
 import {
   setActiveCharacterImage,
@@ -375,7 +375,9 @@ function modulesByNamespaceFromCard(card: StoredRisuCard): Readonly<Record<strin
   return Object.keys(out).length > 0 ? out : null;
 }
 
-registerAllMacros();
+// We do not register macros with Lumi's MacroRegistry. The macroInterceptor
+// resolves every macro through our own evaluator on each Lumi evaluate(), and
+// display/bg-html resolve in-worker, so Lumi's registry is never consulted.
 
 const variableState = new VariableStateStore();
 
@@ -546,6 +548,7 @@ const captureUserId = makeCaptureUserId({
   // Trampolines: massMigrations is declared further down, this closure resolves it at call time.
   runMassModuleMigrationIfNeeded: (uid) => massMigrations.runMassModuleMigrationIfNeeded(uid),
   runMassCharacterMigrationIfNeeded: (uid) => massMigrations.runMassCharacterMigrationIfNeeded(uid),
+  runMacroUnprefixSweepIfNeeded: (uid) => massMigrations.runMacroUnprefixSweepIfNeeded(uid),
   notifyMissingPermsForUser: (userId) => {
     const missing = getMissingPermissions();
     const purposes: Record<string, string> = {};
@@ -1515,6 +1518,11 @@ subscribeToMissingChanges((missing) => {
         await massMigrations.runMassCharacterMigrationIfNeeded(userId);
       } catch (err) {
         log.warn(`permissions.changed: mass character migration retry failed userId=${userId}: ${errMsg(err)}`);
+      }
+      try {
+        await massMigrations.runMacroUnprefixSweepIfNeeded(userId);
+      } catch (err) {
+        log.warn(`permissions.changed: macro un-prefix sweep retry failed userId=${userId}: ${errMsg(err)}`);
       }
     })();
   }

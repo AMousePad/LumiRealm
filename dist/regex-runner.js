@@ -4562,17 +4562,9 @@ var init_blocks = __esm(() => {
     "code"
   ]);
 });
-
-// src/core/cbs/rewrite/text.ts
-var init_text = __esm(() => {
-  init_parser();
-  init_blocks();
-});
-
 // src/core/cbs/rewrite/index.ts
 var init_rewrite = __esm(() => {
   init_encode();
-  init_text();
   init_blocks();
 });
 // src/core/cbs/runtime/mock.ts

@@ -2,7 +2,7 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
-import { runPipeline, workerEvalEnabled } from '../interpreter/evaluator/pipeline.js';
+import { runPipeline } from '../interpreter/evaluator/pipeline.js';
 import { getActiveAssetIndexes } from '../interpreter/asset-cache.js';
 import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { imageUrlFromId } from '../interpreter/image-cache.js';
@@ -162,61 +162,23 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       `resolveReadonly: START chat=${chatId} char=${characterId} userId=${userId ?? '<none>'} cbs=${cbsContext} template_len=${template.length} ` +
         `template[0..200]=${JSON.stringify(template.slice(0, 200))}`,
     );
-    // cbs always forces worker-eval since the Lumi-native fallback can't propagate cbsContext through spindle.macros.resolve.
-    if (cbsContext) {
-      if (userId === undefined) {
-        log.warn(`resolveReadonly: cbs called before userId captured chat=${chatId},returning template verbatim`);
-        return template;
-      }
-      try {
-        const out = await resolveInWorker(template, chatId, characterId, userId, true);
-        log.debug(
-          `resolveReadonly: DONE (cbs worker-eval) chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${out.length} ` +
-            `out[0..200]=${JSON.stringify(out.slice(0, 200))}`,
-        );
-        return out;
-      } catch (err) {
-        log.error(`resolveReadonly: cbs worker-eval threw chat=${chatId}: ${(err as Error).message}. Returning template verbatim.`);
-        return template;
-      }
-    }
-    if (workerEvalEnabled()) {
-      // Operator-scoped Spindle calls require userId, so we skip worker-eval until captureUserId fires and let the legacy path handle it.
-      if (userId === undefined) {
-        log.info(`resolveReadonly: worker-eval skipped chat=${chatId},userId not yet captured, using legacy path`);
-      } else {
-        try {
-          const out = await resolveInWorker(template, chatId, characterId, userId, cbsContext);
-          log.debug(
-            `resolveReadonly: DONE (worker-eval) chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${out.length} ` +
-              `out[0..200]=${JSON.stringify(out.slice(0, 200))}`,
-          );
-          return out;
-        } catch (err) {
-          log.error(`resolveReadonly: worker-eval threw chat=${chatId}: ${(err as Error).message}. Falling back to legacy path.`);
-        }
-      }
+    // Our in-worker evaluator is the only resolver: Lumi's native engine cannot
+    // parse raw Risu CBS. Operator-scoped Spindle calls reject without a userId,
+    // so pre-capture we return the template verbatim rather than mis-resolve.
+    if (userId === undefined) {
+      log.warn(`resolveReadonly: userId not captured chat=${chatId}, returning template verbatim`);
+      return template;
     }
     try {
-      const result = await (spindle.macros as unknown as {
-        resolve: (
-          template: string,
-          options?: { chatId?: string; characterId?: string; userId?: string; commit?: boolean },
-        ) => Promise<{ text: string; diagnostics: unknown[] }>;
-      }).resolve(template, {
-        chatId,
-        characterId,
-        commit: false,
-        ...(userId === undefined ? {} : { userId }),
-      });
+      const out = await resolveInWorker(template, chatId, characterId, userId, cbsContext);
       log.debug(
-        `resolveReadonly: DONE chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${result.text.length} ` +
-          `diagnostics=${(result.diagnostics ?? []).length} out[0..200]=${JSON.stringify(result.text.slice(0, 200))}`,
+        `resolveReadonly: DONE chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${out.length} ` +
+          `out[0..200]=${JSON.stringify(out.slice(0, 200))}`,
       );
-      return result.text;
+      return out;
     } catch (err) {
-      log.error(`resolveReadonly: THREW chat=${chatId} elapsed=${Date.now() - t0}ms: ${(err as Error).message}`);
-      throw err;
+      log.error(`resolveReadonly: worker-eval threw chat=${chatId}: ${(err as Error).message}. Returning template verbatim (no Lumi-native fallback).`);
+      return template;
     }
   }
 

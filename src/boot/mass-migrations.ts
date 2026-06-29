@@ -7,6 +7,8 @@ import {
   readMigrationState,
   writeMigrationState,
 } from '../state/migration-state.js';
+import { unrewriteText } from '../core/cbs/rewrite/unrewrite.js';
+import { loadCatalog } from '../payload/import.js';
 
 type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 
@@ -73,6 +75,7 @@ export interface MassMigrationsDeps {
 export interface MassMigrationsRunner {
   readonly runMassModuleMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runMassCharacterMigrationIfNeeded: (userId: string) => Promise<void>;
+  readonly runMacroUnprefixSweepIfNeeded: (userId: string) => Promise<void>;
   readonly notifyLorebookMigrationArchive: (
     subjectLabel: string,
     archiveWbId: string,
@@ -380,9 +383,174 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     );
   }
 
+  const macroSweepStartedThisBoot = new Set<string>();
+
+  // One-time sweep that un-prefixes legacy risu_* macros to raw Risu CBS across
+  // every stored string surface. The evaluator resolves both forms, so this is
+  // cosmetic-correctness, not load-bearing, but it normalizes storage.
+  async function runMacroUnprefixSweepIfNeeded(userId: string): Promise<void> {
+    if (macroSweepStartedThisBoot.has(userId)) return;
+    if (blockingPermissionsMissing('macro-unprefix')) return;
+    macroSweepStartedThisBoot.add(userId);
+    const state = await readMigrationState(spindle.userStorage, userId);
+    if (state.macros_unprefixed) return;
+    const leafNames = new Set(loadCatalog().incompatibleNames());
+    const un = (s: string): string => unrewriteText(s, { leafNames });
+    const chars = await listLumirealmCharacters(userId);
+    if (chars.length === 0) {
+      await writeMigrationState(spindle.userStorage, userId, { ...state, macros_unprefixed: true });
+      return;
+    }
+    const opId = `macro-unprefix-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const opTitle = 'Updating Risu cards';
+    emitOperationProgress(userId, opId, 'started', opTitle, `Updating ${chars.length} card${chars.length === 1 ? '' : 's'}…`, 0);
+    log.info(`macro-unprefix: user=${userId} starting count=${chars.length} opId=${opId}`);
+    let failed = 0;
+    let changed = 0;
+    let processed = 0;
+    for (const { character, data } of chars) {
+      try {
+        changed += await sweepCharacterMacros(userId, character.id, data, un);
+      } catch (err) {
+        failed++;
+        log.warn(`macro-unprefix: char=${character.id} threw: ${errMsg(err)}`);
+      }
+      processed++;
+      emitOperationProgress(userId, opId, 'progress', opTitle, `Updated ${processed}/${chars.length} card${chars.length === 1 ? '' : 's'}`, processed / chars.length);
+    }
+    if (failed === 0) {
+      const after = await readMigrationState(spindle.userStorage, userId);
+      await writeMigrationState(spindle.userStorage, userId, { ...after, macros_unprefixed: true });
+      log.info(`macro-unprefix: user=${userId} done characters=${chars.length} fields_changed=${changed}`);
+    } else {
+      log.warn(`macro-unprefix: user=${userId} ${failed} character(s) failed, marker NOT set (retry next boot)`);
+    }
+    emitOperationProgress(
+      userId,
+      opId,
+      failed === 0 ? 'done' : 'error',
+      opTitle,
+      failed === 0
+        ? `Updated ${chars.length} card${chars.length === 1 ? '' : 's'}`
+        : `Updated ${chars.length - failed}/${chars.length} (${failed} failed, will retry next start)`,
+      1,
+    );
+  }
+
+  async function sweepCharacterMacros(
+    userId: string,
+    characterId: string,
+    data: LumirealmCharacterData,
+    un: (s: string) => string,
+  ): Promise<number> {
+    let changed = 0;
+    const char = await spindle.characters.get(characterId, userId);
+    if (char) {
+      const c = char as unknown as Record<string, unknown>;
+      const patch: Record<string, unknown> = {};
+      for (const f of ['description', 'personality', 'scenario', 'first_mes', 'mes_example', 'system_prompt', 'post_history_instructions', 'creator_notes']) {
+        const v = c[f];
+        if (typeof v === 'string') { const u = un(v); if (u !== v) patch[f] = u; }
+      }
+      const ag = c['alternate_greetings'];
+      if (Array.isArray(ag)) {
+        const nag = ag.map((g) => (typeof g === 'string' ? un(g) : g));
+        if (nag.some((g, i) => g !== ag[i])) patch['alternate_greetings'] = nag;
+      }
+      if (Object.keys(patch).length > 0) {
+        await spindle.characters.update(characterId, patch as never, userId);
+        changed += Object.keys(patch).length;
+      }
+
+      const wbIds = (c['world_book_ids'] as string[] | undefined) ?? [];
+      for (const wbId of wbIds) {
+        let offset = 0;
+        for (;;) {
+          const page = await spindle.world_books.entries.list(wbId, { limit: 200, offset, userId });
+          for (const e of page.data) {
+            const ep: Record<string, unknown> = {};
+            if (typeof e.content === 'string') { const u = un(e.content); if (u !== e.content) ep['content'] = u; }
+            if (typeof e.comment === 'string') { const u = un(e.comment); if (u !== e.comment) ep['comment'] = u; }
+            if (Object.keys(ep).length > 0) {
+              await spindle.world_books.entries.update(e.id, ep as never, userId);
+              changed += Object.keys(ep).length;
+            }
+          }
+          offset += page.data.length;
+          if (page.data.length === 0 || offset >= page.total) break;
+        }
+      }
+    }
+
+    {
+      let offset = 0;
+      for (;;) {
+        const page = await spindle.regex_scripts.list({ scope: 'character', scopeId: characterId, limit: 200, offset, userId });
+        for (const s of page.data) {
+          const rp: Record<string, unknown> = {};
+          const f = un(s.find_regex); if (f !== s.find_regex) rp['find_regex'] = f;
+          const r = un(s.replace_string); if (r !== s.replace_string) rp['replace_string'] = r;
+          if (Object.keys(rp).length > 0) {
+            await spindle.regex_scripts.update(s.id, rp as never, userId);
+            changed += Object.keys(rp).length;
+          }
+        }
+        offset += page.data.length;
+        if (page.data.length === 0 || offset >= page.total) break;
+      }
+    }
+
+    {
+      let offset = 0;
+      for (;;) {
+        const page = await spindle.chats.list({ characterId, limit: 100, offset, userId });
+        for (const chat of page.data) {
+          const msgs = await spindle.chat.getMessages(chat.id);
+          for (const m of msgs) {
+            const swipes = Array.isArray(m.swipes) ? m.swipes : null;
+            if (swipes && swipes.length > 0) {
+              const ns = swipes.map((s) => (typeof s === 'string' ? un(s) : s));
+              if (ns.some((s, i) => s !== swipes[i])) {
+                await spindle.chat.updateMessage(chat.id, m.id, { swipes: ns });
+                changed++;
+              }
+            } else if (typeof m.content === 'string') {
+              const u = un(m.content);
+              if (u !== m.content) {
+                await spindle.chat.updateMessage(chat.id, m.id, { content: u });
+                changed++;
+              }
+            }
+          }
+        }
+        offset += page.data.length;
+        if (page.data.length === 0 || offset >= page.total) break;
+      }
+    }
+
+    const bg = data.payload.background_html;
+    const bgs = data.payload.background_html_source;
+    const nbg = typeof bg === 'string' ? un(bg) : bg;
+    const nbgs = typeof bgs === 'string' ? un(bgs) : bgs;
+    if (nbg !== bg || nbgs !== bgs) {
+      await writeLumirealm(userId, characterId, {
+        ...data,
+        payload: {
+          ...data.payload,
+          background_html: nbg,
+          ...(bgs !== undefined ? { background_html_source: nbgs } : {}),
+        },
+      });
+      changed++;
+    }
+
+    return changed;
+  }
+
   return {
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
+    runMacroUnprefixSweepIfNeeded,
     notifyLorebookMigrationArchive,
     flushLorebookMigrationArchives,
   };

@@ -58,16 +58,3 @@ export function runPipeline(input: RunPipelineInput, opts?: RunPipelineOptions):
 
   return evaluate(input.template, ctx);
 }
-
-// resolveReadonly resolves in-worker by default so bg-html and cross-rule CSS skip
-// the Lumi evaluate + macroInterceptor round-trip (RISU_COMPAT_USE_WORKER_EVAL=0 restores it).
-export function workerEvalEnabled(): boolean {
-  try {
-    const env = (globalThis as { Bun?: { env?: Record<string, string | undefined> } }).Bun?.env;
-    if (!env) return true;
-    const v = env.RISU_COMPAT_USE_WORKER_EVAL;
-    return v !== "0" && v !== "false" && v !== "no";
-  } catch {
-    return true;
-  }
-}
