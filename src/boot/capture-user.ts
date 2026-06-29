@@ -3,6 +3,7 @@ export interface CaptureUserIdDeps {
   readonly getSettingsForUser: (userId: string) => Promise<unknown>;
   readonly runMassModuleMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runMassCharacterMigrationIfNeeded: (userId: string) => Promise<void>;
+  readonly runMacroUnprefixSweepIfNeeded: (userId: string) => Promise<void>;
   // Sends the initial missing-permissions notification to the newly captured
   // user. Without this, a user who connects after permissions finish loading
   // never sees the modal until perms change at runtime.
@@ -19,6 +20,7 @@ export function makeCaptureUserId(deps: CaptureUserIdDeps): (userId: string | un
     getSettingsForUser,
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
+    runMacroUnprefixSweepIfNeeded,
     log,
     errMsg,
   } = deps;
@@ -46,6 +48,11 @@ export function makeCaptureUserId(deps: CaptureUserIdDeps): (userId: string | un
           await runMassCharacterMigrationIfNeeded(userId);
         } catch (err) {
           log.warn(`captureUserId: mass character migration failed: ${errMsg(err)}`);
+        }
+        try {
+          await runMacroUnprefixSweepIfNeeded(userId);
+        } catch (err) {
+          log.warn(`captureUserId: macro un-prefix sweep failed: ${errMsg(err)}`);
         }
       })();
     }, MASS_MIGRATION_DEFER_MS);

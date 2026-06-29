@@ -4081,736 +4081,10 @@ var init_zod = __esm(() => {
   init_external();
 });
 
-// src/core/cbs/lexer.ts
-function lex(src) {
-  const out = [];
-  const n = src.length;
-  let i = 0;
-  let textStart = 0;
-  const flushText = (end) => {
-    if (end > textStart) {
-      out.push({ kind: "text", value: src.slice(textStart, end), start: textStart, end });
-    }
-  };
-  while (i < n) {
-    const c = src.charCodeAt(i);
-    if (c === 123 && i + 1 < n) {
-      const next = src.charCodeAt(i + 1);
-      if (next === 123) {
-        flushText(i);
-        out.push({ kind: "open", value: "{{", start: i, end: i + 2 });
-        i += 2;
-        textStart = i;
-        continue;
-      }
-      if (next === 35) {
-        flushText(i);
-        out.push({ kind: "legacy_open", value: "{#", start: i, end: i + 2 });
-        i += 2;
-        textStart = i;
-        continue;
-      }
-    } else if (c === 125 && i + 1 < n && src.charCodeAt(i + 1) === 125) {
-      flushText(i);
-      out.push({ kind: "close", value: "}}", start: i, end: i + 2 });
-      i += 2;
-      textStart = i;
-      continue;
-    } else if (c === 35 && i + 1 < n && src.charCodeAt(i + 1) === 125) {
-      flushText(i);
-      out.push({ kind: "legacy_close", value: "#}", start: i, end: i + 2 });
-      i += 2;
-      textStart = i;
-      continue;
-    }
-    i++;
-  }
-  flushText(n);
-  return out;
-}
-
-// src/core/cbs/parser.ts
-function parseCbs(src) {
-  const tokens = lex(src);
-  const parser = new Parser(tokens);
-  return { nodes: parser.parseTemplate() };
-}
-function identifyBlockKind(headerAfterHash) {
-  let end = 0;
-  while (end < headerAfterHash.length) {
-    const c = headerAfterHash.charCodeAt(end);
-    if (c === 58 || c === 32 || c === 9 || c === 10)
-      break;
-    end++;
-  }
-  const rawName = headerAfterHash.slice(0, end);
-  const norm = normalizeMacroName(rawName);
-  switch (norm) {
-    case "if":
-    case "ifpure":
-      return "if";
-    case "when":
-      return "when";
-    case "each":
-      return "each";
-    case "func":
-    case "function":
-      return "func";
-    case "pure":
-      return "pure";
-    case "puredisplay":
-      return "pure_display";
-    case "ignore":
-      return "ignore";
-    case "escape":
-      return "escape";
-    case "code":
-      return "code";
-    default:
-      return "unknown";
-  }
-}
-function normalizeMacroName(raw) {
-  let out = "";
-  for (let i = 0;i < raw.length; i++) {
-    const c = raw.charCodeAt(i);
-    if (c === 32 || c === 95 || c === 45)
-      continue;
-    if (c >= 65 && c <= 90)
-      out += String.fromCharCode(c + 32);
-    else
-      out += raw[i];
-  }
-  return out;
-}
-function parseMacroInner(raw) {
-  if (raw.startsWith("? ")) {
-    return { name: "calc", args: [raw.slice(2)] };
-  }
-  const dblIdx = raw.indexOf("::");
-  if (dblIdx >= 0) {
-    const parts = raw.split("::");
-    return { name: normalizeMacroName(parts[0] ?? ""), args: parts.slice(1) };
-  }
-  const colIdx = raw.indexOf(":");
-  if (colIdx >= 0) {
-    return { name: normalizeMacroName(raw.slice(0, colIdx)), args: [raw.slice(colIdx + 1)] };
-  }
-  return { name: normalizeMacroName(raw), args: [] };
-}
-
-class Parser {
-  tokens;
-  i = 0;
-  constructor(tokens) {
-    this.tokens = tokens;
-  }
-  parseTemplate(stopOnBlockClose = false) {
-    const out = [];
-    while (this.i < this.tokens.length) {
-      const tok = this.tokens[this.i];
-      if (tok.kind === "text") {
-        out.push({ type: "text", value: tok.value });
-        this.i++;
-        continue;
-      }
-      if (tok.kind === "close") {
-        out.push({ type: "text", value: tok.value });
-        this.i++;
-        continue;
-      }
-      if (tok.kind === "legacy_close") {
-        out.push({ type: "text", value: tok.value });
-        this.i++;
-        continue;
-      }
-      if (tok.kind === "legacy_open") {
-        const node = this.tryLegacyBlock();
-        out.push(node);
-        continue;
-      }
-      const maybe = this.tryMacroOrBlock(stopOnBlockClose);
-      if (maybe.kind === "nodes") {
-        for (const n of maybe.nodes)
-          out.push(n);
-        continue;
-      }
-      if (maybe.kind === "block_close") {
-        return out;
-      }
-    }
-    return out;
-  }
-  tryMacroOrBlock(stopOnBlockClose) {
-    const openTok = this.tokens[this.i];
-    const closeIdx = this.findInnerClose(this.i + 1);
-    if (closeIdx < 0) {
-      this.i++;
-      return { kind: "nodes", nodes: [{ type: "text", value: openTok.value }] };
-    }
-    const inner = this.collectInner(this.i + 1, closeIdx);
-    this.i = closeIdx + 1;
-    if (inner.startsWith("#")) {
-      return { kind: "nodes", nodes: [this.parseBlock(inner)] };
-    }
-    if (inner.startsWith(":")) {
-      return { kind: "nodes", nodes: [{
-        type: "macro",
-        name: normalizeMacroName(inner.slice(1)),
-        args: [],
-        raw: inner
-      }] };
-    }
-    if (inner.startsWith("/") && !inner.startsWith("//")) {
-      if (stopOnBlockClose) {
-        this.i -= 0;
-        return { kind: "block_close" };
-      }
-      return { kind: "nodes", nodes: [{ type: "text", value: `{{${inner}}}` }] };
-    }
-    const parsed = parseMacroInner(inner);
-    return { kind: "nodes", nodes: [{
-      type: "macro",
-      name: parsed.name,
-      args: parsed.args,
-      raw: inner
-    }] };
-  }
-  findInnerClose(from) {
-    let depth = 0;
-    for (let k = from;k < this.tokens.length; k++) {
-      const t = this.tokens[k];
-      if (t.kind === "open")
-        depth++;
-      else if (t.kind === "close") {
-        if (depth === 0)
-          return k;
-        depth--;
-      }
-    }
-    return -1;
-  }
-  collectInner(from, closeIdx) {
-    let s = "";
-    for (let k = from;k < closeIdx; k++)
-      s += this.tokens[k].value;
-    return s;
-  }
-  parseBlock(headerWithHash) {
-    const headerRaw = headerWithHash.slice(1);
-    const kind = identifyBlockKind(headerRaw);
-    if (OPAQUE_KINDS.has(kind)) {
-      const { bodyRaw, closeRaw } = this.consumeOpaqueBody();
-      return { type: "block", kind, headerRaw, bodyRaw, closeRaw };
-    }
-    return this.parseStructuralBlock(kind, headerRaw);
-  }
-  consumeOpaqueBody() {
-    let body = "";
-    let depth = 0;
-    while (this.i < this.tokens.length) {
-      const t = this.tokens[this.i];
-      if (t.kind === "text" || t.kind === "legacy_open" || t.kind === "legacy_close") {
-        body += t.value;
-        this.i++;
-        continue;
-      }
-      if (t.kind === "close") {
-        body += t.value;
-        this.i++;
-        continue;
-      }
-      const closeIdx = this.findInnerClose(this.i + 1);
-      if (closeIdx < 0) {
-        body += t.value;
-        this.i++;
-        continue;
-      }
-      const inner = this.collectInner(this.i + 1, closeIdx);
-      if (inner.startsWith("#")) {
-        depth++;
-        body += `{{${inner}}}`;
-        this.i = closeIdx + 1;
-        continue;
-      }
-      if (inner.startsWith("/") && !inner.startsWith("//")) {
-        if (depth === 0) {
-          this.i = closeIdx + 1;
-          return { bodyRaw: body, closeRaw: inner };
-        }
-        depth--;
-        body += `{{${inner}}}`;
-        this.i = closeIdx + 1;
-        continue;
-      }
-      body += `{{${inner}}}`;
-      this.i = closeIdx + 1;
-    }
-    return { bodyRaw: body, closeRaw: "" };
-  }
-  parseStructuralBlock(kind, headerRaw) {
-    const children = [];
-    const elseChildren = [];
-    let bucket = children;
-    let seenElse = false;
-    let closeRaw = "";
-    while (this.i < this.tokens.length) {
-      const t = this.tokens[this.i];
-      if (t.kind === "text") {
-        bucket.push({ type: "text", value: t.value });
-        this.i++;
-        continue;
-      }
-      if (t.kind === "close") {
-        bucket.push({ type: "text", value: t.value });
-        this.i++;
-        continue;
-      }
-      if (t.kind === "legacy_close") {
-        bucket.push({ type: "text", value: t.value });
-        this.i++;
-        continue;
-      }
-      if (t.kind === "legacy_open") {
-        bucket.push(this.tryLegacyBlock());
-        continue;
-      }
-      const closeIdx = this.findInnerClose(this.i + 1);
-      if (closeIdx < 0) {
-        bucket.push({ type: "text", value: t.value });
-        this.i++;
-        continue;
-      }
-      const inner = this.collectInner(this.i + 1, closeIdx);
-      if (inner.startsWith("#")) {
-        this.i = closeIdx + 1;
-        bucket.push(this.parseBlock(inner));
-        continue;
-      }
-      if (inner.startsWith(":")) {
-        const sepName = normalizeMacroName(inner.slice(1));
-        if (sepName === "else" && (kind === "if" || kind === "when")) {
-          this.i = closeIdx + 1;
-          bucket = elseChildren;
-          seenElse = true;
-          continue;
-        }
-        this.i = closeIdx + 1;
-        bucket.push({ type: "macro", name: sepName, args: [], raw: inner });
-        continue;
-      }
-      if (inner.startsWith("/") && !inner.startsWith("//")) {
-        this.i = closeIdx + 1;
-        closeRaw = inner;
-        const blk = seenElse ? { type: "block", kind, headerRaw, children, elseChildren, closeRaw } : { type: "block", kind, headerRaw, children, closeRaw };
-        return blk;
-      }
-      this.i = closeIdx + 1;
-      const parsed = parseMacroInner(inner);
-      bucket.push({ type: "macro", name: parsed.name, args: parsed.args, raw: inner });
-    }
-    return seenElse ? { type: "block", kind, headerRaw, children, elseChildren, closeRaw: "" } : { type: "block", kind, headerRaw, children, closeRaw: "" };
-  }
-  tryLegacyBlock() {
-    const openTok = this.tokens[this.i];
-    let k = this.i + 1;
-    while (k < this.tokens.length) {
-      if (this.tokens[k].kind === "legacy_close")
-        break;
-      k++;
-    }
-    if (k >= this.tokens.length) {
-      this.i++;
-      return { type: "text", value: openTok.value };
-    }
-    let raw = "";
-    for (let j = this.i + 1;j < k; j++)
-      raw += this.tokens[j].value;
-    this.i = k + 1;
-    return { type: "legacy", raw };
-  }
-}
-var OPAQUE_KINDS;
-var init_parser = __esm(() => {
-  OPAQUE_KINDS = new Set([
-    "pure",
-    "pure_display",
-    "ignore",
-    "escape",
-    "each",
-    "func",
-    "code"
-  ]);
-});
-
-// src/core/cbs/serialize.ts
-function serialize(t) {
-  let out = "";
-  for (const n of t.nodes)
-    out += serializeNode(n);
-  return out;
-}
-function serializeNode(n) {
-  switch (n.type) {
-    case "text":
-      return n.value;
-    case "macro":
-      return `{{${n.raw}}}`;
-    case "legacy":
-      return `{#${n.raw}#}`;
-    case "block": {
-      const header = `{{#${n.headerRaw}}}`;
-      const close = n.closeRaw === "" ? "" : `{{${n.closeRaw}}}`;
-      if (n.bodyRaw !== undefined) {
-        return `${header}${n.bodyRaw}${close}`;
-      }
-      let body = "";
-      for (const c of n.children ?? [])
-        body += serializeNode(c);
-      if (n.elseChildren) {
-        body += `{{:else}}`;
-        for (const c of n.elseChildren)
-          body += serializeNode(c);
-      }
-      return `${header}${body}${close}`;
-    }
-  }
-}
-
-// src/core/cbs/rewrite/rename.ts
-function renameCollisions(template, opts) {
-  const prefix = opts.prefix ?? RENAME_PREFIX;
-  const renamed = new Map;
-  const unknownMacros = new Map;
-  const rewriteNodes = (nodes) => nodes.map((n) => rewriteNode(n));
-  const rewriteNode = (n) => {
-    switch (n.type) {
-      case "text":
-      case "legacy":
-        return n;
-      case "macro":
-        return rewriteMacro(n);
-      case "block":
-        return rewriteBlock(n);
-    }
-  };
-  const rewriteMacro = (n) => {
-    let cur = n;
-    if (n.name === "calc" && n.raw.startsWith("? ")) {
-      const expr = n.raw.slice(2);
-      cur = {
-        type: "macro",
-        name: "calc",
-        args: [expr],
-        raw: `calc::${expr}`
-      };
-    }
-    const entry = opts.catalog.find(cur.name);
-    if (entry === null) {
-      unknownMacros.set(cur.name, (unknownMacros.get(cur.name) ?? 0) + 1);
-      return cur;
-    }
-    if (!opts.catalog.needsRename(cur.name))
-      return cur;
-    const newName = `${prefix}${cur.name}`;
-    renamed.set(cur.name, (renamed.get(cur.name) ?? 0) + 1);
-    return {
-      type: "macro",
-      name: newName,
-      args: cur.args,
-      raw: rewriteMacroRaw(cur.raw, newName)
-    };
-  };
-  const rewriteBlock = (n) => {
-    if (n.bodyRaw !== undefined)
-      return n;
-    const next = {
-      type: "block",
-      kind: n.kind,
-      headerRaw: n.headerRaw,
-      closeRaw: n.closeRaw,
-      ...n.children !== undefined ? { children: rewriteNodes(n.children) } : {},
-      ...n.elseChildren !== undefined ? { elseChildren: rewriteNodes(n.elseChildren) } : {}
-    };
-    return next;
-  };
-  const out = { nodes: rewriteNodes(template.nodes) };
-  return { template: out, report: { renamed, unknownMacros } };
-}
-function rewriteMacroRaw(raw, newName) {
-  const dblIdx = raw.indexOf("::");
-  if (dblIdx >= 0)
-    return `${newName}${raw.slice(dblIdx)}`;
-  const colIdx = raw.indexOf(":");
-  if (colIdx >= 0)
-    return `${newName}${raw.slice(colIdx)}`;
-  return newName;
-}
-var RENAME_PREFIX = "risu_";
-
-// src/core/cbs/rewrite/encode.ts
-function encodeOpaqueBody(s) {
-  return s.replaceAll("{{", OPEN_BRACE_A + OPEN_BRACE_B).replaceAll("}}", CLOSE_BRACE_A + CLOSE_BRACE_B).replaceAll("::", COLON_A + COLON_B);
-}
-function decodeOpaqueBody(s) {
-  return s.replaceAll(COLON_A + COLON_B, "::").replaceAll(CLOSE_BRACE_A + CLOSE_BRACE_B, "}}").replaceAll(OPEN_BRACE_A + OPEN_BRACE_B, "{{");
-}
-var OPEN_BRACE_A = "\uE9B8", OPEN_BRACE_B = "\uE9B9", CLOSE_BRACE_A = "\uE9BA", CLOSE_BRACE_B = "\uE9BB", COLON_A = "\uE9BC", COLON_B = "\uE9BD";
-var init_encode = () => {};
-
-// src/core/cbs/rewrite/blocks.ts
-function rewriteBlocks(template) {
-  let structural = 0;
-  let opaque = 0;
-  let legacy = 0;
-  const untouched = new Map;
-  const walk = (nodes) => nodes.map((n) => walkNode(n));
-  const walkNode = (n) => {
-    switch (n.type) {
-      case "text":
-      case "macro":
-        return n;
-      case "legacy": {
-        legacy++;
-        const name = `${BLOCK_PREFIX}legacy`;
-        const enc = encodeOpaqueBody(n.raw);
-        return makeLeaf(name, [enc], `${name}::${enc}`);
-      }
-      case "block":
-        return rewriteBlock(n);
-    }
-  };
-  const rewriteBlock = (b) => {
-    if (STRUCTURAL_KINDS.has(b.kind)) {
-      structural++;
-      return rewriteStructural(b);
-    }
-    if (OPAQUE_KINDS2.has(b.kind)) {
-      opaque++;
-      return rewriteOpaque(b);
-    }
-    untouched.set(b.kind, (untouched.get(b.kind) ?? 0) + 1);
-    return b;
-  };
-  const rewriteStructural = (b) => {
-    const targetKind = b.kind === "unknown" ? "unknown" : b.kind;
-    const name = `${BLOCK_PREFIX}${b.kind === "unknown" ? extractUnknownName(b.headerRaw) : b.kind}`;
-    const headerArgs = extractHeaderArgs(b.kind, b.headerRaw);
-    const newHeader = headerArgs.length > 0 ? `${name}::${headerArgs}` : name;
-    const newClose = `/${name}`;
-    const children = b.children ? walk(b.children) : [];
-    const elseChildren = b.elseChildren ? walk(b.elseChildren) : undefined;
-    let combined;
-    if (elseChildren !== undefined) {
-      combined = [
-        ...children,
-        { type: "macro", name: "else", args: [], raw: "else" },
-        ...elseChildren
-      ];
-    } else {
-      combined = children;
-    }
-    return {
-      type: "block",
-      kind: targetKind,
-      headerRaw: newHeader,
-      closeRaw: newClose,
-      children: combined
-    };
-  };
-  const rewriteOpaque = (b) => {
-    const name = `${BLOCK_PREFIX}${b.kind}`;
-    const headerArgs = extractHeaderArgs(b.kind, b.headerRaw);
-    const body = encodeOpaqueBody(b.bodyRaw ?? "");
-    const parts = [name];
-    if (headerArgs.length > 0)
-      parts.push(headerArgs);
-    parts.push(body);
-    const raw = parts.join("::");
-    const args = [];
-    if (headerArgs.length > 0)
-      args.push(headerArgs);
-    args.push(body);
-    return makeLeaf(name, args, raw);
-  };
-  const outTemplate = { nodes: walk(template.nodes) };
-  return { template: outTemplate, report: { structural, opaque, legacy, untouched } };
-}
-function makeLeaf(name, args, raw) {
-  return { type: "macro", name, args, raw };
-}
-function extractHeaderArgs(kind, headerRaw) {
-  return dropFirstToken(headerRaw);
-}
-function dropFirstToken(s) {
-  const wsIdx = firstIndexOfAny(s, [32, 9, 10, 13]);
-  const dblColIdx = s.indexOf("::");
-  let sepStart;
-  let sepLen;
-  if (wsIdx >= 0 && (dblColIdx < 0 || wsIdx < dblColIdx)) {
-    sepStart = wsIdx;
-    let end = wsIdx;
-    while (end < s.length) {
-      const c = s.charCodeAt(end);
-      if (c !== 32 && c !== 9 && c !== 10 && c !== 13)
-        break;
-      end++;
-    }
-    sepLen = end - wsIdx;
-  } else if (dblColIdx >= 0) {
-    sepStart = dblColIdx;
-    sepLen = 2;
-  } else {
-    return "";
-  }
-  return s.slice(sepStart + sepLen);
-}
-function firstIndexOfAny(s, codes) {
-  for (let i = 0;i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    for (const x of codes)
-      if (c === x)
-        return i;
-  }
-  return -1;
-}
-function extractUnknownName(headerRaw) {
-  let i = 0;
-  while (i < headerRaw.length) {
-    const c = headerRaw.charCodeAt(i);
-    if (c === 32 || c === 9 || c === 10 || c === 13)
-      break;
-    i++;
-  }
-  const first = headerRaw.slice(0, i) || "unknown";
-  return first.toLowerCase().replaceAll("-", "").replaceAll("_", "");
-}
-var BLOCK_PREFIX = "risu_", STRUCTURAL_KINDS, OPAQUE_KINDS2;
-var init_blocks = __esm(() => {
-  init_encode();
-  STRUCTURAL_KINDS = new Set([
-    "if",
-    "when",
-    "unknown"
-  ]);
-  OPAQUE_KINDS2 = new Set([
-    "each",
-    "func",
-    "pure",
-    "pure_display",
-    "ignore",
-    "escape",
-    "code"
-  ]);
-});
-
 // src/core/cbs/rewrite/text.ts
-function rewriteText(text, catalog) {
-  if (text === "" || text == null)
-    return text;
-  if (text.indexOf("{{") < 0 && text.indexOf("{#") < 0)
-    return text;
-  const pre = rewriteArithShortcut(text);
-  const parsed = parseCbs(pre);
-  const renamed = renameCollisions(parsed, { catalog, prefix: RENAME_PREFIX });
-  const blocks = rewriteBlocks(renamed.template);
-  const serialized = serialize(blocks.template);
-  return rewriteCollisionsInArgs(serialized, catalog);
+function rewriteText(text, _catalog) {
+  return text;
 }
-function rewriteCollisionsInArgs(text, catalog) {
-  if (text.indexOf("{{") < 0)
-    return text;
-  const incompat = new Set;
-  for (const name of catalog.incompatibleNames()) {
-    incompat.add(normalizeMacroName(name));
-  }
-  if (incompat.size === 0)
-    return text;
-  let out = "";
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    const at = text.indexOf("{{", i);
-    if (at < 0) {
-      out += text.slice(i);
-      break;
-    }
-    out += text.slice(i, at);
-    out += "{{";
-    const start = at + 2;
-    const c0 = text.charCodeAt(start);
-    if (c0 === 35 || c0 === 47) {
-      i = start;
-      continue;
-    }
-    let end = start;
-    while (end < n) {
-      const c = text.charCodeAt(end);
-      if (c === 58 || c === 125 || c === 32 || c === 10 || c === 9 || c === 123)
-        break;
-      end++;
-    }
-    const name = text.slice(start, end);
-    const lower = name.toLowerCase();
-    if (lower.startsWith(RENAME_PREFIX)) {
-      out += name;
-      i = end;
-      continue;
-    }
-    const norm = normalizeMacroName(name);
-    if (norm.length > 0 && incompat.has(norm)) {
-      out += RENAME_PREFIX + name;
-    } else {
-      out += name;
-    }
-    i = end;
-  }
-  return out;
-}
-function rewriteArithShortcut(text) {
-  if (text.indexOf("{{? ") < 0)
-    return text;
-  let out = "";
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    const at = text.indexOf("{{? ", i);
-    if (at < 0) {
-      out += text.slice(i);
-      break;
-    }
-    out += text.slice(i, at);
-    let depth = 1;
-    let j = at + 4;
-    while (j < n) {
-      if (text.startsWith("{{", j)) {
-        depth++;
-        j += 2;
-        continue;
-      }
-      if (text.startsWith("}}", j)) {
-        depth--;
-        if (depth === 0)
-          break;
-        j += 2;
-        continue;
-      }
-      j++;
-    }
-    if (j >= n || depth !== 0) {
-      out += text.slice(at);
-      break;
-    }
-    const expr = text.slice(at + 4, j);
-    out += `{{calc::${expr}}}`;
-    i = j + 2;
-  }
-  return out;
-}
-var init_text = __esm(() => {
-  init_parser();
-  init_blocks();
-});
 
 // src/core/svg-rasterize.ts
 var exports_svg_rasterize = {};
@@ -4995,6 +4269,32 @@ var init_svg_rasterize = __esm(() => {
   VIEWBOX_RE = /\bviewBox\s*=\s*["']?\s*([\d.-]+)\s+([\d.-]+)\s+([\d.]+)\s+([\d.]+)/i;
   PLACEHOLDER_RE = /<img\b[^>]*\bdata-lumirealm-svg-pending\s*=\s*["']?(\d+)["']?[^>]*>/gi;
 });
+// src/core/cbs/parser.ts
+function normalizeMacroName(raw) {
+  let out = "";
+  for (let i = 0;i < raw.length; i++) {
+    const c = raw.charCodeAt(i);
+    if (c === 32 || c === 95 || c === 45)
+      continue;
+    if (c >= 65 && c <= 90)
+      out += String.fromCharCode(c + 32);
+    else
+      out += raw[i];
+  }
+  return out;
+}
+var OPAQUE_KINDS;
+var init_parser = __esm(() => {
+  OPAQUE_KINDS = new Set([
+    "pure",
+    "pure_display",
+    "ignore",
+    "escape",
+    "each",
+    "func",
+    "code"
+  ]);
+});
 // src/core/cbs/catalog/schema.ts
 function isComplete(entry) {
   if (entry.argShape === "UNCERTAIN")
@@ -5142,10 +4442,39 @@ var init_catalog = __esm(() => {
   init_loader();
 });
 
+// src/core/cbs/rewrite/rename.ts
+var RENAME_PREFIX = "risu_";
+
+// src/core/cbs/rewrite/encode.ts
+function decodeOpaqueBody(s) {
+  return s.replaceAll(COLON_A + COLON_B, "::").replaceAll(CLOSE_BRACE_A + CLOSE_BRACE_B, "}}").replaceAll(OPEN_BRACE_A + OPEN_BRACE_B, "{{");
+}
+var OPEN_BRACE_A = "\uE9B8", OPEN_BRACE_B = "\uE9B9", CLOSE_BRACE_A = "\uE9BA", CLOSE_BRACE_B = "\uE9BB", COLON_A = "\uE9BC", COLON_B = "\uE9BD";
+var init_encode = () => {};
+
+// src/core/cbs/rewrite/blocks.ts
+var STRUCTURAL_KINDS, OPAQUE_KINDS2;
+var init_blocks = __esm(() => {
+  init_encode();
+  STRUCTURAL_KINDS = new Set([
+    "if",
+    "when",
+    "unknown"
+  ]);
+  OPAQUE_KINDS2 = new Set([
+    "each",
+    "func",
+    "pure",
+    "pure_display",
+    "ignore",
+    "escape",
+    "code"
+  ]);
+});
+
 // src/core/cbs/rewrite/index.ts
 var init_rewrite = __esm(() => {
   init_encode();
-  init_text();
   init_blocks();
 });
 // src/core/cbs/runtime/mock.ts
@@ -21241,10 +20570,6 @@ function mapLoreBookWithStats(entries, opts) {
     }
   };
 }
-
-// src/core/mappers/regex.ts
-init_text();
-
 // src/core/mappers/island-merge.ts
 var BLOCK_ELEMENT_RE = /^<(div|section|article|aside|nav|main|header|footer|form|fieldset|figure|details)\b/i;
 var STYLE_TAG_RE = /<style[\s>]/i;
@@ -23821,10 +23146,6 @@ function slugify2(s) {
   }
   return out.join("").slice(0, 64);
 }
-
-// src/core/mappers/background-html.ts
-init_text();
-
 // src/core/mappers/font-hoist.ts
 function extractGlobalFontDeclarations(replaceStrings) {
   if (replaceStrings.length === 0)
@@ -24172,10 +23493,6 @@ function renderCode(a) {
   ].join(`
 `);
 }
-
-// src/core/pipeline/translate.ts
-init_text();
-
 // src/core/pipeline/risu-payload.ts
 var KNOWN_RISUAI_FIELDS = new Set([
   "backgroundHTML",
@@ -27010,23 +26327,10 @@ function setActiveScriptstateDefaults(chatId, characterId, defaults) {
 function clearActiveScriptstateDefaults(chatId) {
   chatToCharacter.delete(chatId);
 }
-function getActiveScriptstateDefaults(chatId) {
-  if (!chatId)
-    return null;
-  const characterId = chatToCharacter.get(chatId);
-  if (!characterId)
-    return null;
-  return byCharacter.get(characterId) ?? null;
-}
 function getScriptstateDefaultsByCharacter(characterId) {
   if (!characterId)
     return null;
   return byCharacter.get(characterId) ?? null;
-}
-function getCharacterIdForChat(chatId) {
-  if (!chatId)
-    return null;
-  return chatToCharacter.get(chatId) ?? null;
 }
 
 // src/interpreter/runtime/vars.ts
@@ -31472,14 +30776,6 @@ function setActiveModulesByNamespace(chatId, characterId, modulesByNamespace) {
 function clearActiveModulesByNamespace(chatId) {
   chatToCharacter3.delete(chatId);
 }
-function getActiveModulesByNamespace(chatId) {
-  if (!chatId)
-    return null;
-  const characterId = chatToCharacter3.get(chatId);
-  if (!characterId)
-    return null;
-  return byCharacter3.get(characterId) ?? null;
-}
 
 // src/interpreter/decorator-buffers.ts
 var TTL_MS = 60000;
@@ -31545,10 +30841,7 @@ function invalidateCachedMessages(chatId) {
 }
 
 // src/interpreter/macros.ts
-var spindleGlobal = typeof spindle !== "undefined" ? spindle : undefined;
 var logger3 = makeSafeLogger("macros");
-var logInfo3 = (msg) => logger3.info(msg);
-var logWarn3 = (msg) => logger3.warn(msg);
 var TRACE_MACROS = (() => {
   try {
     const env = globalThis.Bun?.env;
@@ -31558,34 +30851,6 @@ var TRACE_MACROS = (() => {
   }
 })();
 var varOverlays = new Map;
-var MAX_OVERLAYS = 100;
-function getOverlay(chatId) {
-  let overlay = varOverlays.get(chatId);
-  if (!overlay) {
-    if (varOverlays.size >= MAX_OVERLAYS) {
-      let oldestKey = null;
-      let oldestTouched = Infinity;
-      for (const [k, v] of varOverlays) {
-        if (v.lastTouched < oldestTouched) {
-          oldestTouched = v.lastTouched;
-          oldestKey = k;
-        }
-      }
-      if (oldestKey)
-        varOverlays.delete(oldestKey);
-    }
-    overlay = {
-      local: new Map,
-      global: new Map,
-      chat: new Map,
-      temp: new Map,
-      lastTouched: Date.now()
-    };
-    varOverlays.set(chatId, overlay);
-  }
-  overlay.lastTouched = Date.now();
-  return overlay;
-}
 var sessionFunctions = (() => {
   const table = new Map;
   return {
@@ -31602,259 +30867,12 @@ var sessionFunctions = (() => {
 function clearMacroVarOverlay(chatId) {
   varOverlays.delete(chatId);
 }
-function buildRuntimeContext(mctx) {
-  const env = mctx.env ?? {};
-  const chatId = env.chat?.id ?? "";
-  const committing = mctx.commit !== false;
-  const overlay = chatId && committing ? getOverlay(chatId) : null;
-  const tempOverlay = new Map;
-  const envLocal = env.variables?.local ?? {};
-  const envGlobal = env.variables?.global ?? {};
-  const envChat = env.variables?.chat ?? {};
-  const defaults = getActiveScriptstateDefaults(chatId) ?? {};
-  const vars = {
-    get(scope, name) {
-      if (scope === "temp")
-        return tempOverlay.get(name) ?? "";
-      if (overlay) {
-        if (scope === "local" && overlay.local.has(name))
-          return overlay.local.get(name);
-        if (scope === "global" && overlay.global.has(name))
-          return overlay.global.get(name);
-        if (scope === "local" && overlay.chat.has(name))
-          return overlay.chat.get(name);
-      }
-      if (scope === "global")
-        return envGlobal[name] ?? "null";
-      const fromChat = envChat[name];
-      if (fromChat !== undefined)
-        return fromChat;
-      const fromLocal = envLocal[name];
-      if (fromLocal !== undefined)
-        return fromLocal;
-      const fromDefaults = defaults[name];
-      if (fromDefaults !== undefined)
-        return fromDefaults;
-      return "null";
-    },
-    set(scope, name, value) {
-      if (scope === "temp") {
-        tempOverlay.set(name, value);
-        return;
-      }
-      if (!committing || !overlay)
-        return;
-      if (scope === "global")
-        overlay.global.set(name, value);
-      else
-        overlay.chat.set(name, value);
-      if (chatId && spindleGlobal) {
-        try {
-          const target = scope === "global" ? spindleGlobal.variables.global.set(name, value) : spindleGlobal.variables.chat.set(chatId, name, value);
-          target.catch((err) => {
-            logWarn3(`vars.set writeback failed scope=${scope} name=${name}: ${err instanceof Error ? err.message : String(err)}`);
-          });
-        } catch (err) {
-          logWarn3(`vars.set threw scope=${scope} name=${name}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-    },
-    add(scope, name, delta) {
-      if (scope !== "temp" && !committing)
-        return;
-      const cur = Number(this.get(scope, name));
-      const next = String((Number.isFinite(cur) ? cur : 0) + delta);
-      this.set(scope, name, next);
-    },
-    has(scope, name) {
-      if (scope === "temp")
-        return tempOverlay.has(name);
-      if (overlay) {
-        if (scope === "local" && (overlay.local.has(name) || overlay.chat.has(name)))
-          return true;
-        if (scope === "global" && overlay.global.has(name))
-          return true;
-      }
-      if (scope === "global")
-        return Object.prototype.hasOwnProperty.call(envGlobal, name);
-      return Object.prototype.hasOwnProperty.call(envChat, name) || Object.prototype.hasOwnProperty.call(envLocal, name) || Object.prototype.hasOwnProperty.call(defaults, name);
-    },
-    delete(scope, name) {
-      if (scope === "temp") {
-        tempOverlay.delete(name);
-        return;
-      }
-      if (!committing)
-        return;
-      if (overlay) {
-        if (scope === "global")
-          overlay.global.delete(name);
-        else {
-          overlay.local.delete(name);
-          overlay.chat.delete(name);
-        }
-      }
-      if (chatId && spindleGlobal) {
-        try {
-          const op = scope === "global" ? spindleGlobal.variables.global.delete(name) : spindleGlobal.variables.chat.delete(chatId, name);
-          op.catch(() => {});
-        } catch {}
-      }
-    }
-  };
-  const messageCount = Math.max(0, Number(env.chat?.messageCount ?? 0) - 1);
-  const lastMessage = String(env.chat?.lastMessage ?? "");
-  const lastUser = String(env.chat?.lastUserMessage ?? "");
-  const lastChar = String(env.chat?.lastCharMessage ?? "");
-  const cachedFull = chatId ? getCachedMessages(chatId) : null;
-  const synthesized = [];
-  if (lastUser)
-    synthesized.push({ role: "user", content: lastUser, createdAt: 0 });
-  if (lastChar)
-    synthesized.push({ role: "assistant", content: lastChar, createdAt: 0 });
-  if (lastMessage && !synthesized.some((m) => m.content === lastMessage)) {
-    synthesized.push({ role: "assistant", content: lastMessage, createdAt: 0 });
-  }
-  const effective = cachedFull ?? synthesized;
-  const messages = {
-    all: () => effective,
-    last: () => effective[effective.length - 1] ?? null,
-    lastOf: (role) => {
-      for (let i = effective.length - 1;i >= 0; i--) {
-        const m = effective[i];
-        if (m.role === role)
-          return m;
-      }
-      return null;
-    },
-    count: (role) => {
-      if (role === undefined) {
-        if (cachedFull)
-          return effective.length;
-        return env.chat?.messageCount != null ? messageCount : synthesized.length;
-      }
-      let n = 0;
-      for (const m of effective)
-        if (m.role === role)
-          n++;
-      return n;
-    }
-  };
-  const cachedChatId = String(env.chat?.id ?? "");
-  const cachedUserId = (() => {
-    const raw = env.extra?.userId;
-    return typeof raw === "string" && raw.length > 0 ? raw : undefined;
-  })();
-  const identity = {
-    charName: String(env.names?.char ?? env.character?.name ?? ""),
-    userName: String(env.names?.user ?? ""),
-    personaText: String(env.character?.persona ?? ""),
-    personaName: String(env.names?.user ?? ""),
-    personaImage: getActivePersonaImage(cachedUserId)
-  };
-  const assetIndexes = getActiveAssetIndexes(String(env.chat?.id ?? ""));
-  const additionalAssets = assetIndexes ? indexToCharacterAssets(assetIndexes.assets) : [];
-  const emotionImages = assetIndexes ? indexToCharacterAssets(assetIndexes.emotions) : [];
-  const cachedCharacterId = getCharacterIdForChat(cachedChatId) ?? "";
-  const character2 = {
-    description: String(env.character?.description ?? ""),
-    personality: String(env.character?.personality ?? ""),
-    scenario: String(env.character?.scenario ?? ""),
-    exampleDialogue: String(env.character?.mesExamples ?? ""),
-    mainPrompt: String(env.character?.systemPrompt ?? ""),
-    postHistoryInstructions: String(env.character?.postHistoryInstructions ?? ""),
-    creatorNotes: String(env.character?.creatorNotes ?? ""),
-    jailbreakPrompt: "",
-    globalNote: "",
-    authorsNote: "",
-    firstMessage: String(env.character?.firstMessage ?? ""),
-    alternateGreetings: [],
-    selectedAlternateGreetingIndex: -1,
-    type: "character",
-    additionalAssets,
-    emotionImages,
-    prebuiltAssetCommand: false,
-    prebuiltAssetExclude: [],
-    chaId: cachedCharacterId,
-    image: getActiveCharacterImage(cachedChatId)
-  };
-  const lorebook2 = getActiveLorebook(chatId);
-  const functions = committing ? sessionFunctions : {
-    define: () => {},
-    get: (name) => sessionFunctions.get(name),
-    delete: () => {},
-    has: (name) => sessionFunctions.has(name)
-  };
-  return {
-    vars,
-    identity,
-    character: character2,
-    messages,
-    rng: { random: () => Math.random() },
-    clock: { now: () => Date.now() },
-    triggerId: null,
-    role: (() => {
-      const dyn = env.dynamicMacros;
-      const r = typeof dyn?.role === "string" ? dyn.role : null;
-      return r ? normalizeRoleToLumi(r) : null;
-    })(),
-    functions,
-    aiModel: String(env.system?.model ?? ""),
-    axModel: "",
-    isFirstMessage: Number(env.chat?.messageCount ?? 0) <= 1,
-    currentMessageIndex: env.chat?.lastMessageId != null ? Math.max(-1, env.chat.lastMessageId - 1) : null,
-    lorebook: lorebook2,
-    jailbreakToggle: false,
-    maxContext: Number(env.system?.maxContext ?? 0),
-    language: "",
-    appVersion: "",
-    screenWidth: 0,
-    screenHeight: 0,
-    commit: committing,
-    legacyMediaFindings: false,
-    ...getActiveModulesByNamespace(chatId) ? { modulesByNamespace: getActiveModulesByNamespace(chatId) } : {},
-    ...getDecoratorBuffers(chatId)?.positionPt ? { positionPt: getDecoratorBuffers(chatId).positionPt } : {}
-  };
-}
-function reconstructRaw(name, args) {
-  if (args.length === 0)
-    return name;
-  return `${name}::${args.join("::")}`;
-}
-function indexToCharacterAssets(index) {
-  const out = [];
-  for (const [name, entry] of Object.entries(index)) {
-    for (const imageId of entry.imageIds) {
-      out.push({
-        name,
-        src: `/api/v1/images/${imageId}`,
-        ...entry.ext ? { ext: entry.ext } : {}
-      });
-    }
-  }
-  return out;
-}
-var registered = false;
 var invokeCounter = {
   total: 0,
   byName: new Map,
   lastEmitTotal: 0,
   lastEmitTs: 0
 };
-var SUMMARY_EVERY = 500;
-var SUMMARY_MIN_MS = 250;
-function noteInvoke(name) {
-  invokeCounter.total += 1;
-  invokeCounter.byName.set(name, (invokeCounter.byName.get(name) ?? 0) + 1);
-  const since = invokeCounter.total - invokeCounter.lastEmitTotal;
-  const now = Date.now();
-  if (since >= SUMMARY_EVERY && now - invokeCounter.lastEmitTs >= SUMMARY_MIN_MS) {
-    const top = Array.from(invokeCounter.byName.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `${n}(${c})`).join(" ");
-    logInfo3(`[invoke-summary] total=${invokeCounter.total} since_last=${since} top5=${top}`);
-    invokeCounter.lastEmitTotal = invokeCounter.total;
-    invokeCounter.lastEmitTs = now;
-  }
-}
 var LUMI_NATIVE_COLLISIONS = new Set([
   "or",
   "trim",
@@ -31875,123 +30893,15 @@ var LUMI_NATIVE_COLLISIONS = new Set([
   "idleduration",
   "idle_duration",
   "newline",
-  "jailbreak"
+  "jailbreak",
+  "sum",
+  "average",
+  "all",
+  "any",
+  "contains",
+  "range",
+  "filter"
 ]);
-function registerAll() {
-  if (!spindleGlobal) {
-    logWarn3("spindle unavailable \u2014 macros NOT registered");
-    return;
-  }
-  if (registered) {
-    logInfo3("registerAll: already registered \u2014 skip");
-    return;
-  }
-  const aliasByCanonical = buildAliasMap();
-  const all = registry.entries();
-  logInfo3(`registerAll: starting registration of ${all.length} handlers`);
-  let ok = 0;
-  let failed = 0;
-  let aliasesRegistered = 0;
-  let skippedLumiNatives = 0;
-  for (const reg of all) {
-    if (LUMI_NATIVE_COLLISIONS.has(reg.name)) {
-      skippedLumiNatives += 1;
-      continue;
-    }
-    try {
-      const handlerFn = (mctx) => {
-        noteInvoke(reg.name);
-        const ctx = buildRuntimeContext(mctx);
-        const args = reg.scoped ? [...mctx.args, mctx.body] : mctx.args;
-        const raw = reconstructRaw(reg.name, args);
-        let result = "";
-        let threw = null;
-        try {
-          result = reg.handler(ctx, args, raw);
-        } catch (err) {
-          threw = err instanceof Error ? err : new Error(String(err));
-        }
-        if (TRACE_MACROS) {
-          try {
-            const env = mctx.env;
-            const argsPreview = args.slice(0, 4).map((a) => JSON.stringify(String(a).slice(0, 40))).join(", ");
-            const msgCount = env?.chat?.messageCount ?? "?";
-            const lmi = env?.chat?.lastMessageId ?? "?";
-            const chatId = env?.chat?.id ?? "?";
-            const commit = mctx.commit;
-            const resultPreview = JSON.stringify(String(result).slice(0, 80));
-            const suffix = threw ? ` THREW=${threw.message}` : "";
-            logInfo3(`invoke name=${reg.name} scoped=${reg.scoped ? "1" : "0"} commit=${commit === false ? "dry" : "commit"} ` + `chat.id=${chatId} chat.messageCount=${msgCount} chat.lastMessageId=${lmi} ` + `args=[${argsPreview}] result=${resultPreview}${suffix}`);
-          } catch {}
-        }
-        if (threw) {
-          logWarn3(`handler "${reg.name}" threw: ${threw.message}`);
-          return "";
-        }
-        return result;
-      };
-      spindleGlobal.registerMacro({
-        name: reg.name,
-        category: reg.category,
-        description: reg.description,
-        returnType: "string",
-        handler: handlerFn
-      });
-      ok += 1;
-      const aliases = aliasByCanonical.get(normaliseMacroName(reg.name)) ?? [];
-      for (const alias of aliases) {
-        if (alias === reg.name)
-          continue;
-        if (LUMI_NATIVE_COLLISIONS.has(alias))
-          continue;
-        try {
-          spindleGlobal.registerMacro({
-            name: alias,
-            category: reg.category,
-            description: `${reg.description} (alias of ${reg.name})`,
-            returnType: "string",
-            handler: handlerFn
-          });
-          aliasesRegistered += 1;
-        } catch (err) {
-          logWarn3(`registerMacro alias "${alias}" for "${reg.name}" threw: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-    } catch (err) {
-      failed += 1;
-      logWarn3(`registerMacro "${reg.name}" threw: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  logInfo3(`registerAll: done ok=${ok} aliases=${aliasesRegistered} failed=${failed} skipped_lumi_natives=${skippedLumiNatives} total=${all.length}`);
-  registered = true;
-}
-function buildAliasMap() {
-  const out = new Map;
-  let catalog2;
-  try {
-    catalog2 = new CatalogIndex(parseCatalog(risu_macros_default));
-  } catch (err) {
-    logWarn3(`buildAliasMap: catalog parse failed (${err instanceof Error ? err.message : String(err)}) \u2014 no aliases will be registered`);
-    return out;
-  }
-  for (const entry of catalog2.entries) {
-    if (!entry.aliases || entry.aliases.length === 0)
-      continue;
-    const key = normaliseMacroName(entry.name);
-    const list = out.get(key) ?? [];
-    for (const alias of entry.aliases) {
-      if (typeof alias !== "string" || alias.length === 0)
-        continue;
-      if (!list.includes(alias))
-        list.push(alias);
-    }
-    out.set(key, list);
-  }
-  return out;
-}
-function normaliseMacroName(name) {
-  return name.toLowerCase().replace(/^[#:]+/, "").replace(/[\s_-]+/g, "");
-}
 
 // src/state/lorebook-fetch.ts
 function lumiEntryToRisuLore(e) {
@@ -32029,7 +30939,7 @@ async function fetchLorebookForCharacter(worldBookIds, userId) {
 }
 
 // src/interpreter/evaluator/context.ts
-var spindleGlobal2 = typeof spindle !== "undefined" ? spindle : undefined;
+var spindleGlobal = typeof spindle !== "undefined" ? spindle : undefined;
 var sessionFunctions2 = (() => {
   const table2 = new Map;
   return {
@@ -32044,11 +30954,11 @@ var sessionFunctions2 = (() => {
   };
 })();
 var varOverlays2 = new Map;
-var MAX_OVERLAYS2 = 100;
-function getOverlay2(chatId) {
+var MAX_OVERLAYS = 100;
+function getOverlay(chatId) {
   let overlay = varOverlays2.get(chatId);
   if (!overlay) {
-    if (varOverlays2.size >= MAX_OVERLAYS2) {
+    if (varOverlays2.size >= MAX_OVERLAYS) {
       let oldestKey = null;
       let oldestTouched = Infinity;
       for (const [k, v] of varOverlays2) {
@@ -32085,7 +30995,7 @@ function makeEphemeralOverlay() {
   };
 }
 var MSG_DEP_KEY = "__msg__";
-function indexToCharacterAssets2(index) {
+function indexToCharacterAssets(index) {
   if (!index)
     return [];
   const out = [];
@@ -32103,7 +31013,7 @@ function indexToCharacterAssets2(index) {
 function buildEvaluatorContext(input) {
   const { chatId, commit, character: card, chat, variables } = input;
   const persistVars = commit && input.suppressVarPersist !== true;
-  const overlay = !commit ? null : input.suppressVarPersist === true ? makeEphemeralOverlay() : chatId ? getOverlay2(chatId) : null;
+  const overlay = !commit ? null : input.suppressVarPersist === true ? makeEphemeralOverlay() : chatId ? getOverlay(chatId) : null;
   const tempOverlay = new Map;
   const envLocal = variables.local ?? {};
   const envGlobal = variables.global ?? {};
@@ -32162,9 +31072,9 @@ function buildEvaluatorContext(input) {
         overlay.global.set(name, value);
       else
         overlay.chat.set(name, value);
-      if (chatId && spindleGlobal2 && persistVars) {
+      if (chatId && spindleGlobal && persistVars) {
         try {
-          const op = scope === "global" ? spindleGlobal2.variables.global.set(name, value) : spindleGlobal2.variables.chat.set(chatId, name, value);
+          const op = scope === "global" ? spindleGlobal.variables.global.set(name, value) : spindleGlobal.variables.chat.set(chatId, name, value);
           op.catch(() => {});
         } catch {}
       }
@@ -32206,9 +31116,9 @@ function buildEvaluatorContext(input) {
           overlay.chat.delete(name);
         }
       }
-      if (chatId && spindleGlobal2 && persistVars) {
+      if (chatId && spindleGlobal && persistVars) {
         try {
-          const op = scope === "global" ? spindleGlobal2.variables.global.delete(name) : spindleGlobal2.variables.chat.delete(chatId, name);
+          const op = scope === "global" ? spindleGlobal.variables.global.delete(name) : spindleGlobal.variables.chat.delete(chatId, name);
           op.catch(() => {});
         } catch {}
       }
@@ -32282,8 +31192,8 @@ function buildEvaluatorContext(input) {
     alternateGreetings: card.alternateGreetings ?? [],
     selectedAlternateGreetingIndex: card.selectedAlternateGreetingIndex ?? -1,
     type: "character",
-    additionalAssets: indexToCharacterAssets2(card.additionalAssets),
-    emotionImages: indexToCharacterAssets2(card.emotionImages),
+    additionalAssets: indexToCharacterAssets(card.additionalAssets),
+    emotionImages: indexToCharacterAssets(card.emotionImages),
     prebuiltAssetCommand: false,
     prebuiltAssetExclude: [],
     chaId: input.characterId ?? "",
@@ -35797,17 +34707,6 @@ function runPipeline(input, opts) {
   });
   return evaluate(input.template, ctx);
 }
-function workerEvalEnabled() {
-  try {
-    const env = globalThis.Bun?.env;
-    if (!env)
-      return true;
-    const v = env.RISU_COMPAT_USE_WORKER_EVAL;
-    return v !== "0" && v !== "false" && v !== "no";
-  } catch {
-    return true;
-  }
-}
 
 // src/interpreter/listen-edit.ts
 var log2 = makeSafeLogger("listenEdit.runChain");
@@ -37854,45 +36753,17 @@ function createReadonlyResolver(deps) {
     const cbsContext = opts?.cbsContext === true;
     const t0 = Date.now();
     log8.debug(`resolveReadonly: START chat=${chatId} char=${characterId} userId=${userId ?? "<none>"} cbs=${cbsContext} template_len=${template.length} ` + `template[0..200]=${JSON.stringify(template.slice(0, 200))}`);
-    if (cbsContext) {
-      if (userId === undefined) {
-        log8.warn(`resolveReadonly: cbs called before userId captured chat=${chatId},returning template verbatim`);
-        return template;
-      }
-      try {
-        const out = await resolveInWorker(template, chatId, characterId, userId, true);
-        log8.debug(`resolveReadonly: DONE (cbs worker-eval) chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${out.length} ` + `out[0..200]=${JSON.stringify(out.slice(0, 200))}`);
-        return out;
-      } catch (err) {
-        log8.error(`resolveReadonly: cbs worker-eval threw chat=${chatId}: ${err.message}. Returning template verbatim.`);
-        return template;
-      }
-    }
-    if (workerEvalEnabled()) {
-      if (userId === undefined) {
-        log8.info(`resolveReadonly: worker-eval skipped chat=${chatId},userId not yet captured, using legacy path`);
-      } else {
-        try {
-          const out = await resolveInWorker(template, chatId, characterId, userId, cbsContext);
-          log8.debug(`resolveReadonly: DONE (worker-eval) chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${out.length} ` + `out[0..200]=${JSON.stringify(out.slice(0, 200))}`);
-          return out;
-        } catch (err) {
-          log8.error(`resolveReadonly: worker-eval threw chat=${chatId}: ${err.message}. Falling back to legacy path.`);
-        }
-      }
+    if (userId === undefined) {
+      log8.warn(`resolveReadonly: userId not captured chat=${chatId}, returning template verbatim`);
+      return template;
     }
     try {
-      const result = await spindle.macros.resolve(template, {
-        chatId,
-        characterId,
-        commit: false,
-        ...userId === undefined ? {} : { userId }
-      });
-      log8.debug(`resolveReadonly: DONE chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${result.text.length} ` + `diagnostics=${(result.diagnostics ?? []).length} out[0..200]=${JSON.stringify(result.text.slice(0, 200))}`);
-      return result.text;
+      const out = await resolveInWorker(template, chatId, characterId, userId, cbsContext);
+      log8.debug(`resolveReadonly: DONE chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${out.length} ` + `out[0..200]=${JSON.stringify(out.slice(0, 200))}`);
+      return out;
     } catch (err) {
-      log8.error(`resolveReadonly: THREW chat=${chatId} elapsed=${Date.now() - t0}ms: ${err.message}`);
-      throw err;
+      log8.error(`resolveReadonly: worker-eval threw chat=${chatId}: ${err.message}. Returning template verbatim (no Lumi-native fallback).`);
+      return template;
     }
   }
   return { resolve, resolveInWorker, fetchMessages: fetchMessages2 };
@@ -38890,7 +37761,8 @@ var EMPTY_MIGRATION_STATE = {
   schema_version: 1,
   last_swept_modules: 0,
   last_swept_characters: 0,
-  display_owner_backfilled: false
+  display_owner_backfilled: false,
+  macros_unprefixed: false
 };
 function parseMigrationState(raw) {
   if (!raw || typeof raw !== "object")
@@ -38903,7 +37775,8 @@ function parseMigrationState(raw) {
     schema_version: 1,
     last_swept_modules: typeof obj.last_swept_modules === "number" ? obj.last_swept_modules : legacy,
     last_swept_characters: typeof obj.last_swept_characters === "number" ? obj.last_swept_characters : 0,
-    display_owner_backfilled: obj.display_owner_backfilled === true
+    display_owner_backfilled: obj.display_owner_backfilled === true,
+    macros_unprefixed: obj.macros_unprefixed === true
   };
 }
 async function readMigrationState(storage, userId) {
@@ -38919,9 +37792,174 @@ async function writeMigrationState(storage, userId, state) {
     schema_version: 1,
     last_swept_modules: state.last_swept_modules,
     last_swept_characters: state.last_swept_characters,
-    display_owner_backfilled: state.display_owner_backfilled
+    display_owner_backfilled: state.display_owner_backfilled,
+    macros_unprefixed: state.macros_unprefixed
   };
   await storage.setJson(MIGRATION_STATE_PATH, out, { indent: 2, userId });
+}
+
+// src/core/cbs/rewrite/unrewrite.ts
+init_encode();
+var STRUCTURAL_KINDS2 = new Set(["if", "if_pure", "when"]);
+var OPAQUE_KINDS3 = new Set([
+  "each",
+  "func",
+  "pure",
+  "pure_display",
+  "ignore",
+  "escape",
+  "code",
+  "legacy"
+]);
+function findLeafEnd(text, open) {
+  let depth = 0;
+  let i = open;
+  const n = text.length;
+  while (i < n) {
+    if (text.startsWith("{{", i)) {
+      depth++;
+      i += 2;
+      continue;
+    }
+    if (text.startsWith("}}", i)) {
+      depth--;
+      i += 2;
+      if (depth === 0)
+        return i;
+      continue;
+    }
+    i++;
+  }
+  return -1;
+}
+function splitTopLevel(payload) {
+  const parts = [];
+  let depth = 0;
+  let last = 0;
+  let i = 0;
+  const n = payload.length;
+  while (i < n) {
+    if (payload.startsWith("{{", i)) {
+      depth += 1;
+      i += 2;
+      continue;
+    }
+    if (payload.startsWith("}}", i)) {
+      depth -= 1;
+      i += 2;
+      continue;
+    }
+    if (depth === 0 && payload.startsWith("::", i)) {
+      parts.push(payload.slice(last, i));
+      i += 2;
+      last = i;
+      continue;
+    }
+    i++;
+  }
+  parts.push(payload.slice(last));
+  return parts;
+}
+function reconstructOpaque(kind, segments) {
+  const body = decodeOpaqueBody(segments[segments.length - 1] ?? "");
+  const header = segments.slice(1, -1).join("::");
+  if (kind === "legacy")
+    return body;
+  const open = header.length > 0 ? `{{#${kind} ${header}}}` : `{{#${kind}}}`;
+  return `${open}${body}{{/${kind}}}`;
+}
+function unrewriteText(text, opts) {
+  if (text.indexOf(RENAME_PREFIX) < 0)
+    return text;
+  const { leafNames } = opts;
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  let structDepth = 0;
+  while (i < n) {
+    if (!text.startsWith("{{", i)) {
+      out += text[i];
+      i += 1;
+      continue;
+    }
+    if (text.startsWith("{{/", i)) {
+      const close = text.indexOf("}}", i);
+      if (close < 0) {
+        out += text.slice(i);
+        break;
+      }
+      const nameRaw = text.slice(i + 3, close);
+      if (nameRaw.startsWith(RENAME_PREFIX)) {
+        const kind = nameRaw.slice(RENAME_PREFIX.length);
+        if (STRUCTURAL_KINDS2.has(kind))
+          structDepth = Math.max(0, structDepth - 1);
+        out += "{{/}}";
+      } else {
+        out += text.slice(i, close + 2);
+      }
+      i = close + 2;
+      continue;
+    }
+    if (text.startsWith("{{#", i)) {
+      const end = text.indexOf("}}", i);
+      if (end < 0) {
+        out += text.slice(i);
+        break;
+      }
+      const header = text.slice(i + 3, end);
+      if (header.startsWith(RENAME_PREFIX)) {
+        const rest = header.slice(RENAME_PREFIX.length);
+        const ci = rest.indexOf("::");
+        const kind = ci < 0 ? rest : rest.slice(0, ci);
+        const args = ci < 0 ? "" : rest.slice(ci + 2);
+        if (STRUCTURAL_KINDS2.has(kind)) {
+          structDepth += 1;
+          if (kind === "if" || kind === "if_pure") {
+            out += args.length > 0 ? `{{#${kind} ${args}}}` : `{{#${kind}}}`;
+          } else {
+            out += args.length > 0 ? `{{#${kind}::${args}}}` : `{{#${kind}}}`;
+          }
+          i = end + 2;
+          continue;
+        }
+        out += `{{#${rest}}}`;
+        i = end + 2;
+        continue;
+      }
+      out += text.slice(i, end + 2);
+      i = end + 2;
+      continue;
+    }
+    const leafEnd = findLeafEnd(text, i);
+    if (leafEnd < 0) {
+      out += text.slice(i);
+      break;
+    }
+    const inner = text.slice(i + 2, leafEnd - 2);
+    if (structDepth > 0 && inner === "else") {
+      out += "{{:else}}";
+      i = leafEnd;
+      continue;
+    }
+    if (inner.startsWith(RENAME_PREFIX)) {
+      const rest = inner.slice(RENAME_PREFIX.length);
+      const ci = rest.indexOf("::");
+      const name = ci < 0 ? rest : rest.slice(0, ci);
+      if (OPAQUE_KINDS3.has(name)) {
+        out += reconstructOpaque(name, splitTopLevel(inner));
+        i = leafEnd;
+        continue;
+      }
+      if (leafNames.has(name)) {
+        out += `{{${rest}}}`;
+        i = leafEnd;
+        continue;
+      }
+    }
+    out += text.slice(i, leafEnd);
+    i = leafEnd;
+  }
+  return out;
 }
 
 // src/boot/mass-migrations.ts
@@ -39162,9 +38200,172 @@ function createMassMigrationsRunner(deps) {
     }
     emitOperationProgress(userId, opId, "done", opTitle, failed === 0 ? `Updated ${processed} card${processed === 1 ? "" : "s"}` : `Updated ${processed - failed}/${processed} (${failed} failed, will retry next start)`, 1);
   }
+  const macroSweepStartedThisBoot = new Set;
+  async function runMacroUnprefixSweepIfNeeded(userId) {
+    if (macroSweepStartedThisBoot.has(userId))
+      return;
+    if (blockingPermissionsMissing("macro-unprefix"))
+      return;
+    macroSweepStartedThisBoot.add(userId);
+    const state = await readMigrationState(spindle.userStorage, userId);
+    if (state.macros_unprefixed)
+      return;
+    const leafNames = new Set(loadCatalog().incompatibleNames());
+    const un = (s) => unrewriteText(s, { leafNames });
+    const chars = await listLumirealmCharacters2(userId);
+    if (chars.length === 0) {
+      await writeMigrationState(spindle.userStorage, userId, { ...state, macros_unprefixed: true });
+      return;
+    }
+    const opId = `macro-unprefix-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const opTitle = "Updating Risu cards";
+    emitOperationProgress(userId, opId, "started", opTitle, `Updating ${chars.length} card${chars.length === 1 ? "" : "s"}\u2026`, 0);
+    log8.info(`macro-unprefix: user=${userId} starting count=${chars.length} opId=${opId}`);
+    let failed = 0;
+    let changed = 0;
+    let processed = 0;
+    for (const { character: character2, data } of chars) {
+      try {
+        changed += await sweepCharacterMacros(userId, character2.id, data, un);
+      } catch (err) {
+        failed++;
+        log8.warn(`macro-unprefix: char=${character2.id} threw: ${errMsg2(err)}`);
+      }
+      processed++;
+      emitOperationProgress(userId, opId, "progress", opTitle, `Updated ${processed}/${chars.length} card${chars.length === 1 ? "" : "s"}`, processed / chars.length);
+    }
+    if (failed === 0) {
+      const after = await readMigrationState(spindle.userStorage, userId);
+      await writeMigrationState(spindle.userStorage, userId, { ...after, macros_unprefixed: true });
+      log8.info(`macro-unprefix: user=${userId} done characters=${chars.length} fields_changed=${changed}`);
+    } else {
+      log8.warn(`macro-unprefix: user=${userId} ${failed} character(s) failed, marker NOT set (retry next boot)`);
+    }
+    emitOperationProgress(userId, opId, failed === 0 ? "done" : "error", opTitle, failed === 0 ? `Updated ${chars.length} card${chars.length === 1 ? "" : "s"}` : `Updated ${chars.length - failed}/${chars.length} (${failed} failed, will retry next start)`, 1);
+  }
+  async function sweepCharacterMacros(userId, characterId, data, un) {
+    let changed = 0;
+    const char = await spindle.characters.get(characterId, userId);
+    if (char) {
+      const c = char;
+      const patch = {};
+      for (const f of ["description", "personality", "scenario", "first_mes", "mes_example", "system_prompt", "post_history_instructions", "creator_notes"]) {
+        const v = c[f];
+        if (typeof v === "string") {
+          const u = un(v);
+          if (u !== v)
+            patch[f] = u;
+        }
+      }
+      const ag = c["alternate_greetings"];
+      if (Array.isArray(ag)) {
+        const nag = ag.map((g) => typeof g === "string" ? un(g) : g);
+        if (nag.some((g, i) => g !== ag[i]))
+          patch["alternate_greetings"] = nag;
+      }
+      if (Object.keys(patch).length > 0) {
+        await spindle.characters.update(characterId, patch, userId);
+        changed += Object.keys(patch).length;
+      }
+      const wbIds = c["world_book_ids"] ?? [];
+      for (const wbId of wbIds) {
+        let offset = 0;
+        for (;; ) {
+          const page = await spindle.world_books.entries.list(wbId, { limit: 200, offset, userId });
+          for (const e of page.data) {
+            const ep = {};
+            if (typeof e.content === "string") {
+              const u = un(e.content);
+              if (u !== e.content)
+                ep["content"] = u;
+            }
+            if (typeof e.comment === "string") {
+              const u = un(e.comment);
+              if (u !== e.comment)
+                ep["comment"] = u;
+            }
+            if (Object.keys(ep).length > 0) {
+              await spindle.world_books.entries.update(e.id, ep, userId);
+              changed += Object.keys(ep).length;
+            }
+          }
+          offset += page.data.length;
+          if (page.data.length === 0 || offset >= page.total)
+            break;
+        }
+      }
+    }
+    {
+      let offset = 0;
+      for (;; ) {
+        const page = await spindle.regex_scripts.list({ scope: "character", scopeId: characterId, limit: 200, offset, userId });
+        for (const s of page.data) {
+          const rp = {};
+          const f = un(s.find_regex);
+          if (f !== s.find_regex)
+            rp["find_regex"] = f;
+          const r = un(s.replace_string);
+          if (r !== s.replace_string)
+            rp["replace_string"] = r;
+          if (Object.keys(rp).length > 0) {
+            await spindle.regex_scripts.update(s.id, rp, userId);
+            changed += Object.keys(rp).length;
+          }
+        }
+        offset += page.data.length;
+        if (page.data.length === 0 || offset >= page.total)
+          break;
+      }
+    }
+    {
+      let offset = 0;
+      for (;; ) {
+        const page = await spindle.chats.list({ characterId, limit: 100, offset, userId });
+        for (const chat of page.data) {
+          const msgs = await spindle.chat.getMessages(chat.id);
+          for (const m of msgs) {
+            const swipes = Array.isArray(m.swipes) ? m.swipes : null;
+            if (swipes && swipes.length > 0) {
+              const ns = swipes.map((s) => typeof s === "string" ? un(s) : s);
+              if (ns.some((s, i) => s !== swipes[i])) {
+                await spindle.chat.updateMessage(chat.id, m.id, { swipes: ns });
+                changed++;
+              }
+            } else if (typeof m.content === "string") {
+              const u = un(m.content);
+              if (u !== m.content) {
+                await spindle.chat.updateMessage(chat.id, m.id, { content: u });
+                changed++;
+              }
+            }
+          }
+        }
+        offset += page.data.length;
+        if (page.data.length === 0 || offset >= page.total)
+          break;
+      }
+    }
+    const bg = data.payload.background_html;
+    const bgs = data.payload.background_html_source;
+    const nbg = typeof bg === "string" ? un(bg) : bg;
+    const nbgs = typeof bgs === "string" ? un(bgs) : bgs;
+    if (nbg !== bg || nbgs !== bgs) {
+      await writeLumirealm2(userId, characterId, {
+        ...data,
+        payload: {
+          ...data.payload,
+          background_html: nbg,
+          ...bgs !== undefined ? { background_html_source: nbgs } : {}
+        }
+      });
+      changed++;
+    }
+    return changed;
+  }
   return {
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
+    runMacroUnprefixSweepIfNeeded,
     notifyLorebookMigrationArchive,
     flushLorebookMigrationArchives
   };
@@ -40179,6 +39380,7 @@ function makeCaptureUserId(deps) {
     getSettingsForUser,
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
+    runMacroUnprefixSweepIfNeeded,
     log: log8,
     errMsg: errMsg2
   } = deps;
@@ -40207,6 +39409,11 @@ function makeCaptureUserId(deps) {
           await runMassCharacterMigrationIfNeeded(userId);
         } catch (err) {
           log8.warn(`captureUserId: mass character migration failed: ${errMsg2(err)}`);
+        }
+        try {
+          await runMacroUnprefixSweepIfNeeded(userId);
+        } catch (err) {
+          log8.warn(`captureUserId: macro un-prefix sweep failed: ${errMsg2(err)}`);
         }
       })();
     }, MASS_MIGRATION_DEFER_MS);
@@ -42817,7 +42024,6 @@ function modulesByNamespaceFromCard(card) {
   }
   return Object.keys(out).length > 0 ? out : null;
 }
-registerAll();
 var variableState = new VariableStateStore;
 var toggleState = new ToggleStateStore;
 function scheduleStateChangedRefresh2(chatId, userId) {
@@ -42957,6 +42163,7 @@ var captureUserId = makeCaptureUserId({
   getSettingsForUser,
   runMassModuleMigrationIfNeeded: (uid) => massMigrations.runMassModuleMigrationIfNeeded(uid),
   runMassCharacterMigrationIfNeeded: (uid) => massMigrations.runMassCharacterMigrationIfNeeded(uid),
+  runMacroUnprefixSweepIfNeeded: (uid) => massMigrations.runMacroUnprefixSweepIfNeeded(uid),
   notifyMissingPermsForUser: (userId) => {
     const missing = getMissingPermissions();
     const purposes = {};
@@ -43723,6 +42930,11 @@ subscribeToMissingChanges((missing) => {
         await massMigrations.runMassCharacterMigrationIfNeeded(userId);
       } catch (err) {
         log8.warn(`permissions.changed: mass character migration retry failed userId=${userId}: ${errMsg(err)}`);
+      }
+      try {
+        await massMigrations.runMacroUnprefixSweepIfNeeded(userId);
+      } catch (err) {
+        log8.warn(`permissions.changed: macro un-prefix sweep retry failed userId=${userId}: ${errMsg(err)}`);
       }
     })();
   }

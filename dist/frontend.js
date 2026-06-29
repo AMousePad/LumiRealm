@@ -4593,17 +4593,9 @@ var init_blocks = __esm(() => {
     "code"
   ]);
 });
-
-// src/core/cbs/rewrite/text.ts
-var init_text = __esm(() => {
-  init_parser();
-  init_blocks();
-});
-
 // src/core/cbs/rewrite/index.ts
 var init_rewrite = __esm(() => {
   init_encode();
-  init_text();
   init_blocks();
 });
 // src/core/cbs/runtime/mock.ts
@@ -26273,9 +26265,6 @@ var TIER2_DECORATOR_NAMES = new Set([
   "inject_replace",
   "inject_prepend"
 ]);
-// src/core/mappers/regex.ts
-init_text();
-
 // src/core/mappers/island-merge.ts
 var VOID_ELEMENTS = new Set([
   "input",
@@ -27627,9 +27616,6 @@ var EMITTERS = {
   ...V1_EMITTERS,
   ...V2_EMITTERS
 };
-// src/core/mappers/background-html.ts
-init_text();
-
 // src/core/svg-rasterize.ts
 class SvgIndexer {
   tasks = [];

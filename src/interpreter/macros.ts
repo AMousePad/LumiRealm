@@ -448,6 +448,9 @@ const LUMI_NATIVE_COLLISIONS = new Set<string>([
   'datetimeformat', '//', 'lastcharmessage', 'lastusermessage',
   'lastmessageid', 'maxcontext', 'messagecount', 'isotime', 'isodate',
   'idleduration', 'idle_duration', 'newline', 'jailbreak',
+  // Bare-registered Risu macros Lumi added natively on 2026-06-20. Our evaluator
+  // resolves them, so skip the rejected Lumi registration to silence the warning.
+  'sum', 'average', 'all', 'any', 'contains', 'range', 'filter',
 ]);
 
 export function registerAll(): void {
