@@ -35855,6 +35855,32 @@ function createLumiInterceptors(deps) {
     const ratio = lookups > 0 ? Math.round(stats.hits / lookups * 100) : 0;
     log8.info(`[macro-interceptor-cache] size=${stats.size} hits=${stats.hits} misses=${stats.misses} ratio=${ratio}%`);
   }
+  const promptLocalColdCache = new Map;
+  const PROMPT_LOCAL_COLD_TTL_MS = 1500;
+  const stripDollar = (src) => {
+    const out = {};
+    for (const [k, v] of Object.entries(src))
+      out[k.startsWith("$") ? k.slice(1) : k] = v;
+    return out;
+  };
+  async function storedLocalForResolve(chatId, userId, characterId) {
+    const warm = getRecentFlush(chatId);
+    if (warm)
+      return stripDollar(warm);
+    if (userId === undefined)
+      return {};
+    const cached = promptLocalColdCache.get(chatId);
+    if (cached && Date.now() - cached.ts < PROMPT_LOCAL_COLD_TTL_MS)
+      return cached.vars;
+    try {
+      const api = makeSpindleHost({ chatId, characterId, userId });
+      const loaded2 = stripDollar(await loadVars(api));
+      promptLocalColdCache.set(chatId, { vars: loaded2, ts: Date.now() });
+      return loaded2;
+    } catch {
+      return {};
+    }
+  }
   function registerMacroInterceptorIfAvailable() {
     const registerMacroInterceptor = getRegisterMacroInterceptor();
     const registerMessageContentProcessor = getRegisterMessageContentProcessor();
@@ -35919,6 +35945,7 @@ function createLumiInterceptors(deps) {
       if (ctx.template.includes("lorebook") || ctx.template.includes("risu_each")) {
         log8.trace(`macroInterceptor #${callId}: lorebook entries=${activeLore.length} for chat=${chatId} (tmpl mentions lorebook/each)`);
       }
+      const storedLocal = await storedLocalForResolve(chatId, ctx.userId, active.card.character_id);
       let resolved;
       const recorder = { touched: new Set, volatile: false };
       const __ppT0 = perfEnabled() ? Date.now() : 0;
@@ -35957,7 +35984,7 @@ function createLumiInterceptors(deps) {
             ...cachedMessages ? { messages: cachedMessages } : {}
           },
           variables: {
-            local: ctx.env.variables.local,
+            local: { ...ctx.env.variables.local, ...storedLocal },
             global: ctx.env.variables.global,
             chat: ctx.env.variables.chat
           },
