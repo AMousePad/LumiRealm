@@ -109,7 +109,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const displayRegistered = Boolean(ctx.display);
   if (ctx.display) {
     cleanups.push(ctx.display.registerResolver(createDisplayResolver(
-      (chatId, vars) => ctx.sendToBackend({ type: 'display_writeback', chatId, vars }),
+      (chatId, vars) => {
+        // Mirror editDisplay writes into the local snapshot so init-once guards
+        // see their guard var set next render. Without it the guard never engages,
+        // init re-runs every render, and writeback clobbers committed progress.
+        applyVarDelta(chatId, 'local', vars);
+        ctx.sendToBackend({ type: 'display_writeback', chatId, vars });
+      },
     )));
   }
   // Ownership is per-character: the host reads character.extensions.lumirealm.display_owner

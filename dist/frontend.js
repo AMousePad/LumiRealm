@@ -47127,7 +47127,10 @@ function setup(ctx) {
     readiness.deferReady();
   const displayRegistered = Boolean(ctx.display);
   if (ctx.display) {
-    cleanups.push(ctx.display.registerResolver(createDisplayResolver((chatId, vars) => ctx.sendToBackend({ type: "display_writeback", chatId, vars }))));
+    cleanups.push(ctx.display.registerResolver(createDisplayResolver((chatId, vars) => {
+      applyVarDelta(chatId, "local", vars);
+      ctx.sendToBackend({ type: "display_writeback", chatId, vars });
+    })));
   }
   const sendDisplayAuthority = (chatId) => {
     if (!chatId)
