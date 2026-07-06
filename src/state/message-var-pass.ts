@@ -28,7 +28,19 @@ export interface MessageVarPass {
 }
 
 export function createMessageVarPass(deps: MessageVarPassDeps): MessageVarPass {
-  async function run(chatId: string, characterId: string, userId: string): Promise<void> {
+  const inflight = new Map<string, Promise<void>>();
+
+  function run(chatId: string, characterId: string, userId: string): Promise<void> {
+    const existing = inflight.get(chatId);
+    if (existing) return existing;
+    const task = runInner(chatId, characterId, userId).finally(() => {
+      inflight.delete(chatId);
+    });
+    inflight.set(chatId, task);
+    return task;
+  }
+
+  async function runInner(chatId: string, characterId: string, userId: string): Promise<void> {
     let changed: ReadonlyArray<{ id: string; content: string }>;
     let varWrites: ReadonlyArray<readonly [string, string | null]>;
     try {

@@ -69,6 +69,13 @@ function spindleImagesDelete(): ((id: string, userId?: string) => Promise<boolea
   return spindle.images?.delete ? spindle.images.delete.bind(spindle.images) : null;
 }
 
+function spindleImagesDeleteMany(): ((ids: string[], opts: { userId?: string }) => Promise<number>) | null {
+  const api = spindle.images as unknown as {
+    deleteMany?: (ids: string[], opts: { userId?: string }) => Promise<number>;
+  } | undefined;
+  return typeof api?.deleteMany === 'function' ? api.deleteMany.bind(spindle.images) : null;
+}
+
 export function createOrphanDetectBuilders(deps: OrphanDetectBuildersDeps): OrphanDetectBuilders {
   const {
     journalStorage,
@@ -186,6 +193,27 @@ export function createOrphanDetectBuilders(deps: OrphanDetectBuildersDeps): Orph
     let deleted = 0;
     let absent = 0;
     let failed = 0;
+    const delMany = spindleImagesDeleteMany();
+    if (delMany && imageIds.length > 1) {
+      const BATCH = 500;
+      const total = imageIds.length;
+      let processed = 0;
+      for (let i = 0; i < total; i += BATCH) {
+        const batch = imageIds.slice(i, i + BATCH).filter((id) => typeof id === 'string' && id.length > 0);
+        try {
+          deleted += await delMany([...batch], { userId });
+        } catch (err) {
+          failed += batch.length;
+          log.warn(`${context}: bulk image delete threw (${batch.length} ids): ${errMsg(err)}`);
+        }
+        processed = Math.min(i + BATCH, total);
+        if (onProgress) {
+          try { onProgress(processed, total); } catch (err) { log.warn(`${context}: onProgress threw: ${errMsg(err)}`); }
+        }
+      }
+      absent = Math.max(0, total - deleted - failed);
+      return { deleted, absent, failed };
+    }
     const del = spindleImagesDelete();
     if (!del) {
       log.warn(`${context}: spindle.images.delete unavailable,${imageIds.length} image(s) leaked`);
