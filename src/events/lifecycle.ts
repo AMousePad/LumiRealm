@@ -254,9 +254,14 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
   // invalidation (drop derived caches + reactivate, which repopulates the
   // lorebook cache via ensureActiveCardForChat) is sufficient and dodges the
   // worldBookId→character mapping gap for module-shared books.
-  function onWorldBookMutation(userId: string | undefined): void {
-    deps.captureUserId(userId, 'WORLD_BOOK');
-    if (userId === undefined) return;
+  // Module installs create hundreds of entries back-to-back and each emits an
+  // event. Coalesce to one trailing invalidation per user: the per-event card
+  // re-activation + bg-html re-render fan-out starves the worker and floods the
+  // FE (observed wedging a 282-entry module upload at the world-book sync stage).
+  const worldBookMutationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const WORLD_BOOK_MUTATION_DEBOUNCE_MS = 500;
+
+  function runWorldBookInvalidation(userId: string): void {
     const affected = new Set<string>();
     for (const [chatId, active] of [...deps.activeCardByChat]) {
       if (active.ownerUserId !== userId) continue;
@@ -267,6 +272,17 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
     }
     for (const cid of affected) deps.invalidateActiveForCharacter(cid, userId);
     deps.log.info(`event WORLD_BOOK mutation user=${userId} chars=${affected.size}`);
+  }
+
+  function onWorldBookMutation(userId: string | undefined): void {
+    deps.captureUserId(userId, 'WORLD_BOOK');
+    if (userId === undefined) return;
+    const existing = worldBookMutationTimers.get(userId);
+    if (existing) clearTimeout(existing);
+    worldBookMutationTimers.set(userId, setTimeout(() => {
+      worldBookMutationTimers.delete(userId);
+      runWorldBookInvalidation(userId);
+    }, WORLD_BOOK_MUTATION_DEBOUNCE_MS));
   }
 
   return {

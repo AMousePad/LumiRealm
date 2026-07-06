@@ -34166,10 +34166,9 @@ function createLifecycleEventHandlers(deps) {
     }
     chatChangedDebounceTimers.set(chatId, timer);
   }
-  function onWorldBookMutation(userId) {
-    deps.captureUserId(userId, "WORLD_BOOK");
-    if (userId === undefined)
-      return;
+  const worldBookMutationTimers = new Map;
+  const WORLD_BOOK_MUTATION_DEBOUNCE_MS = 500;
+  function runWorldBookInvalidation(userId) {
     const affected = new Set;
     for (const [chatId, active] of [...deps.activeCardByChat]) {
       if (active.ownerUserId !== userId)
@@ -34182,6 +34181,18 @@ function createLifecycleEventHandlers(deps) {
     for (const cid of affected)
       deps.invalidateActiveForCharacter(cid, userId);
     deps.log.info(`event WORLD_BOOK mutation user=${userId} chars=${affected.size}`);
+  }
+  function onWorldBookMutation(userId) {
+    deps.captureUserId(userId, "WORLD_BOOK");
+    if (userId === undefined)
+      return;
+    const existing = worldBookMutationTimers.get(userId);
+    if (existing)
+      clearTimeout(existing);
+    worldBookMutationTimers.set(userId, setTimeout(() => {
+      worldBookMutationTimers.delete(userId);
+      runWorldBookInvalidation(userId);
+    }, WORLD_BOOK_MUTATION_DEBOUNCE_MS));
   }
   return {
     SETTINGS_UPDATED: async (raw, userId) => {
