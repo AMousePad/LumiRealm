@@ -4,6 +4,7 @@ import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import { runPipeline } from '../interpreter/evaluator/pipeline.js';
 import type { VarReadRecorder } from '../interpreter/evaluator/context.js';
+import { stripSetvarSpans, hasSetvarFamily } from '../interpreter/evaluator/strip-setvar.js';
 import { runListenEditChain } from '../interpreter/listen-edit.js';
 import { runAtActionsForPhase, coerceAtActions } from '../interpreter/at-actions-runtime.js';
 import { puaEncodeFeMacros, puaDecodeFeMacros } from '../util/pua-roundtrip.js';
@@ -85,6 +86,7 @@ export interface CreateLumiInterceptorsDeps {
     userId: string | undefined,
     opts?: { cbsContext?: boolean; rmVar?: boolean },
   ) => Promise<string>;
+  readonly runMessageVarPass: (chatId: string, characterId: string, userId: string) => Promise<void>;
   readonly log: {
     readonly info: (m: string) => void;
     readonly warn: (m: string) => void;
@@ -704,6 +706,16 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
 
       return userIdAls.run(resolvedUserId, async () => {
         let out: LlmMessage[] = messages;
+
+        try {
+          await deps.runMessageVarPass(chatId, active.card.character_id, resolvedUserId);
+        } catch (err) {
+          log.warn(`interceptor.runMessageVarPass threw chat=${chatId}: ${errMsg(err)}`);
+        }
+        out = out.map((m) => {
+          if (typeof m.content !== 'string' || !hasSetvarFamily(m.content)) return m;
+          return { ...m, content: stripSetvarSpans(m.content, () => '').text };
+        });
 
         if (deps.isPromptRegexAuthoritative(chatId) && userId !== undefined) {
           try {

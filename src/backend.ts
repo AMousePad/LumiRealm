@@ -1084,6 +1084,7 @@ createLumiInterceptors({
   getCachedSettingsSync,
   modulesByNamespaceFromCard,
   resolveReadonly,
+  runMessageVarPass: (chatId, characterId, uid) => messageVarPass.run(chatId, characterId, uid),
   log,
   errMsg,
 }).registerAll();

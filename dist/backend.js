@@ -34581,6 +34581,77 @@ function runPipeline(input, opts) {
   return evaluate(input.template, ctx);
 }
 
+// src/interpreter/evaluator/strip-setvar.ts
+init_cbs();
+var SETVAR_FAMILY = new Set(["setvar", "addvar", "setdefaultvar"].map(normalizeMacroName));
+function hasSetvarFamily(text) {
+  if (!text.includes("{{"))
+    return false;
+  return /\{\{\s*(?:setvar|addvar|setdefaultvar|set_var|add_var|set_default_var)\s*:/i.test(text);
+}
+function leafName(inner) {
+  const colon = inner.indexOf(":");
+  return normalizeMacroName(colon === -1 ? inner : inner.slice(0, colon));
+}
+function stripSetvarSpans(text, execSpan) {
+  if (!hasSetvarFamily(text))
+    return { text, changed: false, ran: 0 };
+  let out = "";
+  let ran = 0;
+  let blockDepth = 0;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    if (text[i] === "{" && text[i + 1] === "{") {
+      let depth = 1;
+      let j = i + 2;
+      while (j < n && depth > 0) {
+        if (text[j] === "{" && text[j + 1] === "{") {
+          depth += 1;
+          j += 2;
+          continue;
+        }
+        if (text[j] === "}" && text[j + 1] === "}") {
+          depth -= 1;
+          j += 2;
+          continue;
+        }
+        j += 1;
+      }
+      if (depth !== 0) {
+        out += text.slice(i);
+        break;
+      }
+      const span = text.slice(i, j);
+      const inner = text.slice(i + 2, j - 2);
+      const marker = inner[0];
+      if (marker === "#") {
+        blockDepth += 1;
+        out += span;
+        i = j;
+        continue;
+      }
+      if (marker === "/") {
+        blockDepth = Math.max(0, blockDepth - 1);
+        out += span;
+        i = j;
+        continue;
+      }
+      if (blockDepth === 0 && SETVAR_FAMILY.has(leafName(inner))) {
+        out += execSpan(span);
+        ran += 1;
+      } else {
+        out += span;
+      }
+      i = j;
+      continue;
+    }
+    out += text[i];
+    i += 1;
+  }
+  return { text: out, changed: ran > 0 && out !== text, ran };
+}
+
 // src/interpreter/listen-edit.ts
 var log2 = makeSafeLogger("listenEdit.runChain");
 async function runListenEditChain(triggers2, mode, value, meta, api, data, scriptNS, opts = {}) {
@@ -36140,6 +36211,16 @@ function createLumiInterceptors(deps) {
       const resolvedUserId = userId;
       return userIdAls.run(resolvedUserId, async () => {
         let out = messages;
+        try {
+          await deps.runMessageVarPass(chatId, active.card.character_id, resolvedUserId);
+        } catch (err) {
+          log8.warn(`interceptor.runMessageVarPass threw chat=${chatId}: ${errMsg2(err)}`);
+        }
+        out = out.map((m) => {
+          if (typeof m.content !== "string" || !hasSetvarFamily(m.content))
+            return m;
+          return { ...m, content: stripSetvarSpans(m.content, () => "").text };
+        });
         if (deps.isPromptRegexAuthoritative(chatId) && userId !== undefined) {
           try {
             const scripts = await listLivePromptRegexScripts(active.card.character_id, chatId, userId);
@@ -36547,79 +36628,6 @@ function createPromptRegexRunnerClient(deps) {
 
 // src/state/readonly-resolver.ts
 init_scanner();
-
-// src/interpreter/evaluator/strip-setvar.ts
-init_cbs();
-var SETVAR_FAMILY = new Set(["setvar", "addvar", "setdefaultvar"].map(normalizeMacroName));
-function hasSetvarFamily(text) {
-  if (!text.includes("{{"))
-    return false;
-  return /\{\{\s*(?:setvar|addvar|setdefaultvar|set_var|add_var|set_default_var)\s*:/i.test(text);
-}
-function leafName(inner) {
-  const colon = inner.indexOf(":");
-  return normalizeMacroName(colon === -1 ? inner : inner.slice(0, colon));
-}
-function stripSetvarSpans(text, execSpan) {
-  if (!hasSetvarFamily(text))
-    return { text, changed: false, ran: 0 };
-  let out = "";
-  let ran = 0;
-  let blockDepth = 0;
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    if (text[i] === "{" && text[i + 1] === "{") {
-      let depth = 1;
-      let j = i + 2;
-      while (j < n && depth > 0) {
-        if (text[j] === "{" && text[j + 1] === "{") {
-          depth += 1;
-          j += 2;
-          continue;
-        }
-        if (text[j] === "}" && text[j + 1] === "}") {
-          depth -= 1;
-          j += 2;
-          continue;
-        }
-        j += 1;
-      }
-      if (depth !== 0) {
-        out += text.slice(i);
-        break;
-      }
-      const span = text.slice(i, j);
-      const inner = text.slice(i + 2, j - 2);
-      const marker = inner[0];
-      if (marker === "#") {
-        blockDepth += 1;
-        out += span;
-        i = j;
-        continue;
-      }
-      if (marker === "/") {
-        blockDepth = Math.max(0, blockDepth - 1);
-        out += span;
-        i = j;
-        continue;
-      }
-      if (blockDepth === 0 && SETVAR_FAMILY.has(leafName(inner))) {
-        out += execSpan(span);
-        ran += 1;
-      } else {
-        out += span;
-      }
-      i = j;
-      continue;
-    }
-    out += text[i];
-    i += 1;
-  }
-  return { text: out, changed: ran > 0 && out !== text, ran };
-}
-
-// src/state/readonly-resolver.ts
 function createReadonlyResolver(deps) {
   const { log: log8, errMsg: errMsg2, activeCardByChat } = deps;
   async function fetchMessages2(chatId) {
@@ -36749,7 +36757,18 @@ function createReadonlyResolver(deps) {
 
 // src/state/message-var-pass.ts
 function createMessageVarPass(deps) {
-  async function run(chatId, characterId, userId) {
+  const inflight = new Map;
+  function run(chatId, characterId, userId) {
+    const existing = inflight.get(chatId);
+    if (existing)
+      return existing;
+    const task = runInner(chatId, characterId, userId).finally(() => {
+      inflight.delete(chatId);
+    });
+    inflight.set(chatId, task);
+    return task;
+  }
+  async function runInner(chatId, characterId, userId) {
     let changed;
     let varWrites;
     try {
@@ -40838,6 +40857,10 @@ function collectStoredCardImageIds(avatarId, card) {
 function spindleImagesDelete() {
   return spindle.images?.delete ? spindle.images.delete.bind(spindle.images) : null;
 }
+function spindleImagesDeleteMany() {
+  const api = spindle.images;
+  return typeof api?.deleteMany === "function" ? api.deleteMany.bind(spindle.images) : null;
+}
 function createOrphanDetectBuilders(deps) {
   const {
     journalStorage,
@@ -40940,6 +40963,31 @@ function createOrphanDetectBuilders(deps) {
     let deleted = 0;
     let absent = 0;
     let failed = 0;
+    const delMany = spindleImagesDeleteMany();
+    if (delMany && imageIds.length > 1) {
+      const BATCH = 500;
+      const total2 = imageIds.length;
+      let processed2 = 0;
+      for (let i = 0;i < total2; i += BATCH) {
+        const batch = imageIds.slice(i, i + BATCH).filter((id) => typeof id === "string" && id.length > 0);
+        try {
+          deleted += await delMany([...batch], { userId });
+        } catch (err) {
+          failed += batch.length;
+          log8.warn(`${context2}: bulk image delete threw (${batch.length} ids): ${errMsg2(err)}`);
+        }
+        processed2 = Math.min(i + BATCH, total2);
+        if (onProgress) {
+          try {
+            onProgress(processed2, total2);
+          } catch (err) {
+            log8.warn(`${context2}: onProgress threw: ${errMsg2(err)}`);
+          }
+        }
+      }
+      absent = Math.max(0, total2 - deleted - failed);
+      return { deleted, absent, failed };
+    }
     const del = spindleImagesDelete();
     if (!del) {
       log8.warn(`${context2}: spindle.images.delete unavailable,${imageIds.length} image(s) leaked`);
@@ -42651,6 +42699,7 @@ createLumiInterceptors({
   getCachedSettingsSync,
   modulesByNamespaceFromCard,
   resolveReadonly,
+  runMessageVarPass: (chatId, characterId, uid) => messageVarPass.run(chatId, characterId, uid),
   log: log8,
   errMsg
 }).registerAll();
