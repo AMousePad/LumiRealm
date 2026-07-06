@@ -153,6 +153,7 @@ export function createSidebar(opts: CreateSidebarOptions): SidebarHandle {
               ...(opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}),
             }),
           ...(opts.onModuleImportStart ? { onImportStart: opts.onModuleImportStart } : {}),
+          ...(opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}),
         });
         handle = {
           handleBackendMessage(msg) {

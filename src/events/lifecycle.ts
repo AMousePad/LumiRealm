@@ -65,6 +65,8 @@ export interface LifecycleEventHandlerDeps {
     binding: RisuBinding,
     userId: string | undefined,
   ) => Promise<void>;
+  // Risu runVar pass: strip + persist message-text setvar (see message-var-pass.ts).
+  readonly runMessageVarPass: (chatId: string, characterId: string, userId: string) => Promise<void>;
   readonly generationEndedBindings: readonly RisuBinding[];
 
   // Self-echo gates
@@ -381,6 +383,8 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       await deps.runBinding(active, chatId, 'start', userId);
       deps.log.info(`GENERATION_STARTED: → runBinding(request)`);
       await deps.runBinding(active, chatId, 'request', userId);
+      // Risu runCurrentChatFunction at sendChat start (pre-prompt-assembly).
+      if (userId !== undefined) await deps.runMessageVarPass(chatId, active.card.character_id, userId);
       deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       await deps.refreshBgHtml(active, chatId, userId);
@@ -397,6 +401,8 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       for (const binding of deps.generationEndedBindings) {
         await deps.runBinding(active, chatId, binding, userId);
       }
+      // Risu runCurrentChatFunction post-output, catches the new AI message.
+      if (userId !== undefined) await deps.runMessageVarPass(chatId, active.card.character_id, userId);
       deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       void deps.refreshMessagesCache(chatId, userId);

@@ -122,6 +122,12 @@ export interface RisuRuntimeContext {
    *  editprocess runs risuChatParser WITHOUT runVar, so the setvar family
    *  returns null -> the macro is re-emitted LITERAL and never executes */
   readonly promptRegexLiteralVars?: boolean;
+  /** Risu matcherArg.rmVar (chat display render): setvar family returns ""
+   *  without executing. */
+  readonly rmVar?: boolean;
+  /** Risu matcherArg.runVar (runCurrentChatFunction): setvar family executes.
+   *  Every other pass leaves the macro literal (Risu parity). */
+  readonly runVar?: boolean;
   /** Recursive parser entry. Closure over scanner.evaluate, absent on the
    *  IPC fallback path. */
   readonly evaluate?: (text: string) => string;

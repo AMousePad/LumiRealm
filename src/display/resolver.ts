@@ -64,6 +64,8 @@ function buildInput(
   return {
     template: content,
     phase: 'display',
+    // Risu Chat.svelte renders with rmVar: the setvar family hides, never executes.
+    rmVar: true,
     chatId: snap.chatId,
     characterId: snap.characterId,
     userName: snap.userName,

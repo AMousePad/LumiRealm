@@ -120,6 +120,7 @@ import {
   isPromptRegexRunnerAvailable,
 } from './interceptors/prompt-regex-runner-client.js';
 import { createReadonlyResolver } from './state/readonly-resolver.js';
+import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
 import { createTriggerDispatcher } from './state/trigger-dispatch.js';
 import { createRepairOrchestrator } from './state/repair-orchestrator.js';
@@ -549,6 +550,7 @@ const captureUserId = makeCaptureUserId({
   runMassModuleMigrationIfNeeded: (uid) => massMigrations.runMassModuleMigrationIfNeeded(uid),
   runMassCharacterMigrationIfNeeded: (uid) => massMigrations.runMassCharacterMigrationIfNeeded(uid),
   runMacroUnprefixSweepIfNeeded: (uid) => massMigrations.runMacroUnprefixSweepIfNeeded(uid),
+  runVarScopeMigrationIfNeeded: (uid) => massMigrations.runVarScopeMigrationIfNeeded(uid),
   notifyMissingPermsForUser: (userId) => {
     const missing = getMissingPermissions();
     const purposes: Record<string, string> = {};
@@ -644,24 +646,6 @@ function emitOperationProgress(
 }
 
 
-
-// Bounds module-upload FE-supplied counts so a malicious init can't OOM the
-// worker via `new Array(totalChunks).fill(null)`. 250k slots is ~2MB.
-const MAX_UPLOAD_CHUNKS = 250_000;
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024; // 8 GB
-
-function validateUploadShape(
-  totalBytes: unknown,
-  totalChunks: unknown,
-): { ok: true } | { ok: false; reason: string } {
-  if (typeof totalBytes !== 'number' || !Number.isInteger(totalBytes) || totalBytes < 0 || totalBytes > MAX_UPLOAD_BYTES) {
-    return { ok: false, reason: `totalBytes out of range (max ${MAX_UPLOAD_BYTES})` };
-  }
-  if (typeof totalChunks !== 'number' || !Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > MAX_UPLOAD_CHUNKS) {
-    return { ok: false, reason: `totalChunks out of range (max ${MAX_UPLOAD_CHUNKS})` };
-  }
-  return { ok: true };
-}
 
 function userStorage(): UserStorageLike {
   return spindle.userStorage as unknown as UserStorageLike;
@@ -1134,6 +1118,15 @@ async function refreshMessagesCache(chatId: string, _userId: string | undefined)
   return task;
 }
 
+const messageVarPass = createMessageVarPass({
+  stripMessageSetvars: readonlyResolver.stripMessageSetvars,
+  refreshMessagesCache,
+  invalidateRenderMcpForChat,
+  invalidateMacroInterceptorForChat,
+  log,
+  errMsg,
+});
+
 // SETTINGS_UPDATED activeChatId fires on chat navigation. Warms the active-card cache and renders bg-html.
 const lifecycleHandlers = createLifecycleEventHandlers({
   captureUserId,
@@ -1166,6 +1159,7 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   refreshVariables,
   refreshToggleDefinitions,
   runBinding,
+  runMessageVarPass: (chatId, characterId, userId) => messageVarPass.run(chatId, characterId, userId),
   generationEndedBindings: GENERATION_ENDED_BINDINGS,
   consumeOwnChatChange,
   consumeOwnCharacterEdit,
@@ -1211,19 +1205,6 @@ spindle.on('WORLD_BOOK_CHANGED', userScoped(lifecycleHandlers.WORLD_BOOK_CHANGED
 spindle.on('WORLD_BOOK_DELETED', userScoped(lifecycleHandlers.WORLD_BOOK_DELETED));
 spindle.on('WORLD_BOOK_ENTRY_CHANGED', userScoped(lifecycleHandlers.WORLD_BOOK_ENTRY_CHANGED));
 spindle.on('WORLD_BOOK_ENTRY_DELETED', userScoped(lifecycleHandlers.WORLD_BOOK_ENTRY_DELETED));
-
-interface ModuleUploadSession {
-  readonly fileName: string;
-  readonly totalBytes: number;
-  readonly totalChunks: number;
-  readonly buffer: (Uint8Array | null)[];
-  readonly ownerUserId: string;
-  receivedBytes: number;
-  receivedChunks: number;
-  startedAt: number;
-  lastActivity: number;
-}
-const moduleUploadSessions = new Map<string, ModuleUploadSession>();
 
 function moduleStorage(): import('./state/modules-store.js').UserStorageLike {
   return spindle.userStorage as unknown as import('./state/modules-store.js').UserStorageLike;
@@ -1524,6 +1505,11 @@ subscribeToMissingChanges((missing) => {
       } catch (err) {
         log.warn(`permissions.changed: macro un-prefix sweep retry failed userId=${userId}: ${errMsg(err)}`);
       }
+      try {
+        await massMigrations.runVarScopeMigrationIfNeeded(userId);
+      } catch (err) {
+        log.warn(`permissions.changed: var-scope migration retry failed userId=${userId}: ${errMsg(err)}`);
+      }
     })();
   }
 });
@@ -1584,9 +1570,7 @@ const realmHandle: RealmBackendHandle = setupRealmBackend({
     importCardFromBytes(bytes, fileName, userId),
 });
 
-const HIGH_VOLUME_FRONTEND_MSG_TYPES: ReadonlySet<string> = new Set([
-  'upload_module_chunk',
-]);
+const HIGH_VOLUME_FRONTEND_MSG_TYPES: ReadonlySet<string> = new Set<string>();
 
 const screenHandlers = createScreenHandlers({ setScreenDims, log });
 const consentHandlers = createConsentHandlers({
@@ -1632,7 +1616,23 @@ const dispatchHandlers = createDispatchHandlers({
 });
 const lorebookHandlers = createLorebookHandlers({ lorebookImporter });
 const regexHandlers = createRegexHandlers({ regexImporter });
-const importTextHandlers = createImportTextHandlers({ lorebookImporter, regexImporter });
+
+// tus-uploaded bytes are redeemed by id (spindle.uploads, Lumi 1.1+).
+const getUpload = (uploadId: string, uid: string): Promise<{ fileName: string; size: number; data: Uint8Array } | null> => {
+  if (!spindle.uploads?.get) throw new Error('spindle.uploads unavailable; host update required');
+  return spindle.uploads.get(uploadId, uid);
+};
+const deleteUpload = (uploadId: string, uid: string): Promise<boolean> => {
+  if (!spindle.uploads?.delete) return Promise.resolve(false);
+  return spindle.uploads.delete(uploadId, uid);
+};
+
+const importTextHandlers = createImportTextHandlers({
+  lorebookImporter,
+  regexImporter,
+  getUpload,
+  deleteUpload,
+});
 const assetsHandlers = createAssetsHandlers({
   blockedByRepair,
   mutateAssetIndex,
@@ -1675,14 +1675,8 @@ const importHandlers = createImportHandlers({
   refreshBgHtml,
   refreshVariables,
   importAnyFormat: (bytes, name, uid) => realmHandle.importAnyFormat(bytes, name, uid),
-  getUpload: (uploadId, uid) => {
-    if (!spindle.uploads?.get) throw new Error('spindle.uploads unavailable; host update required');
-    return spindle.uploads.get(uploadId, uid);
-  },
-  deleteUpload: (uploadId, uid) => {
-    if (!spindle.uploads?.delete) return Promise.resolve(false);
-    return spindle.uploads.delete(uploadId, uid);
-  },
+  getUpload,
+  deleteUpload,
   applySvgRasterIndex,
   maybeFinalizeImport,
   characterGet: async (cid, uid) => {
@@ -1716,10 +1710,10 @@ const repairHandlers = createRepairHandlers({
   errMsg,
 });
 const moduleHandlers = createModuleHandlers({
-  moduleUploadSessions,
   worldBookIdsByCharacter,
-  validateUploadShape,
   processModuleUpload,
+  getUpload,
+  deleteUpload,
   nudgeGc,
   readModuleEnvelope: (uid, moduleId) => readModuleEnvelope(moduleStorage(), uid, moduleId),
   readModuleImageJournalImageIds: async (uid, moduleId) => {

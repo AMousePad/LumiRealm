@@ -24,7 +24,7 @@ import {
 } from '../state/macro-interceptor-cache.js';
 import { rememberOurWrite } from '../state/recent-writes.js';
 import { expectChatChange } from '../state/own-chat-change.js';
-import { invalidateRecentFlush, getRecentFlush } from '../state/recent-flush-cache.js';
+import { invalidateRecentFlush } from '../state/recent-flush-cache.js';
 import { getActiveAssetIndexes } from '../interpreter/asset-cache.js';
 import { getActiveLorebook } from '../state/lorebook-cache.js';
 import { getScreenDims } from '../interpreter/screen-dims-cache.js';
@@ -40,7 +40,6 @@ import {
 } from '../interpreter/decorator-buffers.js';
 import { userIdAls } from '../interpreter/runtime/als.js';
 import { makeSpindleHost } from '../interpreter/spindle-host.js';
-import { loadVars } from '../interpreter/runtime/chat-state.js';
 import { makeDispatcherScriptNS } from '../interpreter/dispatcher.js';
 import {
   getRegisterMacroInterceptor,
@@ -84,7 +83,7 @@ export interface CreateLumiInterceptorsDeps {
     chatId: string,
     characterId: string,
     userId: string | undefined,
-    opts?: { cbsContext?: boolean },
+    opts?: { cbsContext?: boolean; rmVar?: boolean },
   ) => Promise<string>;
   readonly log: {
     readonly info: (m: string) => void;
@@ -137,35 +136,6 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
     log.info(
       `[macro-interceptor-cache] size=${stats.size} hits=${stats.hits} misses=${stats.misses} ratio=${ratio}%`,
     );
-  }
-
-  // Lumi builds env.variables.local empty during assembly (transient), so prompt-time
-  // {{getvar}} for our scriptstate reads null unless we resolve against the stored state.
-  const promptLocalColdCache = new Map<string, { vars: Record<string, string>; ts: number }>();
-  const PROMPT_LOCAL_COLD_TTL_MS = 1500;
-  const stripDollar = (src: Record<string, string>): Record<string, string> => {
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(src)) out[k.startsWith('$') ? k.slice(1) : k] = v;
-    return out;
-  };
-  async function storedLocalForResolve(
-    chatId: string,
-    userId: string | undefined,
-    characterId: string,
-  ): Promise<Record<string, string>> {
-    const warm = getRecentFlush(chatId);
-    if (warm) return stripDollar(warm);
-    if (userId === undefined) return {};
-    const cached = promptLocalColdCache.get(chatId);
-    if (cached && Date.now() - cached.ts < PROMPT_LOCAL_COLD_TTL_MS) return cached.vars;
-    try {
-      const api = makeSpindleHost({ chatId, characterId, userId });
-      const loaded = stripDollar(await loadVars(api));
-      promptLocalColdCache.set(chatId, { vars: loaded, ts: Date.now() });
-      return loaded;
-    } catch {
-      return {};
-    }
   }
 
   function registerMacroInterceptorIfAvailable(): void {
@@ -278,7 +248,6 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         log.trace(`macroInterceptor #${callId}: lorebook entries=${activeLore.length} for chat=${chatId} (tmpl mentions lorebook/each)`);
       }
 
-      const storedLocal = await storedLocalForResolve(chatId, ctx.userId, active.card.character_id);
       let resolved: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       const __ppT0 = perfEnabled() ? Date.now() : 0;
@@ -317,7 +286,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             ...(cachedMessages ? { messages: cachedMessages } : {}),
           },
           variables: {
-            local: { ...ctx.env.variables.local, ...storedLocal },
+            local: ctx.env.variables.local,
             global: ctx.env.variables.global,
             chat: ctx.env.variables.chat,
           },
@@ -535,6 +504,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
               const enc = puaEncodeFeMacros(text);
               const resolved = await deps.resolveReadonly(
                 enc.text, ctx.chatId, active.card.character_id, ctx.userId,
+                { rmVar: true },
               );
               return puaDecodeFeMacros(resolved, enc.tokens);
             };
@@ -999,24 +969,20 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         try {
           const chat = await spindle.chats.get(ctx.chatId, ctx.userId);
           const meta = (chat?.metadata ?? {}) as Record<string, unknown>;
-          const mv = (meta['macro_variables'] && typeof meta['macro_variables'] === 'object'
-            ? { ...(meta['macro_variables'] as Record<string, unknown>) }
-            : {}) as Record<string, unknown>;
-          const local = (mv['local'] && typeof mv['local'] === 'object'
-            ? { ...(mv['local'] as Record<string, unknown>) }
+          const cv = (meta['chat_variables'] && typeof meta['chat_variables'] === 'object'
+            ? { ...(meta['chat_variables'] as Record<string, unknown>) }
             : {}) as Record<string, unknown>;
           let changed = 0;
           for (const w of outcome.stickyWrites) {
-            if (local[w.varName] === w.value) continue;
-            local[w.varName] = w.value;
+            if (cv[w.varName] === w.value) continue;
+            cv[w.varName] = w.value;
             changed += 1;
           }
           if (changed > 0) {
-            mv['local'] = local;
             expectChatChange(ctx.chatId);
             await spindle.chats.update(
               ctx.chatId,
-              { metadata: { ...meta, macro_variables: mv } as never },
+              { metadata: { ...meta, chat_variables: cv } as never },
               ctx.userId,
             );
             invalidateRecentFlush(ctx.chatId);

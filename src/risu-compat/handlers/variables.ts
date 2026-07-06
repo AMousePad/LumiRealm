@@ -9,11 +9,18 @@ function register(name: string, handler: MacroHandler, description: string): voi
   registry.register({ name, handler, description, category: "Risu / Variables", scoped: false });
 }
 
-// Risu's setvar family executes ONLY when runVar is true (cbs.ts:827-836). The
-// display pass (our !commit) and the inline prompt-regex/editprocess pass (our
-// promptRegexLiteralVars — Risu's editprocess runs risuChatParser without runVar)
-// both leave runVar unset, so the macro returns null and the parser re-emits it
-// LITERAL (parser.svelte.ts:1764). Only the real generation commit pass executes.
+// Exact Risu mode model for setvar/addvar/setdefaultvar (cbs.ts): rmVar (chat
+// display) hides without executing, runVar (runCurrentChatFunction) executes,
+// every other pass returns null so the parser re-emits the macro LITERAL.
+type SetvarMode = "hide" | "run" | "literal";
+function setvarMode(ctx: { rmVar?: boolean; runVar?: boolean }): SetvarMode {
+  if (ctx.rmVar) return "hide";
+  if (ctx.runVar) return "run";
+  return "literal";
+}
+
+// Legacy gate for the non-Risu extras (deletevar/flushvar/setchatvar): these
+// are our own trigger-support surface, they execute on commit as before.
 function leaveVarLiteral(ctx: { commit: boolean; promptRegexLiteralVars?: boolean }): boolean {
   return !ctx.commit || ctx.promptRegexLiteralVars === true;
 }
@@ -22,29 +29,35 @@ function leaveVarLiteral(ctx: { commit: boolean; promptRegexLiteralVars?: boolea
 register("risu_getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""),
   "Reads a local chat variable. Empty string if unset.");
 
-// In cbs (rmVar:false, runVar:false) Risu returns null and the parser emits
-// the macro literal. Match on !commit.
 register("risu_setvar", (ctx, a) => {
-  if (leaveVarLiteral(ctx)) return `{{setvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  const mode = setvarMode(ctx);
+  if (mode === "hide") return "";
+  if (mode === "literal") return `{{setvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
   ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
   return "";
 }, "Sets a local chat variable.");
 
 register("risu_addvar", (ctx, a) => {
-  if (leaveVarLiteral(ctx)) return `{{addvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
-  ctx.vars.add("local", a[0] ?? "", Number(a[1] ?? "0"));
+  const mode = setvarMode(ctx);
+  if (mode === "hide") return "";
+  if (mode === "literal") return `{{addvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  // Risu passes args[1] raw to Number, a missing arg adds NaN.
+  ctx.vars.add("local", a[0] ?? "", Number(a[1]));
   return "";
 }, "Adds delta to a local chat variable (coerces current value to number).");
 
 register("setdefaultvar", (ctx, a) => {
-  if (leaveVarLiteral(ctx)) return `{{setdefaultvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
-  // cbs.ts. Falsy check; unset and empty both match.
+  const mode = setvarMode(ctx);
+  if (mode === "hide") return "";
+  if (mode === "literal") return `{{setdefaultvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  // cbs.ts falsy check: a MISSING var reads "null" (truthy), so only an
+  // existing empty-string value triggers the default write.
   const name = a[0] ?? "";
   if (!ctx.vars.get("local", name)) {
     ctx.vars.set("local", name, a[1] ?? "");
   }
   return "";
-}, "Sets a local chat variable only if its current value is falsy (unset or empty).");
+}, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
 
 // cbs.ts.
 register("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""),

@@ -118,22 +118,16 @@ export type FrontendToBackend =
   // Card bytes are streamed to the host tus endpoint (resumable, no WS frame
   // cap), then the worker reads them by id via spindle.uploads.
   | { type: 'import_card_from_upload'; uploadId: string; fileName: string }
-  // Chunked transport for large lorebook / regex JSON imports. A single
-  // SPINDLE_BACKEND_MSG frame is capped at 4MB and silently dropped past that,
-  // so files over ~1MB are split across chunks and reassembled on the backend.
+  // Large lorebook / regex JSON imports upload via the tus endpoint (a single
+  // SPINDLE_BACKEND_MSG frame is capped at 4MB and silently dropped past that).
   | {
-      type: 'import_text_init';
+      type: 'import_text_from_upload';
       uploadId: string;
       kind: 'lorebook' | 'regex';
       filename?: string;
-      /** Target character for the reassembled import (regex/lorebook scope). */
+      /** Target character for the import (regex/lorebook scope). */
       characterId: string | null;
-      totalChunks: number;
-      /** Total UTF-8 bytes across all chunks (for validation). */
-      totalBytes: number;
     }
-  | { type: 'import_text_chunk'; uploadId: string; seq: number; data: string }
-  | { type: 'import_text_commit'; uploadId: string }
   | {
       type: 'consent_response';
       requestId: string;
@@ -237,21 +231,7 @@ export type FrontendToBackend =
   | {
       type: 'request_connections_list';
     }
-  | {
-      type: 'upload_module_init';
-      sessionId: string;
-      fileName: string;
-      totalBytes: number;
-      totalChunks: number;
-    }
-  | {
-      type: 'upload_module_chunk';
-      sessionId: string;
-      seq: number;
-      bytesB64Chunk: string;
-    }
-  | { type: 'upload_module_commit'; sessionId: string }
-  | { type: 'upload_module_abort'; sessionId: string; reason?: string }
+  | { type: 'process_module_from_upload'; uploadId: string; fileName: string }
   | { type: 'request_modules' }
   | { type: 'delete_module'; moduleId: string }
   | { type: 'attach_module'; characterId: string; moduleId: string }
@@ -598,15 +578,8 @@ export type BackendToFrontend =
         readonly is_default: boolean;
       }[];
     }
-  // Module upload ack (seq=-1 init, seq=N chunk, seq=-2 commit).
   // `modules_pushed` is the full library + per-character attachment map.
   // `attached_modules_pushed` is a per-character delta after attach/detach.
-  | {
-      type: 'module_upload_ack';
-      sessionId: string;
-      seq: number;
-      receivedBytes: number;
-    }
   | {
       type: 'modules_pushed';
       modules: readonly ModuleSummary[];

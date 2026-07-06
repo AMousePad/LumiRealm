@@ -12,15 +12,15 @@ import { translateModuleName, translateModuleDescription, translateCharacterName
 import { dominantScriptLang } from './browser-translator.js';
 import { createSearchableSelect, type SearchableSelectHandle } from './searchable-select.js';
 import { sendImportText } from './import-text-upload.js';
+import * as tus from 'tus-js-client';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
-const CHUNK_BYTES = 2500 * 1024;
-const CHUNK_WIRE_WARN_BYTES = 3_800_000;
-const INIT_ACK_TIMEOUT_MS = 15_000;
-const CHUNK_ACK_TIMEOUT_MS = 20_000;
-const COMMIT_FIRST_PROGRESS_TIMEOUT_MS = 60_000;
-const UPLOAD_WINDOW_SIZE = 30;
+const UPLOAD_ENDPOINT = '/api/v1/spindle-uploads';
+const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+const EXTENSION_IDENTIFIER = 'lumirealm';
+// Server processing (decode + asset upload + world-book creation) can be slow.
+const PROCESSING_TIMEOUT_MS = 120_000;
 
 const ACCEPT_EXTENSIONS = ['.risum'];
 
@@ -77,30 +77,6 @@ if (typeof document !== 'undefined') {
   });
 }
 
-interface PendingAck {
-  resolve: () => void;
-  reject: (err: Error) => void;
-  timer: VizTimer;
-}
-
-interface ChunkTiming {
-  seq: number;
-  encodeMs: number;
-  sentAt: number;
-  ackedAt: number | null;
-}
-
-interface UploadSession {
-  readonly sessionId: string;
-  lastAckSeq: number;
-  receivedBytesOnBackend: number;
-  pendingAcks: Map<number, PendingAck>;
-  aborted: boolean;
-  startedAt: number;
-  lastAckAt: number;
-  timings: ChunkTiming[];
-}
-
 export interface ModulesPanelHandle {
   handleBackendMessage(msg: BackendToFrontend): void;
   destroy(): void;
@@ -118,6 +94,7 @@ export interface MountModulesPanelOptions {
     readonly destroy: () => void;
   };
   readonly onImportStart?: (label: string, onCancel?: () => void, totalBytes?: number) => void;
+  readonly onUploadProgress?: (sent: number, total: number) => void;
 }
 
 export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelHandle {
@@ -130,7 +107,8 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   let modules: readonly ModuleSummary[] | null = null;
   let cards: readonly CardSummary[] = [];
   const attachedByCharacter = new Map<string, readonly AttachedModuleSummary[]>();
-  let activeUpload: UploadSession | null = null;
+  let activeTus: tus.Upload | null = null;
+  let processingTimer: VizTimer | null = null;
   const expandedCharacters = new Set<string>();
   const expandedModules = new Set<string>();
   let lastError: string | null = null;
@@ -693,7 +671,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     sendToBackend({ type: 'request_modules' });
   });
 
-  // Standalone lorebook import. Large files chunk automatically (sendImportText)
+  // Standalone lorebook import. Large files upload via tus (sendImportText)
   // so they survive the 4MB single-frame WS cap.
   let lorebookImportInFlight = false;
   lbUploadBtn.addEventListener('click', () => { void onLorebookUploadClicked(); });
@@ -718,8 +696,14 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     lorebookImportInFlight = true;
     lbUploadBtn.disabled = true;
     setLorebookStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    const sent = sendImportText(sendToBackend, { kind: 'lorebook', text, filename: file.name, characterId: null });
-    log.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length} chunked=${sent.chunked} chunks=${sent.chunks}`);
+    try {
+      const sent = await sendImportText(sendToBackend, { kind: 'lorebook', text, filename: file.name, characterId: null });
+      log.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length} viaUpload=${sent.chunked}`);
+    } catch (err) {
+      lorebookImportInFlight = false;
+      lbUploadBtn.disabled = false;
+      setLorebookStatus(`Upload failed: ${errMsg(err)}`, true);
+    }
   }
 
   function setLorebookStatus(msg: string, isError: boolean): void {
@@ -728,7 +712,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   }
 
   // Backend parses + translates, the FE POSTs the resulting rows since only the
-  // FE carries the session cookie. Large files chunk via sendImportText.
+  // FE carries the session cookie. Large files upload via tus (sendImportText).
   let regexImportInFlight = false;
   rxUploadBtn.addEventListener('click', () => { void onRegexUploadClicked(); });
 
@@ -763,8 +747,14 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     regexImportInFlight = true;
     rxUploadBtn.disabled = true;
     setRegexStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    const sent = sendImportText(sendToBackend, { kind: 'regex', text, filename: file.name, characterId: targetId });
-    log.info(`modules-panel: import_regex file=${file.name} target=${targetId ?? 'global'} bytes=${text.length} chunked=${sent.chunked} chunks=${sent.chunks}`);
+    try {
+      const sent = await sendImportText(sendToBackend, { kind: 'regex', text, filename: file.name, characterId: targetId });
+      log.info(`modules-panel: import_regex file=${file.name} target=${targetId ?? 'global'} bytes=${text.length} viaUpload=${sent.chunked}`);
+    } catch (err) {
+      regexImportInFlight = false;
+      rxUploadBtn.disabled = false;
+      setRegexStatus(`Upload failed: ${errMsg(err)}`, true);
+    }
   }
 
   function setRegexStatus(msg: string, isError: boolean): void {
@@ -837,183 +827,86 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     }
 
     lastError = null;
-    setStatus(`Uploading ${file.name}…`);
-    uploadBtn.disabled = true;
-
-    const sessionId = generateSessionId();
+    const fileName = file.name;
     const totalBytes = file.bytes.byteLength;
-    const totalChunks = Math.max(1, Math.ceil(totalBytes / CHUNK_BYTES));
-    log.info(`modules-panel: upload session=${sessionId} file=${file.name} bytes=${totalBytes} chunks=${totalChunks}`);
+    setStatus(`Uploading ${fileName}…`);
+    uploadBtn.disabled = true;
+    log.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
 
-    activeUpload = {
-      sessionId,
-      lastAckSeq: -999,
-      receivedBytesOnBackend: 0,
-      pendingAcks: new Map(),
-      aborted: false,
-      startedAt: performance.now(),
-      lastAckAt: performance.now(),
-      timings: [],
-    };
-    const session = activeUpload;
-    opts.onImportStart?.(file.name, () => {
-      if (!session.aborted) {
-        session.aborted = true;
-        log.info(`modules-panel: cancel requested session=${sessionId}`);
-        rejectAllPending(session, new Error('upload cancelled'));
-      }
+    let cancelled = false;
+    opts.onImportStart?.(fileName, () => {
+      cancelled = true;
+      if (activeTus) { void activeTus.abort(true).catch(() => {}); activeTus = null; }
+      clearProcessingTimer();
+      uploadBtn.disabled = false;
+      log.info('modules-panel: upload cancel requested');
     }, totalBytes);
 
-    try {
-      sendToBackend({
-        type: 'upload_module_init',
-        sessionId,
-        fileName: file.name,
-        totalBytes,
-        totalChunks,
-      });
-      await trackAck(session, -1, INIT_ACK_TIMEOUT_MS, 'init');
-
-      let completed = 0;
-      let nextSeq = 0;
-      const errors: Error[] = [];
-
-      const sendOne = async (): Promise<void> => {
-        while (true) {
-          if (session.aborted || errors.length > 0) return;
-          const seq = nextSeq++;
-          if (seq >= totalChunks) return;
-          const start = seq * CHUNK_BYTES;
-          const end = Math.min(start + CHUNK_BYTES, totalBytes);
-          const slice = file.bytes.subarray(start, end);
-          const tEncodeStart = performance.now();
-          const b64 = bytesToBase64(slice);
-          const chunkMsg: FrontendToBackend = {
-            type: 'upload_module_chunk',
-            sessionId,
-            seq,
-            bytesB64Chunk: b64,
-          };
-          const wireSize = JSON.stringify(chunkMsg).length;
-          const encodeMs = performance.now() - tEncodeStart;
-          session.timings.push({ seq, encodeMs, sentAt: performance.now(), ackedAt: null });
-          if (session.timings.length > 60) session.timings.shift();
-          if (wireSize > CHUNK_WIRE_WARN_BYTES) {
-            log.warn(
-              `modules-panel: chunk wire size ${wireSize}B approaches Lumi's 64KB inbound guard ` +
-                `(seq=${seq} of ${totalChunks}, raw_chunk=${slice.byteLength}B, b64=${b64.length}B).`,
-            );
-          }
-          const ack = trackAck(session, seq, CHUNK_ACK_TIMEOUT_MS, `chunk ${seq}`);
-          sendToBackend(chunkMsg);
-          try {
-            await ack;
-          } catch (err) {
-            errors.push(err as Error);
-            return;
-          }
-          completed += 1;
-          setStatus(`Uploading ${file.name}… (${completed}/${totalChunks})`);
+    const upload = new tus.Upload(new Blob([file.bytes as BlobPart]), {
+      endpoint: UPLOAD_ENDPOINT,
+      chunkSize: UPLOAD_CHUNK_BYTES,
+      retryDelays: [0, 1000, 3000, 5000, 10000],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER },
+      onError: (err) => {
+        activeTus = null;
+        if (cancelled) return;
+        log.error('modules-panel: tus upload failed', err);
+        lastError = `Upload failed: ${errMsg(err)}`;
+        setStatus(lastError, true);
+        uploadBtn.disabled = false;
+      },
+      onProgress: (sent, total) => {
+        const pct = total > 0 ? Math.round((sent / total) * 100) : 0;
+        setStatus(`Uploading ${fileName}… (${pct}%)`);
+        opts.onUploadProgress?.(sent, total);
+      },
+      onSuccess: () => {
+        activeTus = null;
+        const uploadId = (upload.url ?? '').split('/').filter(Boolean).pop() ?? '';
+        if (!uploadId) {
+          lastError = 'Upload finished but no id was returned';
+          setStatus(lastError, true);
+          uploadBtn.disabled = false;
+          return;
         }
-      };
+        log.info(`modules-panel: upload complete uploadId=${uploadId} — requesting processing`);
+        setStatus('Processing on server…');
+        sendToBackend({ type: 'process_module_from_upload', uploadId, fileName });
+        // Backend signals done via modules_pushed and failure via an `error` frame.
+        armProcessingTimer();
+      },
+    });
+    activeTus = upload;
 
-      const workers: Promise<void>[] = [];
-      for (let w = 0; w < Math.min(UPLOAD_WINDOW_SIZE, totalChunks); w++) {
-        workers.push(sendOne());
-      }
-      await Promise.all(workers);
-      if (errors.length > 0) throw errors[0];
-      if (session.aborted) throw new Error('upload aborted');
+    try {
+      const prev = await upload.findPreviousUploads();
+      if (cancelled) return;
+      if (prev[0]) upload.resumeFromPreviousUpload(prev[0]);
+    } catch { /* no resumable state, start fresh */ }
+    if (!cancelled) upload.start();
+  }
 
-      setStatus('Processing on server…');
-      sendToBackend({ type: 'upload_module_commit', sessionId });
-      await trackAck(session, -2, COMMIT_FIRST_PROGRESS_TIMEOUT_MS, 'commit');
-      setStatus(null);
-    } catch (err) {
-      log.error('modules-panel: upload failed', err);
-      dumpUploadDiagnostics(session, err);
-      try {
-        sendToBackend({ type: 'upload_module_abort', sessionId, reason: errMsg(err) });
-      } catch { /* ignore */ }
-      lastError = `Upload failed: ${errMsg(err)}`;
+  function clearProcessingTimer(): void {
+    if (processingTimer) { vizClearTimeout(processingTimer); processingTimer = null; }
+  }
+
+  function armProcessingTimer(): void {
+    clearProcessingTimer();
+    processingTimer = vizSetTimeout(PROCESSING_TIMEOUT_MS, () => {
+      processingTimer = null;
+      lastError = 'Server did not respond after upload. The module may still be processing.';
       setStatus(lastError, true);
-    } finally {
-      rejectAllPending(session, new Error('session ended'));
-      if (activeUpload?.sessionId === sessionId) activeUpload = null;
       uploadBtn.disabled = false;
-    }
-  }
-
-  function dumpUploadDiagnostics(session: UploadSession, err: unknown): void {
-    try {
-      const now = performance.now();
-      const wallMs = Math.round(now - session.startedAt);
-      const sinceAckMs = Math.round(now - session.lastAckAt);
-      const acked = session.timings.filter(t => t.ackedAt !== null);
-      const unacked = session.timings.filter(t => t.ackedAt === null).map(t => t.seq);
-      const encodes = session.timings.map(t => t.encodeMs);
-      const rtts = acked.map(t => (t.ackedAt as number) - t.sentAt);
-      const stats = (xs: number[]) => xs.length === 0 ? 'n/a' :
-        `min=${Math.round(Math.min(...xs))}ms p50=${Math.round(percentile(xs, 50))}ms p95=${Math.round(percentile(xs, 95))}ms max=${Math.round(Math.max(...xs))}ms`;
-      log.warn(
-        `modules-panel: upload diagnostics session=${session.sessionId} wall=${wallMs}ms ` +
-          `lastAckSeq=${session.lastAckSeq} sinceLastAck=${sinceAckMs}ms ` +
-          `pendingAcks=${session.pendingAcks.size} unackedSeqs=[${unacked.slice(0, 10).join(',')}${unacked.length > 10 ? ',…' : ''}] ` +
-          `encode(${session.timings.length} samples): ${stats(encodes)} ` +
-          `rtt(${rtts.length} samples): ${stats(rtts)} ` +
-          `err=${errMsg(err)}`,
-      );
-    } catch (diagErr) {
-      log.warn('modules-panel: diagnostics dump threw', diagErr);
-    }
-  }
-
-  function percentile(xs: number[], p: number): number {
-    const sorted = [...xs].sort((a, b) => a - b);
-    const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
-    return sorted[idx] ?? 0;
-  }
-
-  function trackAck(
-    session: UploadSession,
-    seq: number,
-    timeoutMs: number,
-    label: string,
-  ): Promise<void> {
-    if (session.lastAckSeq === seq) return Promise.resolve();
-    return new Promise<void>((resolve, reject) => {
-      const timer = vizSetTimeout(timeoutMs, () => {
-        if (session.pendingAcks.delete(seq)) {
-          session.aborted = true;
-          reject(new Error(`timeout waiting for ${label} ack after ${timeoutMs}ms (visible time)`));
-        }
-      });
-      session.pendingAcks.set(seq, { resolve, reject, timer });
     });
   }
 
-  function rejectAllPending(session: UploadSession, err: Error): void {
-    for (const [seq, p] of session.pendingAcks) {
-      vizClearTimeout(p.timer);
-      p.reject(err);
-      session.pendingAcks.delete(seq);
-    }
-  }
-
-  function onUploadAck(sessionId: string, seq: number, receivedBytes: number): void {
-    const session = activeUpload;
-    if (!session || session.sessionId !== sessionId) return;
-    session.lastAckSeq = seq;
-    session.receivedBytesOnBackend = receivedBytes;
-    session.lastAckAt = performance.now();
-    const t = session.timings.find(t => t.seq === seq);
-    if (t) t.ackedAt = session.lastAckAt;
-    const p = session.pendingAcks.get(seq);
-    if (p) {
-      session.pendingAcks.delete(seq);
-      vizClearTimeout(p.timer);
-      p.resolve();
-    }
+  // A module upload finished server-side: modules_pushed lands on success.
+  function finishModuleUpload(): void {
+    if (!processingTimer) return;
+    clearProcessingTimer();
+    uploadBtn.disabled = false;
+    setStatus(null);
   }
 
   function handleBackendMessage(msg: BackendToFrontend): void {
@@ -1035,14 +928,12 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
             attachedByCharacter.set(charId, list);
           }
         }
+        finishModuleUpload();
         render();
         break;
       case 'attached_modules_pushed':
         attachedByCharacter.set(msg.characterId, msg.attached);
         render();
-        break;
-      case 'module_upload_ack':
-        onUploadAck(msg.sessionId, msg.seq, msg.receivedBytes);
         break;
       case 'lorebook_import_result':
         // Only consume standalone results , per-character imports are still
@@ -1065,9 +956,25 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       case 'standalone_regex_install':
         void onStandaloneRegexInstall(msg);
         break;
+      case 'import_progress':
+        if (processingTimer) {
+          if (msg.phase === 'done') {
+            finishModuleUpload();
+          } else if (msg.phase === 'error') {
+            clearProcessingTimer();
+            uploadBtn.disabled = false;
+            lastError = msg.error ?? msg.message;
+            setStatus(lastError, true);
+          } else {
+            // Server is alive (asset uploads emit these), push the deadline out.
+            armProcessingTimer();
+          }
+        }
+        break;
       case 'error':
-        if (activeUpload && msg.sessionId === activeUpload.sessionId) {
-          rejectAllPending(activeUpload, new Error(msg.message));
+        if (processingTimer) {
+          clearProcessingTimer();
+          uploadBtn.disabled = false;
         }
         if (lastError === null) {
           lastError = msg.message;
@@ -1150,26 +1057,3 @@ function pickLorebookFile(): Promise<File | null> {
   });
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
-function base64ToBlob(b64: string, mimeType: string): Blob {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Blob([bytes as BlobPart], { type: mimeType });
-}
-
-function generateSessionId(): string {
-  const c = typeof globalThis !== 'undefined'
-    ? (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
-    : undefined;
-  if (c?.randomUUID) return c.randomUUID();
-  return `mod-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}

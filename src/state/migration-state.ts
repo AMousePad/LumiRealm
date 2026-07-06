@@ -11,6 +11,9 @@ export interface MigrationState {
   // One-time sweep that un-prefixes legacy risu_* macros back to raw Risu CBS
   // across every stored string surface (translate-time prefixing retired).
   readonly macros_unprefixed: boolean;
+  // One-time move of per-chat scriptstate from macro_variables.local (transient
+  // in Lumi) to chat_variables (natively persisted + rehydrated).
+  readonly vars_migrated_to_chat_scope: boolean;
 }
 
 export const EMPTY_MIGRATION_STATE: MigrationState = {
@@ -19,6 +22,7 @@ export const EMPTY_MIGRATION_STATE: MigrationState = {
   last_swept_characters: 0,
   display_owner_backfilled: false,
   macros_unprefixed: false,
+  vars_migrated_to_chat_scope: false,
 };
 
 export interface UserStorageLike {
@@ -42,6 +46,7 @@ export function parseMigrationState(raw: unknown): MigrationState {
     last_swept_translator_version?: unknown;
     display_owner_backfilled?: unknown;
     macros_unprefixed?: unknown;
+    vars_migrated_to_chat_scope?: unknown;
   };
   if (obj.schema_version !== 1) return EMPTY_MIGRATION_STATE;
   const legacy =
@@ -56,6 +61,7 @@ export function parseMigrationState(raw: unknown): MigrationState {
       typeof obj.last_swept_characters === 'number' ? obj.last_swept_characters : 0,
     display_owner_backfilled: obj.display_owner_backfilled === true,
     macros_unprefixed: obj.macros_unprefixed === true,
+    vars_migrated_to_chat_scope: obj.vars_migrated_to_chat_scope === true,
   };
 }
 
@@ -82,6 +88,7 @@ export async function writeMigrationState(
     last_swept_characters: state.last_swept_characters,
     display_owner_backfilled: state.display_owner_backfilled,
     macros_unprefixed: state.macros_unprefixed,
+    vars_migrated_to_chat_scope: state.vars_migrated_to_chat_scope,
   };
   await storage.setJson(MIGRATION_STATE_PATH, out, { indent: 2, userId });
 }

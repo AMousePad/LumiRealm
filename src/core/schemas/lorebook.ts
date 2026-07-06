@@ -68,7 +68,13 @@ export const loreBookSchema = z
     selective: boolWithDefault(false),
     extentions: loreBookExtentionsSchema.nullish().transform((v) => v ?? undefined),
     activationPercent: nullishNumber,
-    loreCache: loreCacheSchema.nullish().transform((v) => v ?? undefined),
+    // Risu's runtime activation cache. Types declare {key, data[]} but modules
+    // in the wild ship a bare string, so tolerate any shape and keep only a
+    // valid object (we don't consume it, just preserve provenance).
+    loreCache: z.unknown().transform((v) => {
+      const parsed = loreCacheSchema.safeParse(v);
+      return parsed.success ? parsed.data : undefined;
+    }),
     useRegex: nullishBool,
     bookVersion: nullishNumber,
     id: nullishString,

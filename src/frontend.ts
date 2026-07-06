@@ -308,14 +308,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(ctx.dom.addStyle(STYLES));
   flog.info('frontend setup: styles injected');
 
-  // Mute high-frequency chunk types from the send log.
-  const QUIET_SEND_TYPES = new Set<string>([
-    'upload_module_chunk',
-  ]);
   const sendToBackend = (msg: FrontendToBackend): void => {
-    if (!QUIET_SEND_TYPES.has(msg.type)) {
-      flog.trace(`frontend send: ${msg.type}`, msg);
-    }
+    flog.trace(`frontend send: ${msg.type}`, msg);
     ctx.sendToBackend(msg);
   };
 
@@ -532,15 +526,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   // Retry handshake until backend responds; cold worker or WS hiccup can delay first reply.
   let ready = false;
 
-  // Mute high-frequency chunk acks from the recv log.
-  const QUIET_RECV_TYPES = new Set<string>([
-    'module_upload_ack',
-  ]);
   const unsub = ctx.onBackendMessage((raw) => {
     const msg = raw as BackendToFrontend;
-    if (!QUIET_RECV_TYPES.has(msg.type)) {
-      flog.trace(`frontend recv: ${msg.type}`, msg);
-    }
+    flog.trace(`frontend recv: ${msg.type}`, msg);
     if (msg.type === 'log_state_pushed') {
       const level: LogThreshold = isLogThreshold(msg.level) ? msg.level : DEFAULT_LOG_LEVEL;
       logStore.setState({ enabled: msg.enabled, includeChatData: msg.includeChatData, level });

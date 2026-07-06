@@ -155,7 +155,14 @@ export interface BuildEvaluatorCtxInput {
   readonly positionPt?: Readonly<Record<string, string>>;
   /** Risu cbs() call context. See RisuRuntimeContext.cbsContext. */
   readonly cbsContext?: boolean;
+  /** Risu Chat.svelte display render: setvar family hides without executing. */
+  readonly rmVar?: boolean;
+  /** Risu runCurrentChatFunction pass: setvar family executes. */
+  readonly runVar?: boolean;
   readonly recorder?: VarReadRecorder;
+  // Fires on every local-scope write (null = delete) during the runVar strip pass
+  // so the caller can persist to chat_variables (see strip-setvar.ts).
+  readonly localVarSink?: (name: string, value: string | null) => void;
 }
 
 function indexToCharacterAssets(
@@ -236,22 +243,24 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     set(scope: VarScope, name: string, value: string): void {
       if (scope === "temp") { tempOverlay.set(name, value); return; }
       if (!commit || !overlay) return;
-      if (scope === "global") overlay.global.set(name, value);
-      else overlay.chat.set(name, value);
-      if (chatId && spindleGlobal && persistVars) {
-        try {
-          const op = scope === "global"
-            ? spindleGlobal.variables.global.set(name, value)
-            : spindleGlobal.variables.chat.set(chatId, name, value);
-          void op.catch(() => { /* best-effort */ });
-        } catch { /* best-effort */ }
+      if (scope === "global") {
+        overlay.global.set(name, value);
+        if (chatId && spindleGlobal && persistVars) {
+          try {
+            void spindleGlobal.variables.global.set(name, value).catch(() => { /* best-effort */ });
+          } catch { /* best-effort */ }
+        }
+        return;
       }
+      // In-prompt setvar is overlay-only. The runVar strip pass is the one path
+      // that persists message-text setvar, via localVarSink (see strip-setvar.ts).
+      overlay.chat.set(name, value);
+      if (input.localVarSink) input.localVarSink(name, value);
     },
     add(scope: VarScope, name: string, delta: number): void {
       if (scope !== "temp" && !commit) return;
-      const cur = Number(this.get(scope, name));
-      const next = String((Number.isFinite(cur) ? cur : 0) + delta);
-      this.set(scope, name, next);
+      // Risu cbs.ts addvar: raw Number coercion, a missing var ("null") yields "NaN".
+      this.set(scope, name, String(Number(this.get(scope, name)) + delta));
     },
     has(scope: VarScope, name: string): boolean {
       if (recordRead) recordRead(scope, name);
@@ -273,12 +282,10 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
         if (scope === "global") overlay.global.delete(name);
         else { overlay.local.delete(name); overlay.chat.delete(name); }
       }
-      if (chatId && spindleGlobal && persistVars) {
+      if (scope !== "global" && input.localVarSink) input.localVarSink(name, null);
+      if (scope === "global" && chatId && spindleGlobal && persistVars) {
         try {
-          const op = scope === "global"
-            ? spindleGlobal.variables.global.delete(name)
-            : spindleGlobal.variables.chat.delete(chatId, name);
-          void op.catch(() => {});
+          void spindleGlobal.variables.global.delete(name).catch(() => {});
         } catch { /* best-effort */ }
       }
     },
@@ -406,6 +413,8 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     ...(input.modulesByNamespace ? { modulesByNamespace: input.modulesByNamespace } : {}),
     ...(input.positionPt ? { positionPt: input.positionPt } : {}),
     ...(input.cbsContext ? { cbsContext: true } : {}),
+    ...(input.rmVar ? { rmVar: true } : {}),
+    ...(input.runVar ? { runVar: true } : {}),
     // The prompt-regex pass (suppressVarPersist) leaves the setvar family literal,
     // mirroring Risu's editprocess (no runVar). See RisuRuntimeContext.promptRegexLiteralVars.
     ...(input.suppressVarPersist ? { promptRegexLiteralVars: true } : {}),

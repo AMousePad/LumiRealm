@@ -624,10 +624,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   }
 
   function handleBackendMessage(msg: BackendToFrontend): void {
-    // Skip per-chunk ack logging to avoid flooding on large module uploads.
-    if (msg.type !== 'module_upload_ack') {
-      log.info(`drawer.handle: ${msg.type}`);
-    }
+    log.info(`drawer.handle: ${msg.type}`);
     switch (msg.type) {
       case 'cards_updated':
         log.info(`drawer.cards_updated: count=${msg.cards.length}`);
