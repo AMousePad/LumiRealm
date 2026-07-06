@@ -214,12 +214,10 @@ function getStickyState(
   prefix: 'ka' | 'da',
   entryId: string,
 ): boolean {
-  const mv = metadata['macro_variables'];
-  if (!mv || typeof mv !== 'object') return false;
-  const local = (mv as { local?: unknown }).local;
-  if (!local || typeof local !== 'object') return false;
+  const cv = metadata['chat_variables'];
+  if (!cv || typeof cv !== 'object') return false;
   const key = `__internal_${prefix}_${entryId}`;
-  const v = (local as Record<string, unknown>)[key];
+  const v = (cv as Record<string, unknown>)[key];
   return v === 'true' || v === '1' || v === true;
 }
 

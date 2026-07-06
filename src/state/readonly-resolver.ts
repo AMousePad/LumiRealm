@@ -3,6 +3,9 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import { runPipeline } from '../interpreter/evaluator/pipeline.js';
+import { buildEvaluatorContext, type BuildEvaluatorCtxInput } from '../interpreter/evaluator/context.js';
+import { evaluate } from '../interpreter/evaluator/scanner.js';
+import { stripSetvarSpans, hasSetvarFamily } from '../interpreter/evaluator/strip-setvar.js';
 import { getActiveAssetIndexes } from '../interpreter/asset-cache.js';
 import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { imageUrlFromId } from '../interpreter/image-cache.js';
@@ -36,7 +39,7 @@ export interface ReadonlyResolver {
     chatId: string,
     characterId: string,
     userId: string | undefined,
-    opts?: { cbsContext?: boolean },
+    opts?: { cbsContext?: boolean; rmVar?: boolean },
   ) => Promise<string>;
   readonly resolveInWorker: (
     template: string,
@@ -44,8 +47,19 @@ export interface ReadonlyResolver {
     characterId: string,
     userId: string,
     cbsContext?: boolean,
+    rmVar?: boolean,
   ) => Promise<string>;
   readonly fetchMessages: (chatId: string) => Promise<readonly ChatMessage[]>;
+  // Risu runCurrentChatFunction parity: execute + strip the setvar family from
+  // stored message text, returning the stripped rows + accumulated var writes.
+  readonly stripMessageSetvars: (
+    chatId: string,
+    characterId: string,
+    userId: string,
+  ) => Promise<{
+    readonly changed: ReadonlyArray<{ readonly id: string; readonly content: string }>;
+    readonly varWrites: ReadonlyArray<readonly [string, string | null]>;
+  }>;
 }
 
 export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyResolver {
@@ -61,17 +75,17 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     }
   }
 
-  async function resolveInWorker(
-    template: string,
+  // Shared context input for both resolveInWorker and the runVar strip pass.
+  async function buildCtxInput(
     chatId: string,
     characterId: string,
     userId: string,
-    cbsContext = false,
-  ): Promise<string> {
-    const [chat, character, messages, persona] = await Promise.all([
+    messages: readonly ChatMessage[],
+    cbsContext: boolean,
+  ): Promise<Omit<BuildEvaluatorCtxInput, 'commit'>> {
+    const [chat, character, persona] = await Promise.all([
       spindle.chats.get(chatId, userId),
       spindle.characters.get(characterId, userId),
-      fetchMessages(chatId),
       spindle.personas.getActive(userId).catch(() => null),
     ]);
 
@@ -81,8 +95,10 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         global?: Record<string, string>;
         chat?: Record<string, string>;
       };
+      chat_variables?: Record<string, string>;
     };
     const mv = metadata.macro_variables ?? {};
+    const chatVars = metadata.chat_variables;
 
     const lastMessageId = messages.length === 0 ? -1 : messages.length - 1;
     const assistantTail = [...messages].reverse().find((m) => m.role === 'assistant');
@@ -99,9 +115,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       (persona as { image_id?: unknown } | null | undefined)?.image_id as string | null | undefined,
     );
 
-    return runPipeline({
-      template,
-      phase: 'display',
+    return {
       chatId,
       ...(userId !== undefined ? { userId } : {}),
       characterId,
@@ -138,15 +152,65 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       variables: {
         ...(mv.local ? { local: mv.local } : {}),
         ...(mv.global ? { global: mv.global } : {}),
-        ...(mv.chat ? { chat: mv.chat } : {}),
+        ...(chatVars ? { chat: chatVars } : {}),
       },
       legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
-      wrapIslands: false,
       ...(activeCard && deps.modulesByNamespaceFromCard(activeCard) ? { modulesByNamespace: deps.modulesByNamespaceFromCard(activeCard)! } : {}),
       ...(readDecoratorBuffers(chatId)?.positionPt
         ? { positionPt: readDecoratorBuffers(chatId)!.positionPt }
         : {}),
+    };
+  }
+
+  async function resolveInWorker(
+    template: string,
+    chatId: string,
+    characterId: string,
+    userId: string,
+    cbsContext = false,
+    rmVar = false,
+  ): Promise<string> {
+    const messages = await fetchMessages(chatId);
+    const ctxInput = await buildCtxInput(chatId, characterId, userId, messages, cbsContext);
+    return runPipeline({
+      ...ctxInput,
+      template,
+      phase: 'display',
+      ...(rmVar ? { rmVar: true } : {}),
+      wrapIslands: false,
     });
+  }
+
+  async function stripMessageSetvars(
+    chatId: string,
+    characterId: string,
+    userId: string,
+  ): Promise<{
+    changed: ReadonlyArray<{ id: string; content: string }>;
+    varWrites: ReadonlyArray<readonly [string, string | null]>;
+  }> {
+    const all = await fetchMessages(chatId);
+    // Risu chat.message[] excludes the greeting, Lumi stores it as row 0.
+    const messages = all.length > 0 && all[0]!.role !== 'user' ? all.slice(1) : all;
+    if (!messages.some((m) => hasSetvarFamily(m.content))) {
+      return { changed: [], varWrites: [] };
+    }
+    const varWrites = new Map<string, string | null>();
+    const ctxInput = await buildCtxInput(chatId, characterId, userId, all, false);
+    // One ctx shared across every message so the per-chat overlay accumulates
+    // (message A's setvar visible to message B's addvar), matching Risu's pass.
+    const ctx = buildEvaluatorContext({
+      ...ctxInput,
+      commit: true,
+      runVar: true,
+      localVarSink: (name, value) => { varWrites.set(name, value); },
+    });
+    const changed: Array<{ id: string; content: string }> = [];
+    for (const m of messages) {
+      const res = stripSetvarSpans(m.content, (span) => evaluate(span, ctx));
+      if (res.changed) changed.push({ id: m.id, content: res.text });
+    }
+    return { changed, varWrites: [...varWrites] };
   }
 
   async function resolve(
@@ -154,9 +218,10 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     chatId: string,
     characterId: string,
     userId: string | undefined,
-    opts?: { cbsContext?: boolean },
+    opts?: { cbsContext?: boolean; rmVar?: boolean },
   ): Promise<string> {
     const cbsContext = opts?.cbsContext === true;
+    const rmVar = opts?.rmVar === true;
     const t0 = Date.now();
     log.debug(
       `resolveReadonly: START chat=${chatId} char=${characterId} userId=${userId ?? '<none>'} cbs=${cbsContext} template_len=${template.length} ` +
@@ -170,7 +235,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       return template;
     }
     try {
-      const out = await resolveInWorker(template, chatId, characterId, userId, cbsContext);
+      const out = await resolveInWorker(template, chatId, characterId, userId, cbsContext, rmVar);
       log.debug(
         `resolveReadonly: DONE chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${out.length} ` +
           `out[0..200]=${JSON.stringify(out.slice(0, 200))}`,
@@ -182,5 +247,5 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     }
   }
 
-  return { resolve, resolveInWorker, fetchMessages };
+  return { resolve, resolveInWorker, fetchMessages, stripMessageSetvars };
 }

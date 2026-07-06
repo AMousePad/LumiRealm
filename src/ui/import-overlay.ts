@@ -315,23 +315,6 @@ export function setupImportOverlay(
         }
         break;
       }
-      case 'module_upload_ack': {
-        if (!visible && msg.seq === -1) {
-          showOverlay(label || 'character');
-        }
-        if (visible && lastPhase === '') {
-          phaseEl.textContent = 'Uploading';
-          if (uploadTotalBytes > 0) {
-            const sent = Math.min(msg.receivedBytes, uploadTotalBytes);
-            messageEl.textContent =
-              `Sent ${formatBytes(sent)} of ${formatBytes(uploadTotalBytes)} to backend…`;
-            setFraction(sent / uploadTotalBytes);
-          } else {
-            messageEl.textContent = `Sent ${formatBytes(msg.receivedBytes)} to backend…`;
-          }
-        }
-        break;
-      }
       case 'import_progress': {
         if (!visible && msg.phase !== 'done' && msg.phase !== 'error') {
           showOverlay(label || 'character');

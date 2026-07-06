@@ -1,37 +1,24 @@
 import type { ModuleEnvelope } from '../state/modules-store.js';
-import { base64ToBytes } from '../util/base64.js';
 import type { LumirealmCharacterData, LumirealmUserOverrides } from '../payload/types.js';
 import type { SpindleCharactersApi } from '../state/lumirealm-character.js';
 import type { OrphanDetectDeps } from '../state/orphan-detect.js';
 import { buildLiveImageIdSet } from '../state/orphan-detect.js';
 import type { Handler } from './types.js';
 
-export interface ModuleUploadSession {
-  readonly fileName: string;
-  readonly totalBytes: number;
-  readonly totalChunks: number;
-  readonly buffer: (Uint8Array | null)[];
-  readonly ownerUserId: string;
-  receivedBytes: number;
-  receivedChunks: number;
-  startedAt: number;
-  lastActivity: number;
-}
-
 export type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 
 export interface ModuleHandlerDeps {
-  readonly moduleUploadSessions: Map<string, ModuleUploadSession>;
   readonly worldBookIdsByCharacter: Map<string, readonly string[]>;
-  readonly validateUploadShape: (
-    totalBytes: unknown,
-    totalChunks: unknown,
-  ) => { ok: true } | { ok: false; reason: string };
   readonly processModuleUpload: (
     bytes: Uint8Array,
     fileName: string,
     userId: string,
   ) => Promise<{ envelope: ModuleEnvelope }>;
+  readonly getUpload: (
+    uploadId: string,
+    userId: string,
+  ) => Promise<{ fileName: string; size: number; data: Uint8Array } | null>;
+  readonly deleteUpload: (uploadId: string, userId: string) => Promise<boolean>;
   readonly nudgeGc: (reason: string) => void;
   readonly readModuleEnvelope: (userId: string, moduleId: string) => Promise<ModuleEnvelope | null>;
   readonly readModuleImageJournalImageIds: (userId: string, moduleId: string) => Promise<readonly string[]>;
@@ -84,10 +71,7 @@ export interface ModuleHandlerDeps {
 }
 
 export function createModuleHandlers(deps: ModuleHandlerDeps): {
-  readonly upload_module_init: Handler<'upload_module_init'>;
-  readonly upload_module_chunk: Handler<'upload_module_chunk'>;
-  readonly upload_module_commit: Handler<'upload_module_commit'>;
-  readonly upload_module_abort: Handler<'upload_module_abort'>;
+  readonly process_module_from_upload: Handler<'process_module_from_upload'>;
   readonly request_modules: Handler<'request_modules'>;
   readonly delete_module: Handler<'delete_module'>;
   readonly attach_module: Handler<'attach_module'>;
@@ -95,178 +79,58 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
   readonly module_artifacts_installed: Handler<'module_artifacts_installed'>;
   readonly module_artifacts_uninstalled: Handler<'module_artifacts_uninstalled'>;
 } {
+  async function finalizeModuleUpload(
+    bytes: Uint8Array,
+    fileName: string,
+    ctx: { userId: string; send: (msg: import('../types/messages.js').BackendToFrontend, userId: string) => void },
+  ): Promise<void> {
+    try {
+      const { envelope: env } = await deps.processModuleUpload(bytes, fileName, ctx.userId);
+      deps.nudgeGc('module-upload');
+      const moduleName = typeof env.module.name === 'string' && env.module.name.length > 0
+        ? env.module.name
+        : env.id;
+      ctx.send({ type: 'import_progress', phase: 'saving_payload', message: `Saved ${moduleName}`, fraction: 0.95 }, ctx.userId);
+      const attachedBefore = await deps.charactersAttachedTo(env.id, ctx.userId);
+      await deps.pushModules(ctx.userId);
+      if (attachedBefore.length > 0) {
+        deps.log.info(`finalizeModuleUpload: auto-refreshing ${attachedBefore.length} character(s) attached to module ${env.id}`);
+        for (const charId of attachedBefore) {
+          await deps.refreshAttachedModule(charId, env, ctx.userId);
+        }
+      }
+      ctx.send({ type: 'import_progress', phase: 'done', message: `Imported ${moduleName}`, fraction: 1 }, ctx.userId);
+    } catch (err) {
+      ctx.send({ type: 'import_progress', phase: 'error', message: 'Module upload failed', fraction: null, error: deps.errMsg(err) }, ctx.userId);
+      ctx.send({ type: 'error', message: `Module decode/save failed: ${deps.errMsg(err)}` }, ctx.userId);
+    }
+  }
+
   return {
-    upload_module_init: async (msg, ctx) => {
-      deps.log.info(
-        `upload_module_init: sessionId=${msg.sessionId} file=${msg.fileName} ` +
-          `totalBytes=${msg.totalBytes} totalChunks=${msg.totalChunks}`,
-      );
-      const shape = deps.validateUploadShape(msg.totalBytes, msg.totalChunks);
-      if (!shape.ok) {
-        deps.log.warn(`upload_module_init: rejected sessionId=${msg.sessionId} userId=${ctx.userId}: ${shape.reason}`);
-        ctx.send({ type: 'error', message: `upload_module_init: ${shape.reason}`, sessionId: msg.sessionId }, ctx.userId);
-        return;
-      }
-      const existingMod = deps.moduleUploadSessions.get(msg.sessionId);
-      if (existingMod && existingMod.ownerUserId !== ctx.userId) {
-        deps.log.warn(`upload_module_init: sessionId=${msg.sessionId} owned by ${existingMod.ownerUserId}, rejecting cross-user reuse from ${ctx.userId}`);
-        ctx.send({ type: 'error', message: `Session id collision; pick a fresh id` }, ctx.userId);
-        return;
-      }
-      deps.moduleUploadSessions.set(msg.sessionId, {
-        fileName: msg.fileName,
-        totalBytes: msg.totalBytes,
-        totalChunks: msg.totalChunks,
-        buffer: new Array(msg.totalChunks).fill(null),
-        ownerUserId: ctx.userId,
-        receivedBytes: 0,
-        receivedChunks: 0,
-        startedAt: Date.now(),
-        lastActivity: Date.now(),
-      });
-      ctx.send({
-        type: 'module_upload_ack',
-        sessionId: msg.sessionId,
-        seq: -1,
-        receivedBytes: 0,
-      }, ctx.userId);
-    },
-    upload_module_chunk: async (msg, ctx) => {
-      const session = deps.moduleUploadSessions.get(msg.sessionId);
-      if (!session) {
-        ctx.send({ type: 'error', message: `upload_module_chunk: unknown sessionId ${msg.sessionId}` }, ctx.userId);
-        return;
-      }
-      if (session.ownerUserId !== ctx.userId) {
-        deps.log.warn(`upload_module_chunk: ownership mismatch sessionId=${msg.sessionId} owner=${session.ownerUserId} sender=${ctx.userId ?? '<none>'}`);
-        ctx.send({ type: 'error', message: `upload_module_chunk: unknown sessionId ${msg.sessionId}` }, ctx.userId);
-        return;
-      }
-      if (msg.seq < 0 || msg.seq >= session.totalChunks) return;
-      const chunkBytes = base64ToBytes(msg.bytesB64Chunk);
-      if (session.buffer[msg.seq] === null) {
-        session.receivedChunks += 1;
-      }
-      session.buffer[msg.seq] = chunkBytes;
-      session.receivedBytes += chunkBytes.byteLength;
-      session.lastActivity = Date.now();
-      ctx.send({
-        type: 'module_upload_ack',
-        sessionId: msg.sessionId,
-        seq: msg.seq,
-        receivedBytes: session.receivedBytes,
-      }, ctx.userId);
-    },
-    upload_module_commit: async (msg, ctx) => {
-      const session = deps.moduleUploadSessions.get(msg.sessionId);
-      if (!session) {
-        ctx.send({ type: 'error', message: `upload_module_commit: unknown sessionId ${msg.sessionId}` }, ctx.userId);
-        return;
-      }
-      if (session.ownerUserId !== ctx.userId) {
-        deps.log.warn(`upload_module_commit: ownership mismatch sessionId=${msg.sessionId} owner=${session.ownerUserId} sender=${ctx.userId}`);
-        ctx.send({ type: 'error', message: `upload_module_commit: unknown sessionId ${msg.sessionId}` }, ctx.userId);
-        return;
-      }
-      if (session.receivedChunks !== session.totalChunks) {
-        const missing = [];
-        for (let i = 0; i < session.totalChunks; i++) {
-          if (session.buffer[i] === null) missing.push(i);
-        }
-        ctx.send({
-          type: 'error',
-          message: `upload_module_commit: missing ${missing.length} chunk(s) [${missing.slice(0, 5).join(',')}…]`,
-        }, ctx.userId);
-        deps.moduleUploadSessions.delete(msg.sessionId);
-        return;
-      }
-      const totalBytes = session.receivedBytes;
-      const tConcatStart = Date.now();
-      let combined = new Uint8Array(totalBytes);
-      let offset = 0;
-      for (let i = 0; i < session.totalChunks; i++) {
-        const c = session.buffer[i]!;
-        combined.set(c, offset);
-        offset += c.byteLength;
-        // Drop the per-chunk reference so GC can reclaim while we walk.
-        (session.buffer as Array<Uint8Array | null>)[i] = null;
-      }
-      const concatMs = Date.now() - tConcatStart;
-      deps.log.info(
-        `upload_module_commit: concat done bytes=${totalBytes} chunks=${session.totalChunks} elapsed=${concatMs}ms`,
-      );
-      const fileName = session.fileName;
-      deps.moduleUploadSessions.delete(msg.sessionId);
-      ctx.send({
-        type: 'module_upload_ack',
-        sessionId: msg.sessionId,
-        seq: -2,
-        receivedBytes: session.receivedBytes,
-      }, ctx.userId);
-      ctx.send({
-        type: 'import_progress',
-        phase: 'translating',
-        message: `Translating ${fileName}…`,
-        fraction: 0.3,
-      }, ctx.userId);
+    process_module_from_upload: async (msg, ctx) => {
+      deps.log.info(`process_module_from_upload: uploadId=${msg.uploadId} file=${msg.fileName} userId=${ctx.userId}`);
+      let upload: { fileName: string; size: number; data: Uint8Array } | null;
       try {
-        const handoff = combined;
-        // Drop our local reference so processModuleUpload owns the only one.
-        // Inside processModuleUpload, decodeRisum can free the buffer once
-        // assets are extracted into per-asset Uint8Arrays.
-        combined = new Uint8Array(0);
-        const { envelope: env } = await deps.processModuleUpload(handoff, fileName, ctx.userId);
-        deps.nudgeGc('module-upload');
-        const moduleName = typeof env.module.name === 'string' && env.module.name.length > 0
-          ? env.module.name
-          : env.id;
-        ctx.send({
-          type: 'import_progress',
-          phase: 'saving_payload',
-          message: `Saved ${moduleName}`,
-          fraction: 0.95,
-        }, ctx.userId);
-        const attachedBefore = await deps.charactersAttachedTo(env.id, ctx.userId);
-        await deps.pushModules(ctx.userId);
-        if (attachedBefore.length > 0) {
-          deps.log.info(
-            `upload_module_commit: auto-refreshing ${attachedBefore.length} character(s) ` +
-              `attached to module ${env.id}`,
-          );
-          for (const charId of attachedBefore) {
-            await deps.refreshAttachedModule(charId, env, ctx.userId);
-          }
-        }
-        ctx.send({
-          type: 'import_progress',
-          phase: 'done',
-          message: `Imported ${moduleName}`,
-          fraction: 1,
-        }, ctx.userId);
+        upload = await deps.getUpload(msg.uploadId, ctx.userId);
       } catch (err) {
-        ctx.send({
-          type: 'import_progress',
-          phase: 'error',
-          message: 'Module upload failed',
-          fraction: null,
-          error: deps.errMsg(err),
-        }, ctx.userId);
-        ctx.send({
-          type: 'error',
-          message: `Module decode/save failed: ${deps.errMsg(err)}`,
-        }, ctx.userId);
-      }
-    },
-    upload_module_abort: async (msg, ctx) => {
-      const session = deps.moduleUploadSessions.get(msg.sessionId);
-      if (session && session.ownerUserId !== ctx.userId) {
-        deps.log.warn(`upload_module_abort: ownership mismatch sessionId=${msg.sessionId} owner=${session.ownerUserId} sender=${ctx.userId ?? '<none>'},ignoring`);
+        deps.log.warn(`process_module_from_upload: getUpload threw: ${deps.errMsg(err)}`);
+        ctx.send({ type: 'import_progress', phase: 'error', message: 'Upload retrieval failed', fraction: null, error: deps.errMsg(err) }, ctx.userId);
+        ctx.send({ type: 'error', message: `Module upload retrieval failed: ${deps.errMsg(err)}` }, ctx.userId);
         return;
       }
-      const existed = deps.moduleUploadSessions.delete(msg.sessionId);
-      deps.log.info(
-        `upload_module_abort: sessionId=${msg.sessionId} existed=${existed} reason=${msg.reason ?? '<none>'}`,
-      );
+      if (!upload) {
+        deps.log.warn(`process_module_from_upload: uploadId=${msg.uploadId} not found or expired`);
+        ctx.send({ type: 'import_progress', phase: 'error', message: 'Upload not found or expired. Re-import the module.', fraction: null, error: 'upload_missing' }, ctx.userId);
+        ctx.send({ type: 'error', message: 'Module upload not found or expired. Re-import the module.' }, ctx.userId);
+        return;
+      }
+      deps.log.info(`process_module_from_upload: got ${upload.data.byteLength} bytes, processing`);
+      ctx.send({ type: 'import_progress', phase: 'translating', message: `Translating ${msg.fileName || upload.fileName}…`, fraction: 0.3 }, ctx.userId);
+      try {
+        await finalizeModuleUpload(upload.data, msg.fileName || upload.fileName, ctx);
+      } finally {
+        void deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
+      }
     },
     request_modules: async (_msg, ctx) => {
       await deps.pushModules(ctx.userId);

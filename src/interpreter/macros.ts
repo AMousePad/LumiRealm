@@ -194,21 +194,22 @@ export function buildRuntimeContext(mctx: MacroInvokeCtx): RisuRuntimeContext {
     set(scope: VarScope, name: string, value: string): void {
       if (scope === 'temp') { tempOverlay.set(name, value); return; }
       if (!committing || !overlay) return;
-      if (scope === 'global') overlay.global.set(name, value);
-      else overlay.chat.set(name, value);
-      // Fire-and-forget writeback so trigger-path reads see the change on next generation.
-      if (chatId && spindleGlobal) {
-        try {
-          const target = scope === 'global'
-            ? spindleGlobal.variables.global.set(name, value)
-            : spindleGlobal.variables.chat.set(chatId, name, value);
-          void target.catch((err: unknown) => {
-            logWarn(`vars.set writeback failed scope=${scope} name=${name}: ${err instanceof Error ? err.message : String(err)}`);
-          });
-        } catch (err) {
-          logWarn(`vars.set threw scope=${scope} name=${name}: ${err instanceof Error ? err.message : String(err)}`);
+      if (scope === 'global') {
+        overlay.global.set(name, value);
+        if (chatId && spindleGlobal) {
+          try {
+            void spindleGlobal.variables.global.set(name, value).catch((err: unknown) => {
+              logWarn(`vars.set global writeback failed name=${name}: ${err instanceof Error ? err.message : String(err)}`);
+            });
+          } catch (err) {
+            logWarn(`vars.set global threw name=${name}: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
+        return;
       }
+      // In-prompt setvar is overlay-only. Message-text setvar persists via the
+      // runVar strip pass (Risu runCurrentChatFunction), not this fallback path.
+      overlay.chat.set(name, value);
     },
     add(scope: VarScope, name: string, delta: number): void {
       if (scope !== 'temp' && !committing) return;
@@ -234,12 +235,9 @@ export function buildRuntimeContext(mctx: MacroInvokeCtx): RisuRuntimeContext {
         if (scope === 'global') overlay.global.delete(name);
         else { overlay.local.delete(name); overlay.chat.delete(name); }
       }
-      if (chatId && spindleGlobal) {
+      if (scope === 'global' && chatId && spindleGlobal) {
         try {
-          const op = scope === 'global'
-            ? spindleGlobal.variables.global.delete(name)
-            : spindleGlobal.variables.chat.delete(chatId, name);
-          void op.catch(() => {});
+          void spindleGlobal.variables.global.delete(name).catch(() => {});
         } catch { /* ignore */ }
       }
     },
@@ -372,6 +370,9 @@ export function buildRuntimeContext(mctx: MacroInvokeCtx): RisuRuntimeContext {
     screenWidth: 0,
     screenHeight: 0,
     commit: committing,
+    // Interceptor !commit runs are display resolution: Risu renders those with
+    // rmVar (setvar family hides). Commit runs are prompt assembly (literal).
+    ...(committing ? {} : { rmVar: true }),
     legacyMediaFindings: false,
     ...(getActiveModulesByNamespace(chatId)
       ? { modulesByNamespace: getActiveModulesByNamespace(chatId)! }

@@ -1,14 +1,12 @@
-// Persists trigger variables to chat.metadata.macro_variables.local.
-// Risu uses chat.scriptstate['$'+key]; we mirror to macro_variables.local so Lumi's
-// native {{getvar}} reads from the same store.
+// Persists Risu scriptstate to chat.metadata.chat_variables, the scope Lumi natively
+// rehydrates into env and preserves. Keys are $-prefixed in memory, bare on disk.
 
 import { toStr } from '../../util/coerce.js';
 import { rememberRecentFlush, getRecentFlush } from '../../state/recent-flush-cache.js';
 import { runChatMetadataExclusive } from '../../state/chat-metadata-queue.js';
 import type { HostApi } from '../host.js';
 
-export const META_ROOT = 'macro_variables';
-export const META_SUB = 'local';
+export const VAR_STORE_KEY = 'chat_variables';
 
 export async function loadVars(api: HostApi, chatId?: string): Promise<Record<string, string>> {
   if (chatId) {
@@ -16,12 +14,10 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
     if (cached) return { ...cached };
   }
   try {
-    const raw = await api.chat.getMetadata(META_ROOT);
+    const raw = await api.chat.getMetadata(VAR_STORE_KEY);
     if (!raw || typeof raw !== 'object') return {};
-    const localMap = (raw as { local?: unknown }).local;
-    if (!localMap || typeof localMap !== 'object') return {};
     const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(localMap as Record<string, unknown>)) {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
       out['$' + k] = toStr(v);
     }
     return out;
@@ -32,21 +28,15 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
 
 export async function saveVars(api: HostApi, vars: Record<string, string>, chatId?: string): Promise<void> {
   const write = async (): Promise<void> => {
-    const existing = await api.chat.getMetadata(META_ROOT);
-    const base: Record<string, unknown> = (existing && typeof existing === 'object')
-      ? { ...(existing as Record<string, unknown>) }
-      : {};
-    const bareLocal: Record<string, string> = {};
+    const bare: Record<string, string> = {};
     for (const [k, v] of Object.entries(vars)) {
-      const bare = k.startsWith('$') ? k.slice(1) : k;
-      bareLocal[bare] = v;
+      bare[k.startsWith('$') ? k.slice(1) : k] = v;
     }
-    base[META_SUB] = bareLocal;
-    await api.chat.setMetadata(META_ROOT, base);
+    await api.chat.setMetadata(VAR_STORE_KEY, bare);
     if (chatId) rememberRecentFlush(chatId, vars);
   };
   try {
     if (chatId) await runChatMetadataExclusive(chatId, write);
     else await write();
-  } catch { /* ignore — chat-metadata write may not be permitted */ }
+  } catch { /* ignore, chat-metadata write may not be permitted */ }
 }

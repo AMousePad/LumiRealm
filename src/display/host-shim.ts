@@ -21,14 +21,11 @@ export type DisplayVarWriteback = (vars: Record<string, string>) => void;
 export function makeSnapshotHostApi(snap: DisplaySnapshot, onVarWrite?: DisplayVarWriteback): HostApi {
   const noWrite = async (): Promise<void> => { /* read-only display surfaces */ };
   const setMetadata = async (key: string, value: unknown): Promise<void> => {
-    if (key !== 'macro_variables' || !onVarWrite) return;
-    const local = (value && typeof value === 'object'
-      ? (value as { local?: unknown }).local
-      : undefined);
-    if (!local || typeof local !== 'object') return;
+    if (key !== 'chat_variables' || !onVarWrite) return;
+    if (!value || typeof value !== 'object') return;
     const orig = snap.vars.local;
     const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(local as Record<string, unknown>)) {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       const s = typeof v === 'string' ? v : String(v);
       if (orig[k] !== s) out[k] = s;
     }
@@ -36,13 +33,8 @@ export function makeSnapshotHostApi(snap: DisplaySnapshot, onVarWrite?: DisplayV
     onVarWrite(out);
   };
   const getMetadata = (key: string): Promise<unknown> => {
-    if (key === 'macro_variables') {
-      return Promise.resolve({
-        local: { ...snap.vars.local },
-        global: { ...snap.vars.global },
-        chat: { ...snap.vars.chat },
-      });
-    }
+    if (key === 'chat_variables') return Promise.resolve({ ...snap.vars.local });
+    if (key === 'macro_variables') return Promise.resolve({ global: { ...snap.vars.global } });
     if (key === 'authors_note') return Promise.resolve(snap.chatAuthorsNote ?? undefined);
     return Promise.resolve(undefined);
   };

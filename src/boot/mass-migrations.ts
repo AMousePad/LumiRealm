@@ -76,6 +76,7 @@ export interface MassMigrationsRunner {
   readonly runMassModuleMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runMassCharacterMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runMacroUnprefixSweepIfNeeded: (userId: string) => Promise<void>;
+  readonly runVarScopeMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly notifyLorebookMigrationArchive: (
     subjectLabel: string,
     archiveWbId: string,
@@ -437,6 +438,64 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     );
   }
 
+  const varScopeMigrationStartedThisBoot = new Set<string>();
+
+  async function runVarScopeMigrationIfNeeded(userId: string): Promise<void> {
+    if (varScopeMigrationStartedThisBoot.has(userId)) return;
+    if (blockingPermissionsMissing('var-scope')) return;
+    varScopeMigrationStartedThisBoot.add(userId);
+    const state = await readMigrationState(spindle.userStorage, userId);
+    if (state.vars_migrated_to_chat_scope) return;
+    const chars = await listLumirealmCharacters(userId);
+    let migratedChats = 0;
+    let failed = 0;
+    const failures: string[] = [];
+    for (const { character } of chars) {
+      let offset = 0;
+      for (;;) {
+        const page = await spindle.chats.list({ characterId: character.id, limit: 100, offset, userId });
+        for (const chatRow of page.data) {
+          try {
+            const chat = await spindle.chats.get(chatRow.id, userId);
+            const meta = (chat?.metadata ?? {}) as Record<string, unknown>;
+            const mv = (meta['macro_variables'] && typeof meta['macro_variables'] === 'object'
+              ? { ...(meta['macro_variables'] as Record<string, unknown>) }
+              : null);
+            const local = (mv && mv['local'] && typeof mv['local'] === 'object'
+              ? (mv['local'] as Record<string, unknown>)
+              : null);
+            if (!local || Object.keys(local).length === 0) continue;
+            const existingCv = (meta['chat_variables'] && typeof meta['chat_variables'] === 'object'
+              ? { ...(meta['chat_variables'] as Record<string, unknown>) }
+              : {}) as Record<string, unknown>;
+            const mergedCv = { ...existingCv, ...local };
+            const newMv = { ...mv };
+            delete newMv['local'];
+            await spindle.chats.update(
+              chatRow.id,
+              { metadata: { ...meta, chat_variables: mergedCv, macro_variables: newMv } as never },
+              userId,
+            );
+            migratedChats += 1;
+          } catch (err) {
+            failed += 1;
+            failures.push(`${chatRow.id}: ${errMsg(err)}`);
+          }
+        }
+        offset += page.data.length;
+        if (page.data.length === 0 || offset >= page.total) break;
+      }
+    }
+    if (failed === 0) {
+      const after = await readMigrationState(spindle.userStorage, userId);
+      await writeMigrationState(spindle.userStorage, userId, { ...after, vars_migrated_to_chat_scope: true });
+      log.info(`var-scope-migration: user=${userId} done migratedChats=${migratedChats}`);
+    } else {
+      log.warn(`var-scope-migration: user=${userId} FAILED ${failed} chat(s), marker NOT set (retry next boot): ${failures.slice(0, 3).join(' | ')}`);
+      toastFor(userId, 'error', `${failed} chat(s) failed variable migration and may show reset state until restart: ${failures.slice(0, 2).join('; ')}`, { title: 'LumiRealm variable migration failed', duration: 15000 });
+    }
+  }
+
   async function sweepCharacterMacros(
     userId: string,
     characterId: string,
@@ -551,6 +610,7 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
     runMacroUnprefixSweepIfNeeded,
+    runVarScopeMigrationIfNeeded,
     notifyLorebookMigrationArchive,
     flushLorebookMigrationArchives,
   };

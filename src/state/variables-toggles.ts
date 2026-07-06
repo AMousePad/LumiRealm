@@ -185,16 +185,14 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
       log.warn(`variables.refresh: chats.get failed chat=${chatId}: ${errMsg(err)}`);
       return;
     }
-    const mv = ((chat?.metadata as { macro_variables?: unknown } | undefined)
-      ?.macro_variables ?? {}) as {
-        local?: unknown;
-        global?: unknown;
-        chat?: unknown;
-      };
+    const meta = (chat?.metadata ?? {}) as {
+      macro_variables?: { global?: unknown };
+      chat_variables?: unknown;
+    };
     const scopes = {
-      local: sanitizeVarMap(mv.local),
-      global: sanitizeVarMap(mv.global),
-      chat: sanitizeVarMap(mv.chat),
+      local: sanitizeVarMap(meta.chat_variables),
+      global: sanitizeVarMap(meta.macro_variables?.global),
+      chat: sanitizeVarMap(undefined),
     };
     // FE Default subtab needs both effective and card-side defaults to flag overridden entries and offer "Reset to card default".
     const cardSide = active.card.risuPayload.scriptstate_defaults ?? {};
@@ -250,29 +248,25 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
       return { ok: false, reason: `chats.get failed: ${errMsg(err)}` };
     }
     const meta = (chat?.metadata ?? {}) as Record<string, unknown>;
-    const mv = (meta['macro_variables'] && typeof meta['macro_variables'] === 'object'
-      ? { ...(meta['macro_variables'] as Record<string, unknown>) }
-      : {}) as Record<string, unknown>;
-    const local = (mv['local'] && typeof mv['local'] === 'object'
-      ? { ...(mv['local'] as Record<string, unknown>) }
+    const cv = (meta['chat_variables'] && typeof meta['chat_variables'] === 'object'
+      ? { ...(meta['chat_variables'] as Record<string, unknown>) }
       : {}) as Record<string, unknown>;
 
     if (value === null) {
-      if (!Object.prototype.hasOwnProperty.call(local, trimmedKey)) {
+      if (!Object.prototype.hasOwnProperty.call(cv, trimmedKey)) {
         return { ok: true };
       }
-      delete local[trimmedKey];
+      delete cv[trimmedKey];
     } else {
       // Coerce to string. Empty string is allowed (matches `setvar X ""`).
-      local[trimmedKey] = String(value);
+      cv[trimmedKey] = String(value);
     }
-    mv['local'] = local;
 
     try {
       expectChatChange(chatId);
       await spindle.chats.update(
         chatId,
-        { metadata: { ...meta, macro_variables: mv } as never },
+        { metadata: { ...meta, chat_variables: cv } as never },
         userId,
       );
     } catch (err) {

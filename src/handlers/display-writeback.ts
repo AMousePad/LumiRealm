@@ -14,22 +14,18 @@ export function createDisplayWritebackHandlers(): { display_writeback: Handler<'
         await runChatMetadataExclusive(chatId, async () => {
           const chat = await spindle.chats.get(chatId, ctx.userId);
           const meta = (chat?.metadata ?? {}) as Record<string, unknown>;
-          const mv = (meta['macro_variables'] && typeof meta['macro_variables'] === 'object'
-            ? { ...(meta['macro_variables'] as Record<string, unknown>) }
-            : {}) as Record<string, unknown>;
-          const local = (mv['local'] && typeof mv['local'] === 'object'
-            ? { ...(mv['local'] as Record<string, unknown>) }
+          const cv = (meta['chat_variables'] && typeof meta['chat_variables'] === 'object'
+            ? { ...(meta['chat_variables'] as Record<string, unknown>) }
             : {}) as Record<string, unknown>;
           let changed = 0;
           for (const [k, v] of Object.entries(vars)) {
-            if (local[k] === v) continue;
-            local[k] = v;
+            if (cv[k] === v) continue;
+            cv[k] = v;
             changed += 1;
           }
           if (changed === 0) return;
-          mv['local'] = local;
           expectChatChange(chatId);
-          await spindle.chats.update(chatId, { metadata: { ...meta, macro_variables: mv } as never }, ctx.userId);
+          await spindle.chats.update(chatId, { metadata: { ...meta, chat_variables: cv } as never }, ctx.userId);
           invalidateRecentFlush(chatId);
           ctx.log.info(`display_writeback chat=${chatId} changed=${changed}`);
         });

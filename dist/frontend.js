@@ -4612,9 +4612,7 @@ class MockVariableStore {
     this.data[scope].set(name, value);
   }
   add(scope, name, delta) {
-    const current = Number(this.data[scope].get(name) ?? "0");
-    const next = (Number.isFinite(current) ? current : 0) + delta;
-    this.data[scope].set(name, String(next));
+    this.data[scope].set(name, String(Number(this.data[scope].get(name) ?? "0") + delta));
   }
   has(scope, name) {
     return this.data[scope].has(name);
@@ -5779,6 +5777,13 @@ var init_random = __esm(() => {
 function register7(name, handler, description) {
   registry.register({ name, handler, description, category: "Risu / Variables", scoped: false });
 }
+function setvarMode(ctx) {
+  if (ctx.rmVar)
+    return "hide";
+  if (ctx.runVar)
+    return "run";
+  return "literal";
+}
 function leaveVarLiteral(ctx) {
   return !ctx.commit || ctx.promptRegexLiteralVars === true;
 }
@@ -5786,26 +5791,35 @@ var init_variables = __esm(() => {
   init_registry();
   register7("risu_getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a local chat variable. Empty string if unset.");
   register7("risu_setvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
       return `{{setvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
     ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
     return "";
   }, "Sets a local chat variable.");
   register7("risu_addvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
       return `{{addvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    ctx.vars.add("local", a[0] ?? "", Number(a[1] ?? "0"));
+    ctx.vars.add("local", a[0] ?? "", Number(a[1]));
     return "";
   }, "Adds delta to a local chat variable (coerces current value to number).");
   register7("setdefaultvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
       return `{{setdefaultvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
     const name = a[0] ?? "";
     if (!ctx.vars.get("local", name)) {
       ctx.vars.set("local", name, a[1] ?? "");
     }
     return "";
-  }, "Sets a local chat variable only if its current value is falsy (unset or empty).");
+  }, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
   register7("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""), "Reads a global chat variable.");
   register7("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""), "Reads a temporary variable (per-evaluation scope).");
   register7("settempvar", (ctx, a) => {
@@ -22935,23 +22949,23 @@ function buildEvaluatorContext(input) {
       }
       if (!commit || !overlay)
         return;
-      if (scope === "global")
+      if (scope === "global") {
         overlay.global.set(name, value);
-      else
-        overlay.chat.set(name, value);
-      if (chatId && spindleGlobal && persistVars) {
-        try {
-          const op = scope === "global" ? spindleGlobal.variables.global.set(name, value) : spindleGlobal.variables.chat.set(chatId, name, value);
-          op.catch(() => {});
-        } catch {}
+        if (chatId && spindleGlobal && persistVars) {
+          try {
+            spindleGlobal.variables.global.set(name, value).catch(() => {});
+          } catch {}
+        }
+        return;
       }
+      overlay.chat.set(name, value);
+      if (input.localVarSink)
+        input.localVarSink(name, value);
     },
     add(scope, name, delta) {
       if (scope !== "temp" && !commit)
         return;
-      const cur = Number(this.get(scope, name));
-      const next = String((Number.isFinite(cur) ? cur : 0) + delta);
-      this.set(scope, name, next);
+      this.set(scope, name, String(Number(this.get(scope, name)) + delta));
     },
     has(scope, name) {
       if (recordRead)
@@ -22983,10 +22997,11 @@ function buildEvaluatorContext(input) {
           overlay.chat.delete(name);
         }
       }
-      if (chatId && spindleGlobal && persistVars) {
+      if (scope !== "global" && input.localVarSink)
+        input.localVarSink(name, null);
+      if (scope === "global" && chatId && spindleGlobal && persistVars) {
         try {
-          const op = scope === "global" ? spindleGlobal.variables.global.delete(name) : spindleGlobal.variables.chat.delete(chatId, name);
-          op.catch(() => {});
+          spindleGlobal.variables.global.delete(name).catch(() => {});
         } catch {}
       }
     }
@@ -23108,6 +23123,8 @@ function buildEvaluatorContext(input) {
     ...input.modulesByNamespace ? { modulesByNamespace: input.modulesByNamespace } : {},
     ...input.positionPt ? { positionPt: input.positionPt } : {},
     ...input.cbsContext ? { cbsContext: true } : {},
+    ...input.rmVar ? { rmVar: true } : {},
+    ...input.runVar ? { runVar: true } : {},
     ...input.suppressVarPersist ? { promptRegexLiteralVars: true } : {}
   };
   out.evaluate = (text) => {
@@ -23146,6 +23163,8 @@ function runPipeline(input, opts) {
     ...input.lorebook ? { lorebook: input.lorebook } : {},
     ...input.positionPt ? { positionPt: input.positionPt } : {},
     ...input.cbsContext ? { cbsContext: true } : {},
+    ...input.rmVar ? { rmVar: true } : {},
+    ...input.runVar ? { runVar: true } : {},
     ...input.suppressVarPersist ? { suppressVarPersist: true } : {},
     commit
   });
@@ -24723,8 +24742,7 @@ function runChatMetadataExclusive(chatId, fn) {
 }
 
 // src/interpreter/runtime/chat-state.ts
-var META_ROOT = "macro_variables";
-var META_SUB = "local";
+var VAR_STORE_KEY = "chat_variables";
 async function loadVars(api, chatId) {
   if (chatId) {
     const cached = getRecentFlush(chatId);
@@ -24732,14 +24750,11 @@ async function loadVars(api, chatId) {
       return { ...cached };
   }
   try {
-    const raw = await api.chat.getMetadata(META_ROOT);
+    const raw = await api.chat.getMetadata(VAR_STORE_KEY);
     if (!raw || typeof raw !== "object")
       return {};
-    const localMap = raw.local;
-    if (!localMap || typeof localMap !== "object")
-      return {};
     const out = {};
-    for (const [k, v] of Object.entries(localMap)) {
+    for (const [k, v] of Object.entries(raw)) {
       out["$" + k] = toStr(v);
     }
     return out;
@@ -24749,15 +24764,11 @@ async function loadVars(api, chatId) {
 }
 async function saveVars(api, vars, chatId) {
   const write = async () => {
-    const existing = await api.chat.getMetadata(META_ROOT);
-    const base = existing && typeof existing === "object" ? { ...existing } : {};
-    const bareLocal = {};
+    const bare = {};
     for (const [k, v] of Object.entries(vars)) {
-      const bare = k.startsWith("$") ? k.slice(1) : k;
-      bareLocal[bare] = v;
+      bare[k.startsWith("$") ? k.slice(1) : k] = v;
     }
-    base[META_SUB] = bareLocal;
-    await api.chat.setMetadata(META_ROOT, base);
+    await api.chat.setMetadata(VAR_STORE_KEY, bare);
     if (chatId)
       rememberRecentFlush(chatId, vars);
   };
@@ -26127,14 +26138,13 @@ function buildPreloaded(snap) {
 function makeSnapshotHostApi(snap, onVarWrite) {
   const noWrite = async () => {};
   const setMetadata = async (key, value) => {
-    if (key !== "macro_variables" || !onVarWrite)
+    if (key !== "chat_variables" || !onVarWrite)
       return;
-    const local = value && typeof value === "object" ? value.local : undefined;
-    if (!local || typeof local !== "object")
+    if (!value || typeof value !== "object")
       return;
     const orig = snap.vars.local;
     const out = {};
-    for (const [k, v] of Object.entries(local)) {
+    for (const [k, v] of Object.entries(value)) {
       const s = typeof v === "string" ? v : String(v);
       if (orig[k] !== s)
         out[k] = s;
@@ -26144,13 +26154,10 @@ function makeSnapshotHostApi(snap, onVarWrite) {
     onVarWrite(out);
   };
   const getMetadata = (key) => {
-    if (key === "macro_variables") {
-      return Promise.resolve({
-        local: { ...snap.vars.local },
-        global: { ...snap.vars.global },
-        chat: { ...snap.vars.chat }
-      });
-    }
+    if (key === "chat_variables")
+      return Promise.resolve({ ...snap.vars.local });
+    if (key === "macro_variables")
+      return Promise.resolve({ global: { ...snap.vars.global } });
     if (key === "authors_note")
       return Promise.resolve(snap.chatAuthorsNote ?? undefined);
     return Promise.resolve(undefined);
@@ -29660,6 +29667,7 @@ function buildInput(snap, content, context2) {
   return {
     template: content,
     phase: "display",
+    rmVar: true,
     chatId: snap.chatId,
     characterId: snap.characterId,
     userName: snap.userName,
@@ -36623,9 +36631,7 @@ function mountCardsPanel(opts) {
     });
   }
   function handleBackendMessage(msg) {
-    if (msg.type !== "module_upload_ack") {
-      log7.info(`drawer.handle: ${msg.type}`);
-    }
+    log7.info(`drawer.handle: ${msg.type}`);
     switch (msg.type) {
       case "cards_updated":
         log7.info(`drawer.cards_updated: count=${msg.cards.length}`);
@@ -39732,50 +39738,55 @@ function setupTranslateOrchestrator(opts) {
 
 // src/ui/import-text-upload.ts
 var SINGLE_MAX_BYTES = 1e6;
-var CHUNK_CHARS = 600000;
-function uuid2() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
-    return crypto.randomUUID();
-  return `up-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+var UPLOAD_ENDPOINT2 = "/api/v1/spindle-uploads";
+var UPLOAD_CHUNK_BYTES2 = 16 * 1024 * 1024;
+var EXTENSION_IDENTIFIER2 = "lumirealm";
+function tusUploadBytes(bytes, fileName) {
+  return new Promise((resolve, reject) => {
+    const upload = new Upload(new Blob([bytes]), {
+      endpoint: UPLOAD_ENDPOINT2,
+      chunkSize: UPLOAD_CHUNK_BYTES2,
+      retryDelays: [0, 1000, 3000, 5000],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER2 },
+      onError: reject,
+      onSuccess: () => {
+        const id = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
+        if (id)
+          resolve(id);
+        else
+          reject(new Error("upload finished but no id was returned"));
+      }
+    });
+    upload.start();
+  });
 }
-function sendImportText(send, args) {
-  const bytes = new TextEncoder().encode(args.text).length;
-  if (bytes <= SINGLE_MAX_BYTES) {
+async function sendImportText(send, args, uploadBytes = tusUploadBytes) {
+  const encoded = new TextEncoder().encode(args.text);
+  if (encoded.byteLength <= SINGLE_MAX_BYTES) {
     if (args.kind === "lorebook") {
       send({ type: "import_lorebook", characterId: args.characterId, json: args.text, ...args.filename ? { filename: args.filename } : {} });
     } else {
       send({ type: "import_regex", json: args.text, characterId: args.characterId, ...args.filename ? { filename: args.filename } : {} });
     }
-    return { chunked: false, chunks: 1 };
+    return { chunked: false };
   }
-  const uploadId = uuid2();
-  const parts = [];
-  for (let i = 0;i < args.text.length; i += CHUNK_CHARS) {
-    parts.push(args.text.slice(i, i + CHUNK_CHARS));
-  }
+  const uploadId = await uploadBytes(encoded, args.filename ?? `${args.kind}.json`);
   send({
-    type: "import_text_init",
+    type: "import_text_from_upload",
     uploadId,
     kind: args.kind,
     characterId: args.characterId,
-    totalChunks: parts.length,
-    totalBytes: bytes,
     ...args.filename ? { filename: args.filename } : {}
   });
-  for (let seq = 0;seq < parts.length; seq++) {
-    send({ type: "import_text_chunk", uploadId, seq, data: parts[seq] });
-  }
-  send({ type: "import_text_commit", uploadId });
-  return { chunked: true, chunks: parts.length };
+  return { chunked: true };
 }
 
 // src/ui/modules-tab.ts
-var CHUNK_BYTES = 2500 * 1024;
-var CHUNK_WIRE_WARN_BYTES = 3800000;
-var INIT_ACK_TIMEOUT_MS = 15000;
-var CHUNK_ACK_TIMEOUT_MS = 20000;
-var COMMIT_FIRST_PROGRESS_TIMEOUT_MS = 60000;
-var UPLOAD_WINDOW_SIZE = 30;
+var UPLOAD_ENDPOINT3 = "/api/v1/spindle-uploads";
+var UPLOAD_CHUNK_BYTES3 = 16 * 1024 * 1024;
+var EXTENSION_IDENTIFIER3 = "lumirealm";
+var PROCESSING_TIMEOUT_MS2 = 120000;
 var ACCEPT_EXTENSIONS2 = [".risum"];
 var liveVizTimers = new Set;
 function vizStartTimer(t) {
@@ -39829,7 +39840,8 @@ function mountModulesPanel(opts) {
   let modules = null;
   let cards = [];
   const attachedByCharacter = new Map;
-  let activeUpload = null;
+  let activeTus = null;
+  let processingTimer = null;
   const expandedCharacters = new Set;
   const expandedModules = new Set;
   let lastError = null;
@@ -40368,8 +40380,14 @@ filename: ${m.filename}`;
     lorebookImportInFlight = true;
     lbUploadBtn.disabled = true;
     setLorebookStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    const sent = sendImportText(sendToBackend, { kind: "lorebook", text, filename: file.name, characterId: null });
-    log7.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length} chunked=${sent.chunked} chunks=${sent.chunks}`);
+    try {
+      const sent = await sendImportText(sendToBackend, { kind: "lorebook", text, filename: file.name, characterId: null });
+      log7.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length} viaUpload=${sent.chunked}`);
+    } catch (err) {
+      lorebookImportInFlight = false;
+      lbUploadBtn.disabled = false;
+      setLorebookStatus(`Upload failed: ${errMsg(err)}`, true);
+    }
   }
   function setLorebookStatus(msg, isError) {
     lbStatus.textContent = msg;
@@ -40410,8 +40428,14 @@ filename: ${m.filename}`;
     regexImportInFlight = true;
     rxUploadBtn.disabled = true;
     setRegexStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    const sent = sendImportText(sendToBackend, { kind: "regex", text, filename: file.name, characterId: targetId });
-    log7.info(`modules-panel: import_regex file=${file.name} target=${targetId ?? "global"} bytes=${text.length} chunked=${sent.chunked} chunks=${sent.chunks}`);
+    try {
+      const sent = await sendImportText(sendToBackend, { kind: "regex", text, filename: file.name, characterId: targetId });
+      log7.info(`modules-panel: import_regex file=${file.name} target=${targetId ?? "global"} bytes=${text.length} viaUpload=${sent.chunked}`);
+    } catch (err) {
+      regexImportInFlight = false;
+      rxUploadBtn.disabled = false;
+      setRegexStatus(`Upload failed: ${errMsg(err)}`, true);
+    }
   }
   function setRegexStatus(msg, isError) {
     rxStatus.textContent = msg;
@@ -40473,164 +40497,89 @@ filename: ${m.filename}`;
       return;
     }
     lastError = null;
-    setStatus(`Uploading ${file.name}…`);
-    uploadBtn.disabled = true;
-    const sessionId = generateSessionId();
+    const fileName = file.name;
     const totalBytes = file.bytes.byteLength;
-    const totalChunks = Math.max(1, Math.ceil(totalBytes / CHUNK_BYTES));
-    log7.info(`modules-panel: upload session=${sessionId} file=${file.name} bytes=${totalBytes} chunks=${totalChunks}`);
-    activeUpload = {
-      sessionId,
-      lastAckSeq: -999,
-      receivedBytesOnBackend: 0,
-      pendingAcks: new Map,
-      aborted: false,
-      startedAt: performance.now(),
-      lastAckAt: performance.now(),
-      timings: []
-    };
-    const session = activeUpload;
-    opts.onImportStart?.(file.name, () => {
-      if (!session.aborted) {
-        session.aborted = true;
-        log7.info(`modules-panel: cancel requested session=${sessionId}`);
-        rejectAllPending(session, new Error("upload cancelled"));
+    setStatus(`Uploading ${fileName}…`);
+    uploadBtn.disabled = true;
+    log7.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
+    let cancelled = false;
+    opts.onImportStart?.(fileName, () => {
+      cancelled = true;
+      if (activeTus) {
+        activeTus.abort(true).catch(() => {});
+        activeTus = null;
       }
-    }, totalBytes);
-    try {
-      sendToBackend({
-        type: "upload_module_init",
-        sessionId,
-        fileName: file.name,
-        totalBytes,
-        totalChunks
-      });
-      await trackAck(session, -1, INIT_ACK_TIMEOUT_MS, "init");
-      let completed = 0;
-      let nextSeq = 0;
-      const errors2 = [];
-      const sendOne = async () => {
-        while (true) {
-          if (session.aborted || errors2.length > 0)
-            return;
-          const seq = nextSeq++;
-          if (seq >= totalChunks)
-            return;
-          const start = seq * CHUNK_BYTES;
-          const end = Math.min(start + CHUNK_BYTES, totalBytes);
-          const slice = file.bytes.subarray(start, end);
-          const tEncodeStart = performance.now();
-          const b64 = bytesToBase642(slice);
-          const chunkMsg = {
-            type: "upload_module_chunk",
-            sessionId,
-            seq,
-            bytesB64Chunk: b64
-          };
-          const wireSize = JSON.stringify(chunkMsg).length;
-          const encodeMs = performance.now() - tEncodeStart;
-          session.timings.push({ seq, encodeMs, sentAt: performance.now(), ackedAt: null });
-          if (session.timings.length > 60)
-            session.timings.shift();
-          if (wireSize > CHUNK_WIRE_WARN_BYTES) {
-            log7.warn(`modules-panel: chunk wire size ${wireSize}B approaches Lumi's 64KB inbound guard ` + `(seq=${seq} of ${totalChunks}, raw_chunk=${slice.byteLength}B, b64=${b64.length}B).`);
-          }
-          const ack = trackAck(session, seq, CHUNK_ACK_TIMEOUT_MS, `chunk ${seq}`);
-          sendToBackend(chunkMsg);
-          try {
-            await ack;
-          } catch (err) {
-            errors2.push(err);
-            return;
-          }
-          completed += 1;
-          setStatus(`Uploading ${file.name}… (${completed}/${totalChunks})`);
-        }
-      };
-      const workers = [];
-      for (let w = 0;w < Math.min(UPLOAD_WINDOW_SIZE, totalChunks); w++) {
-        workers.push(sendOne());
-      }
-      await Promise.all(workers);
-      if (errors2.length > 0)
-        throw errors2[0];
-      if (session.aborted)
-        throw new Error("upload aborted");
-      setStatus("Processing on server…");
-      sendToBackend({ type: "upload_module_commit", sessionId });
-      await trackAck(session, -2, COMMIT_FIRST_PROGRESS_TIMEOUT_MS, "commit");
-      setStatus(null);
-    } catch (err) {
-      log7.error("modules-panel: upload failed", err);
-      dumpUploadDiagnostics(session, err);
-      try {
-        sendToBackend({ type: "upload_module_abort", sessionId, reason: errMsg(err) });
-      } catch {}
-      lastError = `Upload failed: ${errMsg(err)}`;
-      setStatus(lastError, true);
-    } finally {
-      rejectAllPending(session, new Error("session ended"));
-      if (activeUpload?.sessionId === sessionId)
-        activeUpload = null;
+      clearProcessingTimer();
       uploadBtn.disabled = false;
-    }
-  }
-  function dumpUploadDiagnostics(session, err) {
-    try {
-      const now = performance.now();
-      const wallMs = Math.round(now - session.startedAt);
-      const sinceAckMs = Math.round(now - session.lastAckAt);
-      const acked = session.timings.filter((t) => t.ackedAt !== null);
-      const unacked = session.timings.filter((t) => t.ackedAt === null).map((t) => t.seq);
-      const encodes = session.timings.map((t) => t.encodeMs);
-      const rtts = acked.map((t) => t.ackedAt - t.sentAt);
-      const stats = (xs) => xs.length === 0 ? "n/a" : `min=${Math.round(Math.min(...xs))}ms p50=${Math.round(percentile(xs, 50))}ms p95=${Math.round(percentile(xs, 95))}ms max=${Math.round(Math.max(...xs))}ms`;
-      log7.warn(`modules-panel: upload diagnostics session=${session.sessionId} wall=${wallMs}ms ` + `lastAckSeq=${session.lastAckSeq} sinceLastAck=${sinceAckMs}ms ` + `pendingAcks=${session.pendingAcks.size} unackedSeqs=[${unacked.slice(0, 10).join(",")}${unacked.length > 10 ? ",…" : ""}] ` + `encode(${session.timings.length} samples): ${stats(encodes)} ` + `rtt(${rtts.length} samples): ${stats(rtts)} ` + `err=${errMsg(err)}`);
-    } catch (diagErr) {
-      log7.warn("modules-panel: diagnostics dump threw", diagErr);
-    }
-  }
-  function percentile(xs, p) {
-    const sorted = [...xs].sort((a, b) => a - b);
-    const idx = Math.min(sorted.length - 1, Math.floor(p / 100 * sorted.length));
-    return sorted[idx] ?? 0;
-  }
-  function trackAck(session, seq, timeoutMs, label) {
-    if (session.lastAckSeq === seq)
-      return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const timer = vizSetTimeout(timeoutMs, () => {
-        if (session.pendingAcks.delete(seq)) {
-          session.aborted = true;
-          reject(new Error(`timeout waiting for ${label} ack after ${timeoutMs}ms (visible time)`));
+      log7.info("modules-panel: upload cancel requested");
+    }, totalBytes);
+    const upload = new Upload(new Blob([file.bytes]), {
+      endpoint: UPLOAD_ENDPOINT3,
+      chunkSize: UPLOAD_CHUNK_BYTES3,
+      retryDelays: [0, 1000, 3000, 5000, 1e4],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER3 },
+      onError: (err) => {
+        activeTus = null;
+        if (cancelled)
+          return;
+        log7.error("modules-panel: tus upload failed", err);
+        lastError = `Upload failed: ${errMsg(err)}`;
+        setStatus(lastError, true);
+        uploadBtn.disabled = false;
+      },
+      onProgress: (sent, total) => {
+        const pct = total > 0 ? Math.round(sent / total * 100) : 0;
+        setStatus(`Uploading ${fileName}… (${pct}%)`);
+        opts.onUploadProgress?.(sent, total);
+      },
+      onSuccess: () => {
+        activeTus = null;
+        const uploadId = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
+        if (!uploadId) {
+          lastError = "Upload finished but no id was returned";
+          setStatus(lastError, true);
+          uploadBtn.disabled = false;
+          return;
         }
-      });
-      session.pendingAcks.set(seq, { resolve, reject, timer });
+        log7.info(`modules-panel: upload complete uploadId=${uploadId} — requesting processing`);
+        setStatus("Processing on server…");
+        sendToBackend({ type: "process_module_from_upload", uploadId, fileName });
+        armProcessingTimer();
+      }
+    });
+    activeTus = upload;
+    try {
+      const prev = await upload.findPreviousUploads();
+      if (cancelled)
+        return;
+      if (prev[0])
+        upload.resumeFromPreviousUpload(prev[0]);
+    } catch {}
+    if (!cancelled)
+      upload.start();
+  }
+  function clearProcessingTimer() {
+    if (processingTimer) {
+      vizClearTimeout(processingTimer);
+      processingTimer = null;
+    }
+  }
+  function armProcessingTimer() {
+    clearProcessingTimer();
+    processingTimer = vizSetTimeout(PROCESSING_TIMEOUT_MS2, () => {
+      processingTimer = null;
+      lastError = "Server did not respond after upload. The module may still be processing.";
+      setStatus(lastError, true);
+      uploadBtn.disabled = false;
     });
   }
-  function rejectAllPending(session, err) {
-    for (const [seq, p] of session.pendingAcks) {
-      vizClearTimeout(p.timer);
-      p.reject(err);
-      session.pendingAcks.delete(seq);
-    }
-  }
-  function onUploadAck(sessionId, seq, receivedBytes) {
-    const session = activeUpload;
-    if (!session || session.sessionId !== sessionId)
+  function finishModuleUpload() {
+    if (!processingTimer)
       return;
-    session.lastAckSeq = seq;
-    session.receivedBytesOnBackend = receivedBytes;
-    session.lastAckAt = performance.now();
-    const t = session.timings.find((t2) => t2.seq === seq);
-    if (t)
-      t.ackedAt = session.lastAckAt;
-    const p = session.pendingAcks.get(seq);
-    if (p) {
-      session.pendingAcks.delete(seq);
-      vizClearTimeout(p.timer);
-      p.resolve();
-    }
+    clearProcessingTimer();
+    uploadBtn.disabled = false;
+    setStatus(null);
   }
   function handleBackendMessage(msg) {
     if (charHeaderHandle) {
@@ -40655,14 +40604,12 @@ filename: ${m.filename}`;
             attachedByCharacter.set(charId, list);
           }
         }
+        finishModuleUpload();
         render();
         break;
       case "attached_modules_pushed":
         attachedByCharacter.set(msg.characterId, msg.attached);
         render();
-        break;
-      case "module_upload_ack":
-        onUploadAck(msg.sessionId, msg.seq, msg.receivedBytes);
         break;
       case "lorebook_import_result":
         if (msg.characterId === null) {
@@ -40680,9 +40627,24 @@ filename: ${m.filename}`;
       case "standalone_regex_install":
         onStandaloneRegexInstall(msg);
         break;
+      case "import_progress":
+        if (processingTimer) {
+          if (msg.phase === "done") {
+            finishModuleUpload();
+          } else if (msg.phase === "error") {
+            clearProcessingTimer();
+            uploadBtn.disabled = false;
+            lastError = msg.error ?? msg.message;
+            setStatus(lastError, true);
+          } else {
+            armProcessingTimer();
+          }
+        }
+        break;
       case "error":
-        if (activeUpload && msg.sessionId === activeUpload.sessionId) {
-          rejectAllPending(activeUpload, new Error(msg.message));
+        if (processingTimer) {
+          clearProcessingTimer();
+          uploadBtn.disabled = false;
         }
         if (lastError === null) {
           lastError = msg.message;
@@ -40772,20 +40734,6 @@ function pickLorebookFile() {
     input.addEventListener("cancel", () => done(null));
     input.click();
   });
-}
-function bytesToBase642(bytes) {
-  let binary = "";
-  const chunk = 32768;
-  for (let i = 0;i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-function generateSessionId() {
-  const c = typeof globalThis !== "undefined" ? globalThis.crypto : undefined;
-  if (c?.randomUUID)
-    return c.randomUUID();
-  return `mod-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // src/realm/markdown.ts
@@ -43173,7 +43121,8 @@ function createSidebar(opts) {
             ...opts.onImportStart ? { onImportStart: opts.onImportStart } : {},
             ...opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}
           }),
-          ...opts.onModuleImportStart ? { onImportStart: opts.onModuleImportStart } : {}
+          ...opts.onModuleImportStart ? { onImportStart: opts.onModuleImportStart } : {},
+          ...opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}
         });
         handle = {
           handleBackendMessage(msg) {
@@ -44581,22 +44530,6 @@ function setupImportOverlay(log7, sendToBackend) {
             titleEl.textContent = `Importing ${preferred || "character"}`;
         } else if (visible) {
           applyProgress("error", msg.error ?? "Download failed", null);
-        }
-        break;
-      }
-      case "module_upload_ack": {
-        if (!visible && msg.seq === -1) {
-          showOverlay(label || "character");
-        }
-        if (visible && lastPhase === "") {
-          phaseEl.textContent = "Uploading";
-          if (uploadTotalBytes > 0) {
-            const sent = Math.min(msg.receivedBytes, uploadTotalBytes);
-            messageEl.textContent = `Sent ${formatBytes(sent)} of ${formatBytes(uploadTotalBytes)} to backend…`;
-            setFraction(sent / uploadTotalBytes);
-          } else {
-            messageEl.textContent = `Sent ${formatBytes(msg.receivedBytes)} to backend…`;
-          }
         }
         break;
       }
@@ -47329,13 +47262,8 @@ function setup(ctx) {
   });
   cleanups.push(ctx.dom.addStyle(STYLES));
   flog3.info("frontend setup: styles injected");
-  const QUIET_SEND_TYPES = new Set([
-    "upload_module_chunk"
-  ]);
   const sendToBackend = (msg) => {
-    if (!QUIET_SEND_TYPES.has(msg.type)) {
-      flog3.trace(`frontend send: ${msg.type}`, msg);
-    }
+    flog3.trace(`frontend send: ${msg.type}`, msg);
     ctx.sendToBackend(msg);
   };
   const importOverlay = setupImportOverlay(flog3, sendToBackend);
@@ -47528,14 +47456,9 @@ function setup(ctx) {
       window.clearTimeout(resizeTimer);
   });
   let ready = false;
-  const QUIET_RECV_TYPES = new Set([
-    "module_upload_ack"
-  ]);
   const unsub = ctx.onBackendMessage((raw) => {
     const msg = raw;
-    if (!QUIET_RECV_TYPES.has(msg.type)) {
-      flog3.trace(`frontend recv: ${msg.type}`, msg);
-    }
+    flog3.trace(`frontend recv: ${msg.type}`, msg);
     if (msg.type === "log_state_pushed") {
       const level = isLogThreshold(msg.level) ? msg.level : DEFAULT_LOG_LEVEL;
       logStore.setState({ enabled: msg.enabled, includeChatData: msg.includeChatData, level });

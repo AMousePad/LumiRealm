@@ -4581,9 +4581,7 @@ class MockVariableStore {
     this.data[scope].set(name, value);
   }
   add(scope, name, delta) {
-    const current = Number(this.data[scope].get(name) ?? "0");
-    const next = (Number.isFinite(current) ? current : 0) + delta;
-    this.data[scope].set(name, String(next));
+    this.data[scope].set(name, String(Number(this.data[scope].get(name) ?? "0") + delta));
   }
   has(scope, name) {
     return this.data[scope].has(name);
@@ -5745,6 +5743,13 @@ var init_random = __esm(() => {
 function register7(name, handler, description) {
   registry.register({ name, handler, description, category: "Risu / Variables", scoped: false });
 }
+function setvarMode(ctx) {
+  if (ctx.rmVar)
+    return "hide";
+  if (ctx.runVar)
+    return "run";
+  return "literal";
+}
 function leaveVarLiteral(ctx) {
   return !ctx.commit || ctx.promptRegexLiteralVars === true;
 }
@@ -5752,26 +5757,35 @@ var init_variables = __esm(() => {
   init_registry();
   register7("risu_getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a local chat variable. Empty string if unset.");
   register7("risu_setvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
       return `{{setvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
     ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
     return "";
   }, "Sets a local chat variable.");
   register7("risu_addvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
       return `{{addvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    ctx.vars.add("local", a[0] ?? "", Number(a[1] ?? "0"));
+    ctx.vars.add("local", a[0] ?? "", Number(a[1]));
     return "";
   }, "Adds delta to a local chat variable (coerces current value to number).");
   register7("setdefaultvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
       return `{{setdefaultvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
     const name = a[0] ?? "";
     if (!ctx.vars.get("local", name)) {
       ctx.vars.set("local", name, a[1] ?? "");
     }
     return "";
-  }, "Sets a local chat variable only if its current value is falsy (unset or empty).");
+  }, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
   register7("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""), "Reads a global chat variable.");
   register7("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""), "Reads a temporary variable (per-evaluation scope).");
   register7("settempvar", (ctx, a) => {
@@ -10464,23 +10478,23 @@ function buildEvaluatorContext(input) {
       }
       if (!commit || !overlay)
         return;
-      if (scope === "global")
+      if (scope === "global") {
         overlay.global.set(name, value);
-      else
-        overlay.chat.set(name, value);
-      if (chatId && spindleGlobal && persistVars) {
-        try {
-          const op = scope === "global" ? spindleGlobal.variables.global.set(name, value) : spindleGlobal.variables.chat.set(chatId, name, value);
-          op.catch(() => {});
-        } catch {}
+        if (chatId && spindleGlobal && persistVars) {
+          try {
+            spindleGlobal.variables.global.set(name, value).catch(() => {});
+          } catch {}
+        }
+        return;
       }
+      overlay.chat.set(name, value);
+      if (input.localVarSink)
+        input.localVarSink(name, value);
     },
     add(scope, name, delta) {
       if (scope !== "temp" && !commit)
         return;
-      const cur = Number(this.get(scope, name));
-      const next = String((Number.isFinite(cur) ? cur : 0) + delta);
-      this.set(scope, name, next);
+      this.set(scope, name, String(Number(this.get(scope, name)) + delta));
     },
     has(scope, name) {
       if (recordRead)
@@ -10512,10 +10526,11 @@ function buildEvaluatorContext(input) {
           overlay.chat.delete(name);
         }
       }
-      if (chatId && spindleGlobal && persistVars) {
+      if (scope !== "global" && input.localVarSink)
+        input.localVarSink(name, null);
+      if (scope === "global" && chatId && spindleGlobal && persistVars) {
         try {
-          const op = scope === "global" ? spindleGlobal.variables.global.delete(name) : spindleGlobal.variables.chat.delete(chatId, name);
-          op.catch(() => {});
+          spindleGlobal.variables.global.delete(name).catch(() => {});
         } catch {}
       }
     }
@@ -10637,6 +10652,8 @@ function buildEvaluatorContext(input) {
     ...input.modulesByNamespace ? { modulesByNamespace: input.modulesByNamespace } : {},
     ...input.positionPt ? { positionPt: input.positionPt } : {},
     ...input.cbsContext ? { cbsContext: true } : {},
+    ...input.rmVar ? { rmVar: true } : {},
+    ...input.runVar ? { runVar: true } : {},
     ...input.suppressVarPersist ? { promptRegexLiteralVars: true } : {}
   };
   out.evaluate = (text) => {
@@ -10675,6 +10692,8 @@ function runPipeline(input, opts) {
     ...input.lorebook ? { lorebook: input.lorebook } : {},
     ...input.positionPt ? { positionPt: input.positionPt } : {},
     ...input.cbsContext ? { cbsContext: true } : {},
+    ...input.rmVar ? { rmVar: true } : {},
+    ...input.runVar ? { runVar: true } : {},
     ...input.suppressVarPersist ? { suppressVarPersist: true } : {},
     commit
   });

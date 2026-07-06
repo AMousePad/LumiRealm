@@ -52,6 +52,8 @@ export function runPipeline(input: RunPipelineInput, opts?: RunPipelineOptions):
     ...(input.lorebook ? { lorebook: input.lorebook } : {}),
     ...(input.positionPt ? { positionPt: input.positionPt } : {}),
     ...(input.cbsContext ? { cbsContext: true } : {}),
+    ...(input.rmVar ? { rmVar: true } : {}),
+    ...(input.runVar ? { runVar: true } : {}),
     ...(input.suppressVarPersist ? { suppressVarPersist: true } : {}),
     commit,
   });

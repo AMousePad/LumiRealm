@@ -19,9 +19,8 @@ export class MockVariableStore implements VariableStore {
     this.data[scope].set(name, value);
   }
   add(scope: VarScope, name: string, delta: number): void {
-    const current = Number(this.data[scope].get(name) ?? "0");
-    const next = (Number.isFinite(current) ? current : 0) + delta;
-    this.data[scope].set(name, String(next));
+    // Risu cbs.ts addvar: raw Number coercion, non-numeric current yields "NaN".
+    this.data[scope].set(name, String(Number(this.data[scope].get(name) ?? "0") + delta));
   }
   has(scope: VarScope, name: string): boolean {
     return this.data[scope].has(name);
@@ -101,6 +100,8 @@ export interface MockContextOptions {
   screenHeight?: number;
   commit?: boolean;
   legacyMediaFindings?: boolean;
+  rmVar?: boolean;
+  runVar?: boolean;
 }
 
 const DEFAULT_IDENTITY: IdentityFields = {
@@ -158,5 +159,7 @@ export function makeMockContext(opts: MockContextOptions = {}): RisuRuntimeConte
     screenHeight: opts.screenHeight ?? 0,
     commit: opts.commit ?? true,
     legacyMediaFindings: opts.legacyMediaFindings ?? false,
+    ...(opts.rmVar ? { rmVar: true } : {}),
+    ...(opts.runVar ? { runVar: true } : {}),
   };
 }
