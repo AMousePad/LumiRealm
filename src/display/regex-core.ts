@@ -25,17 +25,16 @@ export interface ApplyRegexCoreOptions {
   readonly placement: string;
   readonly depth: number | undefined;
   readonly evalTemplate: (text: string) => string;
-  /**
-   * Re-resolve the body through evalTemplate after EACH rule's replace+trim,
-   * mirroring Risu's `processScriptFull` which re-parses CBS after every script
-   * (scripts.ts:318, unconditional — even for non-macro rules). Used by the inline
-   * PROMPT-regex path: the host's post-regex macro pass (resolvePromptMacrosAfterRegexPass)
-   * runs during assembly, BEFORE the interceptor fires the inline regex, so any macro a
-   * 'none'-mode rule's replacement injects ({{char}}, {{user}}, …) would otherwise ship
-   * literal. OFF by default so the FE display path stays byte-identical (its macros are
-   * resolved by the FE's separate resolveDisplayMacros pass, not here).
-   */
+  // Risu re-parses CBS after every script. Fires only when the rule changed
+  // the text and the result carries CBS syntax.
   readonly reResolveAfterRule?: boolean;
+}
+
+const LEGACY_NAME_TAG_RE = /<(user|char|bot)>/i;
+
+// Mirrors the evaluator's trigger set, including tags it normalizes at entry.
+function hasCbsSyntax(s: string): boolean {
+  return s.includes("{{") || s.includes("{#") || LEGACY_NAME_TAG_RE.test(s);
 }
 
 export function applyRegexScriptsCore(
@@ -97,12 +96,13 @@ export function applyRegexScriptsCore(
 
       result = applyTrimStrings(result, script.trim_strings);
 
-      // Risu re-parses CBS after every script (scripts.ts:318). For 'none' mode the
-      // replacement was substituted literally, so a macro it injected is still raw;
-      // re-resolve here on the prompt path. Skip when the rule changed nothing (avoid
-      // resolving unrelated macros the rule didn't touch — and 'after'/'raw' already
-      // resolved their own output above).
-      if (reResolveAfterRule && script.substitute_macros === 'none' && result !== before) {
+      if (
+        reResolveAfterRule
+        && script.substitute_macros !== 'after'
+        && script.substitute_macros !== 'raw'
+        && result !== before
+        && hasCbsSyntax(result)
+      ) {
         result = evalTemplate(result);
       }
     } catch {

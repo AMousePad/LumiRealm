@@ -10777,6 +10777,10 @@ function applyTrimStrings(result, trims) {
 }
 
 // src/display/regex-core.ts
+var LEGACY_NAME_TAG_RE = /<(user|char|bot)>/i;
+function hasCbsSyntax(s) {
+  return s.includes("{{") || s.includes("{#") || LEGACY_NAME_TAG_RE.test(s);
+}
 function applyRegexScriptsCore(content, scripts, opts) {
   const { placement, depth, evalTemplate, reResolveAfterRule } = opts;
   let result = content;
@@ -10825,7 +10829,7 @@ function applyRegexScriptsCore(content, scripts, opts) {
         result = result.replace(regex, replaceString);
       }
       result = applyTrimStrings(result, script.trim_strings);
-      if (reResolveAfterRule && script.substitute_macros === "none" && result !== before) {
+      if (reResolveAfterRule && script.substitute_macros !== "after" && script.substitute_macros !== "raw" && result !== before && hasCbsSyntax(result)) {
         result = evalTemplate(result);
       }
     } catch {

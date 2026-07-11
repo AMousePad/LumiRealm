@@ -108,26 +108,37 @@ export function triggerMatchesBinding(
   return t.binding === binding;
 }
 
+export interface DispatchBindingOutcome {
+  /** True when any trigger requested stopSending (Risu stopChat / v1 stop effect). */
+  readonly stopSending: boolean;
+}
+
 export async function dispatchBinding(
   ctx: DispatchCtx,
   binding: RisuBinding,
   onError?: (err: unknown, triggerName: string) => void,
-): Promise<void> {
+): Promise<DispatchBindingOutcome> {
   const dlog = makeSafeLogger('dispatcher').info;
   const matches = ctx.compiledTriggers.filter((t) => triggerMatchesBinding(t, binding));
   dlog(`dispatchBinding: binding=${binding} matches=${matches.length}/${ctx.compiledTriggers.length} data=${JSON.stringify(ctx.data).slice(0, 200)}`);
+  let stopSending = false;
   for (const entry of matches) {
     const tStart = Date.now();
     dlog(`→ trigger START name=${entry.name} binding=${entry.binding} triggers=${JSON.stringify(entry.triggers)} effects=${entry.source?.effect?.length ?? 0}`);
+    // Out-param: a stopChat() issued before a later crash still counts.
+    const flags = { stopSending: false };
     try {
-      await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS);
-      dlog(`← trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms`);
+      await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS, flags);
+      dlog(`← trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms stopSending=${flags.stopSending}`);
     } catch (err) {
-      dlog(`× trigger ERROR name=${entry.name} elapsed=${Date.now() - tStart}ms msg=${(err as Error).message}`);
+      dlog(`× trigger ERROR name=${entry.name} elapsed=${Date.now() - tStart}ms msg=${(err as Error).message} stopSending=${flags.stopSending}`);
       if (onError) onError(err, entry.name);
       else throw err;
+    } finally {
+      if (flags.stopSending) stopSending = true;
     }
   }
+  return { stopSending };
 }
 
 function makeMirroredConsole(name: string): InterpConsole {
@@ -152,6 +163,7 @@ async function runInterpretedTrigger(
   api: HostApi,
   data: DispatchData,
   scriptNS: DispatcherScriptNS,
+  outFlags?: { stopSending: boolean },
 ): Promise<void> {
   await withTriggerDepth(async () => {
     const rLog = makeSafeLogger(`runTrigger[${entry.name}]`);
@@ -172,6 +184,7 @@ async function runInterpretedTrigger(
       rLog.error(`THREW elapsed=${Date.now() - t0}ms — ${(err as Error).message}\n${(err as Error).stack ?? ''}`);
       throw err;
     } finally {
+      if (outFlags && rt.stopSending) outFlags.stopSending = true;
       await rt.flush();
     }
   });

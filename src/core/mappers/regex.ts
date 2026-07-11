@@ -152,7 +152,8 @@ export function mapRegex(
 
     const normalised = normaliseRisuFlag(s.flag, !!s.ableFlag);
     const hasNoEndNl = normalised.actions.includes("no_end_nl");
-    const baseSortOrder = (normalised.order ?? i) * 10;
+    // Risu sorts <order N> descending, Lumi reads sort_order ASC: negate.
+    const baseSortOrder = i * 10 - (normalised.order ?? 0) * 100000;
 
     const outNormalised = s.out.replaceAll("$n", "\n");
     const action = detectAtAction(outNormalised);
@@ -246,6 +247,7 @@ export function mapRegex(
         origin,
         order_index: i,
         has_meta: normalised.actions.length > 0,
+        ...(normalised.order !== undefined ? { order_flag: normalised.order } : {}),
         ...(action ? { at_action: action } : {}),
       },
     };

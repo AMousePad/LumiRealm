@@ -47,6 +47,9 @@ import {
   getRegisterMessageContentProcessor,
   getRegisterInterceptor,
   getRegisterWorldInfoInterceptor,
+  getRegisterContextHandler,
+  getPreAssemblyContractVersion,
+  type GenerationContextShape,
   type LlmMessage,
   type InterceptorContext,
 } from '../adapters/spindle-extras.js';
@@ -87,6 +90,12 @@ export interface CreateLumiInterceptorsDeps {
     opts?: { cbsContext?: boolean; rmVar?: boolean },
   ) => Promise<string>;
   readonly runMessageVarPass: (chatId: string, characterId: string, userId: string) => Promise<void>;
+  readonly runBinding: (
+    active: ActiveCard,
+    chatId: string,
+    binding: 'input' | 'start' | 'request',
+    userId: string | undefined,
+  ) => Promise<{ stopSending: boolean }>;
   readonly log: {
     readonly info: (m: string) => void;
     readonly warn: (m: string) => void;
@@ -905,6 +914,56 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
     log.info('interceptor: registered (editInput + editRequest)');
   }
 
+  function registerContextHandler(): void {
+    const register = getRegisterContextHandler();
+    const contractVersion = getPreAssemblyContractVersion();
+    if (typeof register !== 'function' || contractVersion < 1) {
+      log.error(`contextHandler: host preAssemblyGenerationContext contract=${contractVersion}, need >=1. Update Lumiverse. Risu input/start/request triggers and stopSending will NOT fire.`);
+      return;
+    }
+
+    register(async (contextRaw) => {
+      const ctx = (contextRaw ?? {}) as GenerationContextShape;
+      const chatId = typeof ctx.chatId === 'string' ? ctx.chatId : null;
+      if (!chatId || ctx.dryRun !== false) return contextRaw;
+
+      let active: ActiveCard | null | undefined = activeCardByChat.get(chatId);
+      const userId = typeof ctx.userId === 'string' && ctx.userId.length > 0
+        ? ctx.userId
+        : active?.ownerUserId;
+      if (!userId) return contextRaw;
+      if (active && active.ownerUserId !== userId) {
+        log.warn(`contextHandler: owner mismatch chat=${chatId} cached=${active.ownerUserId} ctx=${userId}, skipping`);
+        return contextRaw;
+      }
+      if (!active) {
+        active = await deps.ensureActiveCardForChat(chatId, null, userId);
+        if (!active) return contextRaw;
+      }
+      const card: ActiveCard = active;
+
+      return userIdAls.run(userId, async () => {
+        let stopSending = false;
+        // Risu sendChat order: input (user sends only), start, request.
+        if (ctx.generationType === 'normal') {
+          const r = await deps.runBinding(card, chatId, 'input', userId);
+          stopSending = stopSending || r.stopSending;
+        }
+        const rStart = await deps.runBinding(card, chatId, 'start', userId);
+        stopSending = stopSending || rStart.stopSending;
+        const rRequest = await deps.runBinding(card, chatId, 'request', userId);
+        stopSending = stopSending || rRequest.stopSending;
+
+        if (stopSending) {
+          log.info(`contextHandler: stopSending chat=${chatId}, cancelling generation`);
+          return { ...(contextRaw as Record<string, unknown>), cancelGeneration: true };
+        }
+        return contextRaw;
+      });
+    }, 100, { timeoutMs: 30_000 });
+    log.info('contextHandler: registered (input + start + request, pre-assembly, 30s budget)');
+  }
+
   function registerWorldInfoInterceptorIfAvailable(): void {
     const registerWorldInfoInterceptor = getRegisterWorldInfoInterceptor();
     if (!registerWorldInfoInterceptor) {
@@ -1063,6 +1122,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       registerMessageContentProcessorIfAvailable();
       registerInterceptorIfAvailable();
       registerWorldInfoInterceptorIfAvailable();
+      registerContextHandler();
     },
   };
 }

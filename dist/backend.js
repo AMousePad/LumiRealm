@@ -21441,7 +21441,7 @@ function mapRegex(scripts, opts) {
     const effectivePhase = phase ?? UNKNOWN_PHASE_FALLBACK;
     const normalised = normaliseRisuFlag(s.flag, !!s.ableFlag);
     const hasNoEndNl = normalised.actions.includes("no_end_nl");
-    const baseSortOrder = (normalised.order ?? i) * 10;
+    const baseSortOrder = i * 10 - (normalised.order ?? 0) * 1e5;
     const outNormalised = s.out.replaceAll("$n", `
 `);
     const action = detectAtAction(outNormalised);
@@ -21513,6 +21513,7 @@ function mapRegex(scripts, opts) {
         origin,
         order_index: i,
         has_meta: normalised.actions.length > 0,
+        ...normalised.order !== undefined ? { order_flag: normalised.order } : {},
         ...action ? { at_action: action } : {}
       }
     };
@@ -30447,20 +30448,26 @@ async function dispatchBinding(ctx, binding, onError) {
   const dlog = makeSafeLogger("dispatcher").info;
   const matches = ctx.compiledTriggers.filter((t) => triggerMatchesBinding(t, binding));
   dlog(`dispatchBinding: binding=${binding} matches=${matches.length}/${ctx.compiledTriggers.length} data=${JSON.stringify(ctx.data).slice(0, 200)}`);
+  let stopSending = false;
   for (const entry of matches) {
     const tStart = Date.now();
     dlog(`\u2192 trigger START name=${entry.name} binding=${entry.binding} triggers=${JSON.stringify(entry.triggers)} effects=${entry.source?.effect?.length ?? 0}`);
+    const flags = { stopSending: false };
     try {
-      await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS);
-      dlog(`\u2190 trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms`);
+      await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS, flags);
+      dlog(`\u2190 trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms stopSending=${flags.stopSending}`);
     } catch (err) {
-      dlog(`\xD7 trigger ERROR name=${entry.name} elapsed=${Date.now() - tStart}ms msg=${err.message}`);
+      dlog(`\xD7 trigger ERROR name=${entry.name} elapsed=${Date.now() - tStart}ms msg=${err.message} stopSending=${flags.stopSending}`);
       if (onError)
         onError(err, entry.name);
       else
         throw err;
+    } finally {
+      if (flags.stopSending)
+        stopSending = true;
     }
   }
+  return { stopSending };
 }
 function makeMirroredConsole(name) {
   const L = makeSafeLogger(`trigger[${name}]`);
@@ -30478,7 +30485,7 @@ function makeMirroredConsole(name) {
     info: (...a) => L.info(`console.info: ${fmt(a)}`)
   };
 }
-async function runInterpretedTrigger(entry, api, data, scriptNS) {
+async function runInterpretedTrigger(entry, api, data, scriptNS, outFlags) {
   await withTriggerDepth(async () => {
     const rLog = makeSafeLogger(`runTrigger[${entry.name}]`);
     const t0 = Date.now();
@@ -30499,6 +30506,8 @@ async function runInterpretedTrigger(entry, api, data, scriptNS) {
 ${err.stack ?? ""}`);
       throw err;
     } finally {
+      if (outFlags && rt.stopSending)
+        outFlags.stopSending = true;
       await rt.flush();
     }
   });
@@ -31512,7 +31521,7 @@ var PERMISSION_PURPOSE = {
   characters: "read and update Risu character data on import",
   generation: "dispatch aux + submodel LLM calls (axLLM / runLLM)",
   interceptor: "apply editInput / editRequest hooks at prompt assembly",
-  context_handler: "enrich generation context with Risu state",
+  context_handler: "run input/start triggers pre-assembly and honor stopSending",
   macro_interceptor: "route Risu CBS macros through the in-worker pipeline",
   ui_panels: "mount the LumiRealm drawer + floating overlays",
   ephemeral_storage: "cache Risu envelopes and image journals",
@@ -34307,10 +34316,6 @@ function createLifecycleEventHandlers(deps) {
       const active = await deps.ensureActiveCardForChat(chatId, characterId, userId);
       if (!active)
         return;
-      deps.log.info(`GENERATION_STARTED: \u2192 runBinding(start)`);
-      await deps.runBinding(active, chatId, "start", userId);
-      deps.log.info(`GENERATION_STARTED: \u2192 runBinding(request)`);
-      await deps.runBinding(active, chatId, "request", userId);
       if (userId !== undefined)
         await deps.runMessageVarPass(chatId, active.card.character_id, userId);
       deps.invalidateRenderMcpForChat(chatId);
@@ -35580,6 +35585,13 @@ function getRegisterMacroInterceptor() {
 function getRegisterInterceptor() {
   return spindle.registerInterceptor;
 }
+function getRegisterContextHandler() {
+  return spindle.registerContextHandler;
+}
+function getPreAssemblyContractVersion() {
+  const contracts = spindle.contracts;
+  return typeof contracts?.["preAssemblyGenerationContext"] === "number" ? contracts["preAssemblyGenerationContext"] : 0;
+}
 function getRegisterWorldInfoInterceptor() {
   const fn = spindle.registerWorldInfoInterceptor;
   return typeof fn === "function" ? spindle.registerWorldInfoInterceptor.bind(spindle) : null;
@@ -36350,6 +36362,51 @@ function createLumiInterceptors(deps) {
     }, 100);
     log8.info("interceptor: registered (editInput + editRequest)");
   }
+  function registerContextHandler() {
+    const register13 = getRegisterContextHandler();
+    const contractVersion = getPreAssemblyContractVersion();
+    if (typeof register13 !== "function" || contractVersion < 1) {
+      log8.error(`contextHandler: host preAssemblyGenerationContext contract=${contractVersion}, need >=1. Update Lumiverse. Risu input/start/request triggers and stopSending will NOT fire.`);
+      return;
+    }
+    register13(async (contextRaw) => {
+      const ctx = contextRaw ?? {};
+      const chatId = typeof ctx.chatId === "string" ? ctx.chatId : null;
+      if (!chatId || ctx.dryRun !== false)
+        return contextRaw;
+      let active = activeCardByChat.get(chatId);
+      const userId = typeof ctx.userId === "string" && ctx.userId.length > 0 ? ctx.userId : active?.ownerUserId;
+      if (!userId)
+        return contextRaw;
+      if (active && active.ownerUserId !== userId) {
+        log8.warn(`contextHandler: owner mismatch chat=${chatId} cached=${active.ownerUserId} ctx=${userId}, skipping`);
+        return contextRaw;
+      }
+      if (!active) {
+        active = await deps.ensureActiveCardForChat(chatId, null, userId);
+        if (!active)
+          return contextRaw;
+      }
+      const card = active;
+      return userIdAls.run(userId, async () => {
+        let stopSending = false;
+        if (ctx.generationType === "normal") {
+          const r = await deps.runBinding(card, chatId, "input", userId);
+          stopSending = stopSending || r.stopSending;
+        }
+        const rStart = await deps.runBinding(card, chatId, "start", userId);
+        stopSending = stopSending || rStart.stopSending;
+        const rRequest = await deps.runBinding(card, chatId, "request", userId);
+        stopSending = stopSending || rRequest.stopSending;
+        if (stopSending) {
+          log8.info(`contextHandler: stopSending chat=${chatId}, cancelling generation`);
+          return { ...contextRaw, cancelGeneration: true };
+        }
+        return contextRaw;
+      });
+    }, 100, { timeoutMs: 30000 });
+    log8.info("contextHandler: registered (input + start + request, pre-assembly, 30s budget)");
+  }
   function registerWorldInfoInterceptorIfAvailable() {
     const registerWorldInfoInterceptor = getRegisterWorldInfoInterceptor();
     if (!registerWorldInfoInterceptor) {
@@ -36465,6 +36522,7 @@ function createLumiInterceptors(deps) {
       registerMessageContentProcessorIfAvailable();
       registerInterceptorIfAvailable();
       registerWorldInfoInterceptorIfAvailable();
+      registerContextHandler();
     }
   };
 }
@@ -37014,12 +37072,12 @@ function createTriggerDispatcher(deps) {
         log8.info(`runBinding: compiled ${compiled.length} triggers for character=${characterId} in ${Date.now() - tCompile}ms`);
       } catch (err) {
         log8.error(`compileTriggers failed for character=${characterId}: ` + (err instanceof Error ? err.message : String(err)));
-        return;
+        return { stopSending: false };
       }
     }
     if (compiled.length === 0) {
       log8.info(`runBinding: no triggers on character=${characterId}, skip binding=${binding}`);
-      return;
+      return { stopSending: false };
     }
     log8.info(`runBinding: start binding=${binding} chatId=${chatId} characterId=${characterId} triggers=${compiled.length}`);
     const api = makeSpindleHost({ chatId, characterId, userId });
@@ -37035,18 +37093,16 @@ function createTriggerDispatcher(deps) {
       auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
       resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true })
     });
-    await withDispatchContext(seams, async () => {
-      await dispatchBinding({
-        compiledTriggers: compiled,
-        api,
-        data: { characterId },
-        scriptNS,
-        opts: { characterId, binding }
-      }, binding, (err, name) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log8.error(`trigger "${name}" failed on ${binding}: ${msg}`);
-      });
-    });
+    const outcome = await withDispatchContext(seams, async () => dispatchBinding({
+      compiledTriggers: compiled,
+      api,
+      data: { characterId },
+      scriptNS,
+      opts: { characterId, binding }
+    }, binding, (err, name) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      log8.error(`trigger "${name}" failed on ${binding}: ${msg}`);
+    }));
     if (binding === "output") {
       const triggers2 = active.card.risuPayload.triggers;
       const luaScripts = active.card.risuPayload.lua_scripts;
@@ -37100,7 +37156,8 @@ function createTriggerDispatcher(deps) {
         }
       }
     }
-    log8.info(`runBinding: done binding=${binding} elapsed=${Date.now() - tBind}ms`);
+    log8.info(`runBinding: done binding=${binding} elapsed=${Date.now() - tBind}ms stopSending=${outcome.stopSending}`);
+    return { stopSending: outcome.stopSending };
   }
   async function dispatchManualTrigger(chatId, triggerName, triggerId, userId) {
     const active = await ensureActiveCardForChat(chatId, null, userId);
@@ -39765,7 +39822,8 @@ function projectModuleRegexEntries(moduleId, moduleName, characterId, raw, idGen
     const ableFlagRaw = eo["ableFlag"];
     const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null ? true : !!ableFlagRaw;
     const rawFlag = typeof eo["flag"] === "string" ? eo["flag"] : undefined;
-    let flags = normaliseRisuFlag(rawFlag, ableFlag).flag;
+    const normalisedFlag = normaliseRisuFlag(rawFlag, ableFlag);
+    let flags = normalisedFlag.flag;
     const findHasCbs = findRegex.indexOf("{{") >= 0;
     if (findHasCbs)
       flags = flags.replace(/u/g, "");
@@ -39788,13 +39846,14 @@ function projectModuleRegexEntries(moduleId, moduleName, characterId, raw, idGen
       run_on_edit: false,
       substitute_macros: pickSubstituteMacroMode(replaceString2, findHasCbs),
       disabled,
-      sort_order: 1000 + sortBase,
+      sort_order: 1000 + sortBase - (normalisedFlag.order ?? 0) * 1e5,
       description: `From .risum module: ${moduleName}`,
       folder: `Module: ${moduleName}`,
       metadata: {
         _risu: {
           module_id: moduleId,
-          source_type: ruleType
+          source_type: ruleType,
+          ...normalisedFlag.order !== undefined ? { order_flag: normalisedFlag.order } : {}
         }
       }
     });
@@ -42700,6 +42759,7 @@ createLumiInterceptors({
   modulesByNamespaceFromCard,
   resolveReadonly,
   runMessageVarPass: (chatId, characterId, uid) => messageVarPass.run(chatId, characterId, uid),
+  runBinding,
   log: log8,
   errMsg
 }).registerAll();
