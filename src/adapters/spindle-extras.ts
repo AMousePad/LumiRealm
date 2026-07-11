@@ -93,6 +93,40 @@ export function getRegisterInterceptor(): RegisterInterceptor | undefined {
   }).registerInterceptor;
 }
 
+// Awaited by the host before world-info activation and macro resolution.
+export interface GenerationContextShape {
+  chatId?: string;
+  connectionId?: string;
+  personaId?: string;
+  generationType?: 'normal' | 'continue' | 'regenerate' | 'swipe' | 'impersonate';
+  userId?: string;
+  dryRun?: boolean;
+  cancelGeneration?: boolean;
+}
+export type ContextHandlerFn = (context: unknown) => Promise<unknown>;
+export type RegisterContextHandler = (
+  handler: ContextHandlerFn,
+  priority?: number,
+  opts?: { timeoutMs?: number },
+) => void;
+
+export function getRegisterContextHandler(): RegisterContextHandler | undefined {
+  return (spindle as unknown as {
+    registerContextHandler?: RegisterContextHandler;
+  }).registerContextHandler;
+}
+
+// Older hosts expose registerContextHandler without the context contract, so
+// gate on the version, not the function.
+export function getPreAssemblyContractVersion(): number {
+  const contracts = (spindle as unknown as {
+    contracts?: Readonly<Record<string, number>>;
+  }).contracts;
+  return typeof contracts?.['preAssemblyGenerationContext'] === 'number'
+    ? contracts['preAssemblyGenerationContext']
+    : 0;
+}
+
 // World-info interceptor (Tier 2 lorebook decorator gates).
 export function getRegisterWorldInfoInterceptor():
   | typeof spindle.registerWorldInfoInterceptor

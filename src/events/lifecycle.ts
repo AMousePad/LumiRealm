@@ -64,7 +64,7 @@ export interface LifecycleEventHandlerDeps {
     chatId: string,
     binding: RisuBinding,
     userId: string | undefined,
-  ) => Promise<void>;
+  ) => Promise<{ stopSending: boolean }>;
   // Risu runVar pass: strip + persist message-text setvar (see message-var-pass.ts).
   readonly runMessageVarPass: (chatId: string, characterId: string, userId: string) => Promise<void>;
   readonly generationEndedBindings: readonly RisuBinding[];
@@ -395,10 +395,8 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       if (!chatId) return;
       const active = await deps.ensureActiveCardForChat(chatId, characterId, userId);
       if (!active) return;
-      deps.log.info(`GENERATION_STARTED: → runBinding(start)`);
-      await deps.runBinding(active, chatId, 'start', userId);
-      deps.log.info(`GENERATION_STARTED: → runBinding(request)`);
-      await deps.runBinding(active, chatId, 'request', userId);
+      // input/start/request fire in the awaited pre-assembly context handler,
+      // not here: this event is not awaited and would race prompt assembly.
       // Risu runCurrentChatFunction at sendChat start (pre-prompt-assembly).
       if (userId !== undefined) await deps.runMessageVarPass(chatId, active.card.character_id, userId);
       deps.invalidateRenderMcpForChat(chatId);

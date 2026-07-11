@@ -1085,6 +1085,7 @@ createLumiInterceptors({
   modulesByNamespaceFromCard,
   resolveReadonly,
   runMessageVarPass: (chatId, characterId, uid) => messageVarPass.run(chatId, characterId, uid),
+  runBinding,
   log,
   errMsg,
 }).registerAll();

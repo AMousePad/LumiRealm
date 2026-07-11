@@ -126,7 +126,8 @@ export function projectModuleRegexEntries(
       ? true
       : !!ableFlagRaw;
     const rawFlag = typeof eo['flag'] === 'string' ? eo['flag'] : undefined;
-    let flags = normaliseRisuFlag(rawFlag, ableFlag).flag;
+    const normalisedFlag = normaliseRisuFlag(rawFlag, ableFlag);
+    let flags = normalisedFlag.flag;
     const findHasCbs = findRegex.indexOf('{{') >= 0;
     if (findHasCbs) flags = flags.replace(/u/g, '');
     if (flags.length === 0) flags = 'g';
@@ -147,13 +148,15 @@ export function projectModuleRegexEntries(
       run_on_edit: false,
       substitute_macros: pickSubstituteMacroMode(replaceString, findHasCbs),
       disabled,
-      sort_order: 1000 + sortBase,
+      // Risu sorts <order N> descending, Lumi reads sort_order ASC: negate.
+      sort_order: 1000 + sortBase - (normalisedFlag.order ?? 0) * 100000,
       description: `From .risum module: ${moduleName}`,
       folder: `Module: ${moduleName}`,
       metadata: {
         _risu: {
           module_id: moduleId,
           source_type: ruleType,
+          ...(normalisedFlag.order !== undefined ? { order_flag: normalisedFlag.order } : {}),
         },
       },
     });

@@ -25,7 +25,7 @@ export const PERMISSION_PURPOSE: Readonly<Record<string, string>> = {
   characters: 'read and update Risu character data on import',
   generation: 'dispatch aux + submodel LLM calls (axLLM / runLLM)',
   interceptor: 'apply editInput / editRequest hooks at prompt assembly',
-  context_handler: 'enrich generation context with Risu state',
+  context_handler: 'run input/start triggers pre-assembly and honor stopSending',
   macro_interceptor: 'route Risu CBS macros through the in-worker pipeline',
   ui_panels: 'mount the LumiRealm drawer + floating overlays',
   ephemeral_storage: 'cache Risu envelopes and image journals',

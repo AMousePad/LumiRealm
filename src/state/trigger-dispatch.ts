@@ -66,7 +66,7 @@ export interface TriggerDispatcher {
     chatId: string,
     binding: RisuBinding,
     userId: string | undefined,
-  ) => Promise<void>;
+  ) => Promise<{ stopSending: boolean }>;
   readonly dispatchManualTrigger: (
     chatId: string,
     triggerName: string,
@@ -108,7 +108,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
     chatId: string,
     binding: RisuBinding,
     userId: string | undefined,
-  ): Promise<void> {
+  ): Promise<{ stopSending: boolean }> {
     const characterId = active.card.character_id;
     const tBind = Date.now();
     let compiled = compiledByCharacter.get(characterId);
@@ -123,12 +123,12 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           `compileTriggers failed for character=${characterId}: ` +
             (err instanceof Error ? err.message : String(err)),
         );
-        return;
+        return { stopSending: false };
       }
     }
     if (compiled.length === 0) {
       log.info(`runBinding: no triggers on character=${characterId}, skip binding=${binding}`);
-      return;
+      return { stopSending: false };
     }
     log.info(`runBinding: start binding=${binding} chatId=${chatId} characterId=${characterId} triggers=${compiled.length}`);
     const api = makeSpindleHost({ chatId, characterId, userId });
@@ -144,8 +144,8 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
       resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
     });
-    await withDispatchContext(seams, async () => {
-      await dispatchBinding(
+    const outcome = await withDispatchContext(seams, async () =>
+      dispatchBinding(
         {
           compiledTriggers: compiled!,
           api,
@@ -158,8 +158,8 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           const msg = err instanceof Error ? err.message : String(err);
           log.error(`trigger "${name}" failed on ${binding}: ${msg}`);
         },
-      );
-    });
+      ),
+    );
 
     // Risu parity: editOutput listenEdit chain runs first, then editoutput/edittrans @@-actions, with one persisted write at the end if content changed.
     if (binding === 'output') {
@@ -237,7 +237,8 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       }
     }
 
-    log.info(`runBinding: done binding=${binding} elapsed=${Date.now() - tBind}ms`);
+    log.info(`runBinding: done binding=${binding} elapsed=${Date.now() - tBind}ms stopSending=${outcome.stopSending}`);
+    return { stopSending: outcome.stopSending };
   }
 
   async function dispatchManualTrigger(

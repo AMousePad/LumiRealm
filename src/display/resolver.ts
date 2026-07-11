@@ -213,6 +213,7 @@ function runApply(
         throw err;
       }
     },
+    reResolveAfterRule: true,
   });
 }
 
