@@ -11,6 +11,7 @@ import {
 } from './lumirealm-character.js';
 import { clearActiveAssetIndexes } from '../interpreter/asset-cache.js';
 import { clearActiveCharacterImage } from '../interpreter/image-cache.js';
+import { clearActiveScriptstateDefaults } from '../interpreter/defaults-cache.js';
 import { clearActiveLorebookForCharacter } from './lorebook-cache.js';
 
 export interface CharacterModuleAttachDeps {
@@ -118,6 +119,7 @@ export function createCharacterModuleAttach(deps: CharacterModuleAttachDeps): Ch
         onActiveChatEvicted?.(chatId);
         clearActiveAssetIndexes(chatId);
         clearActiveCharacterImage(chatId);
+        clearActiveScriptstateDefaults(chatId);
         variableState.clearChat(chatId);
         toggleState.clearChat(chatId);
         lastSentBgHtmlByChat.delete(chatId);
