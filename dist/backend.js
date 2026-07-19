@@ -34203,10 +34203,43 @@ function createLifecycleEventHandlers(deps) {
       runWorldBookInvalidation(userId);
     }, WORLD_BOOK_MUTATION_DEBOUNCE_MS));
   }
+  const personaChangedTimers = new Map;
+  const PERSONA_CHANGED_DEBOUNCE_MS = 300;
+  async function runPersonaRefresh(userId) {
+    await deps.refreshPersonaImage(userId);
+    const chatId = deps.lastActiveChatByUser.get(userId);
+    if (!chatId)
+      return;
+    const active = await deps.ensureActiveCardForChat(chatId, null, userId);
+    if (!active)
+      return;
+    deps.invalidateRenderMcpForChat(chatId);
+    deps.invalidateMacroInterceptorForChat(chatId);
+    await deps.refreshVariables(active, chatId, userId, { force: true });
+    await deps.refreshBgHtml(active, chatId, userId);
+    deps.log.info(`personaChanged: refreshed chat=${chatId}`);
+  }
+  function onPersonaChanged(userId, source) {
+    deps.captureUserId(userId, source);
+    if (userId === undefined)
+      return;
+    const existing = personaChangedTimers.get(userId);
+    if (existing)
+      clearTimeout(existing);
+    personaChangedTimers.set(userId, setTimeout(() => {
+      personaChangedTimers.delete(userId);
+      runPersonaRefresh(userId).catch((err) => {
+        deps.log.warn(`personaChanged: refresh failed user=${userId}: ${err.message}`);
+      });
+    }, PERSONA_CHANGED_DEBOUNCE_MS));
+  }
   return {
     SETTINGS_UPDATED: async (raw, userId) => {
       deps.captureUserId(userId, "SETTINGS_UPDATED");
       const p = raw;
+      if (p.key === "activePersonaId" || Array.isArray(p.keys) && p.keys.includes("activePersonaId")) {
+        onPersonaChanged(userId, "SETTINGS_UPDATED activePersonaId");
+      }
       if (p.key !== "activeChatId")
         return;
       const chatId = typeof p.value === "string" && p.value.length > 0 ? p.value : null;
@@ -34262,6 +34295,9 @@ function createLifecycleEventHandlers(deps) {
       await deps.refreshToggleDefinitions(active, chatId, userId, { force: true });
       await deps.refreshBgHtml(active, chatId, userId);
       deps.log.info(`SETTINGS_UPDATED activeChatId: ALL DONE chatId=${chatId}`);
+    },
+    PERSONA_CHANGED: async (_raw, userId) => {
+      onPersonaChanged(userId, "PERSONA_CHANGED");
     },
     CHAT_CHANGED: async (raw, userId) => {
       deps.captureUserId(userId, "CHAT_CHANGED");
@@ -42838,6 +42874,7 @@ var lifecycleHandlers = createLifecycleEventHandlers({
   clearActiveLorebook,
   clearVarOverlay,
   clearMacroVarOverlay,
+  refreshPersonaImage: (userId) => refreshPersonaImage(userId),
   refreshBgHtml,
   refreshVariables,
   refreshToggleDefinitions,
@@ -42872,6 +42909,7 @@ var lifecycleHandlers = createLifecycleEventHandlers({
   errMsg
 });
 spindle.on("SETTINGS_UPDATED", userScoped(lifecycleHandlers.SETTINGS_UPDATED));
+spindle.on("PERSONA_CHANGED", userScoped(lifecycleHandlers.PERSONA_CHANGED));
 spindle.on("CHAT_CHANGED", userScoped(lifecycleHandlers.CHAT_CHANGED));
 spindle.on("MESSAGE_SENT", userScoped(lifecycleHandlers.MESSAGE_SENT));
 spindle.on("GENERATION_STARTED", userScoped(lifecycleHandlers.GENERATION_STARTED));
