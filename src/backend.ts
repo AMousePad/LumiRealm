@@ -1157,6 +1157,7 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   clearActiveLorebook,
   clearVarOverlay,
   clearMacroVarOverlay,
+  refreshPersonaImage: (userId) => refreshPersonaImage(userId),
   refreshBgHtml,
   refreshVariables,
   refreshToggleDefinitions,
@@ -1191,6 +1192,7 @@ const lifecycleHandlers = createLifecycleEventHandlers({
 });
 
 spindle.on('SETTINGS_UPDATED', userScoped(lifecycleHandlers.SETTINGS_UPDATED));
+spindle.on('PERSONA_CHANGED', userScoped(lifecycleHandlers.PERSONA_CHANGED));
 spindle.on('CHAT_CHANGED', userScoped(lifecycleHandlers.CHAT_CHANGED));
 spindle.on('MESSAGE_SENT', userScoped(lifecycleHandlers.MESSAGE_SENT));
 spindle.on('GENERATION_STARTED', userScoped(lifecycleHandlers.GENERATION_STARTED));

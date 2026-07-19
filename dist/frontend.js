@@ -47498,6 +47498,11 @@ function setup(ctx) {
         const prev = getDisplaySnapshot(msg.snapshot.chatId);
         setDisplaySnapshot(msg.snapshot);
         if (prev) {
+          const ns = msg.snapshot;
+          if (prev.userName !== ns.userName || prev.charName !== ns.charName || prev.personaText !== ns.personaText || prev.personaImage !== ns.personaImage) {
+            ctx.display?.invalidate(["*"]);
+            return;
+          }
           const changed = diffSnapshotVars(prev, msg.snapshot);
           const pc = prev.chat, nc = msg.snapshot.chat;
           if (pc.lastMessageId !== nc.lastMessageId || pc.messageCount !== nc.messageCount || pc.lastMessage !== nc.lastMessage || pc.lastUserMessage !== nc.lastUserMessage || pc.lastCharMessage !== nc.lastCharMessage) {

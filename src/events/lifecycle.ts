@@ -46,6 +46,7 @@ export interface LifecycleEventHandlerDeps {
   readonly clearMacroVarOverlay: (chatId: string) => void;
 
   // Refresh / dispatch
+  readonly refreshPersonaImage: (userId: string) => Promise<void>;
   readonly refreshBgHtml: (active: ActiveCard, chatId: string, userId: string | undefined) => Promise<void>;
   readonly refreshVariables: (
     active: ActiveCard,
@@ -135,6 +136,7 @@ export interface LifecycleEventHandlerDeps {
 
 export interface LifecycleEventHandlers {
   readonly SETTINGS_UPDATED: EventHandler;
+  readonly PERSONA_CHANGED: EventHandler;
   readonly CHAT_CHANGED: EventHandler;
   readonly MESSAGE_SENT: EventHandler;
   readonly GENERATION_STARTED: EventHandler;
@@ -285,10 +287,46 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
     }, WORLD_BOOK_MUTATION_DEBOUNCE_MS));
   }
 
+  const personaChangedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Folder renames emit one PERSONA_CHANGED per persona, coalesce the burst.
+  const PERSONA_CHANGED_DEBOUNCE_MS = 300;
+
+  async function runPersonaRefresh(userId: string): Promise<void> {
+    await deps.refreshPersonaImage(userId);
+    const chatId = deps.lastActiveChatByUser.get(userId);
+    if (!chatId) return;
+    const active = await deps.ensureActiveCardForChat(chatId, null, userId);
+    if (!active) return;
+    // FE-owned display resolves {{user}}/{{persona}} from the snapshot identity,
+    // so a persona change must invalidate + re-push or panels keep the old name.
+    deps.invalidateRenderMcpForChat(chatId);
+    deps.invalidateMacroInterceptorForChat(chatId);
+    await deps.refreshVariables(active, chatId, userId, { force: true });
+    await deps.refreshBgHtml(active, chatId, userId);
+    deps.log.info(`personaChanged: refreshed chat=${chatId}`);
+  }
+
+  function onPersonaChanged(userId: string | undefined, source: string): void {
+    deps.captureUserId(userId, source);
+    if (userId === undefined) return;
+    const existing = personaChangedTimers.get(userId);
+    if (existing) clearTimeout(existing);
+    personaChangedTimers.set(userId, setTimeout(() => {
+      personaChangedTimers.delete(userId);
+      runPersonaRefresh(userId).catch((err) => {
+        deps.log.warn(`personaChanged: refresh failed user=${userId}: ${(err as Error).message}`);
+      });
+    }, PERSONA_CHANGED_DEBOUNCE_MS));
+  }
+
   return {
     SETTINGS_UPDATED: async (raw, userId) => {
       deps.captureUserId(userId, 'SETTINGS_UPDATED');
       const p = raw as { key?: string; value?: unknown; keys?: string[] };
+      // Active-persona swap is a settings write, batch puts carry keys[] with no values.
+      if (p.key === 'activePersonaId' || (Array.isArray(p.keys) && p.keys.includes('activePersonaId'))) {
+        onPersonaChanged(userId, 'SETTINGS_UPDATED activePersonaId');
+      }
       if (p.key !== 'activeChatId') return;
       const chatId = typeof p.value === 'string' && p.value.length > 0 ? p.value : null;
       deps.log.info(`event SETTINGS_UPDATED activeChatId=${chatId ?? '<cleared>'} payload=${deps.dumpPayload(raw)}`);
@@ -342,6 +380,10 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       await deps.refreshToggleDefinitions(active, chatId, userId, { force: true });
       await deps.refreshBgHtml(active, chatId, userId);
       deps.log.info(`SETTINGS_UPDATED activeChatId: ALL DONE chatId=${chatId}`);
+    },
+
+    PERSONA_CHANGED: async (_raw, userId) => {
+      onPersonaChanged(userId, 'PERSONA_CHANGED');
     },
 
     CHAT_CHANGED: async (raw, userId) => {
