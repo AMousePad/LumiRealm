@@ -392,6 +392,13 @@ function reconstructRaw(name: string, args: readonly string[]): string {
   return `${name}::${args.join('::')}`;
 }
 
+export function nonRisuPassthrough(mctx: MacroInvokeCtx): string | null {
+  const chatId = mctx.env?.chat?.id;
+  if (chatId && getCharacterIdForChat(chatId) !== null) return null;
+  if (mctx.isScoped) return mctx.body;
+  return `{{${reconstructRaw(mctx.name, mctx.args)}}}`;
+}
+
 function indexToCharacterAssets(
   index: Readonly<Record<string, AssetIndexEntry>>,
 ): CharacterAsset[] {
@@ -478,6 +485,8 @@ export function registerAll(): void {
     }
     try {
       const handlerFn = (mctx: MacroInvokeCtx): string => {
+        const passthrough = nonRisuPassthrough(mctx);
+        if (passthrough !== null) return passthrough;
         noteInvoke(reg.name);
         const ctx = buildRuntimeContext(mctx);
         const args = reg.scoped ? [...mctx.args, mctx.body] : mctx.args;

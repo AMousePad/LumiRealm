@@ -36415,6 +36415,17 @@ function createLumiInterceptors(deps) {
     }
     log8.info(`[decorators] registerWorldInfoInterceptor wired at boot`);
     registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
+      const hasRisuStampedEntries = ctx.entries.some((e) => {
+        const stash = e.extensions?.["_risu_decorators"];
+        return Array.isArray(stash) && stash.length > 0;
+      });
+      if (!hasRisuStampedEntries) {
+        const gateActive = activeCardByChat.get(ctx.chatId) ?? (ctx.userId ? await deps.ensureActiveCardForChat(ctx.chatId, null, ctx.userId) : null);
+        if (!gateActive) {
+          log8.trace(`[decorators] worldInfoInterceptor skip chat=${ctx.chatId}: not a Risu chat, no stamped entries`);
+          return;
+        }
+      }
       log8.info(`[decorators] worldInfoInterceptor ENTER chat=${ctx.chatId} entries=${ctx.entries.length}`);
       const verbose = (() => {
         try {
@@ -40463,6 +40474,7 @@ function createCharacterModuleAttach(deps) {
         onActiveChatEvicted?.(chatId);
         clearActiveAssetIndexes(chatId);
         clearActiveCharacterImage(chatId);
+        clearActiveScriptstateDefaults(chatId);
         variableState.clearChat(chatId);
         toggleState.clearChat(chatId);
         lastSentBgHtmlByChat.delete(chatId);
