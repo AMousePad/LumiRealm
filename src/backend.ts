@@ -173,6 +173,7 @@ import { resolveAlertDismissal } from './interpreter/alert-bridge.js';
 import { resolvePickResolution } from './interpreter/pick-bridge.js';
 import { userIdAls, currentUserId } from './interpreter/runtime/als.js';
 import { checkHostVersion, type HostVersionCheckResult } from './util/version-check.js';
+import { decodeModuleCharx } from './core/charx/index.js';
 import { decodeRisum } from './core/risum/index.js';
 import { risuModuleSchema } from './core/schemas/module.js';
 import { guessMimeType, sniffImageMime, loadCatalog } from './payload/import.js';
@@ -1261,6 +1262,7 @@ registerLumiagentPhoneline(
 
 const moduleUploader = createModuleUploader({
   decodeRisum,
+  decodeCharx: decodeModuleCharx,
   parseSchema: (data) => risuModuleSchema.safeParse(data) as never,
   newUuid: () => crypto.randomUUID(),
   requestConsent: (opts, userId) => requestConsent(opts, userId),

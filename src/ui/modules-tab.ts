@@ -22,7 +22,7 @@ const EXTENSION_IDENTIFIER = 'lumirealm';
 // Server processing (decode + asset upload + world-book creation) can be slow.
 const PROCESSING_TIMEOUT_MS = 120_000;
 
-const ACCEPT_EXTENSIONS = ['.risum'];
+const ACCEPT_EXTENSIONS = ['.risum', '.charx'];
 
 // Browsers (Chrome especially) throttle background-tab timers heavily, so a
 // plain setTimeout fires the abort even though the BE is responding fine.
@@ -185,8 +185,8 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   const uploadBtn = document.createElement('button');
   uploadBtn.type = 'button';
   uploadBtn.className = 'lrm-btn lrm-btn-primary';
-  uploadBtn.textContent = 'Upload .risum';
-  uploadBtn.title = 'Pick a .risum module file.';
+  uploadBtn.textContent = 'Upload .risum / .charx';
+  uploadBtn.title = 'Pick a legacy .risum or CharX module file.';
   libToolbar.appendChild(uploadBtn);
   const refreshBtn = document.createElement('button');
   refreshBtn.type = 'button';
