@@ -13,7 +13,6 @@ import {
   type ModuleMigrationDeps,
 } from './module-migrations.js';
 import { markLegacyReimportWarned } from './legacy-reimport-warnings.js';
-import { loadCatalog } from '../payload/import.js';
 import { getRegexScriptsApi } from '../adapters/spindle-extras.js';
 
 export interface MigrationsFactoryDeps {
@@ -206,7 +205,6 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
     opts?: { firePromptOnNeedsReimport?: boolean; silent?: boolean },
   ): Promise<MigrationResult['kind']> {
     const migrationDeps: MigrationDeps = {
-      loadCatalog,
       extensionVersion,
       log,
       installCharacterRegexScripts: async (charId, charName, scripts) => {

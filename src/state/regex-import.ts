@@ -1,7 +1,6 @@
 import type { BackendToFrontend, FrontendToBackend, PendingRegexScriptMsg } from '../types/messages.js';
 import type { parseDirectRegex } from '../payload/regex-direct-import.js';
 import type { mapRegex } from '../core/mappers/regex.js';
-import type { CatalogIndex } from '../core/cbs/catalog/loader.js';
 import type { LumiRegexScript } from '../core/lumiverse/types.js';
 
 export type ImportRegexMsg = Extract<FrontendToBackend, { type: 'import_regex' }>;
@@ -12,7 +11,6 @@ export interface RegexImporterDeps {
   readonly errMsg: (err: unknown) => string;
   readonly parseDirectRegex: typeof parseDirectRegex;
   readonly mapRegex: typeof mapRegex;
-  readonly loadCatalog: () => CatalogIndex;
 }
 
 export interface RegexImporter {
@@ -77,7 +75,6 @@ export function createRegexImporter(deps: RegexImporterDeps): RegexImporter {
         scope: characterId ? 'character' : 'global',
         scopeId: characterId,
         folder,
-        catalog: deps.loadCatalog(),
       });
     } catch (err) {
       fail(parsed.scripts.length, parsed.dropped, `regex translation failed: ${deps.errMsg(err)}`);

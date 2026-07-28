@@ -51,7 +51,7 @@ register("crypt", (_c, a) => {
   return result;
 }, "Caesar-style Unicode shift cipher (default shift 32768 which self-inverts).");
 
-register("risu_date", (ctx, a) => {
+register("date", (ctx, a) => {
   if (a.length === 0) {
     const d = new Date(ctx.clock.now());
     return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
@@ -73,7 +73,7 @@ register("hiddenkey", () => "",
   "A key that activates lorebook entries without being sent to the model.");
 
 // Risu: cbs (displaying=false) and prompt-assembly (commit=true) both return ''. Only the display path renders the div.
-register("risu_comment", (ctx, a) => {
+register("comment", (ctx, a) => {
   if (ctx.commit || ctx.cbsContext) return "";
   // Both class forms so card-authored CSS (unprefixed by LumiRealm) and the shipped
   // risu-environment.css baseline (.x-risu-risu-comment) both match, matching Risu.

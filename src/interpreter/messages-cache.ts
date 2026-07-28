@@ -1,5 +1,5 @@
 // Per-chat full messages array, synchronously readable from the macroInterceptor
-// so handlers like previous*chat / risu_message::N / messages.count() can resolve
+// so handlers like previous*chat and messages.count() can resolve
 // against real history instead of the synthesized lastUser+lastChar pair.
 // Backend pre-warms on chat-open and refreshes on MESSAGE_* events.
 

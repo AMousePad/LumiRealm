@@ -7,8 +7,7 @@ import {
   readMigrationState,
   writeMigrationState,
 } from '../state/migration-state.js';
-import { unrewriteText } from '../core/cbs/rewrite/unrewrite.js';
-import { loadCatalog } from '../payload/import.js';
+import { migrateRetiredMacroNames } from './retired-macro-migration.js';
 
 type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 
@@ -75,7 +74,7 @@ export interface MassMigrationsDeps {
 export interface MassMigrationsRunner {
   readonly runMassModuleMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runMassCharacterMigrationIfNeeded: (userId: string) => Promise<void>;
-  readonly runMacroUnprefixSweepIfNeeded: (userId: string) => Promise<void>;
+  readonly runRetiredMacroMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runVarScopeMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly notifyLorebookMigrationArchive: (
     subjectLabel: string,
@@ -384,28 +383,22 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     );
   }
 
-  const macroSweepStartedThisBoot = new Set<string>();
+  const retiredMacroMigrationStartedThisBoot = new Set<string>();
 
-  // One-time sweep that un-prefixes legacy risu_* macros to raw Risu CBS across
-  // every stored string surface. The evaluator resolves both forms, so this is
-  // cosmetic-correctness, not load-bearing, but it normalizes storage.
-  async function runMacroUnprefixSweepIfNeeded(userId: string): Promise<void> {
-    if (macroSweepStartedThisBoot.has(userId)) return;
-    if (blockingPermissionsMissing('macro-unprefix')) return;
-    macroSweepStartedThisBoot.add(userId);
+  // One-time storage migration for names emitted by the retired static macro
+  // projection. The evaluator intentionally does not recognize those names.
+  async function runRetiredMacroMigrationIfNeeded(userId: string): Promise<void> {
+    if (retiredMacroMigrationStartedThisBoot.has(userId)) return;
+    if (blockingPermissionsMissing('retired-macros')) return;
+    retiredMacroMigrationStartedThisBoot.add(userId);
     const state = await readMigrationState(spindle.userStorage, userId);
-    if (state.macros_unprefixed) return;
-    const leafNames = new Set(loadCatalog().incompatibleNames());
-    const un = (s: string): string => unrewriteText(s, { leafNames });
+    if (state.retired_macro_projection_migrated_v2) return;
+    const un = migrateRetiredMacroNames;
     const chars = await listLumirealmCharacters(userId);
-    if (chars.length === 0) {
-      await writeMigrationState(spindle.userStorage, userId, { ...state, macros_unprefixed: true });
-      return;
-    }
-    const opId = `macro-unprefix-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const opTitle = 'Updating Risu cards';
+    const opId = `retired-macros-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const opTitle = 'Updating stored macros';
     emitOperationProgress(userId, opId, 'started', opTitle, `Updating ${chars.length} card${chars.length === 1 ? '' : 's'}…`, 0);
-    log.info(`macro-unprefix: user=${userId} starting count=${chars.length} opId=${opId}`);
+    log.info(`retired-macros: user=${userId} starting count=${chars.length} opId=${opId}`);
     let failed = 0;
     let changed = 0;
     let processed = 0;
@@ -414,17 +407,26 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
         changed += await sweepCharacterMacros(userId, character.id, data, un);
       } catch (err) {
         failed++;
-        log.warn(`macro-unprefix: char=${character.id} threw: ${errMsg(err)}`);
+        log.warn(`retired-macros: char=${character.id} threw: ${errMsg(err)}`);
       }
       processed++;
       emitOperationProgress(userId, opId, 'progress', opTitle, `Updated ${processed}/${chars.length} card${chars.length === 1 ? '' : 's'}`, processed / chars.length);
     }
+    try {
+      changed += await sweepImportedRegexMacros(userId, un);
+    } catch (err) {
+      failed++;
+      log.warn(`retired-macros: standalone regex sweep threw: ${errMsg(err)}`);
+    }
     if (failed === 0) {
       const after = await readMigrationState(spindle.userStorage, userId);
-      await writeMigrationState(spindle.userStorage, userId, { ...after, macros_unprefixed: true });
-      log.info(`macro-unprefix: user=${userId} done characters=${chars.length} fields_changed=${changed}`);
+      await writeMigrationState(spindle.userStorage, userId, {
+        ...after,
+        retired_macro_projection_migrated_v2: true,
+      });
+      log.info(`retired-macros: user=${userId} done characters=${chars.length} fields_changed=${changed}`);
     } else {
-      log.warn(`macro-unprefix: user=${userId} ${failed} character(s) failed, marker NOT set (retry next boot)`);
+      log.warn(`retired-macros: user=${userId} failures=${failed}, marker NOT set (retry next boot)`);
     }
     emitOperationProgress(
       userId,
@@ -432,8 +434,8 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
       failed === 0 ? 'done' : 'error',
       opTitle,
       failed === 0
-        ? `Updated ${chars.length} card${chars.length === 1 ? '' : 's'}`
-        : `Updated ${chars.length - failed}/${chars.length} (${failed} failed, will retry next start)`,
+        ? `Updated stored macros (${changed} field${changed === 1 ? '' : 's'} changed)`
+        : `Migration incomplete (${failed} failure${failed === 1 ? '' : 's'}, will retry next start)`,
       1,
     );
   }
@@ -496,6 +498,39 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     }
   }
 
+  async function sweepImportedRegexMacros(
+    userId: string,
+    un: (s: string) => string,
+  ): Promise<number> {
+    let changed = 0;
+    let offset = 0;
+    for (;;) {
+      const page = await spindle.regex_scripts.list({ limit: 200, offset, userId });
+      for (const script of page.data) {
+        const owner = script.metadata?.['_risu'];
+        if (
+          !owner ||
+          typeof owner !== 'object' ||
+          (owner as Record<string, unknown>)['imported_regex'] !== true
+        ) {
+          continue;
+        }
+        const patch: Record<string, string> = {};
+        const findRegex = un(script.find_regex);
+        const replaceString = un(script.replace_string);
+        if (findRegex !== script.find_regex) patch['find_regex'] = findRegex;
+        if (replaceString !== script.replace_string) patch['replace_string'] = replaceString;
+        if (Object.keys(patch).length > 0) {
+          await spindle.regex_scripts.update(script.id, patch, userId);
+          changed += Object.keys(patch).length;
+        }
+      }
+      offset += page.data.length;
+      if (page.data.length === 0 || offset >= page.total) break;
+    }
+    return changed;
+  }
+
   async function sweepCharacterMacros(
     userId: string,
     characterId: string,
@@ -521,24 +556,6 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
         changed += Object.keys(patch).length;
       }
 
-      const wbIds = (c['world_book_ids'] as string[] | undefined) ?? [];
-      for (const wbId of wbIds) {
-        let offset = 0;
-        for (;;) {
-          const page = await spindle.world_books.entries.list(wbId, { limit: 200, offset, userId });
-          for (const e of page.data) {
-            const ep: Record<string, unknown> = {};
-            if (typeof e.content === 'string') { const u = un(e.content); if (u !== e.content) ep['content'] = u; }
-            if (typeof e.comment === 'string') { const u = un(e.comment); if (u !== e.comment) ep['comment'] = u; }
-            if (Object.keys(ep).length > 0) {
-              await spindle.world_books.entries.update(e.id, ep as never, userId);
-              changed += Object.keys(ep).length;
-            }
-          }
-          offset += page.data.length;
-          if (page.data.length === 0 || offset >= page.total) break;
-        }
-      }
     }
 
     {
@@ -565,20 +582,24 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
         const page = await spindle.chats.list({ characterId, limit: 100, offset, userId });
         for (const chat of page.data) {
           const msgs = await spindle.chat.getMessages(chat.id);
-          for (const m of msgs) {
+          const m = msgs[0];
+          // Lumi stores the card greeting as the leading assistant row. Only
+          // that translator-derived row is in scope; ordinary chat messages
+          // may contain author/LLM-defined names that LumiRealm never created.
+          if (m?.role === 'assistant') {
+            const messagePatch: Record<string, unknown> = {};
+            if (typeof m.content === 'string') {
+              const content = un(m.content);
+              if (content !== m.content) messagePatch['content'] = content;
+            }
             const swipes = Array.isArray(m.swipes) ? m.swipes : null;
             if (swipes && swipes.length > 0) {
               const ns = swipes.map((s) => (typeof s === 'string' ? un(s) : s));
-              if (ns.some((s, i) => s !== swipes[i])) {
-                await spindle.chat.updateMessage(chat.id, m.id, { swipes: ns });
-                changed++;
-              }
-            } else if (typeof m.content === 'string') {
-              const u = un(m.content);
-              if (u !== m.content) {
-                await spindle.chat.updateMessage(chat.id, m.id, { content: u });
-                changed++;
-              }
+              if (ns.some((s, i) => s !== swipes[i])) messagePatch['swipes'] = ns;
+            }
+            if (Object.keys(messagePatch).length > 0) {
+              await spindle.chat.updateMessage(chat.id, m.id, messagePatch);
+              changed += Object.keys(messagePatch).length;
             }
           }
         }
@@ -591,16 +612,34 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     const bgs = data.payload.background_html_source;
     const nbg = typeof bg === 'string' ? un(bg) : bg;
     const nbgs = typeof bgs === 'string' ? un(bgs) : bgs;
-    if (nbg !== bg || nbgs !== bgs) {
+    const nregex = data.regex_scripts.map((script) => {
+      const findRegex = un(script.find_regex);
+      const replaceString = un(script.replace_string);
+      return findRegex === script.find_regex && replaceString === script.replace_string
+        ? script
+        : { ...script, find_regex: findRegex, replace_string: replaceString };
+    });
+    const regexFieldsChanged = nregex.reduce(
+      (count, script, index) =>
+        count +
+        (script.find_regex !== data.regex_scripts[index]?.find_regex ? 1 : 0) +
+        (script.replace_string !== data.regex_scripts[index]?.replace_string ? 1 : 0),
+      0,
+    );
+    if (nbg !== bg || nbgs !== bgs || regexFieldsChanged > 0) {
       await writeLumirealm(userId, characterId, {
         ...data,
+        regex_scripts: nregex,
         payload: {
           ...data.payload,
           background_html: nbg,
           ...(bgs !== undefined ? { background_html_source: nbgs } : {}),
         },
       });
-      changed++;
+      changed +=
+        (nbg !== bg ? 1 : 0) +
+        (nbgs !== bgs ? 1 : 0) +
+        regexFieldsChanged;
     }
 
     return changed;
@@ -609,7 +648,7 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
   return {
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
-    runMacroUnprefixSweepIfNeeded,
+    runRetiredMacroMigrationIfNeeded,
     runVarScopeMigrationIfNeeded,
     notifyLorebookMigrationArchive,
     flushLorebookMigrationArchives,

@@ -1,6 +1,5 @@
-// Builds EvaluatorCtx for in-worker pipeline runs. Parallel to
-// macros.tsbuildRuntimeContext but takes a direct input (no RPC overhead).
-// Var writes fire a best-effort Spindle writeback for cross-pass visibility.
+// Builds EvaluatorCtx directly for in-worker pipeline runs. Var writes fire a
+// best-effort Spindle writeback for cross-pass visibility.
 
 import type {
   FunctionRegistry,
@@ -92,9 +91,8 @@ export interface VarReadRecorder {
 
 export const MSG_DEP_KEY = "__msg__";
 
-// Input shape for a single evaluator run. Mirrors the fields
-// buildRuntimeContext reads from MacroInvokeCtx.env plus direct identity +
-// messages slices pulled out of the extension's live ActiveCard state.
+// Input shape for a single evaluator run, including direct identity and
+// message slices pulled out of the extension's live ActiveCard state.
 export interface BuildEvaluatorCtxInput {
   readonly chatId: string;
   readonly userId?: string;

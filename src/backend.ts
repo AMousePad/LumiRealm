@@ -51,7 +51,6 @@ import { parseDirectRegex } from './payload/regex-direct-import.js';
 import { mapRegex } from './core/mappers/regex.js';
 import { createRegexImporter } from './state/regex-import.js';
 import { mapLoreBook } from './core/mappers/lorebook.js';
-import { clearMacroVarOverlay } from './interpreter/macros.js';
 import { setActiveAssetIndexes, clearActiveAssetIndexes } from './interpreter/asset-cache.js';
 import {
   setActiveCharacterImage,
@@ -176,7 +175,7 @@ import { checkHostVersion, type HostVersionCheckResult } from './util/version-ch
 import { decodeModuleCharx } from './core/charx/index.js';
 import { decodeRisum } from './core/risum/index.js';
 import { risuModuleSchema } from './core/schemas/module.js';
-import { guessMimeType, sniffImageMime, loadCatalog } from './payload/import.js';
+import { guessMimeType, sniffImageMime } from './payload/import.js';
 import {
   type ModuleEnvelope,
   deleteModule as deleteModuleFromStore,
@@ -377,9 +376,9 @@ function modulesByNamespaceFromCard(card: StoredRisuCard): Readonly<Record<strin
   return Object.keys(out).length > 0 ? out : null;
 }
 
-// We do not register macros with Lumi's MacroRegistry. The macroInterceptor
-// resolves every macro through our own evaluator on each Lumi evaluate(), and
-// display/bg-html resolve in-worker, so Lumi's registry is never consulted.
+// Risu macro compatibility does not register aliases with Lumi's MacroRegistry.
+// The macroInterceptor resolves supported raw names through our evaluator before
+// Lumi considers its native registry; display/bg-html resolve in-worker.
 
 const variableState = new VariableStateStore();
 
@@ -550,7 +549,7 @@ const captureUserId = makeCaptureUserId({
   // Trampolines: massMigrations is declared further down, this closure resolves it at call time.
   runMassModuleMigrationIfNeeded: (uid) => massMigrations.runMassModuleMigrationIfNeeded(uid),
   runMassCharacterMigrationIfNeeded: (uid) => massMigrations.runMassCharacterMigrationIfNeeded(uid),
-  runMacroUnprefixSweepIfNeeded: (uid) => massMigrations.runMacroUnprefixSweepIfNeeded(uid),
+  runRetiredMacroMigrationIfNeeded: (uid) => massMigrations.runRetiredMacroMigrationIfNeeded(uid),
   runVarScopeMigrationIfNeeded: (uid) => massMigrations.runVarScopeMigrationIfNeeded(uid),
   notifyMissingPermsForUser: (userId) => {
     const missing = getMissingPermissions();
@@ -1157,7 +1156,6 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   clearActiveScriptstateDefaults,
   clearActiveLorebook,
   clearVarOverlay,
-  clearMacroVarOverlay,
   refreshPersonaImage: (userId) => refreshPersonaImage(userId),
   refreshBgHtml,
   refreshVariables,
@@ -1433,7 +1431,6 @@ const regexImporter = createRegexImporter({
   errMsg,
   parseDirectRegex,
   mapRegex,
-  loadCatalog,
 });
 
 
@@ -1507,9 +1504,9 @@ subscribeToMissingChanges((missing) => {
         log.warn(`permissions.changed: mass character migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
-        await massMigrations.runMacroUnprefixSweepIfNeeded(userId);
+        await massMigrations.runRetiredMacroMigrationIfNeeded(userId);
       } catch (err) {
-        log.warn(`permissions.changed: macro un-prefix sweep retry failed userId=${userId}: ${errMsg(err)}`);
+        log.warn(`permissions.changed: retired macro migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
         await massMigrations.runVarScopeMigrationIfNeeded(userId);

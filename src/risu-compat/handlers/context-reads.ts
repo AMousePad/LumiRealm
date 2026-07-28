@@ -2,7 +2,7 @@ import type { MacroHandler } from "../../core/cbs/index.js";
 import { registry } from "../registry.js";
 import { lumiRoleToRisu } from "../../util/role-coerce.js";
 
-// Context-read macros. Many are renamed to `risu_...` due to Lumi collisions.
+// Context-read macros use RisuAI's runtime names verbatim.
 
 function register(name: string, handler: MacroHandler, description: string): void {
   registry.register({
@@ -20,18 +20,16 @@ function recurse(ctx: import("../../core/cbs/index.js").RisuRuntimeContext, fiel
   return ctx.evaluate ? ctx.evaluate(field) : field;
 }
 
-// Collision-marked in the catalog: rewriter emits `risu_*` form.
-// dispatch.ts also re-registers under the bare name.
-register("risu_description", (ctx) => recurse(ctx, ctx.character.description),
+register("description", (ctx) => recurse(ctx, ctx.character.description),
   "Returns the character description, recursively parsed.");
 
-register("risu_personality", (ctx) => recurse(ctx, ctx.character.personality),
+register("personality", (ctx) => recurse(ctx, ctx.character.personality),
   "Returns the character personality field, recursively parsed.");
 
-register("risu_scenario", (ctx) => recurse(ctx, ctx.character.scenario),
+register("scenario", (ctx) => recurse(ctx, ctx.character.scenario),
   "Returns the character scenario field, recursively parsed.");
 
-register("risu_persona", (ctx) => recurse(ctx, ctx.identity.personaText),
+register("persona", (ctx) => recurse(ctx, ctx.identity.personaText),
   "Returns the user persona prompt, recursively parsed.");
 
 register("exampledialogue", (ctx) => recurse(ctx, ctx.character.exampleDialogue),
@@ -51,7 +49,7 @@ register("authornote", (ctx) => recurse(ctx, ctx.character.authorsNote),
 
 
 // cbs.ts.
-register("risu_model", (ctx) => ctx.aiModel,
+register("model", (ctx) => ctx.aiModel,
   "Returns the id of the currently selected AI model.");
 
 // cbs.ts.
@@ -92,7 +90,7 @@ register("unixtime", (ctx) => Math.floor(ctx.clock.now() / 1000).toString(),
   "Returns the current unix timestamp in seconds.");
 
 // cbs.ts. Local time, unpadded.
-register("risu_time", (ctx) => {
+register("time", (ctx) => {
   const d = new Date(ctx.clock.now());
   return `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
 }, "Returns the current local time in H:M:S format (unpadded, matching Risu).");
@@ -168,7 +166,7 @@ register("messageidleduration", (ctx) => {
 }, "Returns HH:MM:SS between the current and the previous user message.");
 
 
-// cbs.ts. No Lumi collision; rewriter leaves `{{br}}` alone.
+// cbs.ts.
 register("br", () => "\n",
   "Returns a literal newline character.");
 

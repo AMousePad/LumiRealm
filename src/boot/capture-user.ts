@@ -3,7 +3,7 @@ export interface CaptureUserIdDeps {
   readonly getSettingsForUser: (userId: string) => Promise<unknown>;
   readonly runMassModuleMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runMassCharacterMigrationIfNeeded: (userId: string) => Promise<void>;
-  readonly runMacroUnprefixSweepIfNeeded: (userId: string) => Promise<void>;
+  readonly runRetiredMacroMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runVarScopeMigrationIfNeeded: (userId: string) => Promise<void>;
   // Sends the initial missing-permissions notification to the newly captured
   // user. Without this, a user who connects after permissions finish loading
@@ -21,7 +21,7 @@ export function makeCaptureUserId(deps: CaptureUserIdDeps): (userId: string | un
     getSettingsForUser,
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
-    runMacroUnprefixSweepIfNeeded,
+    runRetiredMacroMigrationIfNeeded,
     runVarScopeMigrationIfNeeded,
     log,
     errMsg,
@@ -52,9 +52,9 @@ export function makeCaptureUserId(deps: CaptureUserIdDeps): (userId: string | un
           log.warn(`captureUserId: mass character migration failed: ${errMsg(err)}`);
         }
         try {
-          await runMacroUnprefixSweepIfNeeded(userId);
+          await runRetiredMacroMigrationIfNeeded(userId);
         } catch (err) {
-          log.warn(`captureUserId: macro un-prefix sweep failed: ${errMsg(err)}`);
+          log.warn(`captureUserId: retired macro migration failed: ${errMsg(err)}`);
         }
         try {
           await runVarScopeMigrationIfNeeded(userId);

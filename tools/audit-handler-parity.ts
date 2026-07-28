@@ -165,15 +165,12 @@ function main() {
   const extraInOurs: string[] = [];
 
   for (const h of ours) {
-    let r = risuByName.get(h.name.toLowerCase()) ?? null;
-    if (!r && h.name.startsWith("risu_")) {
-      r = risuByName.get(h.name.slice(5).toLowerCase()) ?? null;
-    }
+    const r = risuByName.get(h.name.toLowerCase()) ?? null;
     const c = classify(h, r);
     if (c.tier === "STUB") stubs.push({ handler: h, risu: r, reason: c.reason });
     else if (c.tier === "SUSPECT") suspects.push({ handler: h, risu: r, reason: c.reason });
     else ok.push(1);
-    if (!r && !h.name.startsWith("risu_")) extraInOurs.push(h.name);
+    if (!r) extraInOurs.push(h.name);
   }
 
   const lumiNatives = new Set<string>([

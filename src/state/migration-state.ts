@@ -8,9 +8,9 @@ export interface MigrationState {
   readonly last_swept_modules: number;
   readonly last_swept_characters: number;
   readonly display_owner_backfilled: boolean;
-  // One-time sweep that un-prefixes legacy risu_* macros back to raw Risu CBS
-  // across every stored string surface (translate-time prefixing retired).
-  readonly macros_unprefixed: boolean;
+  // Versioned so users who ran the earlier incomplete sweep still receive
+  // the complete storage migration.
+  readonly retired_macro_projection_migrated_v2: boolean;
   // One-time move of per-chat scriptstate from macro_variables.local (transient
   // in Lumi) to chat_variables (natively persisted + rehydrated).
   readonly vars_migrated_to_chat_scope: boolean;
@@ -21,7 +21,7 @@ export const EMPTY_MIGRATION_STATE: MigrationState = {
   last_swept_modules: 0,
   last_swept_characters: 0,
   display_owner_backfilled: false,
-  macros_unprefixed: false,
+  retired_macro_projection_migrated_v2: false,
   vars_migrated_to_chat_scope: false,
 };
 
@@ -45,7 +45,7 @@ export function parseMigrationState(raw: unknown): MigrationState {
     last_swept_characters?: unknown;
     last_swept_translator_version?: unknown;
     display_owner_backfilled?: unknown;
-    macros_unprefixed?: unknown;
+    retired_macro_projection_migrated_v2?: unknown;
     vars_migrated_to_chat_scope?: unknown;
   };
   if (obj.schema_version !== 1) return EMPTY_MIGRATION_STATE;
@@ -60,7 +60,8 @@ export function parseMigrationState(raw: unknown): MigrationState {
     last_swept_characters:
       typeof obj.last_swept_characters === 'number' ? obj.last_swept_characters : 0,
     display_owner_backfilled: obj.display_owner_backfilled === true,
-    macros_unprefixed: obj.macros_unprefixed === true,
+    retired_macro_projection_migrated_v2:
+      obj.retired_macro_projection_migrated_v2 === true,
     vars_migrated_to_chat_scope: obj.vars_migrated_to_chat_scope === true,
   };
 }
@@ -87,7 +88,8 @@ export async function writeMigrationState(
     last_swept_modules: state.last_swept_modules,
     last_swept_characters: state.last_swept_characters,
     display_owner_backfilled: state.display_owner_backfilled,
-    macros_unprefixed: state.macros_unprefixed,
+    retired_macro_projection_migrated_v2:
+      state.retired_macro_projection_migrated_v2,
     vars_migrated_to_chat_scope: state.vars_migrated_to_chat_scope,
   };
   await storage.setJson(MIGRATION_STATE_PATH, out, { indent: 2, userId });

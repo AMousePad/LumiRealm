@@ -9,13 +9,13 @@ function register(name: string, handler: MacroHandler, description: string): voi
 }
 
 // cbs.ts.
-register("risu_round", (_c, a) => Math.round(Number(a[0])).toString(),
+register("round", (_c, a) => Math.round(Number(a[0])).toString(),
   "Rounds to nearest integer (half-up).");
-register("risu_floor", (_c, a) => Math.floor(Number(a[0])).toString(),
+register("floor", (_c, a) => Math.floor(Number(a[0])).toString(),
   "Floors (rounds toward negative infinity).");
-register("risu_ceil", (_c, a) => Math.ceil(Number(a[0])).toString(),
+register("ceil", (_c, a) => Math.ceil(Number(a[0])).toString(),
   "Ceils (rounds toward positive infinity).");
-register("risu_abs", (_c, a) => Math.abs(Number(a[0])).toString(),
+register("abs", (_c, a) => Math.abs(Number(a[0])).toString(),
   "Absolute value.");
 register("remaind", (_c, a) => (Number(a[0]) % Number(a[1])).toString(),
   "Returns (a % b) as string.");
@@ -29,9 +29,9 @@ const toNum = (s: string): number => {
   const n = Number(s);
   return isNaN(n) ? 0 : n;
 };
-register("risu_min", (_c, a) => Math.min(...aggSource(a).map(toNum)).toString(),
+register("min", (_c, a) => Math.min(...aggSource(a).map(toNum)).toString(),
   "Minimum of the given values (non-numeric treated as 0).");
-register("risu_max", (_c, a) => Math.max(...aggSource(a).map(toNum)).toString(),
+register("max", (_c, a) => Math.max(...aggSource(a).map(toNum)).toString(),
   "Maximum of the given values.");
 register("sum", (_c, a) => aggSource(a).map(toNum).reduce((x, y) => x + y, 0).toString(),
   "Sum of the given values.");
@@ -53,8 +53,8 @@ register("tonumber", (_c, a) => {
 register("fixnum", (_c, a) => Number(a[0]).toFixed(Number(a[1])).toString(),
   "Rounds to N decimal places via toFixed.");
 
-// cbs.ts. Lumi collision; CBS rewriter prefixes to `risu_calc`. Handler name must match.
-register("risu_calc", (ctx, a) => {
+// cbs.ts.
+register("calc", (ctx, a) => {
   const expr = a[0] ?? "";
   const n = calcString(
     expr,

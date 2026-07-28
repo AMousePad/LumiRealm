@@ -149,16 +149,17 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
     );
   }
 
-  function registerMacroInterceptorIfAvailable(): void {
-    const registerMacroInterceptor = getRegisterMacroInterceptor();
+  function registerMacroInterceptor(): void {
+    const register = getRegisterMacroInterceptor();
     const registerMessageContentProcessor = getRegisterMessageContentProcessor();
-    if (typeof registerMacroInterceptor !== 'function') {
-      log.warn('macroInterceptor: NOT AVAILABLE on this Lumi build, extension macros will resolve via per-call RPC (slow for iteration-heavy cards, and FRAME-SHIFT UNRELIABLE without preprocessor coherence)');
-      return;
+    if (typeof register !== 'function') {
+      throw new Error(
+        'LumiRealm requires Lumiverse macroInterceptor support; update Lumiverse before loading this extension',
+      );
     }
     const mcpRenderAvailable = typeof registerMessageContentProcessor === 'function';
 
-    registerMacroInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
+    register((ctx) => withMaybeUser(ctx.userId, async () => {
       const callId = ++diagInterceptorCall;
       const t0 = Date.now();
       const chatId = typeof ctx.env.chat?.id === 'string' ? (ctx.env.chat.id as string) : null;
@@ -255,7 +256,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       const dynRole = typeof dynamicMacros?.role === 'string' ? dynamicMacros.role : undefined;
       const cachedMessages = getCachedMessages(chatId);
       const activeLore = getActiveLorebook(chatId);
-      if (ctx.template.includes('lorebook') || ctx.template.includes('risu_each')) {
+      if (ctx.template.includes('lorebook') || ctx.template.includes('{{#each')) {
         log.trace(`macroInterceptor #${callId}: lorebook entries=${activeLore.length} for chat=${chatId} (tmpl mentions lorebook/each)`);
       }
 
@@ -319,7 +320,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       if (__ppT0) perfRecord("cbs.runPipeline", Date.now() - __ppT0);
 
       const resolvedMarker = /★[A-Z_]+★|###[A-Z_]+###/.exec(resolved)?.[0] ?? null;
-      const stillHasRaw = resolved.includes('{{risu_') || resolved.includes('{{getvar::') || resolved.includes('{{#risu_');
+      const stillHasRaw = resolved.includes('{{');
 
       // editDisplay fallback for Lumi builds without the render MCP origin (the load-bearing path on Lumi 0.9.6+).
       // DO NOT widen this gate, every commit:false template flowing through here (bg-html, 88KB CSS bundles) feeds 16+ Lua VMs, ~12s per chat-open on listenEdit-heavy cards.
@@ -508,7 +509,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             const editScriptNS = makeDispatcherScriptNS();
             // Risu resolves CBS (risuChatParser rmVar+visualize) BEFORE the
             // editdisplay Lua hook runs, so the hook sees only the active
-            // {{#risu_if}} branch, not the raw body. FE-resolved macros stay
+            // {{#if}} branch, not the raw body. FE-resolved macros stay
             // PUA-protected so resolveDisplayMacros gets current persona.
             const puaResolve = async (text: string): Promise<string> => {
               if (text.indexOf('{{') < 0) return text;
@@ -1130,7 +1131,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
 
   return {
     registerAll(): void {
-      registerMacroInterceptorIfAvailable();
+      registerMacroInterceptor();
       registerMessageContentProcessorIfAvailable();
       registerInterceptorIfAvailable();
       registerWorldInfoInterceptorIfAvailable();

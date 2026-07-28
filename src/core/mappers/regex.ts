@@ -6,8 +6,6 @@ import type {
   LumiRegexMacroMode,
   LumiRegexScope,
 } from "../lumiverse/types.js";
-import type { CatalogIndex } from "../cbs/catalog/loader.js";
-import { rewriteText } from "../cbs/rewrite/text.js";
 import { wrapIslandMergeIfNeeded, wrapForIslandTriggerIfNeeded } from "./island-merge.js";
 import { newUuid, nowMs } from "./util.js";
 import { normalizeReplaceStringForSanitizer } from "../../util/sanitizer-doc-shape.js";
@@ -66,7 +64,6 @@ export interface MapRegexOptions {
   readonly uuid?: () => string;
   readonly userId?: string;
   readonly origin?: "character" | "module";
-  readonly catalog?: CatalogIndex;
   // "global" makes rules apply across every chat (Risu globalscript parity),
   // used by standalone regex import. Defaults to "character".
   readonly scope?: LumiRegexScope;
@@ -179,33 +176,13 @@ export function mapRegex(
       continue;
     }
 
-    let findPattern = String(s.in ?? "");
-    if (opts.catalog && findPattern.indexOf("{{") >= 0) {
-      try {
-        findPattern = rewriteText(findPattern, opts.catalog);
-      } catch (err) {
-        issues.push({
-          path,
-          message: `CBS rewrite of find_regex failed (keeping raw): ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
-    }
+    const findPattern = String(s.in ?? "");
     // Drop `u` when find_regex has CBS: `{{` is invalid in Unicode mode.
     const findHasCbs = findPattern.indexOf("{{") >= 0;
     const baseFlags = findHasCbs ? normalised.flag.replace(/u/g, "") : normalised.flag;
 
     let baseReplace = (action === "inject") ? "" : strippedOut;
     if (baseReplace.endsWith(">") && !hasNoEndNl) baseReplace += "\n";
-    if (opts.catalog && baseReplace.indexOf("{{") >= 0) {
-      try {
-        baseReplace = rewriteText(baseReplace, opts.catalog);
-      } catch (err) {
-        issues.push({
-          path,
-          message: `CBS rewrite of replace_string failed (keeping raw): ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
-    }
     if (effectivePhase.target === "display" && !action) {
       baseReplace = wrapIslandMergeIfNeeded(baseReplace);
     }

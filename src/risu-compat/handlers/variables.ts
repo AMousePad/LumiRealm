@@ -26,10 +26,10 @@ function leaveVarLiteral(ctx: { commit: boolean; promptRegexLiteralVars?: boolea
 }
 
 // cbs.ts.
-register("risu_getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""),
+register("getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""),
   "Reads a local chat variable. Empty string if unset.");
 
-register("risu_setvar", (ctx, a) => {
+register("setvar", (ctx, a) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
   if (mode === "literal") return `{{setvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
@@ -37,7 +37,7 @@ register("risu_setvar", (ctx, a) => {
   return "";
 }, "Sets a local chat variable.");
 
-register("risu_addvar", (ctx, a) => {
+register("addvar", (ctx, a) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
   if (mode === "literal") return `{{addvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
@@ -85,11 +85,10 @@ register("flushvar", (ctx, a) => {
   return "";
 }, "Alias of deletevar.");
 
-// Catalog marks `getchatvar`/`setchatvar` as Lumi collisions; CBS rewriter prefixes them.
-// Handler names must match the rewritten `risu_` form.
-register("risu_getchatvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""),
+// Risu chat-scoped variable aliases.
+register("getchatvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""),
   "Reads a chat-scoped variable (aliased to local in Risu).");
-register("risu_setchatvar", (ctx, a) => {
+register("setchatvar", (ctx, a) => {
   if (leaveVarLiteral(ctx)) return `{{setchatvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
   ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
   return "";

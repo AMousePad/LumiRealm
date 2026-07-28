@@ -5,7 +5,6 @@ import { translateFromStoredSource } from '../core/pipeline/translate.js';
 import { prepareBackgroundHtmlForRuntime } from '../core/mappers/background-html.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
-import type { CatalogIndex } from '../core/cbs/catalog/loader.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import type { SvgRasterTask } from '../core/svg-rasterize.js';
 import {
@@ -21,7 +20,6 @@ export interface LiveWorldBookEntry {
 }
 
 export interface MigrationDeps {
-  loadCatalog: () => CatalogIndex;
   installCharacterRegexScripts: (
     characterId: string,
     characterName: string,
@@ -627,7 +625,6 @@ export async function migrateCharacterIfNeeded(
       {
         sourceId: `migrate:${args.characterId}`,
         mode: 'full',
-        catalog: deps.loadCatalog(),
         emitPackScripts: false,
       },
     );

@@ -108,15 +108,14 @@ register("previoususerchat", (ctx) => {
     : (c.alternateGreetings[c.selectedAlternateGreetingIndex] ?? c.firstMessage);
 }, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
 
-// cbs.ts. Lumi collision; rewriter renames to `risu_lastmessage`.
-register("risu_lastmessage", (ctx) => {
+// cbs.ts.
+register("lastmessage", (ctx) => {
   const last = ctx.messages.last();
   return last?.content ?? "";
 }, "Content of the most recent message, regardless of role.");
 
-// cbs.ts. Lumi collision; off-by-one vs Lumi's native `lastmessageid`.
-// Rewriter emits `risu_lastmessageid`; this handler uses Risu's count-1 formula.
-register("risu_lastmessageid", (ctx) => {
+// Off-by-one vs Lumi's native implementation; this uses Risu's count-1 formula.
+register("lastmessageid", (ctx) => {
   const n = ctx.messages.count();
   return Math.max(-1, n - 1).toString();
 }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");

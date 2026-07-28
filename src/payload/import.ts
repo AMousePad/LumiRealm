@@ -3,7 +3,6 @@ import { readCharx } from '../core/charx/reader.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import { CURRENT_CHARACTER_SCHEMA_VERSION } from '../state/translator-migrations.js';
 import type { LumirealmStoredSource } from './types.js';
-import { CatalogIndex, parseCatalog } from '../core/cbs/index.js';
 import {
   buildLumirealmData,
   preValidateRequires,
@@ -24,14 +23,6 @@ const logger = makeSafeLogger('import');
 const logInfo = (msg: string): void => logger.info(msg);
 const logWarn = (msg: string): void => logger.warn(msg);
 const logError = (msg: string): void => logger.error(msg);
-
-import catalogJson from '../core/cbs/catalog/risu-macros.json';
-let cachedCatalog: CatalogIndex | null = null;
-export function loadCatalog(): CatalogIndex {
-  if (cachedCatalog) return cachedCatalog;
-  cachedCatalog = new CatalogIndex(parseCatalog(catalogJson as unknown));
-  return cachedCatalog;
-}
 
 export interface ImportResult {
   readonly characterId: string;
@@ -227,13 +218,11 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
 
   progress('translating', 'Translating Risu card…', 0.15);
   const tTranslate = Date.now();
-  const catalog = loadCatalog();
   logInfo(`(2) translate: starting translateCharx bytes=${bytes.byteLength}`);
   const charxBundle = readCharx(bytes);
   const bundle: LumiBundle = translateFromCharxBundle(charxBundle, {
     sourceId: args.sourceId ?? `file:${args.fileName}`,
     mode: 'full',
-    catalog,
     // emitPackScripts triggers fengari/json.lua disk reads; those paths
     // are absent in dist/backend.js, so disable pack-script generation.
     emitPackScripts: false,

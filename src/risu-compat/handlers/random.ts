@@ -29,7 +29,7 @@ function randomPickImpl(args: readonly string[], rand: number): string {
   return typeof el === "string" ? el.replace(/\u00A7X/g, ",") : JSON.stringify(el) ?? "";
 }
 
-register("risu_random", (ctx, a) => randomPickImpl(a, ctx.rng.random()),
+register("random", (ctx, a) => randomPickImpl(a, ctx.rng.random()),
   "Random element picker. No args → returns a random [0,1) number. One arg → picks from a JSON array or a comma/colon-delimited string. Multiple args → random one.");
 
 register("pick", (ctx, a) => {
@@ -38,7 +38,7 @@ register("pick", (ctx, a) => {
   return randomPickImpl(a, rand);
 }, "Hash-deterministic pick. Same inputs at the same chat position return the same element.");
 
-register("risu_roll", (ctx, a) => {
+register("roll", (ctx, a) => {
   if (a.length === 0) return "1";
   const notation = (a[0] ?? "").split("d");
   let num = 1;

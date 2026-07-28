@@ -8,23 +8,23 @@ function register(name: string, handler: MacroHandler, description: string): voi
   registry.register({ name, handler, description, category: "Risu / Strings", scoped: false });
 }
 
-register("risu_replace", (_c, a) => (a[0] ?? "").replaceAll(a[1] ?? "", a[2] ?? ""),
+register("replace", (_c, a) => (a[0] ?? "").replaceAll(a[1] ?? "", a[2] ?? ""),
   "Replaces all occurrences of needle with replacement.");
-register("risu_split", (_c, a) => makeArray((a[0] ?? "").split(a[1] ?? "")),
+register("split", (_c, a) => makeArray((a[0] ?? "").split(a[1] ?? "")),
   "Splits a string on the delimiter and returns a JSON array.");
-register("risu_join", (_c, a) => parseArray(a[0] ?? "").join(a[1] ?? ""),
+register("join", (_c, a) => parseArray(a[0] ?? "").join(a[1] ?? ""),
   "Joins a JSON array using the given separator.");
 register("spread", (_c, a) => parseArray(a[0] ?? "").join("::"),
   "Joins a JSON array using :: as the separator.");
 register("trim", (_c, a) => (a[0] ?? "").trim(),
   "Strips leading/trailing whitespace.");
-register("risu_length", (_c, a) => (a[0] ?? "").length.toString(),
+register("length", (_c, a) => (a[0] ?? "").length.toString(),
   "Returns the character length of a string.");
-register("risu_lower", (_c, a) => (a[0] ?? "").toLocaleLowerCase(),
+register("lower", (_c, a) => (a[0] ?? "").toLocaleLowerCase(),
   "Lowercases using locale-aware conversion.");
-register("risu_upper", (_c, a) => (a[0] ?? "").toLocaleUpperCase(),
+register("upper", (_c, a) => (a[0] ?? "").toLocaleUpperCase(),
   "Uppercases using locale-aware conversion.");
-register("risu_capitalize", (_c, a) => {
+register("capitalize", (_c, a) => {
   const s = a[0] ?? "";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }, "Uppercases only the first character.");
