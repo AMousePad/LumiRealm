@@ -52,7 +52,8 @@ export async function runEditDisplayChain(
       characterId: snap.characterId,
       resolveTemplate,
       preloaded: buildPreloaded(snap),
-      wasmoonKey: snap.characterId,
+      // Risu owns one engine per hook mode and recreates it when source changes.
+      wasmoonKey: 'editDisplay',
     },
   );
 }

@@ -1,7 +1,11 @@
 import jsonLuaSource from './lua-json.lua' with { type: 'text' };
 
 interface WasmoonEngine {
-  global: { set: (n: string, v: unknown) => void; get: (n: string) => unknown };
+  global: {
+    set: (n: string, v: unknown) => void;
+    get: (n: string) => unknown;
+    close?: () => void;
+  };
   doString: (s: string) => Promise<unknown>;
 }
 interface WasmoonFactory {
@@ -179,6 +183,13 @@ export async function executeWasmoon(
 ): Promise<unknown> {
   const entry = await getEngineEntry(opts.wasmoonKey);
   const run = entry.tail.then(async () => {
+    if (entry.code !== null && entry.code !== code) {
+      entry.engine.global.close?.();
+      const factory = await ensureFactory();
+      entry.engine = await factory.createEngine({ injectObjects: true });
+      entry.code = null;
+      entry.bound.clear();
+    }
     const engine = entry.engine;
     entry.current = globals;
     for (const name of Object.keys(globals)) {
@@ -186,7 +197,7 @@ export async function executeWasmoon(
       engine.global.set(name, (...args: unknown[]) => (entry.current[name] as (...a: unknown[]) => unknown)(...args));
       entry.bound.add(name);
     }
-    if (entry.code !== code) {
+    if (entry.code === null) {
       await engine.doString(PRELUDE + '\n' + code);
       entry.code = code;
     }
