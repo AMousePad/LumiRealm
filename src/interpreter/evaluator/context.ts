@@ -18,8 +18,7 @@ declare const spindle: import("lumiverse-spindle-types").SpindleAPI | undefined;
 const spindleGlobal: import("lumiverse-spindle-types").SpindleAPI | undefined =
   typeof spindle !== "undefined" ? spindle : undefined;
 
-// Session-scoped; known deviation from Risu which clears per-pass.
-const sessionFunctions: FunctionRegistry = (() => {
+function makeFunctionRegistry(): FunctionRegistry {
   const table = new Map<string, { body: string; argNames: readonly string[] }>();
   return {
     define: (name, body, argNames) => { table.set(name, { body, argNames }); },
@@ -27,7 +26,7 @@ const sessionFunctions: FunctionRegistry = (() => {
     delete: (name) => { table.delete(name); },
     has: (name) => table.has(name),
   };
-})();
+}
 
 // Per-chat write-through overlay; coherent setvar/getvar within a pipeline run.
 interface VarOverlay {
@@ -361,14 +360,9 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
 
   const lorebook: readonly LorebookEntry[] = input.lorebook ?? [];
 
-  const functions: FunctionRegistry = commit
-    ? sessionFunctions
-    : {
-        define: () => { /* dry-fire: no-op */ },
-        get: (name) => sessionFunctions.get(name),
-        delete: () => { /* dry-fire: no-op */ },
-        has: (name) => sessionFunctions.has(name),
-      };
+  // Risu creates this table inside each risuChatParser call. Recursive calls
+  // share it through parser arguments, but independent templates never do.
+  const functions = makeFunctionRegistry();
 
   const rng = recorder
     ? { random: () => { recorder.volatile = true; return Math.random(); } }
