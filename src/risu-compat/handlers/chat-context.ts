@@ -63,8 +63,18 @@ register("history", (ctx, a) => {
     const fm = ctx.character.selectedAlternateGreetingIndex === -1
       ? ctx.character.firstMessage
       : (ctx.character.alternateGreetings[ctx.character.selectedAlternateGreetingIndex] ?? ctx.character.firstMessage);
-    const head = [{ role: "char" as const, data: fm, time: 0 }];
-    return makeArray([...head, ...msgs.map(toSerializableMsg)].map((v) => JSON.stringify(v)));
+    const head = [{
+      role: "char" as const,
+      data: ctx.evaluate ? ctx.evaluate(fm) : fm,
+      time: 0,
+    }];
+    return makeArray([
+      ...head,
+      ...msgs.map((m) => ({
+        ...toSerializableMsg(m),
+        data: ctx.evaluate ? ctx.evaluate(m.content) : m.content,
+      })),
+    ].map((v) => JSON.stringify(v)));
   }
   const withRole = a.includes("role");
   return makeArray(msgs.map((m) => (withRole ? `${risuRole(m.role)}: ${m.content}` : m.content)));
