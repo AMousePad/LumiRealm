@@ -208,6 +208,10 @@ export interface RisuTriggerRuntime {
   getRequestStateRole(i: unknown): string;
   setRequestStateRole(i: unknown, v: unknown): void;
   getRequestStateLength(): number;
+  getRequestStateMessages(): readonly {
+    readonly role: string;
+    readonly content: string;
+  }[];
   // lifecycle
   flush(): Promise<void>;
   warnDroppedTriggerCode(label?: string): void;
@@ -1172,12 +1176,12 @@ export async function makeRisuTriggerRuntime(
     deleteLorebookByIndex, setLorebookActivation, setLorebookAlwaysActive,
   } = _lore;
 
-  const _displayState = makeDisplayStateApi(opts.displayData);
+  const _displayState = makeDisplayStateApi(opts.displayData, opts.requestData);
   const {
     getDisplayState, setDisplayState,
     getRequestState, setRequestState,
     getRequestStateRole, setRequestStateRole,
-    getRequestStateLength,
+    getRequestStateLength, getRequestStateMessages,
   } = _displayState;
 
 
@@ -1241,6 +1245,7 @@ export async function makeRisuTriggerRuntime(
     modifyLorebookByIndex, deleteLorebookByIndex, setLorebookAlwaysActive,
     getDisplayState, setDisplayState, getRequestState, setRequestState,
     getRequestStateRole, setRequestStateRole, getRequestStateLength,
+    getRequestStateMessages,
     flush,
     warnDroppedTriggerCode,
   };

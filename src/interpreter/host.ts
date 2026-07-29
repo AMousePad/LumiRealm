@@ -158,6 +158,10 @@ export interface TriggerRuntimePreloaded {
 export interface TriggerRuntimeOpts {
   readonly displayMode?: boolean;
   readonly displayData?: string;
+  readonly requestData?: readonly {
+    readonly role: string;
+    readonly content: string;
+  }[];
   readonly lowLevelAccess?: boolean;
   readonly characterId?: string | null;
   readonly binding?: string;

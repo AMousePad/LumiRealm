@@ -1,6 +1,6 @@
-import type { TriggerEffect, TriggerScript } from '../core/schemas/triggerscript.js';
 import { makeDispatcherScriptNS } from '../interpreter/dispatcher.js';
 import { makeRisuTriggerRuntime } from '../interpreter/runtime.js';
+import { selectRestrictedTriggers } from '../interpreter/restricted-trigger.js';
 import {
   interpretTrigger,
   type InterpConsole,
@@ -10,49 +10,6 @@ import { buildPreloaded, makeSnapshotHostApi } from './host-shim.js';
 import type { DisplaySnapshot } from './snapshot.js';
 
 const log = makeSafeLogger('display-trigger');
-
-// Risu triggers.ts displayAllowList. v2Loop is retained as structural glue:
-// Risu skips its opcode but v2EndIndent still jumps back to it.
-const DISPLAY_EFFECT_TYPES = new Set<string>([
-  'v2GetDisplayState',
-  'v2SetDisplayState',
-  'v2SetVar',
-  'v2If',
-  'v2IfAdvanced',
-  'v2Else',
-  'v2EndIndent',
-  'v2Loop',
-  'v2LoopNTimes',
-  'v2BreakLoop',
-  'v2ConsoleLog',
-  'v2StopTrigger',
-  'v2Random',
-  'v2ExtractRegex',
-  'v2RegexTest',
-  'v2GetCharAt',
-  'v2GetCharCount',
-  'v2ToLowerCase',
-  'v2ToUpperCase',
-  'v2SetCharAt',
-  'v2SplitString',
-  'v2JoinArrayVar',
-  'v2ConcatString',
-  'v2MakeArrayVar',
-  'v2GetArrayVarLength',
-  'v2GetArrayVar',
-  'v2SetArrayVar',
-  'v2PushArrayVar',
-  'v2PopArrayVar',
-  'v2ShiftArrayVar',
-  'v2UnshiftArrayVar',
-  'v2SpliceArrayVar',
-  'v2SliceArrayVar',
-  'v2GetIndexOfValueInArrayVar',
-  'v2RemoveIndexFromArrayVar',
-  'v2Calculate',
-  'v2Comment',
-  'v2DeclareLocalVar',
-]);
 
 function formatConsoleArgs(args: readonly unknown[]): string {
   return args
@@ -79,43 +36,14 @@ export interface DisplayTriggerChainResult {
   readonly ran: boolean;
 }
 
-function matchesDisplayBinding(source: TriggerScript): boolean {
-  const firstType = source.effect?.[0]?.type;
-  return firstType === 'triggerlua'
-    || firstType === 'triggercode'
-    || source.type === 'display';
-}
-
-function displaySafeSource(source: TriggerScript): TriggerScript {
-  return {
-    ...source,
-    effect: source.effect.map((effect) => {
-      if (DISPLAY_EFFECT_TYPES.has(effect.type)) return effect;
-      const indent = 'indent' in effect && typeof effect.indent === 'number'
-        ? effect.indent
-        : 0;
-      return { type: 'v2Comment', value: '', indent } as TriggerEffect;
-    }),
-  };
-}
-
-function matchingDisplayTriggers(snap: DisplaySnapshot): readonly TriggerScript[] {
-  return snap.luaTriggers
-    .map((entry) => entry.source)
-    .filter(matchesDisplayBinding)
-    .map(displaySafeSource)
-    .filter(
-      (source) =>
-        source.conditions.length > 0
-        || source.effect.some((effect) => effect.type !== 'v2Comment'),
-    );
-}
-
 export async function runDisplayTriggerChain(
   snap: DisplaySnapshot,
   content: string,
 ): Promise<DisplayTriggerChainResult> {
-  const triggers = matchingDisplayTriggers(snap);
+  const triggers = selectRestrictedTriggers(
+    snap.luaTriggers.map((entry) => entry.source),
+    'display',
+  );
   if (triggers.length === 0) return { content, ran: false };
 
   try {

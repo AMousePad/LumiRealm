@@ -1,6 +1,7 @@
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { ActiveCard } from '../interpreter/dispatch.js';
+import type { TriggerScript } from '../core/schemas/triggerscript.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import { runPipeline } from '../interpreter/evaluator/pipeline.js';
 import type { VarReadRecorder } from '../interpreter/evaluator/context.js';
@@ -42,6 +43,7 @@ import {
 import { userIdAls } from '../interpreter/runtime/als.js';
 import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import { makeDispatcherScriptNS } from '../interpreter/dispatcher.js';
+import { runRequestTriggerChain } from '../interpreter/request-trigger-runner.js';
 import {
   getRegisterMacroInterceptor,
   getRegisterMessageContentProcessor,
@@ -100,7 +102,7 @@ export interface CreateLumiInterceptorsDeps {
   readonly runBinding: (
     active: ActiveCard,
     chatId: string,
-    binding: 'input' | 'start' | 'request',
+    binding: 'input' | 'start',
     userId: string | undefined,
   ) => Promise<{ stopSending: boolean }>;
   readonly log: {
@@ -848,12 +850,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           }
         }
 
-        const triggers = active.card.risuPayload.triggers as ReadonlyArray<{
-          effect?: ReadonlyArray<{ type?: string }>;
-        }>;
+        const triggers = active.card.risuPayload.triggers as readonly TriggerScript[];
         const luaScripts = active.card.risuPayload.lua_scripts;
         const hasLuaTrigger = triggers.some((t) => t.effect?.[0]?.type === 'triggerlua');
-        if (!hasLuaTrigger) return out;
 
         const editApi = makeSpindleHost({
           chatId,
@@ -867,7 +866,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         }));
 
         // editInput fires on actual user typing only, not regenerate or swipe or continue.
-        if (ctx.generationType === 'normal') {
+        if (hasLuaTrigger && ctx.generationType === 'normal') {
           let userIdx = -1;
           for (let i = out.length - 1; i >= 0; i--) {
             if (out[i]?.role === 'user') { userIdx = i; break; }
@@ -903,32 +902,47 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           }
         }
 
-        try {
-          const mutated = await runListenEditChain<LlmMessage[]>(
-            editChain,
-            'editRequest',
-            out,
-            { generationType: ctx.generationType ?? 'normal' },
-            editApi,
-            { characterId: active.card.character_id, content: '' },
-            editScriptNS,
-            {
-              chatId,
-              characterId: active.card.character_id,
-              resolveTemplate: (text: string) => deps.resolveReadonly(text, chatId, active.card.character_id, userId, { cbsContext: true }),
-            },
-          );
-          if (Array.isArray(mutated)) {
-            if (mutated.length !== out.length) {
-              log.info(
-                `interceptor.editRequest: chat=${chatId} array length changed ` +
-                  `before=${out.length} after=${mutated.length}`,
-              );
+        if (hasLuaTrigger) {
+          try {
+            const mutated = await runListenEditChain<LlmMessage[]>(
+              editChain,
+              'editRequest',
+              out,
+              { generationType: ctx.generationType ?? 'normal' },
+              editApi,
+              { characterId: active.card.character_id, content: '' },
+              editScriptNS,
+              {
+                chatId,
+                characterId: active.card.character_id,
+                resolveTemplate: (text: string) => deps.resolveReadonly(text, chatId, active.card.character_id, userId, { cbsContext: true }),
+              },
+            );
+            if (Array.isArray(mutated)) {
+              if (mutated.length !== out.length) {
+                log.info(
+                  `interceptor.editRequest: chat=${chatId} array length changed ` +
+                    `before=${out.length} after=${mutated.length}`,
+                );
+              }
+              out = mutated;
             }
-            out = mutated;
+          } catch (err) {
+            log.warn(`interceptor.editRequest threw: ${errMsg(err)}. Continuing with prior array.`);
           }
+        }
+
+        try {
+          out = await runRequestTriggerChain(out, {
+            api: editApi,
+            chatId,
+            characterId: active.card.character_id,
+            triggers,
+          });
         } catch (err) {
-          log.warn(`interceptor.editRequest threw: ${errMsg(err)}. Continuing with prior array.`);
+          // Risu also treats malformed request-trigger output as non-fatal and
+          // sends the last valid prompt array.
+          log.warn(`interceptor.requestTrigger threw: ${errMsg(err)}. Continuing with prior array.`);
         }
 
         return out;
@@ -941,7 +955,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
     const register = getRegisterContextHandler();
     const contractVersion = getPreAssemblyContractVersion();
     if (typeof register !== 'function' || contractVersion < 1) {
-      log.error(`contextHandler: host preAssemblyGenerationContext contract=${contractVersion}, need >=1. Update Lumiverse. Risu input/start/request triggers and stopSending will NOT fire.`);
+      log.error(`contextHandler: host preAssemblyGenerationContext contract=${contractVersion}, need >=1. Update Lumiverse. Risu input/start triggers and stopSending will NOT fire.`);
       return;
     }
 
@@ -967,15 +981,13 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
 
       return userIdAls.run(userId, async () => {
         let stopSending = false;
-        // Risu sendChat order: input (user sends only), start, request.
+        // Request triggers run later against the fully assembled outbound array.
         if (ctx.generationType === 'normal') {
           const r = await deps.runBinding(card, chatId, 'input', userId);
           stopSending = stopSending || r.stopSending;
         }
         const rStart = await deps.runBinding(card, chatId, 'start', userId);
         stopSending = stopSending || rStart.stopSending;
-        const rRequest = await deps.runBinding(card, chatId, 'request', userId);
-        stopSending = stopSending || rRequest.stopSending;
 
         if (stopSending) {
           log.info(`contextHandler: stopSending chat=${chatId}, cancelling generation`);
@@ -984,7 +996,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         return contextRaw;
       });
     }, 100, { timeoutMs: 30_000 });
-    log.info('contextHandler: registered (input + start + request, pre-assembly, 30s budget)');
+    log.info('contextHandler: registered (input + start, pre-assembly, 30s budget)');
   }
 
   function registerWorldInfoInterceptorIfAvailable(): void {
