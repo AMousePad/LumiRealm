@@ -110,6 +110,21 @@ export interface LumiInterceptors {
   readonly registerAll: () => void;
 }
 
+function cardDisablesRecursiveWorldInfo(active: ActiveCard): boolean {
+  const source = active.lumirealm.source?.card;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return false;
+  const root = source as Record<string, unknown>;
+  const data =
+    root['data'] && typeof root['data'] === 'object' && !Array.isArray(root['data'])
+      ? root['data'] as Record<string, unknown>
+      : root;
+  const characterBook = data['character_book'];
+  if (!characterBook || typeof characterBook !== 'object' || Array.isArray(characterBook)) {
+    return false;
+  }
+  return (characterBook as Record<string, unknown>)['recursive_scanning'] === false;
+}
+
 export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiInterceptors {
   const { log, errMsg, activeCardByChat, lastActiveChatByUser } = deps;
 
@@ -977,14 +992,15 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         const stash = e.extensions?.['_risu_decorators'];
         return Array.isArray(stash) && stash.length > 0;
       });
-      if (!hasRisuStampedEntries) {
-        const gateActive = activeCardByChat.get(ctx.chatId)
-          ?? (ctx.userId ? await deps.ensureActiveCardForChat(ctx.chatId, null, ctx.userId) : null);
-        if (!gateActive) {
-          log.trace(`[decorators] worldInfoInterceptor skip chat=${ctx.chatId}: not a Risu chat, no stamped entries`);
-          return;
-        }
+      const active = activeCardByChat.get(ctx.chatId)
+        ?? (ctx.userId ? await deps.ensureActiveCardForChat(ctx.chatId, null, ctx.userId) : null);
+      if (!hasRisuStampedEntries && !active) {
+        log.trace(`[decorators] worldInfoInterceptor skip chat=${ctx.chatId}: not a Risu chat, no stamped entries`);
+        return;
       }
+      const activationOverrides = active && cardDisablesRecursiveWorldInfo(active)
+        ? { disableRecursion: true as const }
+        : undefined;
       log.info(
         `[decorators] worldInfoInterceptor ENTER chat=${ctx.chatId} entries=${ctx.entries.length}`,
       );
@@ -1112,18 +1128,23 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       if (
         outcome.disabled.length === 0 &&
         outcome.forced.length === 0 &&
-        outcome.mutated.length === 0
+        outcome.mutated.length === 0 &&
+        activationOverrides === undefined
       ) return;
       const result: {
         disabled?: readonly string[];
         forced?: readonly string[];
         mutated?: readonly { id: string; content: string }[];
+        activationOverrides?: {
+          disableRecursion?: true;
+        };
       } = {};
       if (outcome.disabled.length > 0) result.disabled = outcome.disabled;
       if (outcome.forced.length > 0) result.forced = outcome.forced;
       if (outcome.mutated.length > 0) {
         result.mutated = outcome.mutated.map((m) => ({ id: m.entryId, content: m.content }));
       }
+      if (activationOverrides) result.activationOverrides = activationOverrides;
       return result;
     }), 100);
     log.info('worldInfoInterceptor: registered');
