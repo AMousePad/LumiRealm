@@ -44,7 +44,13 @@ register("cbr", (_c, a) => {
 // decorated with `@@position pt_<NAME>`. Backend populates `ctx.positionPt`
 // from the worldInfoInterceptor pass; we look up by NAME (the part after pt_)
 // and return the joined content. Empty string when no entries declare pt_<NAME>.
-register("position", (ctx, args) => {
+register("position", (ctx, args, raw) => {
+  // `position` is not a Risu CBS function. Risu substitutes it later in
+  // positionParser, so a standalone cbs() parse must leave it untouched.
+  if (ctx.cbsContext) {
+    const source = raw || `position::${args.join("::")}`;
+    return `{{${source}}}`;
+  }
   const name = args[0];
   if (typeof name !== "string" || name.length === 0) return "";
   const map = ctx.positionPt;

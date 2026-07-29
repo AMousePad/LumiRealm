@@ -100,6 +100,7 @@ export interface MockContextOptions {
   screenHeight?: number;
   commit?: boolean;
   legacyMediaFindings?: boolean;
+  cbsContext?: boolean;
   rmVar?: boolean;
   runVar?: boolean;
 }
@@ -159,6 +160,7 @@ export function makeMockContext(opts: MockContextOptions = {}): RisuRuntimeConte
     screenHeight: opts.screenHeight ?? 0,
     commit: opts.commit ?? true,
     legacyMediaFindings: opts.legacyMediaFindings ?? false,
+    ...(opts.cbsContext ? { cbsContext: true } : {}),
     ...(opts.rmVar ? { rmVar: true } : {}),
     ...(opts.runVar ? { runVar: true } : {}),
   };
