@@ -245,9 +245,16 @@ interface RisuaiBlob {
 
 export interface AttachedModuleForRuntime {
   readonly id: string;
+  /**
+   * Persisted character handles that resolved to this module. A replacement
+   * module can be selected through its namespace instead of its current ID.
+   */
+  readonly attachment_handles?: readonly string[] | undefined;
   readonly triggers: readonly unknown[];
   /** Parallel to `triggers`. Empty string when no `triggerlua` effect. */
   readonly lua_scripts: readonly string[];
+  /** Raw source retained only on the in-memory runtime card. */
+  readonly lorebook: readonly unknown[];
   readonly asset_index: Readonly<Record<string, AssetIndexEntry>>;
   /** Folds into `requires.lowLevelAccess` so module-supplied LLM/network calls trigger consent. */
   readonly low_level_access: boolean;
@@ -407,9 +414,34 @@ export function buildSyntheticStoredCard(
       ...(attachedModules.length > 0
         ? {
             attached_modules: attachedModules.map((m) => m.id),
+            runtime_module_library_order: attachedModules.map((m) => m.id),
             base_trigger_count: baseTrigCount,
             base_lua_count: baseLuaCount,
             modules_by_namespace: merged.modules_by_namespace,
+            runtime_module_lorebooks: Object.fromEntries(
+              attachedModules.map((m) => [m.id, m.lorebook]),
+            ),
+            runtime_module_identities: Object.fromEntries(
+              attachedModules.map((m) => {
+                const persistedHandles = [
+                  ...new Set(
+                    (m.attachment_handles ?? [m.id])
+                      .filter((value) => value.length > 0),
+                  ),
+                ];
+                const aliases =
+                  typeof m.namespace === 'string' && m.namespace.length > 0
+                    ? [m.namespace]
+                    : [];
+                return [
+                  m.id,
+                  {
+                    persisted_handles: persistedHandles,
+                    aliases,
+                  },
+                ];
+              }),
+            ),
           }
         : {}),
     },

@@ -217,6 +217,9 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
   async function readAttachedModuleEnvelopes(
     userId: string,
     attachedIds: readonly string[],
+    librarySnapshot?:
+      | readonly ModuleIndexEntry[]
+      | Promise<readonly ModuleIndexEntry[]>,
   ): Promise<readonly ModuleEnvelope[]> {
     if (attachedIds.length === 0) return [];
 
@@ -237,13 +240,17 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
 
     // Risu namespace fallback. A re-uploaded module with namespace="<old-id>" resolves transparently without re-attach.
     let library: readonly ModuleIndexEntry[] = [];
-    try {
-      library = await listModuleStore(userId);
-    } catch (err) {
-      log.warn(
-        `readAttachedModuleEnvelopes: namespace fallback list failed: ${errMsg(err)}`,
-      );
-      return directHits;
+    if (librarySnapshot !== undefined) {
+      library = await librarySnapshot;
+    } else {
+      try {
+        library = await listModuleStore(userId);
+      } catch (err) {
+        log.warn(
+          `readAttachedModuleEnvelopes: namespace fallback list failed: ${errMsg(err)}`,
+        );
+        return directHits;
+      }
     }
 
     const missingSet = new Set(missingHandles);
@@ -282,16 +289,54 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
     userId: string,
     attachedIds: readonly string[],
   ): Promise<readonly AttachedModuleForRuntime[]> {
-    const envelopes = await readAttachedModuleEnvelopes(userId, attachedIds);
-    return envelopes.map((env) => {
+    if (attachedIds.length === 0) return [];
+
+    // Risu filters its module library by the attached handle set. The
+    // library's order wins over the order of handles on the character.
+    const libraryPromise = listModuleStore(userId).catch((err) => {
+      log.warn(
+        `loadAttachedModulesForRuntime: library-order snapshot failed: ${errMsg(err)}`,
+      );
+      return [] as readonly ModuleIndexEntry[];
+    });
+    const [envelopes, library] = await Promise.all([
+      readAttachedModuleEnvelopes(userId, attachedIds, libraryPromise),
+      libraryPromise,
+    ]);
+    const libraryOrder = new Map(
+      library.map((entry, index) => [entry.id, index]),
+    );
+    const resolvedOrder = new Map(
+      envelopes.map((env, index) => [env.id, index]),
+    );
+    const orderedEnvelopes = [...envelopes].sort((a, b) => {
+      const aLibrary = libraryOrder.get(a.id);
+      const bLibrary = libraryOrder.get(b.id);
+      if (aLibrary !== undefined && bLibrary !== undefined) {
+        return aLibrary - bLibrary;
+      }
+      if (aLibrary !== undefined) return -1;
+      if (bLibrary !== undefined) return 1;
+      return (resolvedOrder.get(a.id) ?? 0) - (resolvedOrder.get(b.id) ?? 0);
+    });
+
+    return orderedEnvelopes.map((env) => {
       const m = env.module as {
         trigger?: readonly unknown[];
+        lorebook?: readonly unknown[];
         lowLevelAccess?: unknown;
         customModuleToggle?: unknown;
         name?: unknown;
         backgroundEmbedding?: unknown;
         namespace?: unknown;
       };
+      const namespace =
+        typeof m.namespace === 'string' && m.namespace.length > 0
+          ? m.namespace
+          : null;
+      const attachmentHandles = attachedIds.filter(
+        (handle) => handle === env.id || handle === namespace,
+      );
       const triggers = Array.isArray(m.trigger) ? (m.trigger as readonly unknown[]) : [];
       const lua_scripts = triggers.map((t) => {
         const tEff = (t as { effect?: readonly unknown[] }).effect ?? [];
@@ -313,8 +358,10 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
       }
       return {
         id: env.id,
+        attachment_handles: [...new Set(attachmentHandles)],
         triggers,
         lua_scripts,
+        lorebook: Array.isArray(m.lorebook) ? m.lorebook : [],
         asset_index: runtimeAssetIndex,
         low_level_access: m.lowLevelAccess === true,
         ...(typeof m.customModuleToggle === 'string' && m.customModuleToggle.length > 0
@@ -326,8 +373,8 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
         ...(typeof m.backgroundEmbedding === 'string' && m.backgroundEmbedding.length > 0
           ? { background_embedding: m.backgroundEmbedding }
           : {}),
-        ...(typeof m.namespace === 'string' && m.namespace.length > 0
-          ? { namespace: m.namespace }
+        ...(namespace !== null
+          ? { namespace }
           : {}),
       };
     });
