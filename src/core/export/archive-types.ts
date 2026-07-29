@@ -44,6 +44,8 @@ export interface CharacterArchivePayload {
   readonly regex_scripts: readonly unknown[];
   readonly assets: readonly ArchiveAssetRef[];
   readonly emotions: readonly ArchiveAssetRef[];
+  /** Card assets Risu keeps as `ccAssets` (background, user_icon, non-main icons). */
+  readonly cc_assets?: readonly ArchiveAssetRef[];
   readonly avatar?: ArchiveAssetRef;
   /** Live edits the Risu-facing half could not represent. */
   readonly divergences: readonly string[];

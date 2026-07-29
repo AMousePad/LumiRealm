@@ -113,6 +113,7 @@ export interface CharacterEnvelopeLike {
   readonly source?: {
     readonly card?: unknown;
     readonly module?: unknown;
+    readonly path_to_image_id?: Readonly<Record<string, string>>;
   };
   readonly user_overrides: {
     readonly default_variables_text?: string;
@@ -190,6 +191,12 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
   const now = (input.now ?? Date.now)();
   const uuid = input.uuid ?? (() => "00000000-0000-4000-8000-000000000000");
   const char = input.character;
+  const sourceData = record(record(input.data.source?.card)?.["data"]);
+  const sourceBook = record(sourceData?.["character_book"]);
+  // Live extensions win: the importer copies these onto the character row, so a
+  // Lumiverse edit lands there rather than in the frozen source card.
+  const liveExt = record(input.character.extensions);
+  const pick = (k: string): unknown => liveExt?.[k] ?? sourceData?.[k];
   const divergences: string[] = [];
 
   const sourceLore = resolveSourceLore(input);
@@ -220,6 +227,7 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
   const cardAssets: { type: string; uri: string; name: string; ext: string }[] = [];
   const sidecarAssets: ArchiveAssetRef[] = [];
   const sidecarEmotions: ArchiveAssetRef[] = [];
+  const sidecarCcAssets: ArchiveAssetRef[] = [];
   let assetIndex = 0;
 
   const pushAsset = (
@@ -240,6 +248,27 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
     cardAssets.push({ type, uri: `embeded://${path}`, name, ext: declaredExt || "png" });
     return declaredExt.length > 0 ? { name, path, ext: declaredExt } : { name, path };
   };
+
+  // Risu's ccAssets: card assets that are neither `emotion` nor `x-risu-asset`
+  // (background, user_icon, non-main icons). The payload extractor ignores those
+  // types, so they exist only on the source card, but import uploads every ZIP
+  // entry so `path_to_image_id` still has their bytes. createBaseV3 emits them
+  // first, ahead of additional assets and emotions.
+  const pathToImageId = input.data.source?.path_to_image_id ?? {};
+  for (const raw of (Array.isArray(sourceData?.["assets"]) ? sourceData["assets"] : []) as unknown[]) {
+    const a = record(raw);
+    if (!a) continue;
+    const type = typeof a["type"] === "string" ? a["type"] : "";
+    const name = typeof a["name"] === "string" ? a["name"] : "";
+    if (type === "emotion" || type === "x-risu-asset") continue;
+    if (type === "icon" && name === "main") continue;
+    const uri = typeof a["uri"] === "string" ? a["uri"] : "";
+    const path = uri.startsWith("embeded://") ? uri.slice("embeded://".length) : uri;
+    const imageId = pathToImageId[path];
+    if (!imageId) { if (name) missingAssets.push(name); continue; }
+    const ext = typeof a["ext"] === "string" ? a["ext"] : "";
+    sidecarCcAssets.push(pushAsset(name || "asset", ext, type || "other", imageId));
+  }
 
   for (const asset of orderedAssetNames(input.data.payload.additional_assets, input.assetIndex)) {
     const resolved = resolveFromIndex(input.assetIndex, asset.name);
@@ -275,12 +304,6 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
   delete risuaiInner["customScripts"];
   risuai["risuai"] = risuaiInner;
 
-  const sourceData = record(record(input.data.source?.card)?.["data"]);
-  const sourceBook = record(sourceData?.["character_book"]);
-  // Live extensions win: the importer copies these onto the character row, so a
-  // Lumiverse edit lands there rather than in the frozen source card.
-  const liveExt = record(input.character.extensions);
-  const pick = (k: string): unknown => liveExt?.[k] ?? sourceData?.[k];
   const card = {
     spec: "chara_card_v3",
     spec_version: "3.0",
@@ -353,6 +376,7 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
       regex_scripts: input.liveRegex,
       assets: sidecarAssets,
       emotions: sidecarEmotions,
+      cc_assets: sidecarCcAssets,
       ...(avatar ? { avatar } : {}),
       divergences,
     },
