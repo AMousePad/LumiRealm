@@ -28,6 +28,10 @@ export interface LiveLoreEntry {
   readonly depth?: unknown;
   readonly role?: unknown;
   readonly match_whole_words?: unknown;
+  readonly scan_depth?: unknown;
+  readonly priority?: unknown;
+  readonly prevent_recursion?: unknown;
+  readonly exclude_recursion?: unknown;
   readonly extensions?: unknown;
 }
 
@@ -59,35 +63,97 @@ function leadingDecoratorLines(content: string): string[] {
   return out;
 }
 
-/** Tier-1 decorators the forward mapping folded into Lumi columns and stripped
- *  from `content`. Recovered by differencing against the source rather than
- *  re-derived from fields, so argument spelling and ordering survive.
- *  `match_whole_words: false` is the default on every projected entry, so a
- *  field-derived guess would stamp `@@match_partial_word` onto entries that
- *  never carried it. */
-function strippedDecorators(source: LoreBook | null, liveContent: string): string[] {
-  if (!source) return [];
-  const sourceLines = leadingDecoratorLines(
-    typeof source.content === "string" ? source.content : "",
-  );
-  if (sourceLines.length === 0) return [];
-  const kept = new Set(leadingDecoratorLines(liveContent));
-  return sourceLines.filter((l) => !kept.has(l));
+/** Every Tier-1 field, its default after projection, and how to spell it as a
+ *  decorator. Fields absent from Lumi's schema are not listed: those stay in
+ *  whatever the source said. */
+interface Tier1Field {
+  readonly key: keyof LiveLoreEntry;
+  /** Value the forward mapping produces when no decorator set it. */
+  readonly dflt: unknown;
+  /** Decorator names that set this field, so a stale one can be dropped. */
+  readonly owns: readonly string[];
+  readonly emit: (v: unknown, entry: LiveLoreEntry) => string[] | null;
 }
 
-/** Only for entries with no source counterpart. Emits a decorator solely when
- *  the field departs from the value the forward mapping defaults to. */
-function decoratorsFromLiveFields(entry: LiveLoreEntry): string[] {
-  const out: ParsedDecorator[] = [];
-  const push = (name: string, args: string[]): void => {
-    out.push({ name, args, isFallback: false, lineIndex: 0 });
-  };
-  const depth = entry.depth;
-  if (typeof depth === "number" && depth > 0) push("depth", [String(depth)]);
-  const role = entry.role;
-  if (typeof role === "string" && role.length > 0) push("role", [role]);
-  if (entry.match_whole_words === true) push("match_full_word", []);
-  return out.map(serializeDecorator);
+const TIER1_FIELDS: readonly Tier1Field[] = [
+  {
+    key: "depth", dflt: 0, owns: ["depth", "reverse_depth", "end", "position"],
+    // position=4 is what @@depth/@@end produce; anything else is a position
+    // decorator's doing and is handled by the position field below.
+    emit: (v, e) => (typeof v === "number" && e.position === 4 ? ["depth", String(v)] : null),
+  },
+  {
+    key: "position", dflt: 0, owns: ["position"],
+    emit: (v) => (v === 0 ? null : v === 1 ? ["position", "after_desc"] : null),
+  },
+  { key: "role", dflt: null, owns: ["role"],
+    emit: (v) => (typeof v === "string" && v.length > 0 ? ["role", v] : null) },
+  { key: "scan_depth", dflt: null, owns: ["scan_depth"],
+    emit: (v) => (typeof v === "number" ? ["scan_depth", String(v)] : null) },
+  { key: "priority", dflt: 0, owns: ["priority", "ignore_on_max_context"],
+    emit: (v) => (typeof v === "number" && v !== 0 ? ["priority", String(v)] : null) },
+  { key: "probability", dflt: 100, owns: ["probability"],
+    emit: (v, e) => (e.use_probability === true && typeof v === "number" ? ["probability", String(v)] : null) },
+  { key: "match_whole_words", dflt: false, owns: ["match_full_word", "match_partial_word"],
+    emit: (v) => (v === true ? ["match_full_word"] : v === false ? null : null) },
+  { key: "prevent_recursion", dflt: false, owns: ["unrecursive", "recursive"],
+    emit: (v) => (v === true ? ["unrecursive"] : null) },
+  { key: "exclude_recursion", dflt: false, owns: ["no_recursive_search"],
+    emit: (v) => (v === true ? ["no_recursive_search"] : null) },
+  { key: "disabled", dflt: false, owns: ["dont_activate"],
+    emit: (v) => (v === true ? ["dont_activate"] : null) },
+];
+
+function decoratorName(line: string): string {
+  const body = line.replace(/^@@@?/, "");
+  const sp = body.indexOf(" ");
+  return (sp < 0 ? body : body.slice(0, sp)).trim();
+}
+
+/** Rebuilds the Tier-1 decorator block the forward mapping stripped out.
+ *
+ *  Live values win on every field, so a Lumiverse edit to depth / role /
+ *  probability / recursion survives the export. A field the user left alone
+ *  re-emits its source line verbatim, which keeps argument spelling
+ *  (`@@reverse_depth`, `@@ignore_on_max_context`) that a canonical re-derive
+ *  would flatten. `match_whole_words: false` is the post-projection default on
+ *  every entry, so it only emits when the source said so explicitly. */
+function tier1Decorators(entry: LiveLoreEntry, source: LoreBook | null, projected: Record<string, unknown> | null): string[] {
+  const sourceLines = source
+    ? leadingDecoratorLines(typeof source.content === "string" ? source.content : "")
+    : [];
+  const liveKept = new Set(leadingDecoratorLines(
+    typeof entry.content === "string" ? entry.content : "",
+  ));
+  // Only lines the forward mapping consumed. Ones still inline in live content
+  // are Tier 2/3 and must not be duplicated.
+  const stripped = sourceLines.filter((l) => !liveKept.has(l));
+
+  const out: string[] = [];
+  const consumed = new Set<string>();
+  for (const f of TIER1_FIELDS) {
+    const liveVal = (entry as Record<string, unknown>)[f.key as string];
+    const projVal = projected ? projected[f.key as string] : undefined;
+    const unchanged = projected !== null && sameField(liveVal, projVal);
+    for (const n of f.owns) consumed.add(n);
+    if (unchanged) {
+      // Re-emit whatever the source spelled for this field.
+      out.push(...stripped.filter((l) => f.owns.includes(decoratorName(l))));
+      continue;
+    }
+    if (sameField(liveVal, f.dflt)) continue;
+    const spec = f.emit(liveVal, entry);
+    if (spec) {
+      const [name, ...args] = spec;
+      out.push(serializeDecorator({ name: name!, args, isFallback: false, lineIndex: 0 } as ParsedDecorator));
+    }
+  }
+  // Stripped decorators for fields Lumi never modelled (additional_keys, the
+  // constant-setting @@activate, ...) pass through untouched.
+  for (const l of stripped) {
+    if (!consumed.has(decoratorName(l)) && !out.includes(l)) out.push(l);
+  }
+  return [...new Set(out)];
 }
 
 /** Project a live Lumi row back to Risu's LoreBook shape. `source` supplies the
@@ -95,6 +161,7 @@ function decoratorsFromLiveFields(entry: LiveLoreEntry): string[] {
 export function liveEntryToRisuLore(
   entry: LiveLoreEntry,
   source: LoreBook | null,
+  projected: Record<string, unknown> | null = null,
 ): LoreBook {
   const e = ext(entry);
   const stashedExtentions = e["risu_extentions"];
@@ -112,9 +179,7 @@ export function liveEntryToRisuLore(
     : (entry.constant === true ? "constant" : "normal");
 
   const rawContent = typeof entry.content === "string" ? entry.content : "";
-  const decorators = source
-    ? strippedDecorators(source, rawContent)
-    : decoratorsFromLiveFields(entry);
+  const decorators = tier1Decorators(entry, source, projected);
   const content = decorators.length > 0
     ? `${decorators.join("\n")}\n${rawContent}`
     : rawContent;
@@ -204,12 +269,12 @@ export function reconcileLoreEntries(
     const untouched = COMPARED_FIELDS.every(
       (f) => sameField(projected[f as string], (live as unknown as Record<string, unknown>)[f as string]),
     );
-    out.push(untouched ? source : liveEntryToRisuLore(live, source));
+    out.push(untouched ? source : liveEntryToRisuLore(live, source, projected));
     if (!untouched) edited += 1;
   }
 
   for (const live of orphans) {
-    out.push(liveEntryToRisuLore(live, null));
+    out.push(liveEntryToRisuLore(live, null, null));
   }
 
   return { entries: out, added: orphans.length, removed, edited };

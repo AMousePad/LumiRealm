@@ -154,10 +154,13 @@ export function reconcileRegexScripts(
 
     const findChanged = String(primaryLive.find_regex ?? "") !== String(primaryProjected.find_regex ?? "");
     const replaceChanged = String(primaryLive.replace_string ?? "") !== String(primaryProjected.replace_string ?? "");
+    const flagsChanged = String(primaryLive.flags ?? "") !== String(primaryProjected.flags ?? "");
+    const nameChanged = String(primaryLive.name ?? "") !== String(primaryProjected.name ?? "");
     const disabledChanged = primaryLive.disabled === true && primaryProjected.disabled !== true;
     const reEnabled = primaryLive.disabled === false && primaryProjected.disabled === true;
 
-    if (!findChanged && !replaceChanged && !disabledChanged && !reEnabled) {
+    if (!findChanged && !replaceChanged && !flagsChanged && !nameChanged
+        && !disabledChanged && !reEnabled) {
       out.push(source);
       continue;
     }
@@ -165,28 +168,30 @@ export function reconcileRegexScripts(
 
     const next: Record<string, unknown> = { ...source };
     if (findChanged) next["in"] = String(primaryLive.find_regex ?? "");
-
-    // The forward transform only leaves replace_string byte-identical when it
-    // took no display-target rewrite. Overlaying an edited one otherwise would
-    // bake island wrappers and SVG placeholders into the exported card.
-    if (replaceChanged) {
-      const forwardWasIdentity = String(primaryProjected.replace_string ?? "")
-        === String(source.out ?? "").replaceAll("$n", "\n");
-      if (forwardWasIdentity) {
-        next["out"] = String(primaryLive.replace_string ?? "");
-      } else {
-        divergences.push({
-          sourceIndex: i,
-          comment: source.comment ?? "",
-          reason: "replace_string edited but the import transform is not reversible; source kept",
-        });
-      }
-    }
+    // Live wins unconditionally. The import transform is not reversible for
+    // display targets, so the exported `out` can carry island wrappers and
+    // resolved asset URLs, but keeping the stale source would silently discard
+    // the user's edit, which is the whole point of exporting.
+    if (replaceChanged) next["out"] = String(primaryLive.replace_string ?? "");
+    if (flagsChanged) next["flag"] = String(primaryLive.flags ?? "");
+    if (nameChanged) next["comment"] = String(primaryLive.name ?? "");
 
     const meta = risuMeta(primaryLive);
     if (disabledChanged) next["type"] = "disabled";
     else if (reEnabled && typeof meta?.phase === "string" && meta.phase !== "disabled") {
       next["type"] = meta.phase;
+    }
+
+    if (replaceChanged) {
+      const reversible = String(primaryProjected.replace_string ?? "")
+        === String(source.out ?? "").replaceAll("$n", "\n");
+      if (!reversible) {
+        divergences.push({
+          sourceIndex: i,
+          comment: source.comment ?? "",
+          reason: "edited replace_string exported as-is; import-time display rewrites are baked in",
+        });
+      }
     }
 
     out.push(next as unknown as CustomScript);
