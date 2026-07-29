@@ -1363,6 +1363,14 @@ const assetTriggerMutate = createAssetTriggerMutate({
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
   writeModuleEnvelope: async (userId, env) => { await writeModuleEnvelope(moduleStorage(), userId, env); },
   pushModules,
+  reclaimImageIds: async (imageIds, userId, context) => {
+    const live = await buildLiveImageIdSet(orphanDetectBuilders.buildOrphanDetectDeps(userId));
+    const safe = imageIds.filter((id) => !live.liveIds.has(id));
+    const shielded = imageIds.length - safe.length;
+    if (safe.length === 0) return { deleted: 0, shielded };
+    const stats = await deleteImageIds(safe, userId, context);
+    return { deleted: stats.deleted, shielded };
+  },
   log,
   errMsg,
 });

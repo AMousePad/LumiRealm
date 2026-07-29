@@ -241,27 +241,19 @@ export type FrontendToBackend =
       source: { kind: 'character'; characterId: string }
         | { kind: 'module'; moduleId: string };
     }
-  | {
-      type: 'add_asset';
-      source: { kind: 'character'; characterId: string }
-        | { kind: 'module'; moduleId: string };
-      /** Author-cased asset name. CBS macros use it verbatim (`{{img::AssetName}}`). */
-      assetName: string;
-      /** Lumi image id from `POST /api/v1/images` — FE already uploaded the bytes. */
-      imageId: string;
-      /** File extension without leading dot (e.g. "png", "mp4"). Drives
-       *  `{{asset::NAME}}` video-vs-image branching. */
-      ext?: string;
-    }
-  // Bulk variant of `add_asset`: single envelope write + single viewer re-push
-  // regardless of `entries.length`. FE pre-uploads bytes via `/api/v1/images`.
+  // Single envelope write + single viewer re-push regardless of `entries.length`.
+  // FE pre-uploads bytes via `/api/v1/images`.
   | {
       type: 'add_assets';
       source: { kind: 'character'; characterId: string }
         | { kind: 'module'; moduleId: string };
       entries: ReadonlyArray<{
+        /** Author-cased asset name. CBS macros use it verbatim (`{{img::AssetName}}`). */
         assetName: string;
+        /** Lumi image id from `POST /api/v1/images` — FE already uploaded the bytes. */
         imageId: string;
+        /** File extension without leading dot (e.g. "png", "mp4"). Drives
+         *  `{{asset::NAME}}` video-vs-image branching. */
         ext?: string;
       }>;
     }
@@ -272,11 +264,14 @@ export type FrontendToBackend =
       oldName: string;
       newName: string;
     }
+  // Single envelope write regardless of `assetNames.length`. Images are reclaimed
+  // in the same pass: entries drop from the index first, then a live-ref sweep
+  // decides which of their image ids nothing else still points at.
   | {
-      type: 'delete_asset';
+      type: 'delete_assets';
       source: { kind: 'character'; characterId: string }
         | { kind: 'module'; moduleId: string };
-      assetName: string;
+      assetNames: readonly string[];
     }
   // Risu-parity master string for defaults. `null` reverts to the card-side baseline.
   | {

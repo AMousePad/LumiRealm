@@ -34,10 +34,19 @@ function setMapKey(map: Record<string, string>, name: string, id: string): void 
 }
 
 export type AssetMutationMessage =
-  | Extract<FrontendToBackend, { type: 'add_asset' }>
   | Extract<FrontendToBackend, { type: 'add_assets' }>
   | Extract<FrontendToBackend, { type: 'rename_asset' }>
-  | Extract<FrontendToBackend, { type: 'delete_asset' }>;
+  | Extract<FrontendToBackend, { type: 'delete_assets' }>;
+
+export interface AssetMutationResultStats {
+  readonly ok: boolean;
+  readonly reason?: string;
+  /** delete_assets only. Entries actually present and removed. */
+  readonly removed?: number;
+  readonly imagesDeleted?: number;
+  /** Image ids kept because something else still references them. */
+  readonly imagesShielded?: number;
+}
 
 export interface AssetTriggerMutateDeps {
   readonly readLumirealm: (
@@ -52,13 +61,21 @@ export interface AssetTriggerMutateDeps {
   readonly readModuleEnvelope: (userId: string, moduleId: string) => Promise<ModuleEnvelope | null>;
   readonly writeModuleEnvelope: (userId: string, env: ModuleEnvelope) => Promise<void>;
   readonly pushModules: (userId: string) => Promise<void>;
-  readonly log: { readonly warn: (m: string) => void; readonly trace: (m: string) => void };
+  // Reclaim pass for delete_assets. Must run after the envelope write: the live
+  // sweep reads the card's own index, so a pre-write call shields every id and
+  // silently deletes nothing.
+  readonly reclaimImageIds: (
+    imageIds: readonly string[],
+    userId: string,
+    context: string,
+  ) => Promise<{ deleted: number; shielded: number }>;
+  readonly log: { readonly warn: (m: string) => void; readonly trace: (m: string) => void; readonly info: (m: string) => void };
   readonly errMsg: (e: unknown) => string;
 }
 
 export interface AssetTriggerMutate {
   readonly refreshRisuAssetMap: (characterId: string, userId: string) => Promise<void>;
-  readonly mutateAssetIndex: (msg: AssetMutationMessage, userId: string) => Promise<{ ok: boolean; reason?: string }>;
+  readonly mutateAssetIndex: (msg: AssetMutationMessage, userId: string) => Promise<AssetMutationResultStats>;
   readonly mutateTriggerLua: (
     msg: Extract<FrontendToBackend, { type: 'set_trigger_lua' }>,
     userId: string,
@@ -72,9 +89,31 @@ export function createAssetTriggerMutate(deps: AssetTriggerMutateDeps): AssetTri
     readModuleEnvelope,
     writeModuleEnvelope,
     pushModules,
+    reclaimImageIds,
     log,
     errMsg,
   } = deps;
+
+  async function reclaim(
+    imageIds: readonly string[],
+    userId: string,
+    context: string,
+  ): Promise<{ imagesDeleted: number; imagesShielded: number }> {
+    const unique = [...new Set(imageIds)];
+    if (unique.length === 0) return { imagesDeleted: 0, imagesShielded: 0 };
+    try {
+      const r = await reclaimImageIds(unique, userId, context);
+      log.info(
+        `${context}: reclaimed ${r.deleted}/${unique.length} image(s), ${r.shielded} still referenced`,
+      );
+      return { imagesDeleted: r.deleted, imagesShielded: r.shielded };
+    } catch (err) {
+      // Index entries are already gone. A failed reclaim leaves orphans that
+      // Settings -> Cleanup collects, so don't fail the whole mutation.
+      log.warn(`${context}: image reclaim failed, ${unique.length} id(s) left for Cleanup: ${errMsg(err)}`);
+      return { imagesDeleted: 0, imagesShielded: 0 };
+    }
+  }
 
   async function refreshRisuAssetMap(characterId: string, userId: string): Promise<void> {
     const fetched = await readLumirealm(characterId, userId);
@@ -123,9 +162,13 @@ export function createAssetTriggerMutate(deps: AssetTriggerMutateDeps): AssetTri
   async function mutateAssetIndex(
     msg: AssetMutationMessage,
     userId: string,
-  ): Promise<{ ok: boolean; reason?: string }> {
+  ): Promise<AssetMutationResultStats> {
     if (msg.source.kind === 'character') {
       const characterId = msg.source.characterId;
+      // updateLumirealm may re-invoke on write contention, so these are assigned
+      // per attempt rather than accumulated.
+      let removedIds: string[] = [];
+      let removedCount = 0;
       const updated = await updateLumirealm(characterId, userId, (cur) => {
         const before = cur.asset_index;
         if (msg.type === 'add_assets') {
@@ -137,18 +180,34 @@ export function createAssetTriggerMutate(deps: AssetTriggerMutateDeps): AssetTri
           }
           return { ...cur, asset_index: working };
         }
-        let result;
-        switch (msg.type) {
-          case 'add_asset':
-            result = addAssetToCharacterIndex(before, msg.assetName, msg.imageId, msg.ext);
-            break;
-          case 'rename_asset':
-            result = renameCharacterAsset(before, msg.oldName, msg.newName);
-            break;
-          case 'delete_asset':
-            result = deleteCharacterAsset(before, msg.assetName);
-            break;
+        if (msg.type === 'delete_assets') {
+          let working = before;
+          const ids: string[] = [];
+          let removed = 0;
+          for (const name of msg.assetNames) {
+            // deleteCharacterAsset is idempotent, so absence can't be read off
+            // its result. Look first to collect ids and count real removals.
+            const entry = Object.prototype.hasOwnProperty.call(working, name)
+              ? working[name]
+              : undefined;
+            const r = deleteCharacterAsset(working, name);
+            if (!r.ok) {
+              log.warn(`delete_assets (character ${characterId}): "${name}" skipped,${r.reason}`);
+              continue;
+            }
+            working = r.index;
+            if (entry) {
+              removed++;
+              for (const id of entry.imageIds) {
+                if (typeof id === 'string' && id.length > 0) ids.push(id);
+              }
+            }
+          }
+          removedIds = ids;
+          removedCount = removed;
+          return { ...cur, asset_index: working };
         }
+        const result = renameCharacterAsset(before, msg.oldName, msg.newName);
         if (!result.ok) {
           log.warn(
             `mutateAssetIndex (character ${characterId}): ${msg.type} failed,${result.reason}`,
@@ -158,6 +217,10 @@ export function createAssetTriggerMutate(deps: AssetTriggerMutateDeps): AssetTri
         return { ...cur, asset_index: result.index };
       });
       if (!updated) return { ok: false, reason: 'character is not a lumirealm card' };
+      if (msg.type === 'delete_assets') {
+        const stats = await reclaim(removedIds, userId, `delete_assets(character ${characterId})`);
+        return { ok: true, removed: removedCount, ...stats };
+      }
       return { ok: true };
     }
 
@@ -176,18 +239,31 @@ export function createAssetTriggerMutate(deps: AssetTriggerMutateDeps): AssetTri
       await pushModules(userId);
       return { ok: true };
     }
-    let result;
-    switch (msg.type) {
-      case 'add_asset':
-        result = addAssetToModuleIndex(env.asset_index, msg.assetName, msg.imageId, msg.ext);
-        break;
-      case 'rename_asset':
-        result = renameModuleAsset(env.asset_index, msg.oldName, msg.newName);
-        break;
-      case 'delete_asset':
-        result = deleteModuleAsset(env.asset_index, msg.assetName);
-        break;
+    if (msg.type === 'delete_assets') {
+      let working = env.asset_index;
+      const ids: string[] = [];
+      let removed = 0;
+      for (const name of msg.assetNames) {
+        const ref = Object.prototype.hasOwnProperty.call(working, name)
+          ? working[name]
+          : undefined;
+        const r = deleteModuleAsset(working, name);
+        if (!r.ok) {
+          log.warn(`delete_assets (module ${moduleId}): "${name}" skipped,${r.reason}`);
+          continue;
+        }
+        working = r.index;
+        if (ref) {
+          removed++;
+          if (typeof ref.imageId === 'string' && ref.imageId.length > 0) ids.push(ref.imageId);
+        }
+      }
+      await writeModuleEnvelope(userId, { ...env, asset_index: working });
+      await pushModules(userId);
+      const stats = await reclaim(ids, userId, `delete_assets(module ${moduleId})`);
+      return { ok: true, removed, ...stats };
     }
+    const result = renameModuleAsset(env.asset_index, msg.oldName, msg.newName);
     if (!result.ok) {
       return { ok: false, ...(result.reason !== undefined ? { reason: result.reason } : {}) };
     }

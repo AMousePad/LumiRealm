@@ -2454,6 +2454,91 @@
 .lr-viewer-drawer .lrv-btn-primary:hover {
   background: var(--lumiverse-primary, rgba(120, 160, 255, 0.4));
 }
+.lr-viewer-drawer .lrv-btn-active {
+  background: var(--lumiverse-primary, rgba(120, 160, 255, 0.3));
+  border-color: var(--lumiverse-primary, rgba(120, 160, 255, 0.6));
+  color: var(--lumiverse-text, inherit);
+}
+.lr-viewer-drawer .lrv-btn-danger {
+  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));
+  color: var(--lumiverse-danger, rgba(255, 130, 130, 0.95));
+}
+.lr-viewer-drawer .lrv-btn-danger:hover {
+  background: rgba(255, 130, 130, 0.12);
+}
+
+/* Bulk-selection bar, shown under the toolbar while in select mode */
+.lr-viewer-drawer .lrv-asset-selbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.05));
+  border-bottom: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.05));
+  flex-wrap: wrap;
+}
+.lr-viewer-drawer .lrv-asset-selbar-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lumiverse-text, inherit);
+}
+.lr-viewer-drawer .lrv-asset-selbar .lrv-asset-action {
+  flex: 0 0 auto;
+}
+.lr-viewer-drawer .lrv-asset-selbar .lrv-asset-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.lr-viewer-drawer .lrv-asset-selbar-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));
+}
+
+/* Selection affordances on tiles */
+.lr-viewer-drawer .lrv-asset-tile-selectable {
+  cursor: pointer;
+  position: relative;
+}
+.lr-viewer-drawer .lrv-asset-tile-selected {
+  border-color: var(--lumiverse-primary, rgba(120, 160, 255, 0.85));
+  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.12));
+}
+.lr-viewer-drawer .lrv-asset-tile-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--lumiverse-primary, #6c9cff);
+  /* Media fills the tile, so the box needs its own backing to stay visible. */
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 3px;
+}
+/* Touch: the whole tile toggles, so the box is an indicator, but keep it a
+   usable target for people who aim at it anyway. */
+@media (hover: none) and (pointer: coarse) {
+  .lr-viewer-drawer .lrv-asset-tile-check {
+    width: 22px;
+    height: 22px;
+  }
+  .lr-viewer-drawer .lrv-asset-selbar .lrv-asset-action {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  /* Long-press is ours. Without these iOS raises the copy/share callout and
+     starts a text selection partway through the hold. */
+  .lr-viewer-drawer .lrv-asset-tile {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .lr-viewer-drawer .lrv-asset-tile img {
+    -webkit-touch-callout: none;
+  }
+}
 .lr-viewer-drawer .lrv-asset-upload-status {
   font-size: 11px;
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.7));

@@ -4,10 +4,9 @@ import { pushViewerData } from '../state/viewer-push.js';
 import type { Handler, HandlerCallCtx } from './types.js';
 
 type AssetMutationMessage =
-  | Extract<FrontendToBackend, { type: 'add_asset' }>
   | Extract<FrontendToBackend, { type: 'add_assets' }>
   | Extract<FrontendToBackend, { type: 'rename_asset' }>
-  | Extract<FrontendToBackend, { type: 'delete_asset' }>;
+  | Extract<FrontendToBackend, { type: 'delete_assets' }>;
 
 export interface AssetsHandlerDeps {
   readonly blockedByRepair: (userId: string, messageType: string) => boolean;
@@ -54,15 +53,13 @@ async function runAssetMutation(
 }
 
 export function createAssetsHandlers(deps: AssetsHandlerDeps): {
-  readonly add_asset: Handler<'add_asset'>;
   readonly add_assets: Handler<'add_assets'>;
   readonly rename_asset: Handler<'rename_asset'>;
-  readonly delete_asset: Handler<'delete_asset'>;
+  readonly delete_assets: Handler<'delete_assets'>;
 } {
   return {
-    add_asset: (msg, ctx) => runAssetMutation(msg, ctx, deps),
     add_assets: (msg, ctx) => runAssetMutation(msg, ctx, deps),
     rename_asset: (msg, ctx) => runAssetMutation(msg, ctx, deps),
-    delete_asset: (msg, ctx) => runAssetMutation(msg, ctx, deps),
+    delete_assets: (msg, ctx) => runAssetMutation(msg, ctx, deps),
   };
 }
