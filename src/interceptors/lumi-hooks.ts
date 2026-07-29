@@ -264,6 +264,10 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         lastCharMessage?: string;
         lastMessageId?: number;
       };
+      const envSystem = ctx.env.system as {
+        model?: string;
+        maxContext?: number;
+      };
       const namesEnv = ctx.env.names as { user?: string; char?: string };
 
       const assetIndexes = getActiveAssetIndexes(chatId);
@@ -325,6 +329,12 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             local: ctx.env.variables.local,
             global: ctx.env.variables.global,
             chat: ctx.env.variables.chat,
+          },
+          system: {
+            ...(typeof envSystem.model === 'string' ? { model: envSystem.model } : {}),
+            ...(typeof envSystem.maxContext === 'number'
+              ? { maxContext: envSystem.maxContext }
+              : {}),
           },
           ...(scriptstateDefaults && Object.keys(scriptstateDefaults).length > 0
             ? { scriptstateDefaults }
