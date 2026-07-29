@@ -879,7 +879,16 @@ export async function makeRisuTriggerRuntime(
       },
       setChatRole: (_id: unknown, index: unknown, value: unknown) => {
         const n = Number(index);
-        if (messagesCache[n]) messagesCache[n] = { ...messagesCache[n]!, role: risuRoleToLumi(toStr(value)) };
+        if (!messagesCache[n]) return;
+        const desired = messagesCache.map((message) => ({
+          role: lumiRoleToRisu(message.role),
+          data: message.content,
+        }));
+        desired[n] = {
+          ...desired[n]!,
+          role: lumiRoleToRisu(risuRoleToLumi(toStr(value))),
+        };
+        reconcileFullChat(JSON.stringify(desired));
       },
       cutChat: (_id: unknown, start: unknown, end: unknown) => { cutChat(start, end); },
       removeChat: (_id: unknown, index: unknown) => {
@@ -909,7 +918,15 @@ export async function makeRisuTriggerRuntime(
         );
       },
       insertChat: (_id: unknown, index: unknown, role: unknown, value: unknown) => {
-        messagesCache.splice(Number(index), 0, { id: String(Date.now()), role: risuRoleToLumi(toStr(role)), content: toStr(value) });
+        const desired = messagesCache.map((message) => ({
+          role: lumiRoleToRisu(message.role),
+          data: message.content,
+        }));
+        desired.splice(Number(index), 0, {
+          role: lumiRoleToRisu(risuRoleToLumi(toStr(role))),
+          data: toStr(value),
+        });
+        reconcileFullChat(JSON.stringify(desired));
       },
       getChatLength: (_id: unknown) => messagesCache.length,
       getFullChatMain: (_id: unknown) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
