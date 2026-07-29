@@ -59,8 +59,8 @@ register("axmodel", (ctx) => ctx.axModel,
 // Risu cbs() default (no cbsConditions, chatID=-1) returns 'null'.
 // Outside cbs: chatRole > firstmsg-then-'char' > chatID-then-msg.role > role > 'null'.
 register("role", (ctx) => {
-  if (ctx.cbsContext) return "null";
   if (ctx.role !== null) return lumiRoleToRisu(ctx.role);
+  if (ctx.cbsContext) return "null";
   // Prompt-regex (editprocess) pass mirrors Risu: chatID=-1 / no chatRole → matcherArg.role
   // ?? 'null' (cbs.ts:684). Risu's editprocess never sets the firstmsg condition, so the
   // greeting and any role-less block resolve 'null', NOT the display-path 'char' fallback.
