@@ -143,11 +143,7 @@ export function buildModuleArchivePlan(input: BuildModuleArchiveInput): ArchiveP
     const path = sanitizer.sanitize(planned.path);
     entries.push({ kind: "image", path, imageId, level: 0, metaPath });
     cardAssets.push({ type, uri: `embeded://${path}`, name, ext: declaredExt });
-    const ref: ArchiveAssetRef = declaredExt.length > 0
-      ? { name, path, ext: declaredExt }
-      : { name, path };
-    sidecarAssets.push(ref);
-    return ref;
+    return declaredExt.length > 0 ? { name, path, ext: declaredExt } : { name, path };
   };
 
   // The schema's preprocess wrapper widens the tuple, so re-narrow here.
@@ -165,7 +161,12 @@ export function buildModuleArchivePlan(input: BuildModuleArchiveInput): ArchiveP
     const declaredExt = typeof triple[2] === "string" && triple[2].length > 0
       ? triple[2]
       : (resolved.ext ?? "");
-    pushAsset(name, declaredExt, "x-risu-asset", resolved.imageId, declaredExt || "unknown");
+    // Positional with module.assets. The icon is deliberately NOT in this list:
+    // it round-trips through `sidecar.module.icon`, and listing it twice would
+    // restore a phantom asset entry.
+    sidecarAssets.push(
+      pushAsset(name, declaredExt, "x-risu-asset", resolved.imageId, declaredExt || "unknown"),
+    );
   }
 
   let icon: ArchiveAssetRef | undefined;

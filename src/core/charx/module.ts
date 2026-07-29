@@ -221,7 +221,56 @@ function indicatorLore(data: UnknownRecord): unknown[] {
   return out;
 }
 
+/** Restores a module from our own archive. The sidecar holds the RisuModule
+ *  verbatim, so this skips the CCSv3 conversion entirely: no indicator-lore
+ *  re-append, no field-by-field remap, and `cjs` / `namespace` / `mcp` survive
+ *  (Risu's own module-to-charx conversion drops them). */
+function restoreModuleFromSidecar(bundle: CharxBundle): DecodedModuleCharx | null {
+  const sidecar = bundle.sidecar;
+  if (!sidecar || sidecar.kind !== "module" || !sidecar.module) return null;
+  const payload = sidecar.module;
+  const module = record(payload.module);
+  if (!module) {
+    throw new TranslationError(
+      "module_charx/bad_sidecar",
+      "lumirealm.json module payload is not an object",
+    );
+  }
+
+  const assetBytes: Uint8Array[] = [];
+  const kept: [string, string, string][] = [];
+  for (const ref of payload.assets ?? []) {
+    const bytes = bundle.assets.get(ref.path);
+    if (!bytes) {
+      // The manifest and the archive disagree; better to fail than to silently
+      // import a module whose asset names no longer line up with its bytes.
+      throw new TranslationError(
+        "module_charx/missing_asset",
+        `sidecar references "${ref.path}" but the archive has no such entry`,
+      );
+    }
+    kept.push([ref.name, "", ref.ext ?? ""]);
+    assetBytes.push(new Uint8Array(bytes));
+  }
+
+  let icon: ModuleCharxIcon | undefined;
+  const iconRef = payload.icon;
+  if (iconRef) {
+    const bytes = bundle.assets.get(iconRef.path);
+    if (bytes) icon = { data: new Uint8Array(bytes), ext: iconRef.ext ?? "png" };
+  }
+
+  return {
+    module: structuredClone({ ...module, assets: kept, icon: "" }),
+    assets: assetBytes,
+    ...(icon ? { icon } : {}),
+  };
+}
+
 export function convertModuleCharxBundle(bundle: CharxBundle): DecodedModuleCharx {
+  const restored = restoreModuleFromSidecar(bundle);
+  if (restored) return restored;
+
   const card = record(bundle.card);
   if (!card) {
     throw new TranslationError(

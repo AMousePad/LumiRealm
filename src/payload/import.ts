@@ -10,6 +10,7 @@ import {
   RisuConsentDeclinedError,
 } from './codec.js';
 import { type UserStorageLike } from './installer.js';
+import { readCharacterSidecar, mergeSidecarOverrides } from './sidecar-restore.js';
 import type {
   LumirealmCharacterData,
   LumirealmUserOverrides,
@@ -856,8 +857,22 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
     module: charxBundle.moduleEnvelope?.module ?? null,
     path_to_image_id: { ...pathToImageId },
   };
+  // Our own archive: overlay the fields Risu's shapes cannot carry. Everything
+  // else already arrived through the normal translate path above, so storage
+  // stays identical to a plain .charx import.
+  const sidecarOverlay = readCharacterSidecar(charxBundle.sidecar);
+  if (sidecarOverlay) {
+    mergeSidecarOverrides(userOverrides, sidecarOverlay);
+    logInfo(
+      `(9) lumirealm sidecar applied: ${sidecarOverlay.applied.length} field(s) ` +
+        `[${sidecarOverlay.applied.slice(0, 8).join(', ')}]`,
+    );
+  }
+  const basePayload = sidecarOverlay?.backgroundHtmlSource !== undefined
+    ? { ...bundle.risuPayload, background_html_source: sidecarOverlay.backgroundHtmlSource }
+    : bundle.risuPayload;
   const lumirealmData = buildLumirealmData(
-    bundle.risuPayload,
+    basePayload,
     args.extensionVersion,
     storedRegexScripts,
     assetIndex,    // populated above via spindle.images.upload
@@ -867,13 +882,16 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
     storedSource,
     CURRENT_CHARACTER_SCHEMA_VERSION,
   );
+  const withTranslations = sidecarOverlay?.translations !== undefined
+    ? { ...lumirealmData, translations: sidecarOverlay.translations as never }
+    : lumirealmData;
   try {
     // display_owner: true MUST match writeLumirealm. The host gates FE-owned display on
     // character.extensions.lumirealm.display_owner, so omitting it imports an unowned
     // character that silently dead-zones (quirks §1.44).
     await args.spindle.characters.update(
       characterId,
-      { extensions: { [LUMIREALM_EXT_KEY]: { ...lumirealmData, display_owner: true } } },
+      { extensions: { [LUMIREALM_EXT_KEY]: { ...withTranslations, display_owner: true } } },
       args.userId,
     );
   } catch (err) {
@@ -890,7 +908,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   return {
     characterId,
     characterName: bundle.character.name,
-    lumirealm: lumirealmData,
+    lumirealm: withTranslations,
     imageIds,
     pendingRegexScripts,
     warnings,
