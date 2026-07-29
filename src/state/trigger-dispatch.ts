@@ -144,24 +144,9 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
       resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
     });
-    const outcome = await withDispatchContext(seams, async () =>
-      dispatchBinding(
-        {
-          compiledTriggers: compiled!,
-          api,
-          data: { characterId },
-          scriptNS,
-          opts: { characterId, binding },
-        },
-        binding,
-        (err, name) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          log.error(`trigger "${name}" failed on ${binding}: ${msg}`);
-        },
-      ),
-    );
-
-    // Risu parity: editOutput listenEdit chain runs first, then editoutput/edittrans @@-actions, with one persisted write at the end if content changed.
+    // Risu finalizes editOutput/list actions and stores the edited assistant
+    // message before firing the structured output trigger. The trigger must
+    // therefore read the post-edit chat state, not the raw model response.
     if (binding === 'output') {
       const triggers = active.card.risuPayload.triggers as ReadonlyArray<{
         effect?: ReadonlyArray<{ type?: string }>;
@@ -236,6 +221,23 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
         }
       }
     }
+
+    const outcome = await withDispatchContext(seams, async () =>
+      dispatchBinding(
+        {
+          compiledTriggers: compiled!,
+          api,
+          data: { characterId },
+          scriptNS,
+          opts: { characterId, binding },
+        },
+        binding,
+        (err, name) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.error(`trigger "${name}" failed on ${binding}: ${msg}`);
+        },
+      ),
+    );
 
     log.info(`runBinding: done binding=${binding} elapsed=${Date.now() - tBind}ms stopSending=${outcome.stopSending}`);
     return { stopSending: outcome.stopSending };
