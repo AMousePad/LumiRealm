@@ -276,6 +276,11 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
   risuai["risuai"] = risuaiInner;
 
   const sourceData = record(record(input.data.source?.card)?.["data"]);
+  const sourceBook = record(sourceData?.["character_book"]);
+  // Live extensions win: the importer copies these onto the character row, so a
+  // Lumiverse edit lands there rather than in the frozen source card.
+  const liveExt = record(input.character.extensions);
+  const pick = (k: string): unknown => liveExt?.[k] ?? sourceData?.[k];
   const card = {
     spec: "chara_card_v3",
     spec_version: "3.0",
@@ -290,18 +295,25 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
       system_prompt: char.system_prompt ?? "",
       post_history_instructions: char.post_history_instructions ?? "",
       alternate_greetings: [...(char.alternate_greetings ?? [])],
+      // Risu rebuilds `loreSettings` only when scan_depth, token_budget and
+      // recursive_scanning are ALL non-nullish, so dropping them silently
+      // resets the card's lore tuning on the next Risu import.
       character_book: {
-        extensions: record(sourceData?.["character_book"])?.["extensions"] ?? {},
+        ...(sourceBook?.["scan_depth"] !== undefined ? { scan_depth: sourceBook["scan_depth"] } : {}),
+        ...(sourceBook?.["token_budget"] !== undefined ? { token_budget: sourceBook["token_budget"] } : {}),
+        ...(sourceBook?.["recursive_scanning"] !== undefined
+          ? { recursive_scanning: sourceBook["recursive_scanning"] } : {}),
+        extensions: sourceBook?.["extensions"] ?? {},
         entries: lore.entries.map(loreToCharacterBookEntry),
       },
       tags: [...(char.tags ?? [])],
       creator: char.creator ?? "",
-      character_version: String(sourceData?.["character_version"] ?? ""),
+      character_version: String(pick("character_version") ?? ""),
       extensions: risuai,
-      group_only_greetings: sourceData?.["group_only_greetings"] ?? [],
-      nickname: sourceData?.["nickname"] ?? "",
-      source: sourceData?.["source"] ?? [],
-      creation_date: sourceData?.["creation_date"] ?? 0,
+      group_only_greetings: pick("group_only_greetings") ?? [],
+      nickname: pick("nickname") ?? "",
+      source: liveExt?.["ccv3_source"] ?? sourceData?.["source"] ?? [],
+      creation_date: liveExt?.["ccv3_creation_date"] ?? sourceData?.["creation_date"] ?? 0,
       modification_date: Math.floor(now / 1000),
       assets: cardAssets,
     },

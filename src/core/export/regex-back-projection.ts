@@ -33,6 +33,16 @@ interface RisuMeta {
   readonly imported_regex?: unknown;
 }
 
+// `@@inject` / `@@move_*` wrap their match in PUA sentinels whose hash derives
+// from a generated uuid, so a re-projection never reproduces the stored row's
+// hash. Comparing raw would mark every such rule "edited" and then export the
+// sentinels themselves into the card, leaking internal machinery.
+const SENTINEL_RE = /[][0-9a-z]{0,8}[]/g;
+
+function desentinel(s: string): string {
+  return s.replace(SENTINEL_RE, '');
+}
+
 function risuMeta(row: LiveRegexRow): RisuMeta | null {
   const m = row.metadata;
   if (!m || typeof m !== "object" || Array.isArray(m)) return null;
@@ -152,8 +162,12 @@ export function reconcileRegexScripts(
       continue;
     }
 
-    const findChanged = String(primaryLive.find_regex ?? "") !== String(primaryProjected.find_regex ?? "");
-    const replaceChanged = String(primaryLive.replace_string ?? "") !== String(primaryProjected.replace_string ?? "");
+    const liveFind = desentinel(String(primaryLive.find_regex ?? ""));
+    const liveRepl = desentinel(String(primaryLive.replace_string ?? ""));
+    const projFind = desentinel(String(primaryProjected.find_regex ?? ""));
+    const projRepl = desentinel(String(primaryProjected.replace_string ?? ""));
+    const findChanged = liveFind !== projFind;
+    const replaceChanged = liveRepl !== projRepl;
     const flagsChanged = String(primaryLive.flags ?? "") !== String(primaryProjected.flags ?? "");
     const nameChanged = String(primaryLive.name ?? "") !== String(primaryProjected.name ?? "");
     const disabledChanged = primaryLive.disabled === true && primaryProjected.disabled !== true;
@@ -167,12 +181,18 @@ export function reconcileRegexScripts(
     edited += 1;
 
     const next: Record<string, unknown> = { ...source };
-    if (findChanged) next["in"] = String(primaryLive.find_regex ?? "");
+    if (findChanged) next["in"] = liveFind;
     // Live wins unconditionally. The import transform is not reversible for
     // display targets, so the exported `out` can carry island wrappers and
     // resolved asset URLs, but keeping the stale source would silently discard
     // the user's edit, which is the whole point of exporting.
-    if (replaceChanged) next["out"] = String(primaryLive.replace_string ?? "");
+    if (replaceChanged) {
+      // An @@-action's prefix lives in the source `out`, not in the live row.
+      // Reuse the source's exact prefix: mapRegex strips the whitespace after
+      // `@@action`, so re-synthesising it would change the separator.
+      const prefix = /^@@[a-z_]+\s*/i.exec(String(source.out ?? ""))?.[0];
+      next["out"] = prefix ? `${prefix}${liveRepl}` : liveRepl;
+    }
     if (flagsChanged) next["flag"] = String(primaryLive.flags ?? "");
     if (nameChanged) next["comment"] = String(primaryLive.name ?? "");
 
