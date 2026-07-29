@@ -77,7 +77,8 @@ export function projectModuleRegexEntries(
   if (!Array.isArray(raw)) return [];
   const out: PendingRegexScriptMsg[] = [];
   let sortBase = 0;
-  for (const e of raw) {
+  for (let sourceIndex = 0; sourceIndex < raw.length; sourceIndex++) {
+    const e = raw[sourceIndex];
     if (!e || typeof e !== 'object') continue;
     const eo = e as Record<string, unknown>;
     const findRegex = typeof eo['in'] === 'string' ? eo['in'] : '';
@@ -108,6 +109,8 @@ export function projectModuleRegexEntries(
           _risu: {
             module_id: moduleId,
             source_type: 'divider',
+            source_index: sourceIndex,
+            source_row_index: sortBase,
           },
         },
       });
@@ -156,7 +159,13 @@ export function projectModuleRegexEntries(
         _risu: {
           module_id: moduleId,
           source_type: ruleType,
+          phase: ruleType,
+          source_index: sourceIndex,
+          source_row_index: sortBase,
           ...(normalisedFlag.order !== undefined ? { order_flag: normalisedFlag.order } : {}),
+          ...(normalisedFlag.actions.length > 0
+            ? { flag_actions: normalisedFlag.actions }
+            : {}),
         },
       },
     });

@@ -11,6 +11,7 @@ import type {
 } from '../payload/types.js';
 import type { ModuleEnvelope, ModuleIndexEntry } from './modules-store.js';
 import type { AttachedModuleForRuntime } from './lumirealm-character.js';
+import { coerceAtActionsFromScripts } from '../interpreter/at-actions-runtime.js';
 import { mergeLangBlock } from './translation-merge.js';
 import { expectCharacterEdit } from './own-character-edit.js';
 
@@ -323,6 +324,7 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
     return orderedEnvelopes.map((env) => {
       const m = env.module as {
         trigger?: readonly unknown[];
+        regex?: readonly unknown[];
         lorebook?: readonly unknown[];
         lowLevelAccess?: unknown;
         customModuleToggle?: unknown;
@@ -338,6 +340,10 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
         (handle) => handle === env.id || handle === namespace,
       );
       const triggers = Array.isArray(m.trigger) ? (m.trigger as readonly unknown[]) : [];
+      const atActions = coerceAtActionsFromScripts(
+        Array.isArray(m.regex) ? m.regex : [],
+        `module:${env.id}`,
+      );
       const lua_scripts = triggers.map((t) => {
         const tEff = (t as { effect?: readonly unknown[] }).effect ?? [];
         const parts: string[] = [];
@@ -361,6 +367,7 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
         attachment_handles: [...new Set(attachmentHandles)],
         triggers,
         lua_scripts,
+        at_actions: atActions,
         lorebook: Array.isArray(m.lorebook) ? m.lorebook : [],
         asset_index: runtimeAssetIndex,
         low_level_access: m.lowLevelAccess === true,

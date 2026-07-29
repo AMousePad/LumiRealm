@@ -253,6 +253,8 @@ export interface AttachedModuleForRuntime {
   readonly triggers: readonly unknown[];
   /** Parallel to `triggers`. Empty string when no `triggerlua` effect. */
   readonly lua_scripts: readonly string[];
+  /** Runtime descriptors. Installed host rows remain authoritative. */
+  readonly at_actions?: readonly unknown[];
   /** Raw source retained only on the in-memory runtime card. */
   readonly lorebook: readonly unknown[];
   readonly asset_index: Readonly<Record<string, AssetIndexEntry>>;
@@ -268,9 +270,13 @@ export function mergeAttachedModulesIntoPayload(
   basePayload: RisuPayload,
   baseAssetIndex: Readonly<Record<string, AssetIndexEntry>>,
   modules: readonly AttachedModuleForRuntime[],
+  installedRegexIdsByModule: Readonly<
+    Record<string, readonly string[]>
+  > = {},
 ): {
   triggers: readonly unknown[];
   lua_scripts: readonly string[];
+  at_actions: readonly unknown[];
   asset_index: Readonly<Record<string, AssetIndexEntry>>;
   requires: RisuPayload['requires'];
   module_background_embedding: string;
@@ -280,6 +286,7 @@ export function mergeAttachedModulesIntoPayload(
     return {
       triggers: basePayload.triggers,
       lua_scripts: basePayload.lua_scripts,
+      at_actions: basePayload.at_actions,
       asset_index: baseAssetIndex,
       requires: basePayload.requires,
       module_background_embedding: '',
@@ -288,6 +295,7 @@ export function mergeAttachedModulesIntoPayload(
   }
   const triggers = [...basePayload.triggers];
   const lua_scripts = [...basePayload.lua_scripts];
+  const atActions = [...basePayload.at_actions];
   const moduleAssets: Record<string, AssetIndexEntry> = {};
   const modulesByNamespace: Record<string, string[]> = {};
   let bgEmbed = '';
@@ -314,6 +322,28 @@ export function mergeAttachedModulesIntoPayload(
       }
       lua_scripts.push(m.lua_scripts[i] ?? '');
     }
+    const installedIds = [
+      m.id,
+      ...(m.attachment_handles ?? []),
+    ].map((key) => installedRegexIdsByModule[key])
+      .find((ids): ids is readonly string[] => Array.isArray(ids));
+    for (const rawAction of m.at_actions ?? []) {
+      if (!rawAction || typeof rawAction !== 'object') {
+        atActions.push(rawAction);
+        continue;
+      }
+      const action = rawAction as Record<string, unknown>;
+      const rowIndex = action.sourceRowIndex;
+      const liveScriptId =
+        typeof rowIndex === 'number' && Number.isInteger(rowIndex)
+          ? installedIds?.[rowIndex]
+          : undefined;
+      atActions.push(
+        typeof liveScriptId === 'string' && liveScriptId.length > 0
+          ? { ...action, liveScriptId }
+          : action,
+      );
+    }
     if (typeof m.background_embedding === 'string' && m.background_embedding.length > 0) {
       bgEmbed += '\n' + m.background_embedding + '\n';
     }
@@ -333,6 +363,7 @@ export function mergeAttachedModulesIntoPayload(
   return {
     triggers,
     lua_scripts,
+    at_actions: atActions,
     asset_index: finalAssetIndex,
     requires: folded,
     module_background_embedding: bgEmbed,
@@ -395,12 +426,13 @@ export function buildSyntheticStoredCard(
     },
     data.asset_index,
     attachedModules,
+    data.user_overrides.attached_module_regex_script_ids ?? {},
   );
 
   const risuPayload: RisuPayload = {
     triggers: merged.triggers,
     lua_scripts: merged.lua_scripts,
-    at_actions: data.payload.at_actions,
+    at_actions: merged.at_actions,
     background_html: backgroundHtml,
     ...(merged.module_background_embedding.length > 0
       ? { module_background_embedding: merged.module_background_embedding }

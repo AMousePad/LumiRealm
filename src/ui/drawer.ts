@@ -463,38 +463,47 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
           credentials: 'include',
         });
         if (resp.ok) {
-          const body = (await resp.json()) as {
-            imported_ids?: unknown;
-            imported?: number;
-          };
-          // imported_ids absent on older Lumi builds, fall back to listing
-          // and filtering by metadata._risu.module_id.
-          if (Array.isArray(body.imported_ids)) {
-            for (const id of body.imported_ids) {
-              if (typeof id === 'string') regexScriptIds.push(id);
-            }
-          } else {
-            try {
-              const listResp = await fetch(
-                `/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=2000`,
-                { credentials: 'include' },
+          try {
+            const listResp = await fetch(
+              `/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=2000`,
+              { credentials: 'include' },
+            );
+            if (listResp.ok) {
+              const listBody = (await listResp.json()) as {
+                data?: Array<{
+                  id: string;
+                  script_id?: string;
+                  metadata?: { _risu?: { module_id?: string } };
+                }>;
+              };
+              const moduleRows = (listBody.data ?? []).filter(
+                (row) => row.metadata?._risu?.module_id === msg.moduleId,
               );
-              if (listResp.ok) {
-                const listBody = (await listResp.json()) as {
-                  data?: Array<{
-                    id: string;
-                    metadata?: { _risu?: { module_id?: string } };
-                  }>;
-                };
-                for (const r of listBody.data ?? []) {
-                  if (r.metadata?._risu?.module_id === msg.moduleId) {
-                    regexScriptIds.push(r.id);
-                  }
-                }
+              const rowsByScriptId = new Map<string, string[]>();
+              for (const row of moduleRows) {
+                if (typeof row.script_id !== 'string') continue;
+                const ids = rowsByScriptId.get(row.script_id) ?? [];
+                ids.push(row.id);
+                rowsByScriptId.set(row.script_id, ids);
               }
-            } catch (err) {
-              log.warn(`drawer.installModuleArtifacts: id-recovery list fetch threw`, err);
+              const ordered = msg.regexScripts.map(
+                (script) => rowsByScriptId.get(script.script_id) ?? [],
+              );
+              if (ordered.every((ids) => ids.length === 1)) {
+                for (const ids of ordered) regexScriptIds.push(ids[0]!);
+              } else {
+                // Keep every row reachable for detach. Runtime binding checks
+                // the row's source identity and fails closed if this fallback
+                // cannot prove a one-to-one match.
+                regexScriptIds.push(...moduleRows.map((row) => row.id));
+                log.warn(
+                  `drawer.installModuleArtifacts: could not pair every imported row by script_id ` +
+                    `for module=${msg.moduleId}; stored cleanup ids only`,
+                );
+              }
             }
+          } catch (err) {
+            log.warn(`drawer.installModuleArtifacts: id-recovery list fetch threw`, err);
           }
         } else {
           log.warn(
