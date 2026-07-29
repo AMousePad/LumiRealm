@@ -50,10 +50,11 @@ register("setdefaultvar", (ctx, a) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
   if (mode === "literal") return `{{setdefaultvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
-  // cbs.ts falsy check: a MISSING var reads "null" (truthy), so only an
-  // existing empty-string value triggers the default write.
+  // Risu cbs.ts: missing variables read as the literal "null", which
+  // setdefaultvar explicitly treats as unset alongside an empty value.
   const name = a[0] ?? "";
-  if (!ctx.vars.get("local", name)) {
+  const current = ctx.vars.get("local", name);
+  if (!current || current === "null") {
     ctx.vars.set("local", name, a[1] ?? "");
   }
   return "";
