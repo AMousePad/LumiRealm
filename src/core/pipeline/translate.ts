@@ -115,6 +115,26 @@ function expandInlineDataUriAssets(
   return synthesized;
 }
 
+/** The exact lore list the importer fed to `mapLoreBook`. Export re-derives its
+ *  baseline through this so the two directions cannot drift on the
+ *  module-lore-wins rule. */
+export function resolveSourceLoreEntries(
+  card: unknown,
+  module: unknown | null,
+): readonly LoreBook[] {
+  const moduleLore = module && typeof module === "object"
+    ? (module as { lorebook?: unknown }).lorebook
+    : null;
+  if (Array.isArray(moduleLore) && moduleLore.length > 0) {
+    return moduleLore as readonly LoreBook[];
+  }
+  const data = (card as { data?: unknown } | null)?.data;
+  const book = data && typeof data === "object"
+    ? (data as { character_book?: unknown }).character_book
+    : undefined;
+  return extractCharacterBookEntries(book, []);
+}
+
 export function translateFromCharxBundle(
   bundle: ReturnType<typeof readCharx>,
   opts: TranslateCharxOptions = {},
@@ -588,7 +608,7 @@ function inferMimeFromExt(ext: string, uri: string): string {
   }
 }
 
-function extractCharacterBookEntries(
+export function extractCharacterBookEntries(
   raw: unknown,
   issues: { path: string; message: string }[],
 ): LoreBook[] {

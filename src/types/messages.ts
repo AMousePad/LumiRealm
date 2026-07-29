@@ -242,6 +242,7 @@ export type FrontendToBackend =
   // Full replacement, not a delta: the chip list sends its whole set.
   | { type: 'set_global_modules'; moduleIds: readonly string[] }
   | { type: 'export_module'; moduleId: string }
+  | { type: 'export_character'; characterId: string }
   | {
       type: 'request_viewer_data';
       source: { kind: 'character'; characterId: string }

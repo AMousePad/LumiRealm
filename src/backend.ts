@@ -1853,6 +1853,52 @@ const moduleHandlers = createModuleHandlers({
 
 const exportHandlers = createExportHandlers({
   readModuleEnvelope: (uid, moduleId) => readModuleEnvelope(moduleStorage(), uid, moduleId),
+  readCharacterForExport: async (characterId, userId) => {
+    const fetched = await readLumirealm(charactersApi(), characterId, userId);
+    if (!fetched || !fetched.data) return null;
+    const ch = fetched.character as unknown as Record<string, unknown>;
+    return {
+      character: ch as never,
+      data: fetched.data,
+      worldBookIds: Array.isArray(ch['world_book_ids'])
+        ? (ch['world_book_ids'] as unknown[]).filter((x): x is string => typeof x === 'string')
+        : [],
+    };
+  },
+  listCharacterRegexRows: async (characterId, userId) => {
+    const regexApi = getRegexScriptsApi();
+    if (!regexApi?.list) throw new Error('spindle.regex_scripts.list is not available on this host');
+    const PAGE_SIZE = 200;
+    const out: Record<string, unknown>[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await regexApi.list({ userId, limit: PAGE_SIZE, offset });
+      if (!Array.isArray(page.data) || page.data.length === 0) break;
+      for (const r of page.data) {
+        const row = r as Record<string, unknown> & { metadata?: { _risu?: { module_id?: unknown } } };
+        if (row['scope'] !== 'character' || row['scope_id'] !== characterId) continue;
+        const mid = row.metadata?._risu?.module_id;
+        if (typeof mid === 'string' && mid.length > 0) continue;
+        out.push(row);
+      }
+      offset += page.data.length;
+      if (typeof page.total === 'number' && offset >= page.total) break;
+    }
+    return out.sort((a, b) => Number(a['sort_order'] ?? 0) - Number(b['sort_order'] ?? 0));
+  },
+  listWorldBookEntries: async (wbId, userId) => {
+    const PAGE_SIZE = 200;
+    const out: unknown[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await spindle.world_books.entries.list(wbId, { limit: PAGE_SIZE, offset, userId });
+      if (!Array.isArray(page.data) || page.data.length === 0) break;
+      out.push(...page.data);
+      if (page.data.length < PAGE_SIZE) break;
+      offset += page.data.length;
+    }
+    return out as never;
+  },
   extensionVersion: EXTENSION_VERSION,
   log,
   errMsg,

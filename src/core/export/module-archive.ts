@@ -276,7 +276,9 @@ export function buildModuleArchivePlan(input: BuildModuleArchiveInput): ArchiveP
   });
 
   return {
-    fileName: `${safeFileStem(module.name, input.moduleId)}.lumirealm.module`,
+    // Must end in `.charx`: both Risu's and our own module importers dispatch on
+    // that suffix and route anything else to the RisuM binary decoder.
+    fileName: `${safeFileStem(module.name, input.moduleId)}.lumirealm.module.charx`,
     entries,
     missingAssets,
   };

@@ -526,7 +526,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     exportBtn.type = 'button';
     exportBtn.className = 'lrm-btn';
     exportBtn.textContent = 'Export';
-    exportBtn.title = `Download "${displayName}" as a .lumirealm.module archive.`;
+    exportBtn.title = `Download "${displayName}" as a .lumirealm.module.charx archive.`;
     exportBtn.addEventListener('click', () => {
       log.info(`modules-panel: export_module id=${m.id}`);
       sendToBackend({ type: 'export_module', moduleId: m.id });
@@ -641,6 +641,21 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
     const body = document.createElement('div');
     body.className = 'lrm-character-body';
+
+    const charActions = document.createElement('div');
+    charActions.className = 'lrm-module-actions';
+    const exportCharBtn = document.createElement('button');
+    exportCharBtn.type = 'button';
+    exportCharBtn.className = 'lrm-btn';
+    exportCharBtn.textContent = 'Export card';
+    exportCharBtn.title =
+      `Download "${original}" as a .lumirealm.charx archive. Attached modules are not included.`;
+    exportCharBtn.addEventListener('click', () => {
+      log.info(`modules-panel: export_character id=${card.character_id}`);
+      sendToBackend({ type: 'export_character', characterId: card.character_id });
+    });
+    charActions.appendChild(exportCharBtn);
+    body.appendChild(charActions);
 
     if (attachedList.length === 0) {
       const empty = document.createElement('div');

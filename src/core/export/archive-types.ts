@@ -33,12 +33,29 @@ export interface ModuleArchivePayload {
   readonly translations?: unknown;
 }
 
+export interface CharacterArchivePayload {
+  readonly character_id: string;
+  /** The full LumirealmCharacterData. Keeps `source` so a reimported card can
+   *  still lazily retranslate instead of landing as a legacy needs-reimport. */
+  readonly envelope: unknown;
+  /** Live rows verbatim. Authoritative on reimport, since card.json and
+   *  module.risum can only carry what Risu's shapes express. */
+  readonly world_book_entries: readonly unknown[];
+  readonly regex_scripts: readonly unknown[];
+  readonly assets: readonly ArchiveAssetRef[];
+  readonly emotions: readonly ArchiveAssetRef[];
+  readonly avatar?: ArchiveAssetRef;
+  /** Live edits the Risu-facing half could not represent. */
+  readonly divergences: readonly string[];
+}
+
 export interface LumirealmArchiveSidecar {
   readonly schema_version: typeof LUMIREALM_ARCHIVE_SCHEMA_VERSION;
   readonly kind: ArchiveKind;
   readonly exported_at: number;
   readonly extension_version: string;
   readonly module?: ModuleArchivePayload;
+  readonly character?: CharacterArchivePayload;
 }
 
 export function isLumirealmSidecar(v: unknown): v is LumirealmArchiveSidecar {
