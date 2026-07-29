@@ -46,6 +46,7 @@ export interface ModuleHandlerDeps {
   readonly charactersAttachedTo: (moduleId: string, userId: string) => Promise<readonly string[]>;
   readonly refreshAttachedModule: (characterId: string, env: ModuleEnvelope, userId: string) => Promise<void>;
   readonly pushModules: (userId: string) => Promise<void>;
+  readonly setGlobalModules: (moduleIds: readonly string[], userId: string) => Promise<void>;
   readonly pushAttachedForCharacter: (characterId: string, userId: string) => Promise<void>;
   readonly charactersApi: () => SpindleCharactersApi;
   readonly updateLumirealm: (
@@ -73,6 +74,7 @@ export interface ModuleHandlerDeps {
 export function createModuleHandlers(deps: ModuleHandlerDeps): {
   readonly process_module_from_upload: Handler<'process_module_from_upload'>;
   readonly request_modules: Handler<'request_modules'>;
+  readonly set_global_modules: Handler<'set_global_modules'>;
   readonly delete_module: Handler<'delete_module'>;
   readonly attach_module: Handler<'attach_module'>;
   readonly detach_module: Handler<'detach_module'>;
@@ -133,6 +135,10 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       }
     },
     request_modules: async (_msg, ctx) => {
+      await deps.pushModules(ctx.userId);
+    },
+    set_global_modules: async (msg, ctx) => {
+      await deps.setGlobalModules(msg.moduleIds, ctx.userId);
       await deps.pushModules(ctx.userId);
     },
     delete_module: async (msg, ctx) => {

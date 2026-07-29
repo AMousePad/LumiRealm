@@ -3,6 +3,8 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 import type { LumirealmCharacterData, AssetIndexEntry, StoredRisuCard } from '../payload/types.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { AttachedModuleForRuntime } from './lumirealm-character.js';
+import { resolveEffectiveModuleIds } from './modules-store.js';
+import { getGlobalModuleIds } from './global-modules-cache.js';
 
 export interface ReadLumirealmResult {
   readonly character: { readonly id: string; readonly name?: string; readonly image_id?: string | null; readonly world_book_ids?: readonly string[]; readonly extensions?: Readonly<Record<string, unknown>> };
@@ -266,7 +268,10 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
         { title: 'lumirealm' },
       );
     }
-    const attachedIds = fetched.data.user_overrides.attached_module_ids ?? [];
+    const attachedIds = resolveEffectiveModuleIds(
+      getGlobalModuleIds(userId),
+      fetched.data.user_overrides.attached_module_ids,
+    );
     const tModules0 = Date.now();
     const attachedForRuntime = attachedIds.length > 0
       ? await loadAttachedModulesForRuntime(userId, attachedIds)
@@ -293,7 +298,21 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
         : '') +
       ` chats_get=${tChatsGet}ms readLumi=${tReadLumi}ms validate=${tValidate}ms modules=${tModules}ms build=${tBuild}ms`,
     );
-    const active: ActiveCard = { card, chatId, ownerUserId: userId, lumirealm: fetched.data };
+    // Effective (globals + per-character) ids ride on the active card, so every
+    // downstream reader of attached_module_ids sees globals without threading
+    // userId through to reach the cache.
+    const active: ActiveCard = {
+      card,
+      chatId,
+      ownerUserId: userId,
+      lumirealm: {
+        ...fetched.data,
+        user_overrides: {
+          ...fetched.data.user_overrides,
+          attached_module_ids: attachedIds,
+        },
+      },
+    };
     activeCardByChat.set(chatId, active);
     const allWbIds = (fetched.character.world_book_ids ?? []).filter(
       (id): id is string => typeof id === 'string' && id.length > 0,

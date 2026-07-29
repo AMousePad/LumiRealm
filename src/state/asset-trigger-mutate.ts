@@ -19,6 +19,8 @@ import {
   replaceTriggerLuaInArray,
 } from './trigger-lua-mutate.js';
 import { expectCharacterEdit } from './own-character-edit.js';
+import { resolveEffectiveModuleIds } from './modules-store.js';
+import { getGlobalModuleIds } from './global-modules-cache.js';
 
 function assetStem(name: string): string {
   const base = name.split('/').pop() || name;
@@ -120,7 +122,10 @@ export function createAssetTriggerMutate(deps: AssetTriggerMutateDeps): AssetTri
     if (!fetched || !fetched.data) return;
     const data = fetched.data;
     const map: Record<string, string> = {};
-    const moduleIds = data.user_overrides.attached_module_ids ?? [];
+    const moduleIds = resolveEffectiveModuleIds(
+      getGlobalModuleIds(userId),
+      data.user_overrides.attached_module_ids,
+    );
     for (const modId of moduleIds) {
       const env = await readModuleEnvelope(userId, modId);
       if (!env) continue;

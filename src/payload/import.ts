@@ -70,18 +70,26 @@ function makeLowLevelAccessConsentMessage(characterName: string): string {
   );
 }
 
+const MIME_BY_EXT: Readonly<Record<string, string>> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', jxl: 'image/jxl',
+  heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp',
+  apng: 'image/apng', ico: 'image/x-icon',
+
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  m4v: 'video/x-m4v', m4p: 'video/mp4', ogv: 'video/ogg',
+  mkv: 'video/x-matroska', avi: 'video/x-msvideo', '3gp': 'video/3gpp',
+  mpeg: 'video/mpeg', mpg: 'video/mpeg', ts: 'video/mp2t', flv: 'video/x-flv',
+
+  mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', wav: 'audio/wav',
+  m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac',
+  opus: 'audio/opus', weba: 'audio/webm',
+};
+
 export function guessMimeType(path: string): string {
-  const lower = path.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.mp3')) return 'audio/mpeg';
-  if (lower.endsWith('.ogg')) return 'audio/ogg';
-  if (lower.endsWith('.wav')) return 'audio/wav';
-  if (lower.endsWith('.mp4')) return 'video/mp4';
-  if (lower.endsWith('.webm')) return 'video/webm';
-  return 'application/octet-stream';
+  const dot = path.lastIndexOf('.');
+  if (dot < 0) return 'application/octet-stream';
+  return MIME_BY_EXT[path.slice(dot + 1).toLowerCase()] ?? 'application/octet-stream';
 }
 
 // Risu module asset names lack extensions, so Lumi stores files as `<uuid>.bin`
@@ -110,6 +118,27 @@ export function sniffImageMime(bytes: Uint8Array): { ext: string; mime: string }
   ) {
     return { ext: 'wav', mime: 'audio/wav' };
   }
+  if (
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x41 && b[9] === 0x56 && b[10] === 0x49 && b[11] === 0x20
+  ) {
+    return { ext: 'avi', mime: 'video/x-msvideo' };
+  }
+  if (b[0] === 0x42 && b[1] === 0x4d) {
+    return { ext: 'bmp', mime: 'image/bmp' };
+  }
+  if (b[0] === 0x66 && b[1] === 0x4c && b[2] === 0x61 && b[3] === 0x43) {
+    return { ext: 'flac', mime: 'audio/flac' };
+  }
+  if (b[0] === 0xff && b[1] === 0x0a) {
+    return { ext: 'jxl', mime: 'image/jxl' };
+  }
+  if (
+    b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x00 && b[3] === 0x0c &&
+    b[4] === 0x4a && b[5] === 0x58 && b[6] === 0x4c && b[7] === 0x20
+  ) {
+    return { ext: 'jxl', mime: 'image/jxl' };
+  }
   if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) {
     return { ext: 'mp3', mime: 'audio/mpeg' };
   }
@@ -119,10 +148,34 @@ export function sniffImageMime(bytes: Uint8Array): { ext: string; mime: string }
   if (b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) {
     return { ext: 'ogg', mime: 'audio/ogg' };
   }
+  // `ftyp` marks every ISOBMFF file, not just mp4: AVIF, HEIC, MOV and M4A all
+  // match here. The major brand at bytes 8..11 is what actually distinguishes
+  // them, and without it AVIF gets served as video/mp4 and renders as a broken
+  // <video> instead of an image.
   if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
-    return { ext: 'mp4', mime: 'video/mp4' };
+    const brand = String.fromCharCode(b[8]!, b[9]!, b[10]!, b[11]!);
+    switch (brand) {
+      case 'avif': case 'avis':
+        return { ext: 'avif', mime: 'image/avif' };
+      case 'heic': case 'heix': case 'hevc': case 'hevx':
+      case 'mif1': case 'msf1':
+        return { ext: 'heic', mime: 'image/heic' };
+      case 'qt  ':
+        return { ext: 'mov', mime: 'video/quicktime' };
+      case 'M4A ':
+        return { ext: 'm4a', mime: 'audio/mp4' };
+      case 'M4V ':
+        return { ext: 'm4v', mime: 'video/x-m4v' };
+      default:
+        if (brand.startsWith('3g')) return { ext: '3gp', mime: 'video/3gpp' };
+        return { ext: 'mp4', mime: 'video/mp4' };
+    }
   }
+  // EBML covers both WebM and Matroska; the DocType string in the header is the
+  // only cheap discriminator, and mislabelling .mkv as webm makes it unplayable.
   if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) {
+    const head = String.fromCharCode(...b.subarray(4, Math.min(b.byteLength, 64)));
+    if (head.includes('matroska')) return { ext: 'mkv', mime: 'video/x-matroska' };
     return { ext: 'webm', mime: 'video/webm' };
   }
   return null;
@@ -131,10 +184,10 @@ export function sniffImageMime(bytes: Uint8Array): { ext: string; mime: string }
 function pickAvatar(
   assets: ReadonlyMap<string, Uint8Array>,
 ): { path: string; data: Uint8Array } | null {
-  const isImage = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
+  const isImage = (p: string) => /\.(png|jpe?g|webp|gif|avif|jxl|heic|heif|bmp)$/i.test(p);
   // Canonical first.
   for (const [path, data] of assets) {
-    if (/^assets\/icon\/main\.(png|jpe?g|webp|gif)$/i.test(path)) return { path, data };
+    if (/^assets\/icon\/main\.(png|jpe?g|webp|gif|avif|jxl|heic|heif|bmp)$/i.test(path)) return { path, data };
   }
   // Any file inside an icon/ dir.
   for (const [path, data] of assets) {

@@ -1028,11 +1028,21 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     return term ? all.filter((a) => a.name.toLowerCase().includes(term)) : all;
   }
 
+  // Preview-only. Risu's narrower video set still drives `{{asset::}}`
+  // image-vs-video branching, so widening here can't change card output.
+  const VIEWER_VIDEO_EXTS = new Set([
+    'mp4', 'webm', 'mov', 'm4v', 'm4p', 'ogv', 'mkv', 'avi',
+    '3gp', 'mpeg', 'mpg', 'ts', 'flv',
+  ]);
+  const VIEWER_AUDIO_EXTS = new Set([
+    'mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'weba',
+  ]);
+
   function assetMediaKind(ext: string | undefined): 'video' | 'audio' | 'image' {
     if (!ext) return 'image';
     const e = ext.toLowerCase();
-    if (e === 'mp4' || e === 'webm' || e === 'mov' || e === 'm4v' || e === 'ogv') return 'video';
-    if (e === 'mp3' || e === 'wav' || e === 'ogg' || e === 'oga' || e === 'm4a' || e === 'aac' || e === 'flac' || e === 'opus') return 'audio';
+    if (VIEWER_VIDEO_EXTS.has(e)) return 'video';
+    if (VIEWER_AUDIO_EXTS.has(e)) return 'audio';
     return 'image';
   }
 

@@ -11,6 +11,7 @@ import { getTranslateEnabled, subscribeTranslateEnabled } from './translate-togg
 import { translateModuleName, translateModuleDescription, translateCharacterName, setModuleScopeLang, setCharacterScopeLang } from './translate-orchestrator.js';
 import { dominantScriptLang } from './browser-translator.js';
 import { createSearchableSelect, type SearchableSelectHandle } from './searchable-select.js';
+import { renderDescription } from '../realm/markdown.js';
 import { sendImportText } from './import-text-upload.js';
 import * as tus from 'tus-js-client';
 
@@ -105,6 +106,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   root.classList.add('lr-modules-drawer');
 
   let modules: readonly ModuleSummary[] | null = null;
+  let globalModuleIds: readonly string[] = [];
   let cards: readonly CardSummary[] = [];
   const attachedByCharacter = new Map<string, readonly AttachedModuleSummary[]>();
   let activeTus: tus.Upload | null = null;
@@ -210,6 +212,10 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   libFilterRow.appendChild(libFilterCount);
   libBody.appendChild(libFilterRow);
 
+  const globalBox = document.createElement('div');
+  globalBox.className = 'lrm-globalbox';
+  libBody.insertBefore(globalBox, libFilterRow);
+
   const libList = document.createElement('div');
   libList.className = 'lrm-modules-list';
   libBody.appendChild(libList);
@@ -291,7 +297,110 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
   function setStatus(_msg: string | null, _isError = false): void { /* no-op */ }
 
+  // Chips + an add dropdown. Mirrors the per-character attach control rather
+  // than introducing a second idiom for "pick a module".
+  function renderGlobalBox(): void {
+    globalBox.replaceChildren();
+    if (modules === null) return;
+
+    const head = document.createElement('div');
+    head.className = 'lrm-globalbox-head';
+    const title = document.createElement('span');
+    title.className = 'lrm-globalbox-title';
+    title.textContent = 'Global modules';
+    head.appendChild(title);
+    const hint = document.createElement('span');
+    hint.className = 'lrm-globalbox-hint';
+    hint.textContent = 'Applied to every character, on top of its own attachments.';
+    head.appendChild(hint);
+    globalBox.appendChild(head);
+
+    const chips = document.createElement('div');
+    chips.className = 'lrm-chips';
+    const byId = new Map(modules.map((m) => [m.id, m]));
+    if (globalModuleIds.length === 0) {
+      const none = document.createElement('span');
+      none.className = 'lrm-chips-empty';
+      none.textContent = 'None';
+      chips.appendChild(none);
+    }
+    for (const id of globalModuleIds) {
+      const m = byId.get(id);
+      const chip = document.createElement('span');
+      chip.className = 'lrm-chip';
+      const label = document.createElement('span');
+      label.className = 'lrm-chip-label';
+      label.textContent = m ? (pickModuleDisplayName(m) || m.id) : '(missing)';
+      if (!m) chip.classList.add('lrm-chip-missing');
+      chip.appendChild(label);
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'lrm-chip-x';
+      x.textContent = '×';
+      x.title = `Remove ${label.textContent} from global modules`;
+      x.addEventListener('click', () => {
+        sendGlobalModules(globalModuleIds.filter((g) => g !== id));
+      });
+      chip.appendChild(x);
+      chips.appendChild(chip);
+    }
+    globalBox.appendChild(chips);
+
+    const addable = modules
+      .filter((m) => !globalModuleIds.includes(m.id))
+      .slice()
+      .sort((a, b) => b.uploaded_at - a.uploaded_at);
+    if (addable.length === 0) return;
+
+    const addWrap = document.createElement('div');
+    addWrap.className = 'lrm-attach-wrap';
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'lrm-btn-mini lrm-btn-primary';
+    addBtn.textContent = 'Add';
+    addBtn.disabled = true;
+    const ss = createSearchableSelect({
+      id: 'lrm-global-add-select',
+      className: 'lrm-attach-trigger',
+      placeholder: `Add a global module… (${addable.length})`,
+      searchPlaceholder: 'Search modules…',
+      emptyMessage: 'No matching modules',
+      items: addable.map((m) => {
+        const display = pickModuleDisplayName(m) || m.id;
+        const aliases: string[] = [];
+        if (m.name && m.name !== display) aliases.push(m.name);
+        if (m.translatedName && m.translatedName !== display) aliases.push(m.translatedName);
+        return {
+          value: m.id,
+          label: display,
+          ...(m.translatedName && m.name && m.translatedName !== m.name
+            ? { secondary: m.name }
+            : {}),
+          ...(aliases.length > 0 ? { searchTerms: aliases } : {}),
+        };
+      }),
+      onChange(selected) { addBtn.disabled = selected === null; },
+    });
+    attachSelectHandles.push(ss);
+    addWrap.appendChild(ss.root);
+    addBtn.addEventListener('click', () => {
+      const id = ss.getValue();
+      if (!id) return;
+      sendGlobalModules([...globalModuleIds, id]);
+    });
+    addWrap.appendChild(addBtn);
+    globalBox.appendChild(addWrap);
+  }
+
+  function sendGlobalModules(next: readonly string[]): void {
+    log.info(`modules-panel: set_global_modules count=${next.length}`);
+    globalModuleIds = next;
+    renderGlobalBox();
+    sendToBackend({ type: 'set_global_modules', moduleIds: next });
+  }
+
   function renderModuleList(): void {
+    renderGlobalBox();
     libList.replaceChildren();
     if (modules === null) {
       libFilterCount.textContent = '';
@@ -389,13 +498,15 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     if (m.description) {
       const desc = document.createElement('div');
       desc.className = 'lrm-module-desc';
-      const displayDesc = pickModuleDisplayDescription(m);
-      desc.textContent = displayDesc || m.description;
+      const setDesc = (text: string): void => {
+        desc.replaceChildren(renderDescription(text));
+      };
+      setDesc(pickModuleDisplayDescription(m) || m.description);
       body.appendChild(desc);
       if (getTranslateEnabled() && !m.translatedDescription) {
         void translateModuleDescription(m.id, m.description).then((tx) => {
           if (tx && tx !== m.description && desc.isConnected) {
-            desc.textContent = tx;
+            setDesc(tx);
           }
         });
       }
@@ -555,14 +666,12 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       body.appendChild(ul);
     }
 
+    // Newest upload first. Alphabetical buried the module you just added at
+    // whatever letter its name happens to start with.
     const attachable = (modules ?? [])
       .filter((m) => !attachedList.some((a) => a.id === m.id))
       .slice()
-      .sort((a, b) => {
-        const an = (pickModuleDisplayName(a) || a.id).toLocaleLowerCase();
-        const bn = (pickModuleDisplayName(b) || b.id).toLocaleLowerCase();
-        return an.localeCompare(bn);
-      });
+      .sort((a, b) => b.uploaded_at - a.uploaded_at);
     if (attachable.length > 0) {
       const attachWrap = document.createElement('div');
       attachWrap.className = 'lrm-attach-wrap';
@@ -920,6 +1029,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         break;
       case 'modules_pushed':
         modules = msg.modules;
+        globalModuleIds = msg.global_module_ids ?? [];
         for (const m of modules) {
           setModuleScopeLang(m.id, dominantScriptLang([m.name, m.description]));
         }

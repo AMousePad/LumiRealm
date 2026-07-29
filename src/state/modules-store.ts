@@ -100,6 +100,24 @@ export interface ModuleIndexEntry {
 export interface ModuleIndex {
   readonly schema_version: typeof MODULE_SCHEMA_VERSION;
   readonly entries: readonly ModuleIndexEntry[];
+  /** Applied to every character, on top of that character's attached ids. */
+  readonly global_module_ids?: readonly string[];
+}
+
+// Globals first so a character's own attachments resolve later and win on
+// conflict, matching how per-character config overrides defaults elsewhere.
+export function resolveEffectiveModuleIds(
+  globalIds: readonly string[] | undefined,
+  attachedIds: readonly string[] | undefined,
+): readonly string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [...(globalIds ?? []), ...(attachedIds ?? [])]) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 
@@ -257,9 +275,45 @@ export async function deleteModule(
   }
   const index = await readIndex(storage, userId);
   const next = removeFromIndex(index, moduleId);
-  if (next !== index) {
-    await writeIndex(storage, userId, next);
+  const globals = next.global_module_ids ?? [];
+  // A deleted module must not linger as a global, or it silently fails to
+  // resolve on every character forever.
+  const prunedGlobals = globals.filter((id) => id !== moduleId);
+  const withGlobals = prunedGlobals.length === globals.length
+    ? next
+    : { ...next, global_module_ids: prunedGlobals };
+  if (withGlobals !== index) {
+    await writeIndex(storage, userId, withGlobals);
   }
+}
+
+export async function readGlobalModuleIds(
+  storage: UserStorageLike,
+  userId: string | undefined,
+): Promise<readonly string[]> {
+  const index = await readIndex(storage, userId);
+  const ids = index.global_module_ids;
+  if (!Array.isArray(ids)) return [];
+  const known = new Set(index.entries.map((e) => e.id));
+  return ids.filter((id) => typeof id === 'string' && known.has(id));
+}
+
+export async function writeGlobalModuleIds(
+  storage: UserStorageLike,
+  userId: string | undefined,
+  ids: readonly string[],
+): Promise<readonly string[]> {
+  const index = await readIndex(storage, userId);
+  const known = new Set(index.entries.map((e) => e.id));
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const id of ids) {
+    if (typeof id !== 'string' || !known.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    next.push(id);
+  }
+  await writeIndex(storage, userId, { ...index, global_module_ids: next });
+  return next;
 }
 
 /** Read the cached index. For a full rebuild use `rebuildIndex`. */

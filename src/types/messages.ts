@@ -18,6 +18,8 @@ export interface CardSummary {
   readonly translator_version: string;
   readonly uses_lua: boolean;
   readonly stored_at: number;
+  /** Last time a chat for this character was opened. Absent = never. */
+  readonly last_opened_at?: number;
 }
 
 /** Phase is a strict union for reliable UI colour/error styling. */
@@ -236,6 +238,8 @@ export type FrontendToBackend =
   | { type: 'delete_module'; moduleId: string }
   | { type: 'attach_module'; characterId: string; moduleId: string }
   | { type: 'detach_module'; characterId: string; moduleId: string }
+  // Full replacement, not a delta: the chip list sends its whole set.
+  | { type: 'set_global_modules'; moduleIds: readonly string[] }
   | {
       type: 'request_viewer_data';
       source: { kind: 'character'; characterId: string }
@@ -579,6 +583,8 @@ export type BackendToFrontend =
       type: 'modules_pushed';
       modules: readonly ModuleSummary[];
       attached_by_character?: Readonly<Record<string, readonly AttachedModuleSummary[]>>;
+      /** Applied to every character on top of its own attachments. */
+      global_module_ids?: readonly string[];
     }
   | {
       type: 'attached_modules_pushed';

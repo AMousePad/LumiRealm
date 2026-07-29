@@ -75,6 +75,12 @@ import {
 import { clearVarOverlay } from './interpreter/evaluator/context.js';
 import { invalidateListenEditPreload } from './interpreter/listenedit-preload.js';
 import { setCachedMessages, invalidateCachedMessages } from './interpreter/messages-cache.js';
+import { setGlobalModuleIdsCache } from './state/global-modules-cache.js';
+import {
+  readCharacterRecency,
+  touchRecency,
+  writeCharacterRecency,
+} from './state/character-recency.js';
 import { setScreenDims } from './interpreter/screen-dims-cache.js';
 import { VariableStateStore } from './state/variables-state.js';
 import { ToggleStateStore } from './state/toggle-state.js';
@@ -183,6 +189,8 @@ import {
   pairModuleAssetsForUpload,
   readEnvelope as readModuleEnvelope,
   writeEnvelope as writeModuleEnvelope,
+  readGlobalModuleIds,
+  writeGlobalModuleIds,
 } from './state/modules-store.js';
 import { registerLumiagentPhoneline } from './lumiagent-phoneline.js';
 
@@ -546,6 +554,9 @@ const clearDeadJournals = (userId: string) => orphanOrchestrator.clearDeadJourna
 const captureUserId = makeCaptureUserId({
   capturedUserIds,
   getSettingsForUser,
+  seedGlobalModules: async (uid) => {
+    setGlobalModuleIdsCache(uid, await readGlobalModuleIds(moduleStorage(), uid));
+  },
   // Trampolines: massMigrations is declared further down, this closure resolves it at call time.
   runMassModuleMigrationIfNeeded: (uid) => massMigrations.runMassModuleMigrationIfNeeded(uid),
   runMassCharacterMigrationIfNeeded: (uid) => massMigrations.runMassCharacterMigrationIfNeeded(uid),
@@ -697,8 +708,10 @@ async function listCards(userId: string | undefined): Promise<readonly CardSumma
     paginate: true,
   });
   const lang = TRANSLATE_TARGET_LANG;
+  const recency = await readCharacterRecency(userStorage(), userId);
   const summaries: CardSummary[] = entries.map((e) => {
     const tx = e.data.translations?.[lang]?.name;
+    const lastOpened = recency.seen[e.character.id];
     return {
       character_id: e.character.id,
       character_name: e.character.name,
@@ -706,9 +719,13 @@ async function listCards(userId: string | undefined): Promise<readonly CardSumma
       translator_version: e.data.translator_version,
       uses_lua: e.data.payload.requires.lua,
       stored_at: e.data.imported_at,
+      ...(lastOpened !== undefined ? { last_opened_at: lastOpened } : {}),
     };
   });
-  summaries.sort((a, b) => b.stored_at - a.stored_at);
+  // Recently opened first, then never-opened by import time. Sorting purely by
+  // import time buried whatever you actually use behind the newest download.
+  summaries.sort((a, b) =>
+    (b.last_opened_at ?? 0) - (a.last_opened_at ?? 0) || b.stored_at - a.stored_at);
   log.debug(`listCards: done count=${summaries.length} elapsed=${Date.now() - t0}ms`);
   return summaries;
 }
@@ -843,6 +860,29 @@ function isPromptRegexOwnedChat(chatId: string): boolean {
   return false;
 }
 
+// Fire-and-forget: chat-open must not block on a storage write, and a lost
+// timestamp only costs picker ordering.
+let recencyWriteChain: Promise<void> = Promise.resolve();
+async function touchCharacterRecency(
+  characterId: string,
+  userId: string | undefined,
+): Promise<void> {
+  if (userId === undefined) return;
+  // Serialised, otherwise two rapid chat switches read the same map and the
+  // second write drops the first character's timestamp.
+  recencyWriteChain = recencyWriteChain.then(async () => {
+    try {
+      const cur = await readCharacterRecency(userStorage(), userId);
+      if (cur.seen[characterId] !== undefined
+        && Date.now() - cur.seen[characterId]! < 60_000) return;
+      await writeCharacterRecency(userStorage(), userId, touchRecency(cur, characterId, Date.now()));
+    } catch (err) {
+      log.debug(`touchCharacterRecency: ${errMsg(err)}`);
+    }
+  });
+  return recencyWriteChain;
+}
+
 function sendSetActiveChat(
   activeChatId: string | null,
   activeCharacterId: string | null,
@@ -853,6 +893,7 @@ function sendSetActiveChat(
   } catch (err) {
     log.warn(`sendSetActiveChat: ${(err as Error).message}`);
   }
+  if (activeCharacterId !== null) void touchCharacterRecency(activeCharacterId, userId);
   if (PROMPT_REGEX_ACTIVE && userId !== undefined) {
     const nowOwned = activeChatId !== null;
     const prevOwned = promptRegexOwnedByUser.get(userId);
@@ -1309,6 +1350,7 @@ async function processModuleUpload(
 
 const modulePushes = createModulePushes({
   translateLang: TRANSLATE_TARGET_LANG,
+  readGlobalModuleIds: (userId) => readGlobalModuleIds(moduleStorage(), userId),
   readLumirealm: (charId, userId) => readLumirealm(charactersApi(), charId, userId),
   writeLumirealm: (charId, data, userId) => writeLumirealm(charactersApi(), charId, data, userId),
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
@@ -1724,6 +1766,15 @@ const repairHandlers = createRepairHandlers({
 });
 const moduleHandlers = createModuleHandlers({
   worldBookIdsByCharacter,
+  setGlobalModules: async (moduleIds, userId) => {
+    const stored = await writeGlobalModuleIds(moduleStorage(), userId, moduleIds);
+    setGlobalModuleIdsCache(userId, stored);
+    // Runtime cards were built with the old list, so every one is stale. Reuses
+    // the per-character eviction rather than adding a second invalidation path.
+    const chars = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
+    for (const c of chars) invalidateActiveForCharacter(c.character.id, userId);
+    log.info(`set_global_modules: user=${userId} count=${stored.length} invalidated=${chars.length}`);
+  },
   processModuleUpload,
   getUpload,
   deleteUpload,

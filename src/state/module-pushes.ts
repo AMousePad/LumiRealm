@@ -14,6 +14,7 @@ import type { AttachedModuleForRuntime } from './lumirealm-character.js';
 import { coerceAtActionsFromScripts } from '../interpreter/at-actions-runtime.js';
 import { mergeLangBlock } from './translation-merge.js';
 import { expectCharacterEdit } from './own-character-edit.js';
+import { setGlobalModuleIdsCache } from './global-modules-cache.js';
 
 export interface ModulePushesDeps {
   readonly translateLang: string;
@@ -29,6 +30,7 @@ export interface ModulePushesDeps {
   readonly readModuleEnvelope: (userId: string, moduleId: string) => Promise<ModuleEnvelope | null>;
   readonly writeModuleEnvelope: (userId: string, env: ModuleEnvelope) => Promise<void>;
   readonly listModuleStore: (userId: string) => Promise<readonly ModuleIndexEntry[]>;
+  readonly readGlobalModuleIds: (userId: string) => Promise<readonly string[]>;
   readonly listLumirealmCharacters: (userId: string) => Promise<readonly {
     readonly character: { readonly id: string };
     readonly data: LumirealmCharacterData;
@@ -69,6 +71,7 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
     readModuleEnvelope,
     writeModuleEnvelope,
     listModuleStore,
+    readGlobalModuleIds: readGlobals,
     listLumirealmCharacters,
     listCards,
     pushCards,
@@ -131,7 +134,16 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
     });
     const byId = new Map(wire.map((w) => [w.id, w]));
     const attached = await buildAttachedByCharacter(userId, byId);
-    send({ type: 'modules_pushed', modules: wire, attached_by_character: attached }, userId);
+    const globalIds = await readGlobals(userId);
+    // Cache stays in step with every push, so the runtime resolution paths never
+    // read a stale global list after an upload / delete / chip edit.
+    setGlobalModuleIdsCache(userId, globalIds);
+    send({
+      type: 'modules_pushed',
+      modules: wire,
+      attached_by_character: attached,
+      global_module_ids: globalIds,
+    }, userId);
   }
 
   async function pushAttachedForCharacter(
