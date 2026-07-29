@@ -30,6 +30,7 @@ import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
 import {
   withCurrentDisplayMessage,
+  type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import { buildModuleDisplayPlan } from './module-action-plan.js';
 const log = makeSafeLogger('display-resolver');
@@ -227,6 +228,7 @@ async function runApply(
   snap: DisplaySnapshot,
   args: SpindleDisplayScriptsArgs,
   recorder: VarReadRecorder,
+  onEffect?: DisplayRuntimeEffectSink,
 ): Promise<string> {
   const ctx = args.context;
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
@@ -253,6 +255,7 @@ async function runApply(
         {
           resolveTemplate: (text) =>
             evalTemplate(snap, text, ctx, recorder),
+          ...(onEffect ? { onEffect } : {}),
         },
       );
       continue;
@@ -279,7 +282,10 @@ async function runApply(
   return content;
 }
 
-export function createDisplayResolver(writeback?: DisplayWritebackSink): SpindleDisplayResolver {
+export function createDisplayResolver(
+  writeback?: DisplayWritebackSink,
+  onEffect?: DisplayRuntimeEffectSink,
+): SpindleDisplayResolver {
   return {
     ready(chatId: string): boolean {
       return isDisplayResolutionReady(chatId);
@@ -305,6 +311,7 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
             args.context,
             (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })),
             (vars) => writeback?.(chatId, vars),
+            onEffect,
           );
         }
         const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
@@ -325,6 +332,7 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
             {
               resolveTemplate: (text) =>
                 evalTemplate(liveSnap, text, args.context, recorder),
+              ...(onEffect ? { onEffect } : {}),
             },
           );
         }
@@ -411,7 +419,7 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
-        feContent = await runApply(snap, args, recorder);
+        feContent = await runApply(snap, args, recorder, onEffect);
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;

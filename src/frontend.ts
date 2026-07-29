@@ -107,14 +107,31 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   if (hasReadiness) readiness.deferReady!();
 
   const displayRegistered = Boolean(ctx.display);
-  if (ctx.display) {
-    cleanups.push(ctx.display.registerResolver(createDisplayResolver(
+  const display = ctx.display;
+  if (display) {
+    cleanups.push(display.registerResolver(createDisplayResolver(
       (chatId, vars) => {
         // Mirror editDisplay writes into the local snapshot so init-once guards
         // see their guard var set next render. Without it the guard never engages,
         // init re-runs every render, and writeback clobbers committed progress.
         applyVarDelta(chatId, 'local', vars);
         ctx.sendToBackend({ type: 'display_writeback', chatId, vars });
+      },
+      (effect) => {
+        if (effect.kind === 'set-expression') {
+          display.setExpression(effect);
+          return;
+        }
+        void ctx.chats.updateMessage(
+          effect.chatId,
+          effect.messageId,
+          { content: effect.content },
+        ).catch((err) => {
+          flog.warn(
+            `display action message update failed chat=${effect.chatId} ` +
+              `message=${effect.messageId}: ${String(err)}`,
+          );
+        });
       },
     )));
   }

@@ -9,6 +9,7 @@ import {
   makeSnapshotHostApi,
   buildPreloaded,
   type DisplayVarWriteback,
+  type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import type { DisplaySnapshot } from './snapshot.js';
 import { makeDispatcherScriptNS, registerManualTriggers } from '../interpreter/dispatcher.js';
@@ -31,9 +32,10 @@ export async function runEditDisplayChain(
   context: SpindleDisplayContext,
   resolveTemplate: (text: string) => Promise<string>,
   onVarWrite: DisplayVarWriteback,
+  onEffect?: DisplayRuntimeEffectSink,
 ): Promise<string> {
   if (snap.luaTriggers.length === 0) return content;
-  const api = makeSnapshotHostApi(snap, onVarWrite);
+  const api = makeSnapshotHostApi(snap, onVarWrite, onEffect);
   const scriptNS = makeDispatcherScriptNS();
   registerManualTriggers(scriptNS, snap.compiledLibraries, api);
   const data: DispatchData = {
@@ -68,10 +70,11 @@ export async function runEditDisplayAtActions(
   actions: readonly RuntimeAtAtAction[] = snap.atActions,
   options: {
     readonly resolveTemplate?: (text: string) => string | Promise<string>;
+    readonly onEffect?: DisplayRuntimeEffectSink;
   } = {},
 ): Promise<string> {
   if (actions.length === 0) return content;
-  const api = makeSnapshotHostApi(snap);
+  const api = makeSnapshotHostApi(snap, undefined, options.onEffect);
   const role = (context.role ?? undefined) as HostMessage['role'] | undefined;
   return runAtActionsForPhase(actions, 'editdisplay', content, {
     api,
