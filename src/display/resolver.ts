@@ -234,7 +234,6 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
           : snap;
         let body = args.content;
         if (liveSnap.luaTriggers.length > 0) {
-          body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
           body = await runEditDisplayChain(
             liveSnap,
             body,
@@ -246,10 +245,11 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
         const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
         body = displayTriggerResult.content;
         if (displayTriggerResult.ran) recorder.volatile = true;
+        body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
         if (liveSnap.atActions.length > 0) {
           body = await runEditDisplayAtActions(liveSnap, body, args.context);
         }
-        feContent = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
+        feContent = body;
       } catch (err) {
         log.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;
