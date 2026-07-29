@@ -30,6 +30,7 @@ interface RisuMeta {
   readonly at_action?: unknown;
   readonly source_type?: unknown;
   readonly module_id?: unknown;
+  readonly imported_regex?: unknown;
 }
 
 function risuMeta(row: LiveRegexRow): RisuMeta | null {
@@ -65,8 +66,30 @@ export interface RegexReconcileResult {
   readonly scripts: readonly CustomScript[];
   readonly removed: number;
   readonly edited: number;
+  /** Standalone-imported rows appended after the card's own scripts. */
+  readonly imported: number;
   /** Edits that card.json / module.risum cannot represent. Sidecar-only. */
   readonly divergences: readonly RegexDivergence[];
+}
+
+/** Rows from `Import -> Regex` targeted at this character. They carry their own
+ *  `order_index` from their own import batch, which collides with the card's
+ *  source indices, so they must never take part in source matching. */
+function isStandaloneImport(row: LiveRegexRow): boolean {
+  return risuMeta(row)?.imported_regex === true;
+}
+
+function toCustomScript(row: LiveRegexRow): CustomScript {
+  const meta = risuMeta(row);
+  const phase = typeof meta?.phase === "string" ? meta.phase : "editdisplay";
+  return {
+    comment: typeof row.name === "string" ? row.name : "",
+    in: String(row.find_regex ?? ""),
+    out: String(row.replace_string ?? ""),
+    type: row.disabled === true ? "disabled" : phase,
+    flag: typeof row.flags === "string" ? row.flags : "g",
+    ableFlag: true,
+  } as unknown as CustomScript;
 }
 
 export function reconcileRegexScripts(
@@ -90,8 +113,10 @@ export function reconcileRegexScripts(
     list.push(row as unknown as LiveRegexRow);
     projectedByIndex.set(idx, list);
   }
+  const standalone = liveRows.filter(isStandaloneImport);
   const liveByIndex = new Map<number, LiveRegexRow[]>();
   for (const row of liveRows) {
+    if (isStandaloneImport(row)) continue;
     const idx = regexSourceIndex(row);
     if (idx === null) continue;
     const list = liveByIndex.get(idx) ?? [];
@@ -167,5 +192,11 @@ export function reconcileRegexScripts(
     out.push(next as unknown as CustomScript);
   }
 
-  return { scripts: out, removed, edited, divergences };
+  // Appended, never interleaved: they have no source position to sort against.
+  for (const row of standalone) {
+    if (isSynthetic(row)) continue;
+    out.push(toCustomScript(row));
+  }
+
+  return { scripts: out, removed, edited, imported: standalone.length, divergences };
 }

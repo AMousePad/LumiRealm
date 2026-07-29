@@ -167,6 +167,11 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
     divergences.push(`regex[${d.sourceIndex}] "${d.comment}": ${d.reason}`);
   }
   if (regex.removed > 0) divergences.push(`${regex.removed} regex rule(s) deleted in Lumiverse`);
+  if (regex.imported > 0) {
+    divergences.push(
+      `${regex.imported} standalone-imported regex rule(s) appended after the card's own scripts`,
+    );
+  }
 
   const seenPaths = new Set<string>();
   const sanitizer = new ZipNameSanitizer();
