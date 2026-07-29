@@ -372,6 +372,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     : { now: () => Date.now() };
 
   const out: EvaluatorCtx = {
+    chatId,
     vars,
     identity,
     character,

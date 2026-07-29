@@ -80,6 +80,7 @@ export class MockFunctionRegistry implements FunctionRegistry {
 }
 
 export interface MockContextOptions {
+  chatId?: string;
   identity?: Partial<IdentityFields>;
   character?: Partial<CharacterFields>;
   messages?: readonly Message[];
@@ -138,6 +139,7 @@ const DEFAULT_CHARACTER: CharacterFields = {
 
 export function makeMockContext(opts: MockContextOptions = {}): RisuRuntimeContext {
   return {
+    chatId: opts.chatId ?? "",
     vars: new MockVariableStore(),
     identity: { ...DEFAULT_IDENTITY, ...opts.identity },
     character: { ...DEFAULT_CHARACTER, ...opts.character },

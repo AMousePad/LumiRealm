@@ -86,6 +86,7 @@ export interface Clock {
 
 
 export interface RisuRuntimeContext {
+  readonly chatId: string;
   readonly vars: VariableStore;
   readonly identity: IdentityFields;
   readonly character: CharacterFields;

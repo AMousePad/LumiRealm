@@ -4,7 +4,7 @@ import { parseArray, pickHashRand } from "../risu-helpers.js";
 
 // Random / dice / pick macros. Risu source: cbs.ts.
 // `random`/`roll` route through ctx.rng so tests can seed.
-// `pick`/`rollp` use pickHashRand; seed approximated with character name + messages.count(), known deviation from Risu's chaId+chat.id.
+// `pick`/`rollp` use Risu's character-ID + chat-ID seed.
 
 function register(name: string, handler: MacroHandler, description: string): void {
   registry.register({ name, handler, description, category: "Risu / Random", scoped: false });
@@ -33,8 +33,10 @@ register("random", (ctx, a) => randomPickImpl(a, ctx.rng.random()),
   "Random element picker. No args → returns a random [0,1) number. One arg → picks from a JSON array or a comma/colon-delimited string. Multiple args → random one.");
 
 register("pick", (ctx, a) => {
-  const seed = ctx.identity.charName + ":" + ctx.messages.count();
-  const rand = pickHashRand(ctx.messages.count(), seed);
+  const rand = pickHashRand(
+    ctx.messages.count(),
+    ctx.character.chaId + ctx.chatId,
+  );
   return randomPickImpl(a, rand);
 }, "Hash-deterministic pick. Same inputs at the same chat position return the same element.");
 
@@ -70,8 +72,9 @@ register("rollp", (ctx, a) => {
   let total = 0;
   for (let i = 0; i < num; i++) {
     const cid = ctx.messages.count() + (i * 15);
-    const seed = ctx.identity.charName;
-    total += Math.floor(pickHashRand(cid, seed) * sides) + 1;
+    total += Math.floor(
+      pickHashRand(cid, ctx.character.chaId + ctx.chatId) * sides,
+    ) + 1;
   }
   return total.toString();
 }, "Hash-deterministic dice roll. Same chat position returns the same outcome.");
