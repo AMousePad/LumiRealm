@@ -32,6 +32,27 @@ function sanitizeVarMap(raw: unknown): Record<string, string> {
   return out;
 }
 
+function objectRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null;
+}
+
+export function readCharacterToggleDsl(
+  data: LumirealmCharacterData,
+  risuai: Readonly<Record<string, unknown>>,
+): string {
+  const card = objectRecord(data.source?.card);
+  const cardData = objectRecord(card?.['data']) ?? card;
+  const extensions = objectRecord(cardData?.['extensions']);
+  const sourceRisuai = objectRecord(extensions?.['risuai']);
+  const sourceDsl = sourceRisuai?.['toggles'];
+  if (typeof sourceDsl === 'string') return sourceDsl;
+
+  const storedDsl = risuai['toggles'];
+  return typeof storedDsl === 'string' ? storedDsl : '';
+}
+
 function toggleToWire(
   t: SidebarToggle,
   moduleId: string,
@@ -101,7 +122,11 @@ export interface VariablesTogglesDeps {
   readonly readLumirealm: (
     characterId: string,
     userId: string,
-  ) => Promise<{ data: LumirealmCharacterData | null } | null>;
+  ) => Promise<{
+    readonly data: LumirealmCharacterData | null;
+    readonly risuai?: Readonly<Record<string, unknown>>;
+    readonly character?: { readonly name?: string };
+  } | null>;
   readonly readAttachedModuleEnvelopes: (
     userId: string,
     attachedIds: readonly string[],
@@ -297,40 +322,61 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
     const fetched = await readLumirealm(characterId, userId);
     if (!fetched || !fetched.data) return { wireRows: [], attribution: {}, keyCount: 0 };
     const attachedIds = fetched.data.user_overrides.attached_module_ids ?? [];
-    if (attachedIds.length === 0) return { wireRows: [], attribution: {}, keyCount: 0 };
-
-    const envelopes = await readAttachedModuleEnvelopes(userId, attachedIds);
+    const envelopes = attachedIds.length > 0
+      ? await readAttachedModuleEnvelopes(userId, attachedIds)
+      : [];
 
     const attribution: Record<string, AttributionWire> = {};
     const wireRows: SidebarToggleWire[] = [];
     let keyCount = 0;
 
-    for (const env of envelopes) {
-      const m = env.module as { customModuleToggle?: unknown; name?: unknown };
-      const dsl = typeof m.customModuleToggle === 'string' ? m.customModuleToggle : '';
-      if (!dsl) continue;
+    const appendDsl = (
+      dsl: string,
+      ownerId: string,
+      ownerName: string,
+      toggleTranslations: Readonly<Record<string, string>> = {},
+      translatedName?: string,
+    ): void => {
+      if (!dsl) return;
       const localFlat: readonly SidebarToggle[] = parseToggleSyntax(dsl);
-      if (localFlat.length === 0) continue;
+      if (localFlat.length === 0) return;
 
-      const originalName = typeof m.name === 'string' && m.name.length > 0 ? m.name : env.id;
-      const translatedName = env.translations?.[translateLang]?.name;
       const entry: AttributionWire = {
-        name: originalName,
-        moduleId: env.id,
+        name: ownerName,
+        moduleId: ownerId,
         ...(translatedName && translatedName.length > 0 ? { translatedName } : {}),
       };
-      for (const k of extractToggleKeys(localFlat)) {
+      const keys = extractToggleKeys(localFlat);
+      for (const k of keys) {
         if (!Object.prototype.hasOwnProperty.call(attribution, k)) {
           attribution[k] = entry;
         }
       }
-      keyCount += extractToggleKeys(localFlat).length;
+      keyCount += keys.length;
 
-      const toggleTranslations = env.translations?.[translateLang]?.toggles ?? {};
       for (const t of localFlat) {
-        wireRows.push(toggleToWire(t, env.id, toggleTranslations));
+        wireRows.push(toggleToWire(t, ownerId, toggleTranslations));
       }
+    };
+
+    for (const env of envelopes) {
+      const m = env.module as { customModuleToggle?: unknown; name?: unknown };
+      const dsl = typeof m.customModuleToggle === 'string' ? m.customModuleToggle : '';
+      const ownerName = typeof m.name === 'string' && m.name.length > 0 ? m.name : env.id;
+      appendDsl(
+        dsl,
+        env.id,
+        ownerName,
+        env.translations?.[translateLang]?.toggles ?? {},
+        env.translations?.[translateLang]?.name,
+      );
     }
+
+    appendDsl(
+      readCharacterToggleDsl(fetched.data, fetched.risuai ?? {}),
+      `character:${characterId}`,
+      fetched.character?.name || 'Character',
+    );
 
     return { wireRows, attribution, keyCount };
   }
