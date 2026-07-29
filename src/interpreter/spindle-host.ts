@@ -99,7 +99,9 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     const rawImageId = ch['image_id'];
     return {
       id,
+      name: typeof ch['name'] === 'string' ? ch['name'] as string : '',
       description: typeof ch['description'] === 'string' ? ch['description'] as string : '',
+      firstMessage: typeof ch['first_mes'] === 'string' ? ch['first_mes'] as string : '',
       worldBookIds: Array.isArray(ch['world_book_ids']) ? ch['world_book_ids'] as string[] : [],
       imageId: typeof rawImageId === 'string' && rawImageId.length > 0 ? rawImageId : null,
     };
@@ -107,7 +109,9 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
 
   async function charUpdate(id: string, patch: Partial<HostCharacter>): Promise<void> {
     const p: Record<string, unknown> = {};
+    if (typeof patch.name === 'string') p['name'] = patch.name;
     if (typeof patch.description === 'string') p['description'] = patch.description;
+    if (typeof patch.firstMessage === 'string') p['first_mes'] = patch.firstMessage;
     // Suppress CHARACTER_EDITED echo; dispatch does its own fan-out at end.
     expectCharacterEdit(id);
     await spindle.characters.update(id, p, uid);

@@ -307,6 +307,14 @@ function cbs(value)
   return cbsMain(value):await()
 end
 
+function getName(id)
+  return getNameMain(id):await()
+end
+
+function setName(id, value)
+  return setNameMain(id, value):await()
+end
+
 function getDescription(id)
   return getDescriptionMain(id):await()
 end
@@ -321,6 +329,14 @@ end
 
 function getAuthorsNote(id)
   return getAuthorsNoteMain(id):await()
+end
+
+function getCharacterFirstMessage(id)
+  return getCharacterFirstMessageMain(id):await()
+end
+
+function setCharacterFirstMessage(id, value)
+  return setCharacterFirstMessageMain(id, value):await()
 end
 
 local editRequestFuncs = {}

@@ -12,7 +12,9 @@ export interface HostMessage {
 
 export interface HostCharacter {
   readonly id: string;
+  readonly name?: string;
   readonly description?: string;
+  readonly firstMessage?: string;
   readonly worldBookIds?: readonly string[];
   // Lumi image_id column; null when no avatar uploaded.
   readonly imageId?: string | null;

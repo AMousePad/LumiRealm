@@ -966,12 +966,34 @@ export async function makeRisuTriggerRuntime(
       reloadChat: (_id: unknown, _index: unknown) => {
         notifyStateChanged('reloadChat');
       },
-      getName: (_id: unknown) => toStr((data as { characterName?: unknown }).characterName || ''),
-      setName: (_id: unknown, _name: unknown) => { /* */ },
+      getNameMain: async (_id: unknown) => {
+        const cid = characterId || (data as { characterId?: string }).characterId;
+        if (!cid) return '';
+        try {
+          return toStr((await api.characters.get(cid)).name);
+        } catch {
+          return toStr((data as { characterName?: unknown }).characterName || '');
+        }
+      },
+      setNameMain: async (_id: unknown, name: unknown) => {
+        const cid = characterId || (data as { characterId?: string }).characterId;
+        if (cid) await api.characters.update(cid, { name: toStr(name) });
+      },
       getDescriptionMain: (_id: unknown) => _charNote.getCharacterDesc(),
       setDescriptionMain: (_id: unknown, desc: unknown) => _charNote.setCharacterDesc(desc),
-      getCharacterFirstMessage: (_id: unknown) => getVar('__risu_first_msg__') || '',
-      setCharacterFirstMessage: (_id: unknown, v: unknown) => setVar('__risu_first_msg__', toStr(v)),
+      getCharacterFirstMessageMain: async (_id: unknown) => {
+        const cid = characterId || (data as { characterId?: string }).characterId;
+        if (!cid) return toStr(firstMessage ?? '');
+        try {
+          return toStr((await api.characters.get(cid)).firstMessage);
+        } catch {
+          return toStr(firstMessage ?? '');
+        }
+      },
+      setCharacterFirstMessageMain: async (_id: unknown, value: unknown) => {
+        const cid = characterId || (data as { characterId?: string }).characterId;
+        if (cid) await api.characters.update(cid, { firstMessage: toStr(value) });
+      },
       getPersonaName: (_id: unknown) => toStr((data as { userName?: unknown }).userName || 'user'),
       getPersonaDescriptionMain: async (_id: unknown) => {
         const description = await _charNote.getPersonaDesc();
