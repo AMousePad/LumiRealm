@@ -64,21 +64,8 @@ function risuEscape(text) {
     }
   });
 }
-function denormalise(input) {
-  if (!input.startsWith("#risu_"))
-    return input;
-  const rest = input.slice(6);
-  const ci = rest.indexOf("::");
-  if (ci === -1)
-    return "#" + rest;
-  const name = rest.slice(0, ci);
-  const tail = rest.slice(ci + 2);
-  if (name === "if" || name === "if_pure")
-    return `#${name} ${tail}`;
-  return `#${name}::${tail}`;
-}
 function blockStartMatcher(input, ctx) {
-  const p1 = denormalise(input);
+  const p1 = input;
   if (p1.startsWith("#if") || p1.startsWith("#if_pure ")) {
     const statement = p1.split(" ", 2);
     const state = statement[1];
@@ -208,6 +195,8 @@ function blockStartMatcher(input, ctx) {
     return { type: "pure" };
   if (p1 === "#pure_display" || p1 === "#puredisplay")
     return { type: "pure-display" };
+  if (p1 === "#ignore")
+    return { type: "ignore" };
   if (p1 === "#code")
     return { type: "normalize" };
   if (p1.startsWith("#escape")) {
@@ -253,17 +242,11 @@ function blockEndMatcher(p1, type) {
     case "newif":
     case "newif-falsy": {
       const findElse = (s) => {
-        const withColon = s.indexOf("{{:else}}");
-        if (withColon !== -1)
-          return { index: withColon, len: 9 };
-        const noColon = s.indexOf("{{else}}");
-        if (noColon !== -1)
-          return { index: noColon, len: 8 };
-        return { index: -1, len: 0 };
+        const index = s.indexOf("{{:else}}");
+        return { index, len: index === -1 ? 0 : 9 };
       };
       const isElseLine = (v) => {
-        const t = v.trim();
-        return t === "{{:else}}" || t === "{{else}}";
+        return v.trim() === "{{:else}}";
       };
       const lines = p1.split(`
 `);
@@ -397,6 +380,1443 @@ var init_trigger_id = __esm(() => {
     category: "Risu / Identity",
     scoped: false
   });
+});
+
+// src/util/role-coerce.ts
+function lumiRoleToRisu(r) {
+  return r === "user" ? "user" : "char";
+}
+function normalizeRoleToLumi(r) {
+  if (r === "user" || r === "assistant" || r === "system")
+    return r;
+  if (r === "char" || r === "bot")
+    return "assistant";
+  if (r === "sys")
+    return "system";
+  return null;
+}
+
+// src/risu-compat/handlers/context-reads.ts
+function register(name, handler, description) {
+  registry.register({
+    name,
+    handler,
+    description,
+    category: "Risu / Context",
+    scoped: false
+  });
+}
+function recurse(ctx, field) {
+  return ctx.evaluate ? ctx.evaluate(field) : field;
+}
+function formatDuration(ms) {
+  let seconds = Math.floor(ms / 1000);
+  let minutes = Math.floor(seconds / 60);
+  let hours = Math.floor(minutes / 60);
+  seconds = seconds % 60;
+  minutes = minutes % 60;
+  return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+function makeArray(arr) {
+  return JSON.stringify(arr.map((v) => {
+    if (typeof v === "string")
+      return v.replaceAll("::", "\\u003A\\u003A");
+    return v;
+  }));
+}
+var init_context_reads = __esm(() => {
+  init_registry();
+  register("description", (ctx) => recurse(ctx, ctx.character.description), "Returns the character description, recursively parsed.");
+  register("personality", (ctx) => recurse(ctx, ctx.character.personality), "Returns the character personality field, recursively parsed.");
+  register("scenario", (ctx) => recurse(ctx, ctx.character.scenario), "Returns the character scenario field, recursively parsed.");
+  register("persona", (ctx) => recurse(ctx, ctx.identity.personaText), "Returns the user persona prompt, recursively parsed.");
+  register("exampledialogue", (ctx) => recurse(ctx, ctx.character.exampleDialogue), "Returns the character's example dialogue field, recursively parsed.");
+  register("mainprompt", (ctx) => recurse(ctx, ctx.character.mainPrompt), "Returns the system/main prompt configured for the current character, recursively parsed.");
+  register("jb", (ctx) => recurse(ctx, ctx.character.jailbreakPrompt), "Returns the jailbreak prompt text, recursively parsed.");
+  register("globalnote", (ctx) => recurse(ctx, ctx.character.globalNote), "Returns the global note (system note / ujb), recursively parsed.");
+  register("authornote", (ctx) => recurse(ctx, ctx.character.authorsNote), "Returns the author's note for the current chat, recursively parsed.");
+  register("model", (ctx) => ctx.aiModel, "Returns the id of the currently selected AI model.");
+  register("axmodel", (ctx) => ctx.axModel, "Returns the id of the auxiliary/secondary model.");
+  register("role", (ctx) => {
+    if (ctx.role !== null)
+      return lumiRoleToRisu(ctx.role);
+    if (ctx.cbsContext)
+      return "null";
+    if (ctx.promptRegexLiteralVars)
+      return "null";
+    if (ctx.isFirstMessage)
+      return "char";
+    return "null";
+  }, "Returns the role of the current message ('user', 'char'/'assistant', 'system').");
+  register("isfirstmsg", (ctx) => {
+    if (ctx.cbsContext)
+      return "0";
+    if (ctx.promptRegexLiteralVars)
+      return "0";
+    if (ctx.currentMessageIndex !== null && ctx.currentMessageIndex !== undefined) {
+      return ctx.currentMessageIndex === -1 ? "1" : "0";
+    }
+    return ctx.isFirstMessage ? "1" : "0";
+  }, "Returns '1' if the current context is the first (greeting) message, '0' otherwise.");
+  register("unixtime", (ctx) => Math.floor(ctx.clock.now() / 1000).toString(), "Returns the current unix timestamp in seconds.");
+  register("time", (ctx) => {
+    const d = new Date(ctx.clock.now());
+    return `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
+  }, "Returns the current local time in H:M:S format (unpadded, matching Risu).");
+  register("isotime", (ctx) => {
+    const d = new Date(ctx.clock.now());
+    return `${d.getUTCHours()}:${d.getUTCMinutes()}:${d.getUTCSeconds()}`;
+  }, "Returns the current UTC time in H:M:S format.");
+  register("isodate", (ctx) => {
+    const d = new Date(ctx.clock.now());
+    return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+  }, "Returns the current UTC date in YYYY-M-D format (month/day not zero-padded, matching Risu).");
+  register("messagetime", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    const msg = msgs[ctx.currentMessageIndex];
+    if (!msg)
+      return "[Cannot get time]";
+    if (!msg.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return new Date(msg.createdAt).toLocaleTimeString();
+  }, "Returns the local time the current message was sent.");
+  register("messagedate", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    const msg = msgs[ctx.currentMessageIndex];
+    if (!msg)
+      return "[Cannot get time]";
+    if (!msg.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return new Date(msg.createdAt).toLocaleDateString();
+  }, "Returns the local date the current message was sent.");
+  register("messageunixtimearray", (ctx) => {
+    const arr = ctx.messages.all().map((m) => String(m.createdAt ?? 0));
+    return makeArray(arr);
+  }, "Returns a JSON-encoded array of all message unix timestamps (milliseconds).");
+  register("idleduration", (ctx) => {
+    const msgs = ctx.messages.all();
+    if (msgs.length === 0)
+      return "00:00:00";
+    const last = msgs[msgs.length - 1];
+    if (!last.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return formatDuration(ctx.clock.now() - last.createdAt);
+  }, "Returns HH:MM:SS since the most recent message.");
+  register("messageidleduration", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    let pointer = ctx.currentMessageIndex;
+    let message;
+    let previous;
+    let stage = "findLast";
+    while (pointer >= 0) {
+      const m = msgs[pointer];
+      if (m && m.role === "user") {
+        if (stage === "findLast") {
+          message = m;
+          stage = "findSecondLast";
+        } else {
+          previous = m;
+          break;
+        }
+      }
+      pointer--;
+    }
+    if (!message)
+      return "[No user message found]";
+    if (!previous)
+      return "[No previous user message found]";
+    if (!message.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    if (!previous.createdAt)
+      return "[Cannot get time, previous message was sent in older version]";
+    return formatDuration(message.createdAt - previous.createdAt);
+  }, "Returns HH:MM:SS between the current and the previous user message.");
+  register("br", () => `
+`, "Returns a literal newline character.");
+  register("blank", () => "", "Returns an empty string.");
+});
+
+// src/risu-compat/risu-helpers.ts
+function parseArray2(s) {
+  try {
+    const arr = JSON.parse(s);
+    if (Array.isArray(arr))
+      return arr;
+  } catch {}
+  return s.split("\xA7");
+}
+function parseDict(s) {
+  try {
+    const v = JSON.parse(s);
+    if (v && typeof v === "object" && !Array.isArray(v))
+      return v;
+  } catch {}
+  return {};
+}
+function makeArray2(arr) {
+  return JSON.stringify(arr.map((v) => {
+    if (typeof v === "string")
+      return v.replaceAll("::", "\\u003A\\u003A");
+    return v;
+  }));
+}
+function sfc32(a, b, c, d) {
+  return function() {
+    a |= 0;
+    b |= 0;
+    c |= 0;
+    d |= 0;
+    const t = (a + b | 0) + d | 0;
+    d = d + 1 | 0;
+    a = b ^ b >>> 9;
+    b = c + (c << 3) | 0;
+    c = c << 21 | c >>> 11;
+    c = c + t | 0;
+    return (t >>> 0) / 4294967296;
+  };
+}
+function pickHashRand(cid, word) {
+  let hashAddress = 5515;
+  const rand = (w) => {
+    for (let counter = 0;counter < w.length; counter++) {
+      hashAddress = (hashAddress << 5) + hashAddress + w.charCodeAt(counter);
+    }
+    return hashAddress;
+  };
+  const randF = sfc32(rand(word), rand(word), rand(word), rand(word));
+  const v = cid % 1000;
+  for (let i = 0;i < v; i++)
+    randF();
+  return randF();
+}
+function dateTimeFormat(main, time = 0) {
+  const date = time === 0 ? new Date : new Date(time);
+  if (!main)
+    return "";
+  if (main.startsWith(":"))
+    main = main.substring(1);
+  if (main.length > 300)
+    return "";
+  return main.replace(/YYYY/g, date.getFullYear().toString()).replace(/YY/g, date.getFullYear().toString().substring(2)).replace(/MMMM/g, new Intl.DateTimeFormat("en", { month: "long" }).format(date)).replace(/MMM/g, new Intl.DateTimeFormat("en", { month: "short" }).format(date)).replace(/MM/g, (date.getMonth() + 1).toString().padStart(2, "0")).replace(/DDDD/g, Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)).toString()).replace(/DD/g, date.getDate().toString().padStart(2, "0")).replace(/dddd/g, new Intl.DateTimeFormat("en", { weekday: "long" }).format(date)).replace(/ddd/g, new Intl.DateTimeFormat("en", { weekday: "short" }).format(date)).replace(/HH/g, date.getHours().toString().padStart(2, "0")).replace(/hh/g, (date.getHours() % 12 || 12).toString().padStart(2, "0")).replace(/mm/g, date.getMinutes().toString().padStart(2, "0")).replace(/ss/g, date.getSeconds().toString().padStart(2, "0")).replace(/X/g, Math.floor(date.getTime() / 1000).toString()).replace(/x/g, date.getTime().toString()).replace(/A/g, date.getHours() >= 12 ? "PM" : "AM");
+}
+function calcString(text, readLocal, readGlobal) {
+  const depthText = [""];
+  for (let i = 0;i < text.length; i++) {
+    if (text[i] === "(") {
+      depthText.push("");
+    } else if (text[i] === ")" && depthText.length > 1) {
+      const inner = depthText.pop();
+      const result = executeRPN(inner, readLocal, readGlobal);
+      depthText[depthText.length - 1] += result;
+    } else {
+      depthText[depthText.length - 1] += text[i];
+    }
+  }
+  return executeRPN(depthText.join(""), readLocal, readGlobal);
+}
+function executeRPN(text, readLocal, readGlobal) {
+  const substituted = text.replace(/\$([a-zA-Z0-9_]+)/g, (_, p1) => {
+    const v = readLocal(p1);
+    const parsed = parseFloat(v);
+    return isNaN(parsed) ? "0" : parsed.toString();
+  }).replace(/@([a-zA-Z0-9_]+)/g, (_, p1) => {
+    const v = readGlobal(p1);
+    const parsed = parseFloat(v);
+    return isNaN(parsed) ? "0" : parsed.toString();
+  }).replace(/&&/g, "&").replace(/\|\|/g, "|").replace(/<=/g, "\u2264").replace(/>=/g, "\u2265").replace(/==/g, "=").replace(/!=/g, "\u2260").replace(/null/gi, "0");
+  const rpn = toRPN(substituted);
+  return calculateRPN(rpn);
+}
+function toRPN(expression) {
+  expression = expression.replace(/\s+/g, "");
+  const expr2 = [];
+  let lastToken = "";
+  for (let i = 0;i < expression.length; i++) {
+    const char = expression[i];
+    if (char === "-" && (i === 0 || OPERATOR_CHARS.has(expression[i - 1]) || expression[i - 1] === "(")) {
+      lastToken += char;
+    } else if (OPERATOR_CHARS.has(char)) {
+      expr2.push(lastToken !== "" ? lastToken : "0");
+      lastToken = "";
+      expr2.push(char);
+    } else {
+      lastToken += char;
+    }
+  }
+  expr2.push(lastToken !== "" ? lastToken : "0");
+  let outputQueue = "";
+  const operatorStack = [];
+  for (const token of expr2) {
+    if (parseFloat(token) || token === "0") {
+      outputQueue += token + " ";
+    } else if (OPERATOR_CHARS.has(token)) {
+      while (operatorStack.length > 0) {
+        const top = operatorStack[operatorStack.length - 1];
+        const op = OPERATORS[token];
+        const topOp = OPERATORS[top];
+        const drain = op.associativity === "Left" ? op.precedence <= topOp.precedence : op.precedence < topOp.precedence;
+        if (!drain)
+          break;
+        outputQueue += operatorStack.pop() + " ";
+      }
+      operatorStack.push(token);
+    }
+  }
+  while (operatorStack.length > 0)
+    outputQueue += operatorStack.pop() + " ";
+  return outputQueue.trim();
+}
+function calculateRPN(expression) {
+  const stack = [];
+  for (const token of expression.split(" ")) {
+    if (parseFloat(token) || token === "0") {
+      stack.push(parseFloat(token));
+    } else {
+      const b = stack.pop();
+      const a = stack.pop();
+      switch (token) {
+        case "+":
+          stack.push(a + b);
+          break;
+        case "-":
+          stack.push(a - b);
+          break;
+        case "*":
+          stack.push(a * b);
+          break;
+        case "/":
+          stack.push(a / b);
+          break;
+        case "^":
+          stack.push(a ** b);
+          break;
+        case "%":
+          stack.push(a % b);
+          break;
+        case "<":
+          stack.push(a < b ? 1 : 0);
+          break;
+        case ">":
+          stack.push(a > b ? 1 : 0);
+          break;
+        case "|":
+          stack.push(a || b);
+          break;
+        case "&":
+          stack.push(a && b);
+          break;
+        case "\u2264":
+          stack.push(a <= b ? 1 : 0);
+          break;
+        case "\u2265":
+          stack.push(a >= b ? 1 : 0);
+          break;
+        case "=":
+          stack.push(a === b ? 1 : 0);
+          break;
+        case "\u2260":
+          stack.push(a !== b ? 1 : 0);
+          break;
+        case "!":
+          stack.push(b ? 0 : 1);
+          break;
+      }
+    }
+  }
+  return stack.length === 0 ? 0 : stack.pop();
+}
+var OPERATORS, OPERATOR_CHARS;
+var init_risu_helpers = __esm(() => {
+  OPERATORS = {
+    "+": { precedence: 2, associativity: "Left" },
+    "-": { precedence: 2, associativity: "Left" },
+    "*": { precedence: 3, associativity: "Left" },
+    "/": { precedence: 3, associativity: "Left" },
+    "^": { precedence: 4, associativity: "Left" },
+    "%": { precedence: 3, associativity: "Left" },
+    "<": { precedence: 1, associativity: "Left" },
+    ">": { precedence: 1, associativity: "Left" },
+    "|": { precedence: 1, associativity: "Left" },
+    "&": { precedence: 1, associativity: "Left" },
+    "\u2264": { precedence: 1, associativity: "Left" },
+    "\u2265": { precedence: 1, associativity: "Left" },
+    "=": { precedence: 1, associativity: "Left" },
+    "\u2260": { precedence: 1, associativity: "Left" },
+    "!": { precedence: 5, associativity: "Right" }
+  };
+  OPERATOR_CHARS = new Set(Object.keys(OPERATORS));
+});
+
+// src/risu-compat/handlers/math.ts
+function register2(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Math", scoped: false });
+}
+var aggSource = (args) => args.length > 1 ? args : parseArray2(args[0] ?? "").map((v) => String(v)), toNum = (s) => {
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
+};
+var init_math = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register2("round", (_c, a) => Math.round(Number(a[0])).toString(), "Rounds to nearest integer (half-up).");
+  register2("floor", (_c, a) => Math.floor(Number(a[0])).toString(), "Floors (rounds toward negative infinity).");
+  register2("ceil", (_c, a) => Math.ceil(Number(a[0])).toString(), "Ceils (rounds toward positive infinity).");
+  register2("abs", (_c, a) => Math.abs(Number(a[0])).toString(), "Absolute value.");
+  register2("remaind", (_c, a) => (Number(a[0]) % Number(a[1])).toString(), "Returns (a % b) as string.");
+  register2("pow", (_c, a) => Math.pow(Number(a[0]), Number(a[1])).toString(), "Returns a^b.");
+  register2("min", (_c, a) => Math.min(...aggSource(a).map(toNum)).toString(), "Minimum of the given values (non-numeric treated as 0).");
+  register2("max", (_c, a) => Math.max(...aggSource(a).map(toNum)).toString(), "Maximum of the given values.");
+  register2("sum", (_c, a) => aggSource(a).map(toNum).reduce((x, y) => x + y, 0).toString(), "Sum of the given values.");
+  register2("average", (_c, a) => {
+    const src = aggSource(a);
+    if (src.length === 0)
+      return "NaN";
+    return (src.map(toNum).reduce((x, y) => x + y, 0) / src.length).toString();
+  }, "Arithmetic mean of the given values.");
+  register2("tonumber", (_c, a) => {
+    const s = a[0] ?? "";
+    let out = "";
+    for (const ch of s) {
+      if (!isNaN(Number(ch)) || ch === ".")
+        out += ch;
+    }
+    return out;
+  }, "Extracts digits (and decimal points) from the input string.");
+  register2("fixnum", (_c, a) => Number(a[0]).toFixed(Number(a[1])).toString(), "Rounds to N decimal places via toFixed.");
+  register2("calc", (ctx, a) => {
+    const expr = a[0] ?? "";
+    const n = calcString(expr, (name) => ctx.vars.get("local", name), (name) => ctx.vars.get("global", name));
+    return n.toString();
+  }, "Evaluates a mathematical expression. Supports + - * / ^ % and comparison operators; $x reads local var, @x reads global var.");
+});
+
+// src/risu-compat/handlers/logic.ts
+function register3(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Logic", scoped: false });
+}
+var bag = (a) => a.length > 1 ? a : parseArray2(a[0] ?? "").map((v) => String(v));
+var init_logic = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register3("equal", (_c, a) => a[0] === a[1] ? "1" : "0", "Returns '1' if args[0] === args[1] (string compare), else '0'.");
+  register3("notequal", (_c, a) => a[0] !== a[1] ? "1" : "0", "Returns '1' if args[0] !== args[1], else '0'.");
+  register3("greater", (_c, a) => Number(a[0]) > Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) > Number(args[1]).");
+  register3("less", (_c, a) => Number(a[0]) < Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) < Number(args[1]).");
+  register3("greaterequal", (_c, a) => Number(a[0]) >= Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) >= Number(args[1]).");
+  register3("lessequal", (_c, a) => Number(a[0]) <= Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) <= Number(args[1]).");
+  register3("and", (_c, a) => a[0] === "1" && a[1] === "1" ? "1" : "0", "Boolean AND: returns '1' if both args are the literal string '1'.");
+  register3("or", (_c, a) => a[0] === "1" || a[1] === "1" ? "1" : "0", "Boolean OR: returns '1' if either arg is '1'.");
+  register3("not", (_c, a) => a[0] === "1" ? "0" : "1", "Boolean NOT of a '1'/'0' value.");
+  register3("all", (_c, a) => bag(a).every((f) => f === "1") ? "1" : "0", "Returns '1' if every value is the literal string '1'.");
+  register3("any", (_c, a) => bag(a).some((f) => f === "1") ? "1" : "0", "Returns '1' if any value is '1'.");
+  register3("startswith", (_c, a) => (a[0] ?? "").startsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] starts with args[1].");
+  register3("endswith", (_c, a) => (a[0] ?? "").endsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] ends with args[1].");
+  register3("contains", (_c, a) => (a[0] ?? "").includes(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] contains args[1] anywhere.");
+  register3("iserror", (_c, a) => (a[0] ?? "").toLocaleLowerCase().startsWith("error:") ? "1" : "0", "Returns '1' if the argument begins with 'error:' (case-insensitive).");
+});
+
+// src/risu-compat/handlers/strings.ts
+function register4(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Strings", scoped: false });
+}
+var init_strings = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register4("replace", (_c, a) => (a[0] ?? "").replaceAll(a[1] ?? "", a[2] ?? ""), "Replaces all occurrences of needle with replacement.");
+  register4("split", (_c, a) => makeArray2((a[0] ?? "").split(a[1] ?? "")), "Splits a string on the delimiter and returns a JSON array.");
+  register4("join", (_c, a) => parseArray2(a[0] ?? "").join(a[1] ?? ""), "Joins a JSON array using the given separator.");
+  register4("spread", (_c, a) => parseArray2(a[0] ?? "").join("::"), "Joins a JSON array using :: as the separator.");
+  register4("trim", (_c, a) => (a[0] ?? "").trim(), "Strips leading/trailing whitespace.");
+  register4("length", (_c, a) => (a[0] ?? "").length.toString(), "Returns the character length of a string.");
+  register4("lower", (_c, a) => (a[0] ?? "").toLocaleLowerCase(), "Lowercases using locale-aware conversion.");
+  register4("upper", (_c, a) => (a[0] ?? "").toLocaleUpperCase(), "Uppercases using locale-aware conversion.");
+  register4("capitalize", (_c, a) => {
+    const s = a[0] ?? "";
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }, "Uppercases only the first character.");
+  register4("reverse", (_c, a) => [...a[0] ?? ""].reverse().join(""), "Reverses a string (code-point safe via iterator).");
+});
+
+// src/risu-compat/handlers/arrays.ts
+function register5(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Arrays", scoped: false });
+}
+var init_arrays = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register5("arraylength", (_c, a) => parseArray2(a[0] ?? "").length.toString(), "Returns the length of a JSON array.");
+  register5("arrayshift", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    arr.shift();
+    return makeArray2(arr);
+  }, "Removes and discards the first element.");
+  register5("arraypop", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    arr.pop();
+    return makeArray2(arr);
+  }, "Removes and discards the last element.");
+  register5("arraypush", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    arr.push(a[1] ?? "");
+    return makeArray2(arr);
+  }, "Appends a new element.");
+  register5("arraysplice", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    arr.splice(Number(a[1]), Number(a[2]), a[3] ?? "");
+    return makeArray2(arr);
+  }, "Risu-style splice: (array, start, deleteCount, newElement).");
+  register5("arrayassert", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    const idx = Number(a[1]);
+    if (idx >= arr.length)
+      arr[idx] = a[2] ?? "";
+    return makeArray2(arr);
+  }, "Sets arr[idx] = value if idx is out of bounds; else leaves array unchanged.");
+  register5("arrayelement", (_c, a) => {
+    const el = parseArray2(a[0] ?? "").at(Number(a[1])) ?? "null";
+    return typeof el === "object" ? JSON.stringify(el) : String(el);
+  }, "Returns the element at index (JSON-stringifies if object). 'null' if OOB.");
+  register5("dictelement", (_c, a) => {
+    const el = parseDict(a[0] ?? "")[a[1] ?? ""] ?? "null";
+    return typeof el === "object" ? JSON.stringify(el) : String(el);
+  }, "Returns dict[key] or 'null'.");
+  register5("objectassert", (_c, a) => {
+    const d = parseDict(a[0] ?? "");
+    if (!d[a[1] ?? ""])
+      d[a[1] ?? ""] = a[2] ?? "";
+    return JSON.stringify(d);
+  }, "Sets obj[key] = value if missing or falsy; returns JSON.");
+  register5("element", (_c, a) => {
+    try {
+      let current = a[0] ?? "";
+      for (const step of a.slice(1)) {
+        const parsed = JSON.parse(current);
+        if (parsed === null || typeof parsed !== "object" && !Array.isArray(parsed))
+          return "null";
+        current = parsed[step];
+        if (!current)
+          return "null";
+      }
+      return String(current);
+    } catch {
+      return "null";
+    }
+  }, "Walks a JSON structure by successive keys/indices. Returns 'null' if any step fails.");
+  register5("makearray", (_c, a) => makeArray2(a), "Creates a JSON array from the given arguments.");
+  register5("makedict", (_c, a) => {
+    const d = {};
+    for (let i = 0;i + 1 < a.length; i += 2) {
+      d[a[i] ?? ""] = a[i + 1] ?? "";
+    }
+    return JSON.stringify(d);
+  }, "Creates a JSON object from interleaved key-value arguments.");
+  register5("range", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    const start = arr.length > 1 ? Number(arr[0]) : 0;
+    const end = arr.length > 1 ? Number(arr[1]) : Number(arr[0]);
+    const step = arr.length > 2 ? Number(arr[2]) : 1;
+    const out = [];
+    if (step !== 0) {
+      for (let i = start;i < end; i += step)
+        out.push(i.toString());
+    }
+    return makeArray2(out);
+  }, "Creates a range. [n] \u2192 [0,1,\u2026,n-1]. [a,b] \u2192 [a,\u2026,b-1]. [a,b,s] \u2192 step s.");
+  register5("filter", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    const mode = ["all", "nonempty", "unique"].indexOf(a[1] ?? "all");
+    const filterType = mode === -1 ? 0 : mode;
+    return makeArray2(arr.filter((f, i) => {
+      switch (filterType) {
+        case 0:
+          return f !== "" && i === arr.indexOf(f);
+        case 1:
+          return f !== "";
+        case 2:
+          return i === arr.indexOf(f);
+        default:
+          return true;
+      }
+    }));
+  }, "Filters an array. mode='all' (unique + nonempty), 'nonempty', or 'unique'.");
+});
+
+// src/risu-compat/handlers/random.ts
+function register6(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Random", scoped: false });
+}
+function randomPickImpl(args, rand) {
+  if (args.length === 0)
+    return rand.toString();
+  let arr;
+  if (args.length === 1) {
+    const s = args[0] ?? "";
+    if (s.startsWith("[") && s.endsWith("]")) {
+      arr = parseArray2(s);
+    } else {
+      arr = s.replace(/\\,/g, "\xA7X").split(/:|,/);
+    }
+  } else {
+    arr = [...args];
+  }
+  const idx = Math.floor(rand * arr.length);
+  const el = arr[idx];
+  return typeof el === "string" ? el.replace(/\u00A7X/g, ",") : JSON.stringify(el) ?? "";
+}
+var init_random = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register6("random", (ctx, a) => randomPickImpl(a, ctx.rng.random()), "Random element picker. No args \u2192 returns a random [0,1) number. One arg \u2192 picks from a JSON array or a comma/colon-delimited string. Multiple args \u2192 random one.");
+  register6("pick", (ctx, a) => {
+    const rand = pickHashRand(ctx.messages.count(), ctx.character.chaId + ctx.chatId);
+    return randomPickImpl(a, rand);
+  }, "Hash-deterministic pick. Same inputs at the same chat position return the same element.");
+  register6("roll", (ctx, a) => {
+    if (a.length === 0)
+      return "1";
+    const notation = (a[0] ?? "").split("d");
+    let num = 1;
+    let sides = 6;
+    if (notation.length === 2) {
+      num = Number(notation[0] || 1);
+      sides = Number(notation[1] || 6);
+    } else if (notation.length === 1) {
+      sides = Number(notation[0]);
+    }
+    if (isNaN(num) || isNaN(sides) || num < 1 || sides < 1)
+      return "NaN";
+    let total = 0;
+    for (let i = 0;i < num; i++)
+      total += Math.floor(ctx.rng.random() * sides) + 1;
+    return total.toString();
+  }, "Dice roll. XdY syntax (default 1d6). Sum of N uniform rolls.");
+  register6("rollp", (ctx, a) => {
+    if (a.length === 0)
+      return "1";
+    const notation = (a[0] ?? "").split("d");
+    let num = 1;
+    let sides = 6;
+    if (notation.length === 2) {
+      num = Number(notation[0] || 1);
+      sides = Number(notation[1] || 6);
+    } else if (notation.length === 1) {
+      sides = Number(notation[0]);
+    }
+    if (isNaN(num) || isNaN(sides) || num < 1 || sides < 1)
+      return "NaN";
+    let total = 0;
+    for (let i = 0;i < num; i++) {
+      const cid = ctx.messages.count() + i * 15;
+      total += Math.floor(pickHashRand(cid, ctx.character.chaId + ctx.chatId) * sides) + 1;
+    }
+    return total.toString();
+  }, "Hash-deterministic dice roll. Same chat position returns the same outcome.");
+  register6("dice", (ctx, a) => {
+    const notation = (a[0] ?? "").split("d");
+    const num = Number(notation[0]);
+    const sides = Number(notation[1]);
+    if (isNaN(num) || isNaN(sides))
+      return "NaN";
+    let total = 0;
+    for (let i = 0;i < num; i++)
+      total += Math.floor(ctx.rng.random() * sides) + 1;
+    return total.toString();
+  }, "Dice roll via NdS notation. No defaults \u2014 both numbers required.");
+  register6("randint", (ctx, a) => {
+    const min = Number(a[0]);
+    const max = Number(a[1]);
+    if (isNaN(min) || isNaN(max))
+      return "NaN";
+    return (Math.floor(ctx.rng.random() * (max - min + 1)) + min).toString();
+  }, "Uniform random integer in [min, max] (inclusive).");
+  register6("hash", (_c, a) => {
+    const v = pickHashRand(0, a[0] ?? "");
+    return (v * 1e7 + 1).toFixed(0).padStart(7, "0");
+  }, "Returns a deterministic 7-digit hash of the input string.");
+});
+
+// src/risu-compat/handlers/variables.ts
+function register7(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Variables", scoped: false });
+}
+function setvarMode(ctx) {
+  if (ctx.rmVar)
+    return "hide";
+  if (ctx.runVar)
+    return "run";
+  return "literal";
+}
+function leaveVarLiteral(ctx) {
+  return !ctx.commit || ctx.promptRegexLiteralVars === true;
+}
+var init_variables = __esm(() => {
+  init_registry();
+  register7("getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a local chat variable. Empty string if unset.");
+  register7("setvar", (ctx, a) => {
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
+      return `{{setvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+    ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
+    return "";
+  }, "Sets a local chat variable.");
+  register7("addvar", (ctx, a) => {
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
+      return `{{addvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+    ctx.vars.add("local", a[0] ?? "", Number(a[1]));
+    return "";
+  }, "Adds delta to a local chat variable (coerces current value to number).");
+  register7("setdefaultvar", (ctx, a) => {
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
+      return `{{setdefaultvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+    const name = a[0] ?? "";
+    const current = ctx.vars.get("local", name);
+    if (!current || current === "null") {
+      ctx.vars.set("local", name, a[1] ?? "");
+    }
+    return "";
+  }, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
+  register7("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""), "Reads a global chat variable.");
+  register7("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""), "Reads a temporary variable (per-evaluation scope).");
+  register7("settempvar", (ctx, a) => {
+    ctx.vars.set("temp", a[0] ?? "", a[1] ?? "");
+    return "";
+  }, "Sets a temporary variable.");
+  register7("deletevar", (ctx, a) => {
+    if (leaveVarLiteral(ctx))
+      return `{{deletevar::${a[0] ?? ""}}}`;
+    ctx.vars.delete("local", a[0] ?? "");
+    return "";
+  }, "Deletes a local chat variable.");
+  register7("flushvar", (ctx, a) => {
+    if (leaveVarLiteral(ctx))
+      return `{{flushvar::${a[0] ?? ""}}}`;
+    ctx.vars.delete("local", a[0] ?? "");
+    return "";
+  }, "Alias of deletevar.");
+  register7("getchatvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a chat-scoped variable (aliased to local in Risu).");
+  register7("setchatvar", (ctx, a) => {
+    if (leaveVarLiteral(ctx))
+      return `{{setchatvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+    ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
+    return "";
+  }, "Sets a chat-scoped variable.");
+  register7("return", (ctx, a) => {
+    ctx.vars.set("temp", "__force_return__", "1");
+    ctx.vars.set("temp", "__return__", a[0] ?? "");
+    return "";
+  }, "Halts further macro resolution, returns the given value as the entire parser output (Risu parity).");
+});
+
+// src/util/base64.ts
+function base64ToBytes(input) {
+  const sextets = [];
+  for (let i = 0;i < input.length; i++) {
+    const v = DECODE[input.charCodeAt(i)] ?? -1;
+    if (v >= 0)
+      sextets.push(v);
+  }
+  const out = new Uint8Array(sextets.length * 6 >> 3);
+  let bitBuf = 0;
+  let bitCount = 0;
+  let o = 0;
+  for (const s of sextets) {
+    bitBuf = bitBuf << 6 | s;
+    bitCount += 6;
+    if (bitCount >= 8) {
+      bitCount -= 8;
+      out[o++] = bitBuf >> bitCount & 255;
+    }
+  }
+  return out;
+}
+function base64ToUtf8(input) {
+  return new TextDecoder().decode(base64ToBytes(input));
+}
+function bytesToBase64(bytes) {
+  let out = "";
+  let i = 0;
+  for (;i + 2 < bytes.length; i += 3) {
+    const n = bytes[i] << 16 | bytes[i + 1] << 8 | bytes[i + 2];
+    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + B64_ALPHABET[n >> 6 & 63] + B64_ALPHABET[n & 63];
+  }
+  const rem = bytes.length - i;
+  if (rem === 1) {
+    const n = bytes[i] << 16;
+    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + "==";
+  } else if (rem === 2) {
+    const n = bytes[i] << 16 | bytes[i + 1] << 8;
+    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + B64_ALPHABET[n >> 6 & 63] + "=";
+  }
+  return out;
+}
+var B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", DECODE;
+var init_base64 = __esm(() => {
+  DECODE = new Int16Array(256).fill(-1);
+  for (let i = 0;i < B64_ALPHABET.length; i++) {
+    DECODE[B64_ALPHABET.charCodeAt(i)] = i;
+  }
+  DECODE[45] = 62;
+  DECODE[95] = 63;
+});
+
+// src/risu-compat/handlers/misc.ts
+function register8(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Misc", scoped: false });
+}
+function escapeButtonLabel(s) {
+  return s.replace(BARE_AMP_RE, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+var BARE_AMP_RE;
+var init_misc = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  init_base64();
+  register8("u", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Returns the character for a hex codepoint.");
+  register8("ue", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Alias for {{u}}.");
+  register8("unicodeencode", (_c, a) => (a[0] ?? "").charCodeAt(a[1] ? Number(a[1]) : 0).toString(), "Returns the Unicode code point of a character at the given index (default 0).");
+  register8("unicodedecode", (_c, a) => String.fromCharCode(Number(a[0] ?? "0")), "Converts a Unicode code point back to a character.");
+  register8("fromhex", (_c, a) => Number.parseInt(a[0] ?? "0", 16).toString(), "Converts a hex string to decimal.");
+  register8("tohex", (_c, a) => Number.parseInt(a[0] ?? "0").toString(16), "Converts a decimal number to hex.");
+  register8("xor", (_c, a) => {
+    const bytes = new TextEncoder().encode(a[0] ?? "");
+    for (let i = 0;i < bytes.length; i++)
+      bytes[i] ^= 255;
+    return bytesToBase64(bytes);
+  }, "XOR-encrypts a string with 0xFF and base64-encodes.");
+  register8("xordecrypt", (_c, a) => {
+    const bytes = base64ToBytes(a[0] ?? "");
+    for (let i = 0;i < bytes.length; i++)
+      bytes[i] ^= 255;
+    return new TextDecoder().decode(bytes);
+  }, "Decrypts an XOR-encrypted base64 string.");
+  register8("crypt", (_c, a) => {
+    let shift = a[1] ? Number(a[1]) : 32768;
+    if (isNaN(shift))
+      shift = 32768;
+    const input = a[0] ?? "";
+    let result = "";
+    for (let i = 0;i < input.length; i++) {
+      const code = input.charCodeAt(i);
+      if (code > 65535) {
+        result += input[i];
+        continue;
+      }
+      let shifted = code + shift;
+      if (shifted > 65535)
+        shifted -= 65536;
+      result += String.fromCharCode(shifted);
+    }
+    return result;
+  }, "Caesar-style Unicode shift cipher (default shift 32768 which self-inverts).");
+  register8("date", (ctx, a) => {
+    if (a.length === 0) {
+      const d = new Date(ctx.clock.now());
+      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    }
+    const t = a[1] ? Number(a[1]) : 0;
+    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
+  }, "Formats a date. No args \u2192 YYYY-M-D. First arg is format, optional second arg is unix ms.");
+  register8("datetimeformat", (ctx, a) => {
+    if (a.length === 0) {
+      const d = new Date(ctx.clock.now());
+      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    }
+    const t = a[1] ? Number(a[1]) : 0;
+    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
+  }, "Alias of {{date::fmt}}.");
+  register8("hiddenkey", () => "", "A key that activates lorebook entries without being sent to the model.");
+  register8("comment", (ctx, a) => {
+    if (ctx.commit || ctx.cbsContext)
+      return "";
+    return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
+  }, 'Comment macro. Empty at prompt time and in cbs; displays as <div class="risu-comment">\u2026</div> at render time.');
+  registry.register({
+    name: "//",
+    handler: () => "",
+    description: "Inline comment. Returns empty string.",
+    category: "Risu / Misc",
+    scoped: false
+  });
+  register8("tex", (_c, a) => `$$${a[0] ?? ""}$$`, "LaTeX/math block.");
+  register8("ruby", (_c, a) => `<ruby>${a[0] ?? ""}<rp> (</rp><rt>${a[1] ?? ""}</rt><rp>) </rp></ruby>`, "Ruby (furigana) HTML wrapper.");
+  register8("codeblock", (_c, a) => {
+    const code = (a[a.length - 1] ?? "").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    if (a.length > 1)
+      return `<pre-hljs-placeholder lang="${a[0]}">${code}</pre-hljs-placeholder>`;
+    return `<pre><code>${code}</code></pre>`;
+  }, "Code-block HTML wrapper. One arg \u2192 plain. Two args \u2192 highlighted, first is lang.");
+  register8("risu", (_c, a) => {
+    const size = a[0] || "45";
+    return `<img src="/logo2.png" style="height:${size}px;width:${size}px" />`;
+  }, "Embeds the RisuAI logo image.");
+  BARE_AMP_RE = /&(?!#x[0-9a-fA-F]+;|#[0-9]+;|[a-zA-Z][a-zA-Z0-9]*;)/g;
+  register8("button", (_c, a) => {
+    const label = escapeButtonLabel(a[0] ?? "");
+    const trigger = (a[1] ?? "").replace(/"/g, "&quot;");
+    return `<button class="button-default x-risu-button-default" risu-trigger="${trigger}">${label}</button>`;
+  }, "HTML button that fires the named risu-trigger when clicked.");
+  register8("screenwidth", (ctx) => String(ctx.screenWidth ?? 0), "Viewport width in pixels. Read from the frontend-reported value; 0 before the first report.");
+  register8("screenheight", (ctx) => String(ctx.screenHeight ?? 0), "Viewport height in pixels. Read from the frontend-reported value; 0 before the first report.");
+  register8("moduleenabled", (ctx, a) => {
+    const ns = a[0] ?? "";
+    if (ns.length === 0)
+      return "0";
+    const map = ctx.modulesByNamespace;
+    if (map && map[ns])
+      return "1";
+    return "0";
+  }, "Returns 1 if a module with the specified namespace is attached, 0 otherwise.");
+  register8("moduleassetlist", (ctx, a) => {
+    const ns = a[0] ?? "";
+    if (ns.length === 0)
+      return "";
+    const map = ctx.modulesByNamespace;
+    if (!map)
+      return "";
+    const list = map[ns];
+    if (!list || list.length === 0)
+      return "";
+    return makeArray2(list);
+  }, "Returns a JSON array of asset names for the specified module namespace. Returns empty string if namespace not found.");
+  register8("metadata", (ctx, a) => {
+    const key = (a[0] ?? "").toLocaleLowerCase();
+    switch (key) {
+      case "imateapot":
+        return "\uD83E\uDED6";
+      case "mobile":
+      case "local":
+      case "node":
+        return "0";
+      case "risutype":
+        return "web";
+      case "modelname":
+      case "modelshortname":
+      case "modelinternalid":
+        return ctx.aiModel || "";
+      case "version":
+        return ctx.appVersion;
+      case "majorversion":
+      case "majorver":
+      case "major":
+        return ctx.appVersion.split(".")[0] ?? "";
+      case "maxcontext":
+        return ctx.maxContext.toString();
+      case "language":
+      case "locale":
+      case "lang":
+      case "browserlanguage":
+      case "browserlocale":
+      case "browserlang":
+        return ctx.language;
+      default:
+        return `Error: ${a[0]} is not a valid metadata key.`;
+    }
+  }, "Returns host metadata. Subset implemented \u2014 model fields read from ctx.aiModel; platform fields default to non-native; language and browserlanguage collapse to one value.");
+  register8("chatindex", (ctx) => {
+    const idx = ctx.currentMessageIndex;
+    return idx === null ? "" : idx.toString();
+  }, "Index of the current message being processed. Risu cbs() default returns -1.");
+  register8("firstmsgindex", (ctx) => {
+    const idx = ctx.character.selectedAlternateGreetingIndex;
+    return String(typeof idx === "number" ? idx : -1);
+  }, "Returns chat.fmIndex (selected alternate greeting index). -1 = default firstMessage.");
+});
+
+// src/risu-compat/handlers/chat-context.ts
+function register9(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Chat", scoped: false });
+}
+function selectedGreeting(ctx) {
+  const character = ctx.character;
+  if (character.selectedGreeting !== undefined)
+    return character.selectedGreeting;
+  return character.selectedAlternateGreetingIndex === -1 ? character.firstMessage : character.alternateGreetings[character.selectedAlternateGreetingIndex] ?? character.firstMessage;
+}
+function risuRole(r) {
+  return r === "assistant" ? "char" : r;
+}
+function toSerializableMsg(m) {
+  const out = {
+    role: risuRole(m.role),
+    data: m.content,
+    time: m.createdAt
+  };
+  if (m.speaker)
+    out.speaker = m.speaker;
+  return out;
+}
+function evalMsg(ctx, m) {
+  const data = ctx.evaluate ? ctx.evaluate(m.content) : m.content;
+  const out = {
+    role: risuRole(m.role),
+    data,
+    time: m.createdAt
+  };
+  if (m.speaker)
+    out.speaker = m.speaker;
+  return out;
+}
+var init_chat_context = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register9("lorebook", (ctx) => {
+    return makeArray2(ctx.lorebook.map((e) => JSON.stringify(e)));
+  }, "Returns all active lorebook entries as a JSON array (character + chat + module lore concatenated).");
+  register9("userhistory", (ctx) => {
+    const filtered = ctx.messages.all().filter((m) => m.role === "user").map((m) => JSON.stringify(evalMsg(ctx, m)));
+    return makeArray2(filtered);
+  }, "Returns all user messages as a JSON array, each .data recursively parsed.");
+  register9("charhistory", (ctx) => {
+    const filtered = ctx.messages.all().filter((m) => m.role === "assistant").map((m) => JSON.stringify(evalMsg(ctx, m)));
+    return makeArray2(filtered);
+  }, "Returns all character (assistant) messages as a JSON array, each .data recursively parsed.");
+  register9("history", (ctx, a) => {
+    const msgs = ctx.messages.all();
+    if (a.length === 0) {
+      const fm = selectedGreeting(ctx);
+      const head = [{
+        role: "char",
+        data: ctx.evaluate ? ctx.evaluate(fm) : fm,
+        time: 0
+      }];
+      return makeArray2([
+        ...head,
+        ...msgs.map((m) => ({
+          ...toSerializableMsg(m),
+          data: ctx.evaluate ? ctx.evaluate(m.content) : m.content
+        }))
+      ].map((v) => JSON.stringify(v)));
+    }
+    const withRole = a.includes("role");
+    return makeArray2(msgs.map((m) => withRole ? `${risuRole(m.role)}: ${m.content}` : m.content));
+  }, "No args \u2192 full JSON history with first-greeting at index 0. With 'role' arg \u2192 array of 'role: data' strings.");
+  register9("previouschatlog", (ctx, a) => {
+    const idx = Number(a[0]);
+    const msgs = ctx.messages.all();
+    return msgs[idx]?.content ?? "Out of range";
+  }, "Returns message[N].content, or 'Out of range' if index invalid.");
+  register9("previouscharchat", (ctx) => {
+    const msgs = ctx.messages.all();
+    const start = ctx.cbsContext ? msgs.length - 1 : ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1;
+    for (let i = start;i >= 0; i--) {
+      const m = msgs[i];
+      if (m && m.role === "assistant")
+        return m.content;
+    }
+    return selectedGreeting(ctx);
+  }, "Last character (assistant) message; cbs walks from chat-end, others from currentMessageIndex-1.");
+  register9("previoususerchat", (ctx) => {
+    if (ctx.cbsContext)
+      return "";
+    if (ctx.currentMessageIndex === null)
+      return "";
+    const msgs = ctx.messages.all();
+    for (let i = ctx.currentMessageIndex - 1;i >= 0; i--) {
+      const m = msgs[i];
+      if (m && m.role === "user")
+        return m.content;
+    }
+    return selectedGreeting(ctx);
+  }, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
+  register9("lastmessage", (ctx) => {
+    const last = ctx.messages.last();
+    return last?.content ?? "";
+  }, "Content of the most recent message, regardless of role.");
+  register9("lastmessageid", (ctx) => {
+    const n = ctx.messages.count();
+    return Math.max(-1, n - 1).toString();
+  }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");
+  register9("lastusermessage", (ctx) => {
+    const m = ctx.messages.lastOf("user");
+    return m?.content ?? "";
+  }, "Alias-style shortcut for the most recent user message. '' if none.");
+  register9("lastcharmessage", (ctx) => {
+    const m = ctx.messages.lastOf("assistant");
+    return m?.content ?? "";
+  }, "Alias-style shortcut for the most recent character (assistant) message.");
+  register9("jbtoggled", (ctx) => ctx.jailbreakToggle ? "1" : "0", "Returns '1' when the global jailbreak toggle is on.");
+  register9("maxcontext", (ctx) => ctx.maxContext.toString(), "Returns the configured max-context length as a string.");
+  register9("messagecount", (ctx) => ctx.messages.count().toString(), "Returns the total number of messages in the chat.");
+});
+
+// src/risu-compat/handlers/display.ts
+function register10(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Display", scoped: false });
+}
+var DOC_ONLY;
+var init_display = __esm(() => {
+  init_registry();
+  register10("decbo", () => "\uE9B8", "Displays as { without being re-lexed by the parser (PUA sentinel).");
+  register10("decbc", () => "\uE9B9", "Displays as } without being re-lexed.");
+  register10("bo", () => "\uE9B8\uE9B8", "Displays as {{ without being re-lexed.");
+  register10("bc", () => "\uE9B9\uE9B9", "Displays as }} without being re-lexed.");
+  register10("displayescapedbracketopen", () => "\uE9BA", "Displays as ( (PUA sentinel).");
+  register10("displayescapedbracketclose", () => "\uE9BB", "Displays as ).");
+  register10("displayescapedanglebracketopen", () => "\uE9BC", "Displays as < (PUA sentinel).");
+  register10("displayescapedanglebracketclose", () => "\uE9BD", "Displays as >.");
+  register10("displayescapedcolon", () => "\uE9BE", "Displays as : without being parsed as a CBS separator.");
+  register10("displayescapedsemicolon", () => "\uE9BF", "Displays as ;.");
+  register10("cbr", (_c, a) => {
+    if (a.length === 0)
+      return "\\n";
+    const n = Math.max(1, Number(a[0] ?? "1"));
+    return "\\n".repeat(n);
+  }, "Returns a literal '\\n'. With numeric arg, repeats that many times.");
+  register10("position", (ctx, args, raw) => {
+    if (ctx.cbsContext) {
+      const source = raw || `position::${args.join("::")}`;
+      return `{{${source}}}`;
+    }
+    const name = args[0];
+    if (typeof name !== "string" || name.length === 0)
+      return "";
+    const map = ctx.positionPt;
+    if (!map)
+      return "";
+    return map[name] ?? "";
+  }, "Risu {{position::NAME}}: joined content of active entries with @@position pt_<NAME>.");
+  DOC_ONLY = [
+    ["slot", "{{slot::VAR}} inside a scoped block. Resolved by #each/#func/call handlers."]
+  ];
+  for (const [name, desc] of DOC_ONLY) {
+    register10(name, () => "", desc);
+  }
+  register10("bkspc", () => "", "Removes the last word from the parser output buffer.");
+  register10("erase", () => "", "Removes the last sentence from the parser output buffer.");
+});
+
+// src/risu-compat/handlers/metadata.ts
+function register11(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Metadata", scoped: false });
+}
+var init_metadata = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  init_base64();
+  register11("declare", (ctx, a) => {
+    ctx.vars.set("temp", `__declared_${a[0] ?? ""}__`, "1");
+    return "";
+  }, "Declares a marker; {{declared::NAME}} reads it. Backed by the temp-scope store.");
+  register11("declared", (ctx, a) => {
+    return ctx.vars.get("temp", `__declared_${a[0] ?? ""}__`) === "1" ? "1" : "0";
+  }, "Reads a declaration marker set by {{declare::NAME}}.");
+  register11("emotionlist", (ctx) => {
+    return makeArray2(ctx.character.emotionImages.map((e) => e.name));
+  }, "JSON array of emotion image names for the current character.");
+  register11("assetlist", (ctx) => {
+    if (ctx.character.type === "group")
+      return "";
+    return makeArray2(ctx.character.additionalAssets.map((a) => a.name));
+  }, "JSON array of additional asset names. '' for group characters.");
+  register11("prefillsupported", (ctx) => {
+    return ctx.aiModel.startsWith("claude") ? "1" : "0";
+  }, "'1' if the current AI model id starts with 'claude' (Claude supports prefill).");
+  register11("file", (ctx, a) => {
+    const decode = ctx.cbsContext || ctx.commit;
+    if (!decode)
+      return `<br><div class="x-risu-risu-file">${a[0] ?? ""}</div><br>`;
+    const content = a[1] ?? "";
+    try {
+      return base64ToUtf8(content);
+    } catch {
+      return "";
+    }
+  }, 'Decodes base64 file content to UTF-8 (prompt and cbs paths); renders <div class="risu-file">\u2026</div> in display path.');
+  register11("chardisplayasset", (ctx) => {
+    if (!ctx.character.prebuiltAssetCommand)
+      return makeArray2([]);
+    const excludes = ctx.character.prebuiltAssetExclude;
+    const list = ctx.character.additionalAssets.filter((a) => !excludes.includes(a.src)).map((a) => a.name);
+    return makeArray2(list);
+  }, "JSON array of character display assets, minus the excluded set. Empty array if prebuiltAssetCommand is off.");
+});
+
+// src/risu-compat/handlers/assets.ts
+function register12(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Assets", scoped: false });
+}
+function trimAssetKey(s) {
+  let out = s;
+  for (const e of TRIMMER_EXTS) {
+    if (out.endsWith("." + e)) {
+      out = out.substring(0, out.length - e.length - 1);
+      break;
+    }
+  }
+  return out.trim().replace(/[_ \-.]/g, "");
+}
+function getDistance(a, b) {
+  const h = a.length + 1;
+  const w = b.length + 1;
+  const d = new Int16Array(h * w);
+  for (let i = 0;i < h; i++)
+    d[i * w] = i;
+  for (let j = 0;j < w; j++)
+    d[j] = j;
+  for (let i = 1;i < h; i++) {
+    for (let j = 1;j < w; j++) {
+      d[i * w + j] = Math.min(d[(i - 1) * w + (j - 1)] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1), d[(i - 1) * w + j] + 1, d[i * w + (j - 1)] + 1);
+    }
+  }
+  return d[h * w - 1];
+}
+function findAsset(ctx, list, name, legacyMediaFindings) {
+  const norm = name.toLowerCase();
+  let matches = null;
+  for (const a of list) {
+    if (a.name.toLowerCase() === norm) {
+      if (matches === null)
+        matches = [a];
+      else
+        matches.push(a);
+    }
+  }
+  if (matches !== null) {
+    if (matches.length === 1)
+      return matches[0];
+    const chatID = ctx.currentMessageIndex ?? -1;
+    const seedWord = (ctx.character.chaId || "global") + String(chatID);
+    const cx = pickHashRand(chatID, seedWord);
+    const selIndex = Math.floor(cx * matches.length);
+    return matches[selIndex] ?? matches[0];
+  }
+  if (legacyMediaFindings)
+    return null;
+  const trimmedName = trimAssetKey(norm);
+  if (trimmedName.length === 0)
+    return null;
+  let closest = null;
+  let closestDist = Number.MAX_SAFE_INTEGER;
+  for (const a of list) {
+    const key = trimAssetKey(a.name.toLowerCase());
+    const dist = getDistance(trimmedName, key);
+    if (dist < closestDist) {
+      closest = a;
+      closestDist = dist;
+      if (dist === 0)
+        break;
+    }
+  }
+  if (closestDist > ASSET_MAX_DIFFERENCE)
+    return null;
+  return closest;
+}
+function imgTag(src) {
+  return `<img src="${src}" alt="${src}" style="${ASSET_WIDTH_STYLE} "/>`;
+}
+function videoTag(src, opts) {
+  const controls = opts.controls ? "controls " : "";
+  const muted = opts.muted ? "muted " : "";
+  return `<video ${controls}${muted}autoplay loop><source src="${src}" type="video/mp4"></video>
+`;
+}
+function literal(name, args) {
+  return `{{${name}${args.length > 0 ? "::" + args.join("::") : ""}}}`;
+}
+var ASSET_WIDTH_STYLE = "", VIDEO_EXTENSIONS, TRIMMER_EXTS, ASSET_MAX_DIFFERENCE = 4;
+var init_assets = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  VIDEO_EXTENSIONS = new Set(["mp4", "webm", "avi", "m4p", "m4v"]);
+  TRIMMER_EXTS = [
+    "webp",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "mp4",
+    "webm",
+    "avi",
+    "m4p",
+    "m4v",
+    "mp3",
+    "wav",
+    "ogg"
+  ];
+  register12("path", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("path", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    return hit?.src ?? "";
+  }, "Asset URL by name, plain string (for src=/url()). parser.svelte.ts.");
+  register12("img", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("img", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return imgTag(hit.src);
+  }, "Inline <img> for a named asset. parser.svelte.ts.");
+  register12("image", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("image", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="${hit.src}" alt="${hit.src}" style="${ASSET_WIDTH_STYLE}"/></div>
+`;
+  }, "Inlay image wrapper. parser.svelte.ts.");
+  register12("emotion", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("emotion", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.emotionImages, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return imgTag(hit.src);
+  }, "Emotion image by name. parser.svelte.ts.");
+  register12("asset", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("asset", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    if (hit.ext && VIDEO_EXTENSIONS.has(hit.ext.toLowerCase())) {
+      return videoTag(hit.src, { controls: false, muted: true });
+    }
+    return `${imgTag(hit.src)}
+`;
+  }, "Asset by name \u2014 img or video depending on extension. parser.svelte.ts.");
+  register12("bg", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("bg", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return `<div style="width:100%;height:100%;background: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),url(${hit.src}); background-size: cover;"></div>`;
+  }, "Background panel. parser.svelte.ts.");
+  register12("video", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("video", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return videoTag(hit.src, { controls: true, muted: false });
+  }, "Full-featured video. parser.svelte.ts.");
+  register12("video-img", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("video-img", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return videoTag(hit.src, { controls: false, muted: true });
+  }, "Muted autoplay video (image-substitute). parser.svelte.ts.");
+  register12("audio", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("audio", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return `<audio controls autoplay loop><source src="${hit.src}" type="audio/mpeg"></audio>
+`;
+  }, "Audio player. parser.svelte.ts.");
+  register12("bgm", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("bgm", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return `<div risu-ctrl="bgm___auto___${hit.src}" style="display:none;"></div>
+`;
+  }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
+  register12("inlay", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("inlay", args);
+    const id = String(args[0] ?? "");
+    if (!id)
+      return "";
+    return `<img src="/api/v1/images/${id}"/>`;
+  }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
+  register12("inlayed", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("inlayed", args);
+    const id = String(args[0] ?? "");
+    if (!id)
+      return "";
+    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>
+
+`;
+  }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
+  register12("inlayeddata", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("inlayeddata", args);
+    const id = String(args[0] ?? "");
+    if (!id)
+      return "";
+    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>
+
+`;
+  }, "Wrapped inlay image (data variant). Risu parser.svelte.ts + 688.");
+  register12("source", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("source", args);
+    const kind = String(args[0] ?? "").toLowerCase();
+    if (kind === "char")
+      return ctx.character.image;
+    if (kind === "user")
+      return ctx.identity.personaImage;
+    return "";
+  }, "{{source::char}} / {{source::user}} avatar URLs. parser.svelte.ts. Empty string when no avatar uploaded.");
+});
+
+// src/risu-compat/handlers/index.ts
+var init_handlers = __esm(() => {
+  init_trigger_id();
+  init_context_reads();
+  init_math();
+  init_logic();
+  init_strings();
+  init_arrays();
+  init_random();
+  init_variables();
+  init_misc();
+  init_chat_context();
+  init_display();
+  init_metadata();
+  init_assets();
 });
 // src/core/cbs/parser.ts
 function normalizeMacroName(raw) {
@@ -4536,37 +5956,6 @@ var init_catalog = __esm(() => {
   init_schema();
   init_loader();
 });
-// src/core/cbs/rewrite/encode.ts
-function decodeOpaqueBody(s) {
-  return s.replaceAll(COLON_A + COLON_B, "::").replaceAll(CLOSE_BRACE_A + CLOSE_BRACE_B, "}}").replaceAll(OPEN_BRACE_A + OPEN_BRACE_B, "{{");
-}
-var OPEN_BRACE_A = "\uE9B8", OPEN_BRACE_B = "\uE9B9", CLOSE_BRACE_A = "\uE9BA", CLOSE_BRACE_B = "\uE9BB", COLON_A = "\uE9BC", COLON_B = "\uE9BD";
-var init_encode = () => {};
-
-// src/core/cbs/rewrite/blocks.ts
-var STRUCTURAL_KINDS, OPAQUE_KINDS2;
-var init_blocks = __esm(() => {
-  init_encode();
-  STRUCTURAL_KINDS = new Set([
-    "if",
-    "when",
-    "unknown"
-  ]);
-  OPAQUE_KINDS2 = new Set([
-    "each",
-    "func",
-    "pure",
-    "pure_display",
-    "ignore",
-    "escape",
-    "code"
-  ]);
-});
-// src/core/cbs/rewrite/index.ts
-var init_rewrite = __esm(() => {
-  init_encode();
-  init_blocks();
-});
 // src/core/cbs/runtime/mock.ts
 class MockVariableStore {
   data = {
@@ -4617,1873 +6006,7 @@ var init_runtime = __esm(() => {
 var init_cbs = __esm(() => {
   init_parser();
   init_catalog();
-  init_rewrite();
   init_runtime();
-});
-
-// src/risu-compat/handlers/opaque-blocks.ts
-function parseOpaqueArgs(args) {
-  if (args.length === 0)
-    return { mode: null, body: "" };
-  if (args.length === 1)
-    return { mode: null, body: decodeOpaqueBody(args[0]) };
-  const raw = args[args.length - 1];
-  const mode = args.slice(0, -1).join("::");
-  return { mode, body: decodeOpaqueBody(raw) };
-}
-function risuEscape2(text) {
-  let out = "";
-  for (let i = 0;i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    if (c === 123)
-      out += "\uE9B8";
-    else if (c === 125)
-      out += "\uE9B9";
-    else if (c === 40)
-      out += "\uE9BA";
-    else if (c === 41)
-      out += "\uE9BB";
-    else
-      out += text[i];
-  }
-  return out;
-}
-function processUnicodeEscapes(s) {
-  let out = "";
-  let i = 0;
-  while (i < s.length) {
-    if (s[i] === "\\" && s[i + 1] === "u" && i + 6 <= s.length) {
-      const hex = s.slice(i + 2, i + 6);
-      if (/^[0-9A-Fa-f]{4}$/.test(hex)) {
-        out += String.fromCharCode(parseInt(hex, 16));
-        i += 6;
-        continue;
-      }
-    }
-    out += s[i];
-    i++;
-  }
-  return out;
-}
-function processBackslashEscapes(s) {
-  let out = "";
-  let i = 0;
-  while (i < s.length) {
-    if (s[i] === "\\" && i + 1 < s.length) {
-      const next = s[i + 1];
-      switch (next) {
-        case "n":
-          out += `
-`;
-          break;
-        case "r":
-          out += "\r";
-          break;
-        case "t":
-          out += "\t";
-          break;
-        case "b":
-          out += "\b";
-          break;
-        case "f":
-          out += "\f";
-          break;
-        case "v":
-          out += "\v";
-          break;
-        case "a":
-          out += "\x07";
-          break;
-        case "x":
-          out += "\x00";
-          break;
-        default:
-          out += next;
-      }
-      i += 2;
-      continue;
-    }
-    out += s[i];
-    i++;
-  }
-  return out;
-}
-var ignoreHandler = () => "", pureHandler = (_ctx, args) => {
-  const { body } = parseOpaqueArgs(args);
-  return body.trim();
-}, pureDisplayHandler = (_ctx, args) => {
-  const { body } = parseOpaqueArgs(args);
-  return body.trim().replaceAll("{{", "\\{\\{").replaceAll("}}", "\\}\\}");
-}, escapeHandler = (_ctx, args) => {
-  const { mode, body } = parseOpaqueArgs(args);
-  return risuEscape2(mode === "keep" ? body : body.trim());
-}, codeHandler = (_ctx, args) => {
-  const { body } = parseOpaqueArgs(args);
-  let s = body.trim().replaceAll(`
-`, "").replaceAll("\t", "");
-  s = processUnicodeEscapes(s);
-  s = processBackslashEscapes(s);
-  return s;
-};
-var init_opaque_blocks = __esm(() => {
-  init_cbs();
-  init_registry();
-  registry.register({
-    name: "risu_ignore",
-    handler: ignoreHandler,
-    description: "Discards the block body and returns empty string.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_pure",
-    handler: pureHandler,
-    description: "Returns the block body as literal text without evaluating inner macros.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_pure_display",
-    handler: pureDisplayHandler,
-    description: "Returns the block body with {{ and }} backslash-escaped so nothing downstream re-parses them.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_escape",
-    handler: escapeHandler,
-    description: "Replaces { } ( ) with Private Use Area characters so they don't parse as macro/function syntax.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_code",
-    handler: codeHandler,
-    description: "Normalizes a block of code text: trims, removes newlines/tabs, and processes backslash escape sequences.",
-    category: "Risu / Control",
-    scoped: false
-  });
-});
-
-// src/risu-compat/handlers/structural-blocks.ts
-function splitOnElse(body) {
-  const idx = body.indexOf(ELSE_MARKER);
-  if (idx < 0)
-    return { truthy: body, falsy: "" };
-  return { truthy: body.substring(0, idx), falsy: body.substring(idx + ELSE_MARKER.length) };
-}
-function evaluateWhen(statement, readVar, readToggle) {
-  const stack = [...statement];
-  let mode = "normal";
-  while (stack.length > 1) {
-    const condition = stack.pop();
-    const operator = stack.pop();
-    switch (operator) {
-      case "not":
-        stack.push(isTruthy2(condition) ? "0" : "1");
-        break;
-      case "keep":
-        mode = "keep";
-        stack.push(condition);
-        break;
-      case "legacy":
-        mode = "legacy";
-        stack.push(condition);
-        break;
-      case "and": {
-        const c2 = stack.pop();
-        stack.push(isTruthy2(condition) && isTruthy2(c2) ? "1" : "0");
-        break;
-      }
-      case "or": {
-        const c2 = stack.pop();
-        stack.push(isTruthy2(condition) || isTruthy2(c2) ? "1" : "0");
-        break;
-      }
-      case "is": {
-        const c2 = stack.pop();
-        stack.push(condition === c2 ? "1" : "0");
-        break;
-      }
-      case "isnot": {
-        const c2 = stack.pop();
-        stack.push(condition !== c2 ? "1" : "0");
-        break;
-      }
-      case "var": {
-        stack.push(isTruthy2(readVar(condition)) ? "1" : "0");
-        break;
-      }
-      case "toggle": {
-        stack.push(isTruthy2(readToggle(condition)) ? "1" : "0");
-        break;
-      }
-      case "vis": {
-        const name = stack.pop();
-        stack.push(readVar(name) === condition ? "1" : "0");
-        break;
-      }
-      case "visnot": {
-        const name = stack.pop();
-        stack.push(readVar(name) !== condition ? "1" : "0");
-        break;
-      }
-      case "tis": {
-        const name = stack.pop();
-        stack.push(readToggle(name) === condition ? "1" : "0");
-        break;
-      }
-      case "tisnot": {
-        const name = stack.pop();
-        stack.push(readToggle(name) !== condition ? "1" : "0");
-        break;
-      }
-      case ">": {
-        const c2 = stack.pop();
-        stack.push(parseFloat(c2) > parseFloat(condition) ? "1" : "0");
-        break;
-      }
-      case "<": {
-        const c2 = stack.pop();
-        stack.push(parseFloat(c2) < parseFloat(condition) ? "1" : "0");
-        break;
-      }
-      case ">=": {
-        const c2 = stack.pop();
-        stack.push(parseFloat(c2) >= parseFloat(condition) ? "1" : "0");
-        break;
-      }
-      case "<=": {
-        const c2 = stack.pop();
-        stack.push(parseFloat(c2) <= parseFloat(condition) ? "1" : "0");
-        break;
-      }
-      default:
-        stack.push(isTruthy2(condition) ? "1" : "0");
-    }
-  }
-  return { truthy: isTruthy2(stack[0] ?? "0"), mode };
-}
-function trimLines2(s) {
-  const lines = s.split(`
-`);
-  while (lines.length > 0 && lines[0].trim() === "")
-    lines.shift();
-  while (lines.length > 0 && lines[lines.length - 1].trim() === "")
-    lines.pop();
-  return lines.join(`
-`);
-}
-var ELSE_MARKER = "\x00ELSE_MARKER\x00", isTruthy2 = (s) => {
-  const t = s.trim();
-  return t === "true" || t === "1";
-}, ifHandler = (_ctx, args) => {
-  if (args.length < 1)
-    return "";
-  const cond = args[0];
-  const body = args.length >= 2 ? args[args.length - 1] : "";
-  const branches = splitOnElse(body);
-  return isTruthy2(cond) ? trimLines2(branches.truthy) : trimLines2(branches.falsy);
-}, whenHandler = (ctx, args) => {
-  if (args.length < 1)
-    return "";
-  const body = args[args.length - 1];
-  const statement = args.slice(0, -1);
-  const readVar = (name) => ctx.vars.get("local", name);
-  const readToggle = (name) => ctx.vars.get("global", "toggle_" + name);
-  if (statement.length <= 1) {
-    const state = statement[0] ?? "";
-    const branches2 = splitOnElse(body);
-    return isTruthy2(state) ? branches2.truthy : branches2.falsy;
-  }
-  const result = evaluateWhen(statement, readVar, readToggle);
-  const branches = splitOnElse(body);
-  if (result.truthy) {
-    if (result.mode === "keep")
-      return branches.truthy;
-    if (result.mode === "legacy")
-      return branches.truthy;
-    return trimLines2(branches.truthy);
-  }
-  if (result.mode === "keep")
-    return branches.falsy;
-  if (result.mode === "legacy")
-    return branches.falsy;
-  return trimLines2(branches.falsy);
-}, unknownHandler = (_ctx, args) => {
-  return args.length > 0 ? args[args.length - 1] ?? "" : "";
-};
-var init_structural_blocks = __esm(() => {
-  init_registry();
-  registry.register({
-    name: "risu_if",
-    handler: ifHandler,
-    description: "Conditional block. Returns body if the condition argument is truthy ('1' or 'true'), else empty (or the {{else}} branch).",
-    category: "Risu / Control",
-    scoped: true
-  });
-  registry.register({
-    name: "risu_when",
-    handler: whenHandler,
-    description: "Conditional block with operator chain. Supports and/or/is/isnot/not/var/vis/visnot/toggle/tis/tisnot/>/</>=/<= and whitespace modes (keep, legacy).",
-    category: "Risu / Control",
-    scoped: true
-  });
-  registry.register({
-    name: "risu_unknown",
-    handler: unknownHandler,
-    description: "Fallback for unknown block constructs. Emits the body as-is without interpretation.",
-    category: "Risu / Control",
-    scoped: true
-  });
-});
-
-// src/risu-compat/handlers/iteration-blocks.ts
-function parseArray2(s) {
-  try {
-    const arr = JSON.parse(s);
-    if (Array.isArray(arr))
-      return arr;
-  } catch {}
-  return s.split("\xA7");
-}
-function stringify(v) {
-  return typeof v === "string" ? v : JSON.stringify(v);
-}
-function trimLines3(s) {
-  return s.split(`
-`).map((v) => v.trimStart()).join(`
-`).trim();
-}
-function splitOnce(s, sep) {
-  const idx = s.indexOf(sep);
-  if (idx === -1)
-    return [s, null];
-  return [s.substring(0, idx), s.substring(idx + sep.length)];
-}
-var eachHandler = (_ctx, args) => {
-  if (args.length < 2)
-    return "";
-  const rawHeader = args[0];
-  const encodedBody = args[args.length - 1];
-  const body = decodeOpaqueBody(encodedBody);
-  let header = rawHeader.trim();
-  let mode = "normal";
-  if (header.startsWith("::keep ")) {
-    mode = "keep";
-    header = header.substring(7).trim();
-  } else if (header.startsWith("keep ")) {
-    mode = "keep";
-    header = header.substring(5).trim();
-  }
-  if (header.startsWith("as "))
-    header = header.substring(3).trim();
-  let sub;
-  let arrayExpr;
-  const asIdx = header.lastIndexOf(" as ");
-  if (asIdx !== -1) {
-    sub = header.substring(asIdx + 4).trim();
-    arrayExpr = header.substring(0, asIdx);
-  } else {
-    const spaceIdx = header.lastIndexOf(" ");
-    if (spaceIdx === -1)
-      return "";
-    sub = header.substring(spaceIdx + 1).trim();
-    arrayExpr = header.substring(0, spaceIdx);
-  }
-  const array = parseArray2(arrayExpr);
-  const needle = "{{slot::" + sub + "}}";
-  const repeatBody = mode === "keep" ? body : trimLines3(body.trim());
-  let out = "";
-  for (let i = 0;i < array.length; i++) {
-    out += repeatBody.replaceAll(needle, stringify(array[i]));
-  }
-  return mode === "keep" ? out : out.trim();
-}, funcHandler = (ctx, args) => {
-  if (args.length < 2)
-    return "";
-  const header = args[0];
-  const encodedBody = args[args.length - 1];
-  const body = decodeOpaqueBody(encodedBody);
-  const parts = header.trim().split(" ").filter((p) => p.length > 0);
-  if (parts.length === 0)
-    return "";
-  const name = parts[0];
-  const argNames = parts.slice(1);
-  ctx.functions.define(name, body, argNames);
-  return "";
-}, callHandler = (ctx, args, raw) => {
-  if (args.length === 0)
-    return `{{${raw}}}`;
-  const funcName = args[0];
-  const fn = ctx.functions.get(funcName);
-  if (!fn)
-    return `{{${raw}}}`;
-  let out = fn.body;
-  for (let i = 0;i < args.length - 1; i++) {
-    out = out.replaceAll("{{arg::" + i + "}}", args[i + 1] ?? "");
-  }
-  for (let i = args.length - 1;i < fn.argNames.length + 10; i++) {
-    out = out.replaceAll("{{arg::" + i + "}}", "");
-  }
-  return out;
-}, legacyHandler = (_ctx, args) => {
-  if (args.length === 0)
-    return "";
-  const raw = decodeOpaqueBody(args[0]);
-  const nl = raw.indexOf(`
-`);
-  if (nl === -1)
-    return "";
-  const logic = raw.substring(0, nl);
-  const content = raw.substring(nl + 1);
-  const [keyword, condRaw] = splitOnce(logic, " ");
-  if (keyword !== "if")
-    return "";
-  const cond = (condRaw ?? "").trim();
-  if (cond.length === 0)
-    return "";
-  return `{{#risu_if::${cond}}}${content}{{/risu_if}}`;
-};
-var init_iteration_blocks = __esm(() => {
-  init_cbs();
-  init_registry();
-  registry.register({
-    name: "risu_each",
-    handler: eachHandler,
-    description: "Iterates over a JSON or \xA7-delimited array, substituting {{slot::name}} per iteration. Known deviation: inner macros are not re-evaluated per iteration.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_func",
-    handler: funcHandler,
-    description: "Defines a reusable function; later invoked via {{call::name::arg0::arg1}}. Arguments referenced in the body as {{arg::0}}, {{arg::1}}, etc.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "call",
-    handler: callHandler,
-    description: "Invokes a function previously defined by #func. Arguments are passed as additional :: tokens and referenced inside the function body as {{arg::0}}, {{arg::1}}, \u2026",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_legacy",
-    handler: legacyHandler,
-    description: "Legacy {#if cond\\ncontent#} form. Returns trimmed content if cond is not '', '0', or '-1'.",
-    category: "Risu / Control",
-    scoped: false
-  });
-});
-
-// src/util/role-coerce.ts
-function lumiRoleToRisu(r) {
-  return r === "user" ? "user" : "char";
-}
-function normalizeRoleToLumi(r) {
-  if (r === "user" || r === "assistant" || r === "system")
-    return r;
-  if (r === "char" || r === "bot")
-    return "assistant";
-  if (r === "sys")
-    return "system";
-  return null;
-}
-
-// src/risu-compat/handlers/context-reads.ts
-function register(name, handler, description) {
-  registry.register({
-    name,
-    handler,
-    description,
-    category: "Risu / Context",
-    scoped: false
-  });
-}
-function recurse(ctx, field) {
-  return ctx.evaluate ? ctx.evaluate(field) : field;
-}
-function formatDuration(ms) {
-  let seconds = Math.floor(ms / 1000);
-  let minutes = Math.floor(seconds / 60);
-  let hours = Math.floor(minutes / 60);
-  seconds = seconds % 60;
-  minutes = minutes % 60;
-  return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-}
-function makeArray(arr) {
-  return JSON.stringify(arr.map((v) => {
-    if (typeof v === "string")
-      return v.replaceAll("::", "\\u003A\\u003A");
-    return v;
-  }));
-}
-var init_context_reads = __esm(() => {
-  init_registry();
-  register("risu_description", (ctx) => recurse(ctx, ctx.character.description), "Returns the character description, recursively parsed.");
-  register("risu_personality", (ctx) => recurse(ctx, ctx.character.personality), "Returns the character personality field, recursively parsed.");
-  register("risu_scenario", (ctx) => recurse(ctx, ctx.character.scenario), "Returns the character scenario field, recursively parsed.");
-  register("risu_persona", (ctx) => recurse(ctx, ctx.identity.personaText), "Returns the user persona prompt, recursively parsed.");
-  register("exampledialogue", (ctx) => recurse(ctx, ctx.character.exampleDialogue), "Returns the character's example dialogue field, recursively parsed.");
-  register("mainprompt", (ctx) => recurse(ctx, ctx.character.mainPrompt), "Returns the system/main prompt configured for the current character, recursively parsed.");
-  register("jb", (ctx) => recurse(ctx, ctx.character.jailbreakPrompt), "Returns the jailbreak prompt text, recursively parsed.");
-  register("globalnote", (ctx) => recurse(ctx, ctx.character.globalNote), "Returns the global note (system note / ujb), recursively parsed.");
-  register("authornote", (ctx) => recurse(ctx, ctx.character.authorsNote), "Returns the author's note for the current chat, recursively parsed.");
-  register("risu_model", (ctx) => ctx.aiModel, "Returns the id of the currently selected AI model.");
-  register("axmodel", (ctx) => ctx.axModel, "Returns the id of the auxiliary/secondary model.");
-  register("role", (ctx) => {
-    if (ctx.cbsContext)
-      return "null";
-    if (ctx.role !== null)
-      return lumiRoleToRisu(ctx.role);
-    if (ctx.promptRegexLiteralVars)
-      return "null";
-    if (ctx.isFirstMessage)
-      return "char";
-    return "null";
-  }, "Returns the role of the current message ('user', 'char'/'assistant', 'system').");
-  register("isfirstmsg", (ctx) => {
-    if (ctx.cbsContext)
-      return "0";
-    if (ctx.promptRegexLiteralVars)
-      return "0";
-    if (ctx.currentMessageIndex !== null && ctx.currentMessageIndex !== undefined) {
-      return ctx.currentMessageIndex === -1 ? "1" : "0";
-    }
-    return ctx.isFirstMessage ? "1" : "0";
-  }, "Returns '1' if the current context is the first (greeting) message, '0' otherwise.");
-  register("unixtime", (ctx) => Math.floor(ctx.clock.now() / 1000).toString(), "Returns the current unix timestamp in seconds.");
-  register("risu_time", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
-  }, "Returns the current local time in H:M:S format (unpadded, matching Risu).");
-  register("isotime", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getUTCHours()}:${d.getUTCMinutes()}:${d.getUTCSeconds()}`;
-  }, "Returns the current UTC time in H:M:S format.");
-  register("isodate", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
-  }, "Returns the current UTC date in YYYY-M-D format (month/day not zero-padded, matching Risu).");
-  register("messagetime", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    const msg = msgs[ctx.currentMessageIndex];
-    if (!msg)
-      return "[Cannot get time]";
-    if (!msg.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return new Date(msg.createdAt).toLocaleTimeString();
-  }, "Returns the local time the current message was sent.");
-  register("messagedate", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    const msg = msgs[ctx.currentMessageIndex];
-    if (!msg)
-      return "[Cannot get time]";
-    if (!msg.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return new Date(msg.createdAt).toLocaleDateString();
-  }, "Returns the local date the current message was sent.");
-  register("messageunixtimearray", (ctx) => {
-    const arr = ctx.messages.all().map((m) => String(m.createdAt ?? 0));
-    return makeArray(arr);
-  }, "Returns a JSON-encoded array of all message unix timestamps (milliseconds).");
-  register("idleduration", (ctx) => {
-    const msgs = ctx.messages.all();
-    if (msgs.length === 0)
-      return "00:00:00";
-    const last = msgs[msgs.length - 1];
-    if (!last.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return formatDuration(ctx.clock.now() - last.createdAt);
-  }, "Returns HH:MM:SS since the most recent message.");
-  register("messageidleduration", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    let pointer = ctx.currentMessageIndex;
-    let message;
-    let previous;
-    let stage = "findLast";
-    while (pointer >= 0) {
-      const m = msgs[pointer];
-      if (m && m.role === "user") {
-        if (stage === "findLast") {
-          message = m;
-          stage = "findSecondLast";
-        } else {
-          previous = m;
-          break;
-        }
-      }
-      pointer--;
-    }
-    if (!message)
-      return "[No user message found]";
-    if (!previous)
-      return "[No previous user message found]";
-    if (!message.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    if (!previous.createdAt)
-      return "[Cannot get time, previous message was sent in older version]";
-    return formatDuration(message.createdAt - previous.createdAt);
-  }, "Returns HH:MM:SS between the current and the previous user message.");
-  register("br", () => `
-`, "Returns a literal newline character.");
-  register("blank", () => "", "Returns an empty string.");
-});
-
-// src/risu-compat/risu-helpers.ts
-function parseArray3(s) {
-  try {
-    const arr = JSON.parse(s);
-    if (Array.isArray(arr))
-      return arr;
-  } catch {}
-  return s.split("\xA7");
-}
-function parseDict(s) {
-  try {
-    const v = JSON.parse(s);
-    if (v && typeof v === "object" && !Array.isArray(v))
-      return v;
-  } catch {}
-  return {};
-}
-function makeArray2(arr) {
-  return JSON.stringify(arr.map((v) => {
-    if (typeof v === "string")
-      return v.replaceAll("::", "\\u003A\\u003A");
-    return v;
-  }));
-}
-function sfc32(a, b, c, d) {
-  return function() {
-    a |= 0;
-    b |= 0;
-    c |= 0;
-    d |= 0;
-    const t = (a + b | 0) + d | 0;
-    d = d + 1 | 0;
-    a = b ^ b >>> 9;
-    b = c + (c << 3) | 0;
-    c = c << 21 | c >>> 11;
-    c = c + t | 0;
-    return (t >>> 0) / 4294967296;
-  };
-}
-function pickHashRand(cid, word) {
-  let hashAddress = 5515;
-  const rand = (w) => {
-    for (let counter = 0;counter < w.length; counter++) {
-      hashAddress = (hashAddress << 5) + hashAddress + w.charCodeAt(counter);
-    }
-    return hashAddress;
-  };
-  const randF = sfc32(rand(word), rand(word), rand(word), rand(word));
-  const v = cid % 1000;
-  for (let i = 0;i < v; i++)
-    randF();
-  return randF();
-}
-function dateTimeFormat(main, time = 0) {
-  const date = time === 0 ? new Date : new Date(time);
-  if (!main)
-    return "";
-  if (main.startsWith(":"))
-    main = main.substring(1);
-  if (main.length > 300)
-    return "";
-  return main.replace(/YYYY/g, date.getFullYear().toString()).replace(/YY/g, date.getFullYear().toString().substring(2)).replace(/MMMM/g, new Intl.DateTimeFormat("en", { month: "long" }).format(date)).replace(/MMM/g, new Intl.DateTimeFormat("en", { month: "short" }).format(date)).replace(/MM/g, (date.getMonth() + 1).toString().padStart(2, "0")).replace(/DDDD/g, Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)).toString()).replace(/DD/g, date.getDate().toString().padStart(2, "0")).replace(/dddd/g, new Intl.DateTimeFormat("en", { weekday: "long" }).format(date)).replace(/ddd/g, new Intl.DateTimeFormat("en", { weekday: "short" }).format(date)).replace(/HH/g, date.getHours().toString().padStart(2, "0")).replace(/hh/g, (date.getHours() % 12 || 12).toString().padStart(2, "0")).replace(/mm/g, date.getMinutes().toString().padStart(2, "0")).replace(/ss/g, date.getSeconds().toString().padStart(2, "0")).replace(/X/g, Math.floor(date.getTime() / 1000).toString()).replace(/x/g, date.getTime().toString()).replace(/A/g, date.getHours() >= 12 ? "PM" : "AM");
-}
-function calcString(text, readLocal, readGlobal) {
-  const depthText = [""];
-  for (let i = 0;i < text.length; i++) {
-    if (text[i] === "(") {
-      depthText.push("");
-    } else if (text[i] === ")" && depthText.length > 1) {
-      const inner = depthText.pop();
-      const result = executeRPN(inner, readLocal, readGlobal);
-      depthText[depthText.length - 1] += result;
-    } else {
-      depthText[depthText.length - 1] += text[i];
-    }
-  }
-  return executeRPN(depthText.join(""), readLocal, readGlobal);
-}
-function executeRPN(text, readLocal, readGlobal) {
-  const substituted = text.replace(/\$([a-zA-Z0-9_]+)/g, (_, p1) => {
-    const v = readLocal(p1);
-    const parsed = parseFloat(v);
-    return isNaN(parsed) ? "0" : parsed.toString();
-  }).replace(/@([a-zA-Z0-9_]+)/g, (_, p1) => {
-    const v = readGlobal(p1);
-    const parsed = parseFloat(v);
-    return isNaN(parsed) ? "0" : parsed.toString();
-  }).replace(/&&/g, "&").replace(/\|\|/g, "|").replace(/<=/g, "\u2264").replace(/>=/g, "\u2265").replace(/==/g, "=").replace(/!=/g, "\u2260").replace(/null/gi, "0");
-  const rpn = toRPN(substituted);
-  return calculateRPN(rpn);
-}
-function toRPN(expression) {
-  expression = expression.replace(/\s+/g, "");
-  const expr2 = [];
-  let lastToken = "";
-  for (let i = 0;i < expression.length; i++) {
-    const char = expression[i];
-    if (char === "-" && (i === 0 || OPERATOR_CHARS.has(expression[i - 1]) || expression[i - 1] === "(")) {
-      lastToken += char;
-    } else if (OPERATOR_CHARS.has(char)) {
-      expr2.push(lastToken !== "" ? lastToken : "0");
-      lastToken = "";
-      expr2.push(char);
-    } else {
-      lastToken += char;
-    }
-  }
-  expr2.push(lastToken !== "" ? lastToken : "0");
-  let outputQueue = "";
-  const operatorStack = [];
-  for (const token of expr2) {
-    if (parseFloat(token) || token === "0") {
-      outputQueue += token + " ";
-    } else if (OPERATOR_CHARS.has(token)) {
-      while (operatorStack.length > 0) {
-        const top = operatorStack[operatorStack.length - 1];
-        const op = OPERATORS[token];
-        const topOp = OPERATORS[top];
-        const drain = op.associativity === "Left" ? op.precedence <= topOp.precedence : op.precedence < topOp.precedence;
-        if (!drain)
-          break;
-        outputQueue += operatorStack.pop() + " ";
-      }
-      operatorStack.push(token);
-    }
-  }
-  while (operatorStack.length > 0)
-    outputQueue += operatorStack.pop() + " ";
-  return outputQueue.trim();
-}
-function calculateRPN(expression) {
-  const stack = [];
-  for (const token of expression.split(" ")) {
-    if (parseFloat(token) || token === "0") {
-      stack.push(parseFloat(token));
-    } else {
-      const b = stack.pop();
-      const a = stack.pop();
-      switch (token) {
-        case "+":
-          stack.push(a + b);
-          break;
-        case "-":
-          stack.push(a - b);
-          break;
-        case "*":
-          stack.push(a * b);
-          break;
-        case "/":
-          stack.push(a / b);
-          break;
-        case "^":
-          stack.push(a ** b);
-          break;
-        case "%":
-          stack.push(a % b);
-          break;
-        case "<":
-          stack.push(a < b ? 1 : 0);
-          break;
-        case ">":
-          stack.push(a > b ? 1 : 0);
-          break;
-        case "|":
-          stack.push(a || b);
-          break;
-        case "&":
-          stack.push(a && b);
-          break;
-        case "\u2264":
-          stack.push(a <= b ? 1 : 0);
-          break;
-        case "\u2265":
-          stack.push(a >= b ? 1 : 0);
-          break;
-        case "=":
-          stack.push(a === b ? 1 : 0);
-          break;
-        case "\u2260":
-          stack.push(a !== b ? 1 : 0);
-          break;
-        case "!":
-          stack.push(b ? 0 : 1);
-          break;
-      }
-    }
-  }
-  return stack.length === 0 ? 0 : stack.pop();
-}
-var OPERATORS, OPERATOR_CHARS;
-var init_risu_helpers = __esm(() => {
-  OPERATORS = {
-    "+": { precedence: 2, associativity: "Left" },
-    "-": { precedence: 2, associativity: "Left" },
-    "*": { precedence: 3, associativity: "Left" },
-    "/": { precedence: 3, associativity: "Left" },
-    "^": { precedence: 4, associativity: "Left" },
-    "%": { precedence: 3, associativity: "Left" },
-    "<": { precedence: 1, associativity: "Left" },
-    ">": { precedence: 1, associativity: "Left" },
-    "|": { precedence: 1, associativity: "Left" },
-    "&": { precedence: 1, associativity: "Left" },
-    "\u2264": { precedence: 1, associativity: "Left" },
-    "\u2265": { precedence: 1, associativity: "Left" },
-    "=": { precedence: 1, associativity: "Left" },
-    "\u2260": { precedence: 1, associativity: "Left" },
-    "!": { precedence: 5, associativity: "Right" }
-  };
-  OPERATOR_CHARS = new Set(Object.keys(OPERATORS));
-});
-
-// src/risu-compat/handlers/math.ts
-function register2(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Math", scoped: false });
-}
-var aggSource = (args) => args.length > 1 ? args : parseArray3(args[0] ?? "").map((v) => String(v)), toNum = (s) => {
-  const n = Number(s);
-  return isNaN(n) ? 0 : n;
-};
-var init_math = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register2("risu_round", (_c, a) => Math.round(Number(a[0])).toString(), "Rounds to nearest integer (half-up).");
-  register2("risu_floor", (_c, a) => Math.floor(Number(a[0])).toString(), "Floors (rounds toward negative infinity).");
-  register2("risu_ceil", (_c, a) => Math.ceil(Number(a[0])).toString(), "Ceils (rounds toward positive infinity).");
-  register2("risu_abs", (_c, a) => Math.abs(Number(a[0])).toString(), "Absolute value.");
-  register2("remaind", (_c, a) => (Number(a[0]) % Number(a[1])).toString(), "Returns (a % b) as string.");
-  register2("pow", (_c, a) => Math.pow(Number(a[0]), Number(a[1])).toString(), "Returns a^b.");
-  register2("risu_min", (_c, a) => Math.min(...aggSource(a).map(toNum)).toString(), "Minimum of the given values (non-numeric treated as 0).");
-  register2("risu_max", (_c, a) => Math.max(...aggSource(a).map(toNum)).toString(), "Maximum of the given values.");
-  register2("sum", (_c, a) => aggSource(a).map(toNum).reduce((x, y) => x + y, 0).toString(), "Sum of the given values.");
-  register2("average", (_c, a) => {
-    const src = aggSource(a);
-    if (src.length === 0)
-      return "NaN";
-    return (src.map(toNum).reduce((x, y) => x + y, 0) / src.length).toString();
-  }, "Arithmetic mean of the given values.");
-  register2("tonumber", (_c, a) => {
-    const s = a[0] ?? "";
-    let out = "";
-    for (const ch of s) {
-      if (!isNaN(Number(ch)) || ch === ".")
-        out += ch;
-    }
-    return out;
-  }, "Extracts digits (and decimal points) from the input string.");
-  register2("fixnum", (_c, a) => Number(a[0]).toFixed(Number(a[1])).toString(), "Rounds to N decimal places via toFixed.");
-  register2("risu_calc", (ctx, a) => {
-    const expr = a[0] ?? "";
-    const n = calcString(expr, (name) => ctx.vars.get("local", name), (name) => ctx.vars.get("global", name));
-    return n.toString();
-  }, "Evaluates a mathematical expression. Supports + - * / ^ % and comparison operators; $x reads local var, @x reads global var.");
-});
-
-// src/risu-compat/handlers/logic.ts
-function register3(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Logic", scoped: false });
-}
-var bag = (a) => a.length > 1 ? a : parseArray3(a[0] ?? "").map((v) => String(v));
-var init_logic = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register3("equal", (_c, a) => a[0] === a[1] ? "1" : "0", "Returns '1' if args[0] === args[1] (string compare), else '0'.");
-  register3("notequal", (_c, a) => a[0] !== a[1] ? "1" : "0", "Returns '1' if args[0] !== args[1], else '0'.");
-  register3("risu_greater", (_c, a) => Number(a[0]) > Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) > Number(args[1]).");
-  register3("less", (_c, a) => Number(a[0]) < Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) < Number(args[1]).");
-  register3("greaterequal", (_c, a) => Number(a[0]) >= Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) >= Number(args[1]).");
-  register3("lessequal", (_c, a) => Number(a[0]) <= Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) <= Number(args[1]).");
-  register3("risu_and", (_c, a) => a[0] === "1" && a[1] === "1" ? "1" : "0", "Boolean AND: returns '1' if both args are the literal string '1'.");
-  register3("or", (_c, a) => a[0] === "1" || a[1] === "1" ? "1" : "0", "Boolean OR: returns '1' if either arg is '1'.");
-  register3("risu_not", (_c, a) => a[0] === "1" ? "0" : "1", "Boolean NOT of a '1'/'0' value.");
-  register3("all", (_c, a) => bag(a).every((f) => f === "1") ? "1" : "0", "Returns '1' if every value is the literal string '1'.");
-  register3("any", (_c, a) => bag(a).some((f) => f === "1") ? "1" : "0", "Returns '1' if any value is '1'.");
-  register3("startswith", (_c, a) => (a[0] ?? "").startsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] starts with args[1].");
-  register3("endswith", (_c, a) => (a[0] ?? "").endsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] ends with args[1].");
-  register3("contains", (_c, a) => (a[0] ?? "").includes(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] contains args[1] anywhere.");
-  register3("iserror", (_c, a) => (a[0] ?? "").toLocaleLowerCase().startsWith("error:") ? "1" : "0", "Returns '1' if the argument begins with 'error:' (case-insensitive).");
-});
-
-// src/risu-compat/handlers/strings.ts
-function register4(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Strings", scoped: false });
-}
-var init_strings = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register4("risu_replace", (_c, a) => (a[0] ?? "").replaceAll(a[1] ?? "", a[2] ?? ""), "Replaces all occurrences of needle with replacement.");
-  register4("risu_split", (_c, a) => makeArray2((a[0] ?? "").split(a[1] ?? "")), "Splits a string on the delimiter and returns a JSON array.");
-  register4("risu_join", (_c, a) => parseArray3(a[0] ?? "").join(a[1] ?? ""), "Joins a JSON array using the given separator.");
-  register4("spread", (_c, a) => parseArray3(a[0] ?? "").join("::"), "Joins a JSON array using :: as the separator.");
-  register4("trim", (_c, a) => (a[0] ?? "").trim(), "Strips leading/trailing whitespace.");
-  register4("risu_length", (_c, a) => (a[0] ?? "").length.toString(), "Returns the character length of a string.");
-  register4("risu_lower", (_c, a) => (a[0] ?? "").toLocaleLowerCase(), "Lowercases using locale-aware conversion.");
-  register4("risu_upper", (_c, a) => (a[0] ?? "").toLocaleUpperCase(), "Uppercases using locale-aware conversion.");
-  register4("risu_capitalize", (_c, a) => {
-    const s = a[0] ?? "";
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }, "Uppercases only the first character.");
-  register4("reverse", (_c, a) => [...a[0] ?? ""].reverse().join(""), "Reverses a string (code-point safe via iterator).");
-});
-
-// src/risu-compat/handlers/arrays.ts
-function register5(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Arrays", scoped: false });
-}
-var init_arrays = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register5("arraylength", (_c, a) => parseArray3(a[0] ?? "").length.toString(), "Returns the length of a JSON array.");
-  register5("arrayshift", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    arr.shift();
-    return makeArray2(arr);
-  }, "Removes and discards the first element.");
-  register5("arraypop", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    arr.pop();
-    return makeArray2(arr);
-  }, "Removes and discards the last element.");
-  register5("arraypush", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    arr.push(a[1] ?? "");
-    return makeArray2(arr);
-  }, "Appends a new element.");
-  register5("arraysplice", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    arr.splice(Number(a[1]), Number(a[2]), a[3] ?? "");
-    return makeArray2(arr);
-  }, "Risu-style splice: (array, start, deleteCount, newElement).");
-  register5("arrayassert", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    const idx = Number(a[1]);
-    if (idx >= arr.length)
-      arr[idx] = a[2] ?? "";
-    return makeArray2(arr);
-  }, "Sets arr[idx] = value if idx is out of bounds; else leaves array unchanged.");
-  register5("arrayelement", (_c, a) => {
-    const el = parseArray3(a[0] ?? "").at(Number(a[1])) ?? "null";
-    return typeof el === "object" ? JSON.stringify(el) : String(el);
-  }, "Returns the element at index (JSON-stringifies if object). 'null' if OOB.");
-  register5("dictelement", (_c, a) => {
-    const el = parseDict(a[0] ?? "")[a[1] ?? ""] ?? "null";
-    return typeof el === "object" ? JSON.stringify(el) : String(el);
-  }, "Returns dict[key] or 'null'.");
-  register5("objectassert", (_c, a) => {
-    const d = parseDict(a[0] ?? "");
-    if (!d[a[1] ?? ""])
-      d[a[1] ?? ""] = a[2] ?? "";
-    return JSON.stringify(d);
-  }, "Sets obj[key] = value if missing or falsy; returns JSON.");
-  register5("element", (_c, a) => {
-    try {
-      let current = a[0] ?? "";
-      for (const step of a.slice(1)) {
-        const parsed = JSON.parse(current);
-        if (parsed === null || typeof parsed !== "object" && !Array.isArray(parsed))
-          return "null";
-        current = parsed[step];
-        if (!current)
-          return "null";
-      }
-      return String(current);
-    } catch {
-      return "null";
-    }
-  }, "Walks a JSON structure by successive keys/indices. Returns 'null' if any step fails.");
-  register5("makearray", (_c, a) => makeArray2(a), "Creates a JSON array from the given arguments.");
-  register5("makedict", (_c, a) => {
-    const d = {};
-    for (let i = 0;i + 1 < a.length; i += 2) {
-      d[a[i] ?? ""] = a[i + 1] ?? "";
-    }
-    return JSON.stringify(d);
-  }, "Creates a JSON object from interleaved key-value arguments.");
-  register5("range", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    const start = arr.length > 1 ? Number(arr[0]) : 0;
-    const end = arr.length > 1 ? Number(arr[1]) : Number(arr[0]);
-    const step = arr.length > 2 ? Number(arr[2]) : 1;
-    const out = [];
-    if (step !== 0) {
-      for (let i = start;i < end; i += step)
-        out.push(i.toString());
-    }
-    return makeArray2(out);
-  }, "Creates a range. [n] \u2192 [0,1,\u2026,n-1]. [a,b] \u2192 [a,\u2026,b-1]. [a,b,s] \u2192 step s.");
-  register5("filter", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    const mode = ["all", "nonempty", "unique"].indexOf(a[1] ?? "all");
-    const filterType = mode === -1 ? 0 : mode;
-    return makeArray2(arr.filter((f, i) => {
-      switch (filterType) {
-        case 0:
-          return f !== "" && i === arr.indexOf(f);
-        case 1:
-          return f !== "";
-        case 2:
-          return i === arr.indexOf(f);
-        default:
-          return true;
-      }
-    }));
-  }, "Filters an array. mode='all' (unique + nonempty), 'nonempty', or 'unique'.");
-});
-
-// src/risu-compat/handlers/random.ts
-function register6(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Random", scoped: false });
-}
-function randomPickImpl(args, rand) {
-  if (args.length === 0)
-    return rand.toString();
-  let arr;
-  if (args.length === 1) {
-    const s = args[0] ?? "";
-    if (s.startsWith("[") && s.endsWith("]")) {
-      arr = parseArray3(s);
-    } else {
-      arr = s.replace(/\\,/g, "\xA7X").split(/:|,/);
-    }
-  } else {
-    arr = [...args];
-  }
-  const idx = Math.floor(rand * arr.length);
-  const el = arr[idx];
-  return typeof el === "string" ? el.replace(/\u00A7X/g, ",") : JSON.stringify(el) ?? "";
-}
-var init_random = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register6("risu_random", (ctx, a) => randomPickImpl(a, ctx.rng.random()), "Random element picker. No args \u2192 returns a random [0,1) number. One arg \u2192 picks from a JSON array or a comma/colon-delimited string. Multiple args \u2192 random one.");
-  register6("pick", (ctx, a) => {
-    const seed = ctx.identity.charName + ":" + ctx.messages.count();
-    const rand = pickHashRand(ctx.messages.count(), seed);
-    return randomPickImpl(a, rand);
-  }, "Hash-deterministic pick. Same inputs at the same chat position return the same element.");
-  register6("risu_roll", (ctx, a) => {
-    if (a.length === 0)
-      return "1";
-    const notation = (a[0] ?? "").split("d");
-    let num = 1;
-    let sides = 6;
-    if (notation.length === 2) {
-      num = Number(notation[0] || 1);
-      sides = Number(notation[1] || 6);
-    } else if (notation.length === 1) {
-      sides = Number(notation[0]);
-    }
-    if (isNaN(num) || isNaN(sides) || num < 1 || sides < 1)
-      return "NaN";
-    let total = 0;
-    for (let i = 0;i < num; i++)
-      total += Math.floor(ctx.rng.random() * sides) + 1;
-    return total.toString();
-  }, "Dice roll. XdY syntax (default 1d6). Sum of N uniform rolls.");
-  register6("rollp", (ctx, a) => {
-    if (a.length === 0)
-      return "1";
-    const notation = (a[0] ?? "").split("d");
-    let num = 1;
-    let sides = 6;
-    if (notation.length === 2) {
-      num = Number(notation[0] || 1);
-      sides = Number(notation[1] || 6);
-    } else if (notation.length === 1) {
-      sides = Number(notation[0]);
-    }
-    if (isNaN(num) || isNaN(sides) || num < 1 || sides < 1)
-      return "NaN";
-    let total = 0;
-    for (let i = 0;i < num; i++) {
-      const cid = ctx.messages.count() + i * 15;
-      const seed = ctx.identity.charName;
-      total += Math.floor(pickHashRand(cid, seed) * sides) + 1;
-    }
-    return total.toString();
-  }, "Hash-deterministic dice roll. Same chat position returns the same outcome.");
-  register6("dice", (ctx, a) => {
-    const notation = (a[0] ?? "").split("d");
-    const num = Number(notation[0]);
-    const sides = Number(notation[1]);
-    if (isNaN(num) || isNaN(sides))
-      return "NaN";
-    let total = 0;
-    for (let i = 0;i < num; i++)
-      total += Math.floor(ctx.rng.random() * sides) + 1;
-    return total.toString();
-  }, "Dice roll via NdS notation. No defaults \u2014 both numbers required.");
-  register6("randint", (ctx, a) => {
-    const min = Number(a[0]);
-    const max = Number(a[1]);
-    if (isNaN(min) || isNaN(max))
-      return "NaN";
-    return (Math.floor(ctx.rng.random() * (max - min + 1)) + min).toString();
-  }, "Uniform random integer in [min, max] (inclusive).");
-  register6("hash", (_c, a) => {
-    const v = pickHashRand(0, a[0] ?? "");
-    return (v * 1e7 + 1).toFixed(0).padStart(7, "0");
-  }, "Returns a deterministic 7-digit hash of the input string.");
-});
-
-// src/risu-compat/handlers/variables.ts
-function register7(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Variables", scoped: false });
-}
-function setvarMode(ctx) {
-  if (ctx.rmVar)
-    return "hide";
-  if (ctx.runVar)
-    return "run";
-  return "literal";
-}
-function leaveVarLiteral(ctx) {
-  return !ctx.commit || ctx.promptRegexLiteralVars === true;
-}
-var init_variables = __esm(() => {
-  init_registry();
-  register7("risu_getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a local chat variable. Empty string if unset.");
-  register7("risu_setvar", (ctx, a) => {
-    const mode = setvarMode(ctx);
-    if (mode === "hide")
-      return "";
-    if (mode === "literal")
-      return `{{setvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
-    return "";
-  }, "Sets a local chat variable.");
-  register7("risu_addvar", (ctx, a) => {
-    const mode = setvarMode(ctx);
-    if (mode === "hide")
-      return "";
-    if (mode === "literal")
-      return `{{addvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    ctx.vars.add("local", a[0] ?? "", Number(a[1]));
-    return "";
-  }, "Adds delta to a local chat variable (coerces current value to number).");
-  register7("setdefaultvar", (ctx, a) => {
-    const mode = setvarMode(ctx);
-    if (mode === "hide")
-      return "";
-    if (mode === "literal")
-      return `{{setdefaultvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    const name = a[0] ?? "";
-    if (!ctx.vars.get("local", name)) {
-      ctx.vars.set("local", name, a[1] ?? "");
-    }
-    return "";
-  }, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
-  register7("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""), "Reads a global chat variable.");
-  register7("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""), "Reads a temporary variable (per-evaluation scope).");
-  register7("settempvar", (ctx, a) => {
-    ctx.vars.set("temp", a[0] ?? "", a[1] ?? "");
-    return "";
-  }, "Sets a temporary variable.");
-  register7("deletevar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
-      return `{{deletevar::${a[0] ?? ""}}}`;
-    ctx.vars.delete("local", a[0] ?? "");
-    return "";
-  }, "Deletes a local chat variable.");
-  register7("flushvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
-      return `{{flushvar::${a[0] ?? ""}}}`;
-    ctx.vars.delete("local", a[0] ?? "");
-    return "";
-  }, "Alias of deletevar.");
-  register7("risu_getchatvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a chat-scoped variable (aliased to local in Risu).");
-  register7("risu_setchatvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
-      return `{{setchatvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
-    return "";
-  }, "Sets a chat-scoped variable.");
-  register7("return", (ctx, a) => {
-    ctx.vars.set("temp", "__force_return__", "1");
-    ctx.vars.set("temp", "__return__", a[0] ?? "");
-    return "";
-  }, "Halts further macro resolution, returns the given value as the entire parser output (Risu parity).");
-});
-
-// src/util/base64.ts
-function base64ToBytes(input) {
-  const sextets = [];
-  for (let i = 0;i < input.length; i++) {
-    const v = DECODE[input.charCodeAt(i)] ?? -1;
-    if (v >= 0)
-      sextets.push(v);
-  }
-  const out = new Uint8Array(sextets.length * 6 >> 3);
-  let bitBuf = 0;
-  let bitCount = 0;
-  let o = 0;
-  for (const s of sextets) {
-    bitBuf = bitBuf << 6 | s;
-    bitCount += 6;
-    if (bitCount >= 8) {
-      bitCount -= 8;
-      out[o++] = bitBuf >> bitCount & 255;
-    }
-  }
-  return out;
-}
-function base64ToUtf8(input) {
-  return new TextDecoder().decode(base64ToBytes(input));
-}
-function bytesToBase64(bytes) {
-  let out = "";
-  let i = 0;
-  for (;i + 2 < bytes.length; i += 3) {
-    const n = bytes[i] << 16 | bytes[i + 1] << 8 | bytes[i + 2];
-    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + B64_ALPHABET[n >> 6 & 63] + B64_ALPHABET[n & 63];
-  }
-  const rem = bytes.length - i;
-  if (rem === 1) {
-    const n = bytes[i] << 16;
-    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + "==";
-  } else if (rem === 2) {
-    const n = bytes[i] << 16 | bytes[i + 1] << 8;
-    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + B64_ALPHABET[n >> 6 & 63] + "=";
-  }
-  return out;
-}
-var B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", DECODE;
-var init_base64 = __esm(() => {
-  DECODE = new Int16Array(256).fill(-1);
-  for (let i = 0;i < B64_ALPHABET.length; i++) {
-    DECODE[B64_ALPHABET.charCodeAt(i)] = i;
-  }
-  DECODE[45] = 62;
-  DECODE[95] = 63;
-});
-
-// src/risu-compat/handlers/misc.ts
-function register8(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Misc", scoped: false });
-}
-function escapeButtonLabel(s) {
-  return s.replace(BARE_AMP_RE, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-var BARE_AMP_RE;
-var init_misc = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  init_base64();
-  register8("u", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Returns the character for a hex codepoint.");
-  register8("ue", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Alias for {{u}}.");
-  register8("unicodeencode", (_c, a) => (a[0] ?? "").charCodeAt(a[1] ? Number(a[1]) : 0).toString(), "Returns the Unicode code point of a character at the given index (default 0).");
-  register8("unicodedecode", (_c, a) => String.fromCharCode(Number(a[0] ?? "0")), "Converts a Unicode code point back to a character.");
-  register8("fromhex", (_c, a) => Number.parseInt(a[0] ?? "0", 16).toString(), "Converts a hex string to decimal.");
-  register8("tohex", (_c, a) => Number.parseInt(a[0] ?? "0").toString(16), "Converts a decimal number to hex.");
-  register8("xor", (_c, a) => {
-    const bytes = new TextEncoder().encode(a[0] ?? "");
-    for (let i = 0;i < bytes.length; i++)
-      bytes[i] ^= 255;
-    return bytesToBase64(bytes);
-  }, "XOR-encrypts a string with 0xFF and base64-encodes.");
-  register8("xordecrypt", (_c, a) => {
-    const bytes = base64ToBytes(a[0] ?? "");
-    for (let i = 0;i < bytes.length; i++)
-      bytes[i] ^= 255;
-    return new TextDecoder().decode(bytes);
-  }, "Decrypts an XOR-encrypted base64 string.");
-  register8("crypt", (_c, a) => {
-    let shift = a[1] ? Number(a[1]) : 32768;
-    if (isNaN(shift))
-      shift = 32768;
-    const input = a[0] ?? "";
-    let result = "";
-    for (let i = 0;i < input.length; i++) {
-      const code = input.charCodeAt(i);
-      if (code > 65535) {
-        result += input[i];
-        continue;
-      }
-      let shifted = code + shift;
-      if (shifted > 65535)
-        shifted -= 65536;
-      result += String.fromCharCode(shifted);
-    }
-    return result;
-  }, "Caesar-style Unicode shift cipher (default shift 32768 which self-inverts).");
-  register8("risu_date", (ctx, a) => {
-    if (a.length === 0) {
-      const d = new Date(ctx.clock.now());
-      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-    }
-    const t = a[1] ? Number(a[1]) : 0;
-    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
-  }, "Formats a date. No args \u2192 YYYY-M-D. First arg is format, optional second arg is unix ms.");
-  register8("datetimeformat", (ctx, a) => {
-    if (a.length === 0) {
-      const d = new Date(ctx.clock.now());
-      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-    }
-    const t = a[1] ? Number(a[1]) : 0;
-    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
-  }, "Alias of {{date::fmt}}.");
-  register8("hiddenkey", () => "", "A key that activates lorebook entries without being sent to the model.");
-  register8("risu_comment", (ctx, a) => {
-    if (ctx.commit || ctx.cbsContext)
-      return "";
-    return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
-  }, 'Comment macro. Empty at prompt time and in cbs; displays as <div class="risu-comment">\u2026</div> at render time.');
-  registry.register({
-    name: "//",
-    handler: () => "",
-    description: "Inline comment. Returns empty string.",
-    category: "Risu / Misc",
-    scoped: false
-  });
-  register8("tex", (_c, a) => `$$${a[0] ?? ""}$$`, "LaTeX/math block.");
-  register8("ruby", (_c, a) => `<ruby>${a[0] ?? ""}<rp> (</rp><rt>${a[1] ?? ""}</rt><rp>) </rp></ruby>`, "Ruby (furigana) HTML wrapper.");
-  register8("codeblock", (_c, a) => {
-    const code = (a[a.length - 1] ?? "").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    if (a.length > 1)
-      return `<pre-hljs-placeholder lang="${a[0]}">${code}</pre-hljs-placeholder>`;
-    return `<pre><code>${code}</code></pre>`;
-  }, "Code-block HTML wrapper. One arg \u2192 plain. Two args \u2192 highlighted, first is lang.");
-  register8("risu", (_c, a) => {
-    const size = a[0] || "45";
-    return `<img src="/logo2.png" style="height:${size}px;width:${size}px" />`;
-  }, "Embeds the RisuAI logo image.");
-  BARE_AMP_RE = /&(?!#x[0-9a-fA-F]+;|#[0-9]+;|[a-zA-Z][a-zA-Z0-9]*;)/g;
-  register8("button", (_c, a) => {
-    const label = escapeButtonLabel(a[0] ?? "");
-    const trigger = (a[1] ?? "").replace(/"/g, "&quot;");
-    return `<button class="button-default x-risu-button-default" risu-trigger="${trigger}">${label}</button>`;
-  }, "HTML button that fires the named risu-trigger when clicked.");
-  register8("screenwidth", (ctx) => String(ctx.screenWidth ?? 0), "Viewport width in pixels. Read from the frontend-reported value; 0 before the first report.");
-  register8("screenheight", (ctx) => String(ctx.screenHeight ?? 0), "Viewport height in pixels. Read from the frontend-reported value; 0 before the first report.");
-  register8("moduleenabled", (ctx, a) => {
-    const ns = a[0] ?? "";
-    if (ns.length === 0)
-      return "0";
-    const map = ctx.modulesByNamespace;
-    if (map && map[ns])
-      return "1";
-    return "0";
-  }, "Returns 1 if a module with the specified namespace is attached, 0 otherwise.");
-  register8("moduleassetlist", (ctx, a) => {
-    const ns = a[0] ?? "";
-    if (ns.length === 0)
-      return "";
-    const map = ctx.modulesByNamespace;
-    if (!map)
-      return "";
-    const list = map[ns];
-    if (!list || list.length === 0)
-      return "";
-    return makeArray2(list);
-  }, "Returns a JSON array of asset names for the specified module namespace. Returns empty string if namespace not found.");
-  register8("metadata", (ctx, a) => {
-    const key = (a[0] ?? "").toLocaleLowerCase();
-    switch (key) {
-      case "imateapot":
-        return "\uD83E\uDED6";
-      case "mobile":
-      case "local":
-      case "node":
-        return "0";
-      case "risutype":
-        return "web";
-      case "modelname":
-      case "modelshortname":
-      case "modelinternalid":
-        return ctx.aiModel || "";
-      default:
-        return `Error: ${a[0]} is not a valid metadata key.`;
-    }
-  }, "Returns host metadata. Subset implemented \u2014 model fields read from ctx.aiModel; platform fields default to non-native.");
-  register8("chatindex", (ctx) => {
-    const idx = ctx.currentMessageIndex;
-    return idx === null ? "" : idx.toString();
-  }, "Index of the current message being processed. Risu cbs() default returns -1.");
-  register8("firstmsgindex", (ctx) => {
-    const idx = ctx.character.selectedAlternateGreetingIndex;
-    return String(typeof idx === "number" ? idx : -1);
-  }, "Returns chat.fmIndex (selected alternate greeting index). -1 = default firstMessage.");
-});
-
-// src/risu-compat/handlers/chat-context.ts
-function register9(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Chat", scoped: false });
-}
-function risuRole(r) {
-  return r === "assistant" ? "char" : r;
-}
-function toSerializableMsg(m) {
-  const out = {
-    role: risuRole(m.role),
-    data: m.content,
-    time: m.createdAt
-  };
-  if (m.speaker)
-    out.speaker = m.speaker;
-  return out;
-}
-function evalMsg(ctx, m) {
-  const data = ctx.evaluate ? ctx.evaluate(m.content) : m.content;
-  const out = {
-    role: risuRole(m.role),
-    data,
-    time: m.createdAt
-  };
-  if (m.speaker)
-    out.speaker = m.speaker;
-  return out;
-}
-var init_chat_context = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register9("lorebook", (ctx) => {
-    return makeArray2(ctx.lorebook.map((e) => JSON.stringify(e)));
-  }, "Returns all active lorebook entries as a JSON array (character + chat + module lore concatenated).");
-  register9("userhistory", (ctx) => {
-    const filtered = ctx.messages.all().filter((m) => m.role === "user").map((m) => JSON.stringify(evalMsg(ctx, m)));
-    return makeArray2(filtered);
-  }, "Returns all user messages as a JSON array, each .data recursively parsed.");
-  register9("charhistory", (ctx) => {
-    const filtered = ctx.messages.all().filter((m) => m.role === "assistant").map((m) => JSON.stringify(evalMsg(ctx, m)));
-    return makeArray2(filtered);
-  }, "Returns all character (assistant) messages as a JSON array, each .data recursively parsed.");
-  register9("history", (ctx, a) => {
-    const msgs = ctx.messages.all();
-    if (a.length === 0) {
-      const fm = ctx.character.selectedAlternateGreetingIndex === -1 ? ctx.character.firstMessage : ctx.character.alternateGreetings[ctx.character.selectedAlternateGreetingIndex] ?? ctx.character.firstMessage;
-      const head = [{ role: "char", data: fm, time: 0 }];
-      return makeArray2([...head, ...msgs.map(toSerializableMsg)].map((v) => JSON.stringify(v)));
-    }
-    const withRole = a.includes("role");
-    return makeArray2(msgs.map((m) => withRole ? `${risuRole(m.role)}: ${m.content}` : m.content));
-  }, "No args \u2192 full JSON history with first-greeting at index 0. With 'role' arg \u2192 array of 'role: data' strings.");
-  register9("previouschatlog", (ctx, a) => {
-    const idx = Number(a[0]);
-    const msgs = ctx.messages.all();
-    return msgs[idx]?.content ?? "Out of range";
-  }, "Returns message[N].content, or 'Out of range' if index invalid.");
-  register9("previouscharchat", (ctx) => {
-    const msgs = ctx.messages.all();
-    const start = ctx.cbsContext ? msgs.length - 1 : ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1;
-    for (let i = start;i >= 0; i--) {
-      const m = msgs[i];
-      if (m && m.role === "assistant")
-        return m.content;
-    }
-    const c = ctx.character;
-    return c.selectedAlternateGreetingIndex === -1 ? c.firstMessage : c.alternateGreetings[c.selectedAlternateGreetingIndex] ?? c.firstMessage;
-  }, "Last character (assistant) message; cbs walks from chat-end, others from currentMessageIndex-1.");
-  register9("previoususerchat", (ctx) => {
-    if (ctx.cbsContext)
-      return "";
-    if (ctx.currentMessageIndex === null)
-      return "";
-    const msgs = ctx.messages.all();
-    for (let i = ctx.currentMessageIndex - 1;i >= 0; i--) {
-      const m = msgs[i];
-      if (m && m.role === "user")
-        return m.content;
-    }
-    const c = ctx.character;
-    return c.selectedAlternateGreetingIndex === -1 ? c.firstMessage : c.alternateGreetings[c.selectedAlternateGreetingIndex] ?? c.firstMessage;
-  }, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
-  register9("risu_lastmessage", (ctx) => {
-    const last = ctx.messages.last();
-    return last?.content ?? "";
-  }, "Content of the most recent message, regardless of role.");
-  register9("risu_lastmessageid", (ctx) => {
-    const n = ctx.messages.count();
-    return Math.max(-1, n - 1).toString();
-  }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");
-  register9("lastusermessage", (ctx) => {
-    const m = ctx.messages.lastOf("user");
-    return m?.content ?? "";
-  }, "Alias-style shortcut for the most recent user message. '' if none.");
-  register9("lastcharmessage", (ctx) => {
-    const m = ctx.messages.lastOf("assistant");
-    return m?.content ?? "";
-  }, "Alias-style shortcut for the most recent character (assistant) message.");
-  register9("jbtoggled", (ctx) => ctx.jailbreakToggle ? "1" : "0", "Returns '1' when the global jailbreak toggle is on.");
-  register9("maxcontext", (ctx) => ctx.maxContext.toString(), "Returns the configured max-context length as a string.");
-  register9("messagecount", (ctx) => ctx.messages.count().toString(), "Returns the total number of messages in the chat.");
-});
-
-// src/risu-compat/handlers/display.ts
-function register10(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Display", scoped: false });
-}
-var DOC_ONLY;
-var init_display = __esm(() => {
-  init_registry();
-  register10("decbo", () => "\uE9B8", "Displays as { without being re-lexed by the parser (PUA sentinel).");
-  register10("decbc", () => "\uE9B9", "Displays as } without being re-lexed.");
-  register10("bo", () => "\uE9B8\uE9B8", "Displays as {{ without being re-lexed.");
-  register10("bc", () => "\uE9B9\uE9B9", "Displays as }} without being re-lexed.");
-  register10("displayescapedbracketopen", () => "\uE9BA", "Displays as ( (PUA sentinel).");
-  register10("displayescapedbracketclose", () => "\uE9BB", "Displays as ).");
-  register10("displayescapedanglebracketopen", () => "\uE9BC", "Displays as < (PUA sentinel).");
-  register10("displayescapedanglebracketclose", () => "\uE9BD", "Displays as >.");
-  register10("displayescapedcolon", () => "\uE9BE", "Displays as : without being parsed as a CBS separator.");
-  register10("displayescapedsemicolon", () => "\uE9BF", "Displays as ;.");
-  register10("cbr", (_c, a) => {
-    if (a.length === 0)
-      return "\\n";
-    const n = Math.max(1, Number(a[0] ?? "1"));
-    return "\\n".repeat(n);
-  }, "Returns a literal '\\n'. With numeric arg, repeats that many times.");
-  register10("position", (ctx, args) => {
-    const name = args[0];
-    if (typeof name !== "string" || name.length === 0)
-      return "";
-    const map = ctx.positionPt;
-    if (!map)
-      return "";
-    return map[name] ?? "";
-  }, "Risu {{position::NAME}}: joined content of active entries with @@position pt_<NAME>.");
-  DOC_ONLY = [
-    ["slot", "{{slot::VAR}} inside a scoped block. Resolved by #each/#func/call handlers."]
-  ];
-  for (const [name, desc] of DOC_ONLY) {
-    register10(name, () => "", desc);
-  }
-  register10("bkspc", () => "", "Risu's buffer-rewind (removes last word). No buffer access in risu-compat \u2192 shim '', known deviation.");
-  register10("erase", () => "", "Risu's buffer-rewind (removes last sentence). Shim '', known deviation.");
-});
-
-// src/risu-compat/handlers/metadata.ts
-function register11(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Metadata", scoped: false });
-}
-var init_metadata = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  init_base64();
-  register11("declare", (ctx, a) => {
-    ctx.vars.set("temp", `__declared_${a[0] ?? ""}__`, "1");
-    return "";
-  }, "Declares a marker; {{declared::NAME}} reads it. Backed by the temp-scope store.");
-  register11("declared", (ctx, a) => {
-    return ctx.vars.get("temp", `__declared_${a[0] ?? ""}__`) === "1" ? "1" : "0";
-  }, "Reads a declaration marker set by {{declare::NAME}}.");
-  register11("emotionlist", (ctx) => {
-    return makeArray2(ctx.character.emotionImages.map((e) => e.name));
-  }, "JSON array of emotion image names for the current character.");
-  register11("assetlist", (ctx) => {
-    if (ctx.character.type === "group")
-      return "";
-    return makeArray2(ctx.character.additionalAssets.map((a) => a.name));
-  }, "JSON array of additional asset names. '' for group characters.");
-  register11("prefillsupported", (ctx) => {
-    return ctx.aiModel.startsWith("claude") ? "1" : "0";
-  }, "'1' if the current AI model id starts with 'claude' (Claude supports prefill).");
-  register11("file", (ctx, a) => {
-    const decode = ctx.cbsContext || ctx.commit;
-    if (!decode)
-      return `<br><div class="x-risu-risu-file">${a[0] ?? ""}</div><br>`;
-    const content = a[1] ?? "";
-    try {
-      return base64ToUtf8(content);
-    } catch {
-      return "";
-    }
-  }, 'Decodes base64 file content to UTF-8 (prompt and cbs paths); renders <div class="risu-file">\u2026</div> in display path.');
-  register11("chardisplayasset", (ctx) => {
-    if (!ctx.character.prebuiltAssetCommand)
-      return makeArray2([]);
-    const excludes = ctx.character.prebuiltAssetExclude;
-    const list = ctx.character.additionalAssets.filter((a) => !excludes.includes(a.src)).map((a) => a.name);
-    return makeArray2(list);
-  }, "JSON array of character display assets, minus the excluded set. Empty array if prebuiltAssetCommand is off.");
-});
-
-// src/risu-compat/handlers/assets.ts
-function register12(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Assets", scoped: false });
-}
-function trimAssetKey(s) {
-  let out = s;
-  for (const e of TRIMMER_EXTS) {
-    if (out.endsWith("." + e)) {
-      out = out.substring(0, out.length - e.length - 1);
-      break;
-    }
-  }
-  return out.trim().replace(/[_ \-.]/g, "");
-}
-function getDistance(a, b) {
-  const h = a.length + 1;
-  const w = b.length + 1;
-  const d = new Int16Array(h * w);
-  for (let i = 0;i < h; i++)
-    d[i * w] = i;
-  for (let j = 0;j < w; j++)
-    d[j] = j;
-  for (let i = 1;i < h; i++) {
-    for (let j = 1;j < w; j++) {
-      d[i * w + j] = Math.min(d[(i - 1) * w + (j - 1)] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1), d[(i - 1) * w + j] + 1, d[i * w + (j - 1)] + 1);
-    }
-  }
-  return d[h * w - 1];
-}
-function findAsset(ctx, list, name, legacyMediaFindings) {
-  const norm = name.toLowerCase();
-  let matches = null;
-  for (const a of list) {
-    if (a.name.toLowerCase() === norm) {
-      if (matches === null)
-        matches = [a];
-      else
-        matches.push(a);
-    }
-  }
-  if (matches !== null) {
-    if (matches.length === 1)
-      return matches[0];
-    const chatID = ctx.currentMessageIndex ?? -1;
-    const seedWord = (ctx.character.chaId || "global") + String(chatID);
-    const cx = pickHashRand(chatID, seedWord);
-    const selIndex = Math.floor(cx * matches.length);
-    return matches[selIndex] ?? matches[0];
-  }
-  if (legacyMediaFindings)
-    return null;
-  const trimmedName = trimAssetKey(norm);
-  if (trimmedName.length === 0)
-    return null;
-  let closest = null;
-  let closestDist = Number.MAX_SAFE_INTEGER;
-  for (const a of list) {
-    const key = trimAssetKey(a.name.toLowerCase());
-    const dist = getDistance(trimmedName, key);
-    if (dist < closestDist) {
-      closest = a;
-      closestDist = dist;
-      if (dist === 0)
-        break;
-    }
-  }
-  if (closestDist > ASSET_MAX_DIFFERENCE)
-    return null;
-  return closest;
-}
-function imgTag(src) {
-  return `<img src="${src}" alt="${src}" style="${ASSET_WIDTH_STYLE} "/>`;
-}
-function videoTag(src, opts) {
-  const controls = opts.controls ? "controls " : "";
-  const muted = opts.muted ? "muted " : "";
-  return `<video ${controls}${muted}autoplay loop><source src="${src}" type="video/mp4"></video>
-`;
-}
-function literal(name, args) {
-  return `{{${name}${args.length > 0 ? "::" + args.join("::") : ""}}}`;
-}
-var ASSET_WIDTH_STYLE = "", VIDEO_EXTENSIONS, TRIMMER_EXTS, ASSET_MAX_DIFFERENCE = 4;
-var init_assets = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  VIDEO_EXTENSIONS = new Set(["mp4", "webm", "avi", "m4p", "m4v"]);
-  TRIMMER_EXTS = [
-    "webp",
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "mp4",
-    "webm",
-    "avi",
-    "m4p",
-    "m4v",
-    "mp3",
-    "wav",
-    "ogg"
-  ];
-  register12("path", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("path", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    return hit?.src ?? "";
-  }, "Asset URL by name, plain string (for src=/url()). parser.svelte.ts.");
-  register12("img", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("img", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return imgTag(hit.src);
-  }, "Inline <img> for a named asset. parser.svelte.ts.");
-  register12("image", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("image", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="${hit.src}" alt="${hit.src}" style="${ASSET_WIDTH_STYLE}"/></div>
-`;
-  }, "Inlay image wrapper. parser.svelte.ts.");
-  register12("emotion", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("emotion", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.emotionImages, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return imgTag(hit.src);
-  }, "Emotion image by name. parser.svelte.ts.");
-  register12("asset", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("asset", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    if (hit.ext && VIDEO_EXTENSIONS.has(hit.ext.toLowerCase())) {
-      return videoTag(hit.src, { controls: false, muted: true });
-    }
-    return `${imgTag(hit.src)}
-`;
-  }, "Asset by name \u2014 img or video depending on extension. parser.svelte.ts.");
-  register12("bg", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("bg", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return `<div style="width:100%;height:100%;background: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),url(${hit.src}); background-size: cover;"></div>`;
-  }, "Background panel. parser.svelte.ts.");
-  register12("video", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("video", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return videoTag(hit.src, { controls: true, muted: false });
-  }, "Full-featured video. parser.svelte.ts.");
-  register12("video-img", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("video-img", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return videoTag(hit.src, { controls: false, muted: true });
-  }, "Muted autoplay video (image-substitute). parser.svelte.ts.");
-  register12("audio", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("audio", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return `<audio controls autoplay loop><source src="${hit.src}" type="audio/mpeg"></audio>
-`;
-  }, "Audio player. parser.svelte.ts.");
-  register12("bgm", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("bgm", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return `<div risu-ctrl="bgm___auto___${hit.src}" style="display:none;"></div>
-`;
-  }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
-  register12("inlay", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlay", args);
-    const id = String(args[0] ?? "");
-    if (!id)
-      return "";
-    return `<img src="/api/v1/images/${id}"/>`;
-  }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
-  register12("inlayed", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlayed", args);
-    const id = String(args[0] ?? "");
-    if (!id)
-      return "";
-    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>
-
-`;
-  }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
-  register12("inlayeddata", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlayeddata", args);
-    const id = String(args[0] ?? "");
-    if (!id)
-      return "";
-    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>
-
-`;
-  }, "Wrapped inlay image (data variant). Risu parser.svelte.ts + 688.");
-  register12("source", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("source", args);
-    const kind = String(args[0] ?? "").toLowerCase();
-    if (kind === "char")
-      return ctx.character.image;
-    if (kind === "user")
-      return ctx.identity.personaImage;
-    return "";
-  }, "{{source::char}} / {{source::user}} avatar URLs. parser.svelte.ts. Empty string when no avatar uploaded.");
-});
-
-// src/risu-compat/handlers/index.ts
-var init_handlers = __esm(() => {
-  init_trigger_id();
-  init_opaque_blocks();
-  init_structural_blocks();
-  init_iteration_blocks();
-  init_context_reads();
-  init_math();
-  init_logic();
-  init_strings();
-  init_arrays();
-  init_random();
-  init_variables();
-  init_misc();
-  init_chat_context();
-  init_display();
-  init_metadata();
-  init_assets();
 });
 
 // src/core/cbs/catalog/risu-macros.json
@@ -8284,7 +7807,7 @@ var init_risu_macros = __esm(() => {
       lumiverseCollision: {
         name: "lastmessageid",
         compatible: false,
-        notes: "Risu: chat.message[].length - 1 (greeting excluded) \u2192 -1 on greeting-only. Lumi: messages.length - 1 (greeting included as msg 0) \u2192 0 on greeting-only. Off-by-one. Card-level literal comparisons like {{equal::lastmessageid::-1}} require Risu-frame \u2014 the rewriter emits {{risu_lastmessageid}} and our handler returns the Risu-frame value."
+        notes: "Risu: chat.message[].length - 1 (greeting excluded) \u2192 -1 on greeting-only. Lumi: messages.length - 1 (greeting included as msg 0) \u2192 0 on greeting-only. Card-level literal comparisons like {{equal::lastmessageid::-1}} require the compatibility evaluator's Risu-frame handler."
       },
       risuFile: "src/ts/cbs.ts",
       risuLine: 737,
@@ -8585,7 +8108,7 @@ var init_risu_macros = __esm(() => {
       lumiverseCollision: null,
       risuFile: "src/ts/cbs.ts",
       risuLine: 1863,
-      summary: "Host metadata. Supported: imateapot, mobile/local/node, risutype, modelname/modelshortname/modelinternalid. Other keys return 'Error: X is not a valid metadata key.'.",
+      summary: "Host metadata. Supported: imateapot, mobile/local/node, risutype, modelname/modelshortname/modelinternalid, version, majorversion/majorver/major, maxcontext, language/locale/lang, browserlanguage/browserlocale/browserlang. Unsupported (still error): modelformat, modelprovider, modeltokenizer.",
       notes: ""
     },
     {
@@ -9816,22 +9339,6 @@ content#} form. Returns trimmed content if cond is not the empty string, 0, or -
       notes: "Deprecated Risu form; preserved for compatibility."
     },
     {
-      name: "unknown",
-      aliases: [],
-      category: "control_flow",
-      argShape: "any + body",
-      minArgs: 0,
-      maxArgs: -1,
-      pure: true,
-      readsState: [],
-      writesState: [],
-      lumiverseCollision: null,
-      risuFile: "packages/core/src/cbs/rewrite/blocks.ts",
-      risuLine: 1,
-      summary: `Fallback handler for unrecognized block kinds. Returns body verbatim without interpretation, matching Risu's "nothing" type fall-through.`,
-      notes: "Synthetic name emitted by the rewriter when it sees {{#someUnknownBlock}}\u2026{{/someUnknownBlock}}. Not a Risu macro."
-    },
-    {
       name: "deletevar",
       aliases: [],
       category: "variables",
@@ -10084,9 +9591,6 @@ function init() {
   initialised = true;
   for (const reg of registry.entries()) {
     registerInto(reg.name, reg.handler, reg.scoped);
-    if (reg.name.startsWith("risu_")) {
-      registerInto(reg.name.slice(5), reg.handler, reg.scoped);
-    }
   }
   try {
     const catalog2 = new CatalogIndex(parseCatalog(risu_macros_default));
@@ -10169,6 +9673,43 @@ function dispatchLeaf(payload, ctx, callStack) {
   } catch {
     return null;
   }
+}
+function rewindLastWord(root) {
+  if (!root)
+    return root;
+  const trimmed = root.trimEnd();
+  let trimPointer = trimmed.length - 1;
+  for (;trimPointer >= 0; trimPointer--) {
+    const char = trimmed[trimPointer];
+    if (trimPointer === 0 || char === " " || char === `
+` || char === "\t")
+      break;
+  }
+  if (trimPointer === -1)
+    trimPointer = 0;
+  return trimmed.substring(0, trimPointer).trimEnd();
+}
+function rewindLastSentence(root) {
+  if (!root)
+    return root;
+  const trimmed = root.trimEnd();
+  let trimPointer = trimmed.length - 1;
+  let sentenceEndFound = false;
+  for (;trimPointer >= 0; trimPointer--) {
+    const char = trimmed[trimPointer];
+    if (char === "." || char === "!" || char === "?" || char === `
+`) {
+      sentenceEndFound = true;
+      break;
+    }
+    if (trimPointer === 0)
+      break;
+  }
+  if (trimPointer === -1)
+    trimPointer = 0;
+  else if (sentenceEndFound)
+    trimPointer += 1;
+  return trimmed.substring(0, trimPointer).trimEnd();
 }
 function evaluate(template, ctx, opts = {}) {
   const callStack = (opts.callStack ?? ctx.callStack ?? 0) + 1;
@@ -10313,6 +9854,15 @@ function evaluate(template, ctx, opts = {}) {
             break;
           }
         }
+        const leafName = normalizeMacroName(splitMacroArgs(dat).name);
+        if (!isPureMode() && leafName === "bkspc") {
+          nested[0] = rewindLastWord(nested[0] ?? "");
+          break;
+        }
+        if (!isPureMode() && leafName === "erase") {
+          nested[0] = rewindLastSentence(nested[0] ?? "");
+          break;
+        }
         const mc = isPureMode() ? null : dispatchLeaf(dat, innerCtx, callStack);
         if (mc == null) {
           nested[0] += `{{${dat}}}`;
@@ -10350,10 +9900,58 @@ var init_scanner = __esm(() => {
 
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
+// spindle.json
+var spindle_default = {
+  version: "0.8.0",
+  name: "LumiRealm",
+  identifier: "lumirealm",
+  author: "amousepad",
+  github: "https://github.com/AMousePad/LumiRealm",
+  homepage: "https://github.com/AMousePad/LumiRealm",
+  description: "Bringing RisuRealm into Lumiverse",
+  permissions: [
+    "generation",
+    "interceptor",
+    "tools",
+    "cors_proxy",
+    "context_handler",
+    "ephemeral_storage",
+    "chat_mutation",
+    "event_tracking",
+    "ui_panels",
+    "app_manipulation",
+    "oauth",
+    "characters",
+    "chats",
+    "world_books",
+    "regex_scripts",
+    "databanks",
+    "personas",
+    "presets",
+    "push_notification",
+    "image_gen",
+    "images",
+    "generation_parameters",
+    "macro_interceptor",
+    "web_search"
+  ],
+  requested_capabilities: [
+    "base64_decode"
+  ],
+  entry_backend: "dist/backend.js",
+  entry_frontend: "dist/frontend.js",
+  minimum_lumiverse_version: "1.1.0",
+  lumirealm: {
+    risu_app_version: "2026.6.215",
+    risu_language: "en-US"
+  }
+};
 
 // src/interpreter/evaluator/context.ts
+var RISU_APP_VERSION = spindle_default.lumirealm.risu_app_version;
+var RISU_LANGUAGE = spindle_default.lumirealm.risu_language;
 var spindleGlobal = typeof spindle !== "undefined" ? spindle : undefined;
-var sessionFunctions = (() => {
+function makeFunctionRegistry() {
   const table2 = new Map;
   return {
     define: (name, body, argNames) => {
@@ -10365,7 +9963,7 @@ var sessionFunctions = (() => {
     },
     has: (name) => table2.has(name)
   };
-})();
+}
 var varOverlays = new Map;
 var MAX_OVERLAYS = 100;
 function getOverlay(chatId) {
@@ -10602,6 +10200,7 @@ function buildEvaluatorContext(input) {
     firstMessage: card.firstMessage ?? "",
     alternateGreetings: card.alternateGreetings ?? [],
     selectedAlternateGreetingIndex: card.selectedAlternateGreetingIndex ?? -1,
+    ...card.selectedGreeting !== undefined ? { selectedGreeting: card.selectedGreeting } : {},
     type: "character",
     additionalAssets: indexToCharacterAssets(card.additionalAssets),
     emotionImages: indexToCharacterAssets(card.emotionImages),
@@ -10611,12 +10210,7 @@ function buildEvaluatorContext(input) {
     image: card.image ?? ""
   };
   const lorebook = input.lorebook ?? [];
-  const functions = commit ? sessionFunctions : {
-    define: () => {},
-    get: (name) => sessionFunctions.get(name),
-    delete: () => {},
-    has: (name) => sessionFunctions.has(name)
-  };
+  const functions = makeFunctionRegistry();
   const rng = recorder ? { random: () => {
     recorder.volatile = true;
     return Math.random();
@@ -10626,6 +10220,7 @@ function buildEvaluatorContext(input) {
     return Date.now();
   } } : { now: () => Date.now() };
   const out = {
+    chatId,
     vars,
     identity,
     character,
@@ -10642,8 +10237,8 @@ function buildEvaluatorContext(input) {
     lorebook,
     jailbreakToggle: false,
     maxContext: Number(input.system?.maxContext ?? 0),
-    language: "",
-    appVersion: "",
+    language: RISU_LANGUAGE,
+    appVersion: RISU_APP_VERSION,
     screenWidth: Number(input.screenWidth ?? 0),
     screenHeight: Number(input.screenHeight ?? 0),
     commit,

@@ -95,21 +95,8 @@ function risuEscape(text) {
     }
   });
 }
-function denormalise(input) {
-  if (!input.startsWith("#risu_"))
-    return input;
-  const rest = input.slice(6);
-  const ci = rest.indexOf("::");
-  if (ci === -1)
-    return "#" + rest;
-  const name = rest.slice(0, ci);
-  const tail = rest.slice(ci + 2);
-  if (name === "if" || name === "if_pure")
-    return `#${name} ${tail}`;
-  return `#${name}::${tail}`;
-}
 function blockStartMatcher(input, ctx) {
-  const p1 = denormalise(input);
+  const p1 = input;
   if (p1.startsWith("#if") || p1.startsWith("#if_pure ")) {
     const statement = p1.split(" ", 2);
     const state = statement[1];
@@ -239,6 +226,8 @@ function blockStartMatcher(input, ctx) {
     return { type: "pure" };
   if (p1 === "#pure_display" || p1 === "#puredisplay")
     return { type: "pure-display" };
+  if (p1 === "#ignore")
+    return { type: "ignore" };
   if (p1 === "#code")
     return { type: "normalize" };
   if (p1.startsWith("#escape")) {
@@ -284,17 +273,11 @@ function blockEndMatcher(p1, type) {
     case "newif":
     case "newif-falsy": {
       const findElse = (s) => {
-        const withColon = s.indexOf("{{:else}}");
-        if (withColon !== -1)
-          return { index: withColon, len: 9 };
-        const noColon = s.indexOf("{{else}}");
-        if (noColon !== -1)
-          return { index: noColon, len: 8 };
-        return { index: -1, len: 0 };
+        const index = s.indexOf("{{:else}}");
+        return { index, len: index === -1 ? 0 : 9 };
       };
       const isElseLine = (v) => {
-        const t = v.trim();
-        return t === "{{:else}}" || t === "{{else}}";
+        return v.trim() === "{{:else}}";
       };
       const lines = p1.split(`
 `);
@@ -428,6 +411,1446 @@ var init_trigger_id = __esm(() => {
     category: "Risu / Identity",
     scoped: false
   });
+});
+
+// src/util/role-coerce.ts
+function risuRoleToLumi(r) {
+  return r === "user" ? "user" : "assistant";
+}
+function lumiRoleToRisu(r) {
+  return r === "user" ? "user" : "char";
+}
+function normalizeRoleToLumi(r) {
+  if (r === "user" || r === "assistant" || r === "system")
+    return r;
+  if (r === "char" || r === "bot")
+    return "assistant";
+  if (r === "sys")
+    return "system";
+  return null;
+}
+
+// src/risu-compat/handlers/context-reads.ts
+function register(name, handler, description) {
+  registry.register({
+    name,
+    handler,
+    description,
+    category: "Risu / Context",
+    scoped: false
+  });
+}
+function recurse(ctx, field) {
+  return ctx.evaluate ? ctx.evaluate(field) : field;
+}
+function formatDuration(ms) {
+  let seconds = Math.floor(ms / 1000);
+  let minutes = Math.floor(seconds / 60);
+  let hours = Math.floor(minutes / 60);
+  seconds = seconds % 60;
+  minutes = minutes % 60;
+  return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+function makeArray(arr) {
+  return JSON.stringify(arr.map((v) => {
+    if (typeof v === "string")
+      return v.replaceAll("::", "\\u003A\\u003A");
+    return v;
+  }));
+}
+var init_context_reads = __esm(() => {
+  init_registry();
+  register("description", (ctx) => recurse(ctx, ctx.character.description), "Returns the character description, recursively parsed.");
+  register("personality", (ctx) => recurse(ctx, ctx.character.personality), "Returns the character personality field, recursively parsed.");
+  register("scenario", (ctx) => recurse(ctx, ctx.character.scenario), "Returns the character scenario field, recursively parsed.");
+  register("persona", (ctx) => recurse(ctx, ctx.identity.personaText), "Returns the user persona prompt, recursively parsed.");
+  register("exampledialogue", (ctx) => recurse(ctx, ctx.character.exampleDialogue), "Returns the character's example dialogue field, recursively parsed.");
+  register("mainprompt", (ctx) => recurse(ctx, ctx.character.mainPrompt), "Returns the system/main prompt configured for the current character, recursively parsed.");
+  register("jb", (ctx) => recurse(ctx, ctx.character.jailbreakPrompt), "Returns the jailbreak prompt text, recursively parsed.");
+  register("globalnote", (ctx) => recurse(ctx, ctx.character.globalNote), "Returns the global note (system note / ujb), recursively parsed.");
+  register("authornote", (ctx) => recurse(ctx, ctx.character.authorsNote), "Returns the author's note for the current chat, recursively parsed.");
+  register("model", (ctx) => ctx.aiModel, "Returns the id of the currently selected AI model.");
+  register("axmodel", (ctx) => ctx.axModel, "Returns the id of the auxiliary/secondary model.");
+  register("role", (ctx) => {
+    if (ctx.role !== null)
+      return lumiRoleToRisu(ctx.role);
+    if (ctx.cbsContext)
+      return "null";
+    if (ctx.promptRegexLiteralVars)
+      return "null";
+    if (ctx.isFirstMessage)
+      return "char";
+    return "null";
+  }, "Returns the role of the current message ('user', 'char'/'assistant', 'system').");
+  register("isfirstmsg", (ctx) => {
+    if (ctx.cbsContext)
+      return "0";
+    if (ctx.promptRegexLiteralVars)
+      return "0";
+    if (ctx.currentMessageIndex !== null && ctx.currentMessageIndex !== undefined) {
+      return ctx.currentMessageIndex === -1 ? "1" : "0";
+    }
+    return ctx.isFirstMessage ? "1" : "0";
+  }, "Returns '1' if the current context is the first (greeting) message, '0' otherwise.");
+  register("unixtime", (ctx) => Math.floor(ctx.clock.now() / 1000).toString(), "Returns the current unix timestamp in seconds.");
+  register("time", (ctx) => {
+    const d = new Date(ctx.clock.now());
+    return `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
+  }, "Returns the current local time in H:M:S format (unpadded, matching Risu).");
+  register("isotime", (ctx) => {
+    const d = new Date(ctx.clock.now());
+    return `${d.getUTCHours()}:${d.getUTCMinutes()}:${d.getUTCSeconds()}`;
+  }, "Returns the current UTC time in H:M:S format.");
+  register("isodate", (ctx) => {
+    const d = new Date(ctx.clock.now());
+    return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+  }, "Returns the current UTC date in YYYY-M-D format (month/day not zero-padded, matching Risu).");
+  register("messagetime", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    const msg = msgs[ctx.currentMessageIndex];
+    if (!msg)
+      return "[Cannot get time]";
+    if (!msg.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return new Date(msg.createdAt).toLocaleTimeString();
+  }, "Returns the local time the current message was sent.");
+  register("messagedate", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    const msg = msgs[ctx.currentMessageIndex];
+    if (!msg)
+      return "[Cannot get time]";
+    if (!msg.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return new Date(msg.createdAt).toLocaleDateString();
+  }, "Returns the local date the current message was sent.");
+  register("messageunixtimearray", (ctx) => {
+    const arr = ctx.messages.all().map((m) => String(m.createdAt ?? 0));
+    return makeArray(arr);
+  }, "Returns a JSON-encoded array of all message unix timestamps (milliseconds).");
+  register("idleduration", (ctx) => {
+    const msgs = ctx.messages.all();
+    if (msgs.length === 0)
+      return "00:00:00";
+    const last = msgs[msgs.length - 1];
+    if (!last.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return formatDuration(ctx.clock.now() - last.createdAt);
+  }, "Returns HH:MM:SS since the most recent message.");
+  register("messageidleduration", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    let pointer = ctx.currentMessageIndex;
+    let message;
+    let previous;
+    let stage = "findLast";
+    while (pointer >= 0) {
+      const m = msgs[pointer];
+      if (m && m.role === "user") {
+        if (stage === "findLast") {
+          message = m;
+          stage = "findSecondLast";
+        } else {
+          previous = m;
+          break;
+        }
+      }
+      pointer--;
+    }
+    if (!message)
+      return "[No user message found]";
+    if (!previous)
+      return "[No previous user message found]";
+    if (!message.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    if (!previous.createdAt)
+      return "[Cannot get time, previous message was sent in older version]";
+    return formatDuration(message.createdAt - previous.createdAt);
+  }, "Returns HH:MM:SS between the current and the previous user message.");
+  register("br", () => `
+`, "Returns a literal newline character.");
+  register("blank", () => "", "Returns an empty string.");
+});
+
+// src/risu-compat/risu-helpers.ts
+function parseArray2(s) {
+  try {
+    const arr = JSON.parse(s);
+    if (Array.isArray(arr))
+      return arr;
+  } catch {}
+  return s.split("§");
+}
+function parseDict(s) {
+  try {
+    const v = JSON.parse(s);
+    if (v && typeof v === "object" && !Array.isArray(v))
+      return v;
+  } catch {}
+  return {};
+}
+function makeArray2(arr) {
+  return JSON.stringify(arr.map((v) => {
+    if (typeof v === "string")
+      return v.replaceAll("::", "\\u003A\\u003A");
+    return v;
+  }));
+}
+function sfc32(a, b, c, d) {
+  return function() {
+    a |= 0;
+    b |= 0;
+    c |= 0;
+    d |= 0;
+    const t = (a + b | 0) + d | 0;
+    d = d + 1 | 0;
+    a = b ^ b >>> 9;
+    b = c + (c << 3) | 0;
+    c = c << 21 | c >>> 11;
+    c = c + t | 0;
+    return (t >>> 0) / 4294967296;
+  };
+}
+function pickHashRand(cid, word) {
+  let hashAddress = 5515;
+  const rand = (w) => {
+    for (let counter = 0;counter < w.length; counter++) {
+      hashAddress = (hashAddress << 5) + hashAddress + w.charCodeAt(counter);
+    }
+    return hashAddress;
+  };
+  const randF = sfc32(rand(word), rand(word), rand(word), rand(word));
+  const v = cid % 1000;
+  for (let i = 0;i < v; i++)
+    randF();
+  return randF();
+}
+function dateTimeFormat(main, time = 0) {
+  const date = time === 0 ? new Date : new Date(time);
+  if (!main)
+    return "";
+  if (main.startsWith(":"))
+    main = main.substring(1);
+  if (main.length > 300)
+    return "";
+  return main.replace(/YYYY/g, date.getFullYear().toString()).replace(/YY/g, date.getFullYear().toString().substring(2)).replace(/MMMM/g, new Intl.DateTimeFormat("en", { month: "long" }).format(date)).replace(/MMM/g, new Intl.DateTimeFormat("en", { month: "short" }).format(date)).replace(/MM/g, (date.getMonth() + 1).toString().padStart(2, "0")).replace(/DDDD/g, Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)).toString()).replace(/DD/g, date.getDate().toString().padStart(2, "0")).replace(/dddd/g, new Intl.DateTimeFormat("en", { weekday: "long" }).format(date)).replace(/ddd/g, new Intl.DateTimeFormat("en", { weekday: "short" }).format(date)).replace(/HH/g, date.getHours().toString().padStart(2, "0")).replace(/hh/g, (date.getHours() % 12 || 12).toString().padStart(2, "0")).replace(/mm/g, date.getMinutes().toString().padStart(2, "0")).replace(/ss/g, date.getSeconds().toString().padStart(2, "0")).replace(/X/g, Math.floor(date.getTime() / 1000).toString()).replace(/x/g, date.getTime().toString()).replace(/A/g, date.getHours() >= 12 ? "PM" : "AM");
+}
+function calcString(text, readLocal, readGlobal) {
+  const depthText = [""];
+  for (let i = 0;i < text.length; i++) {
+    if (text[i] === "(") {
+      depthText.push("");
+    } else if (text[i] === ")" && depthText.length > 1) {
+      const inner = depthText.pop();
+      const result = executeRPN(inner, readLocal, readGlobal);
+      depthText[depthText.length - 1] += result;
+    } else {
+      depthText[depthText.length - 1] += text[i];
+    }
+  }
+  return executeRPN(depthText.join(""), readLocal, readGlobal);
+}
+function executeRPN(text, readLocal, readGlobal) {
+  const substituted = text.replace(/\$([a-zA-Z0-9_]+)/g, (_, p1) => {
+    const v = readLocal(p1);
+    const parsed = parseFloat(v);
+    return isNaN(parsed) ? "0" : parsed.toString();
+  }).replace(/@([a-zA-Z0-9_]+)/g, (_, p1) => {
+    const v = readGlobal(p1);
+    const parsed = parseFloat(v);
+    return isNaN(parsed) ? "0" : parsed.toString();
+  }).replace(/&&/g, "&").replace(/\|\|/g, "|").replace(/<=/g, "≤").replace(/>=/g, "≥").replace(/==/g, "=").replace(/!=/g, "≠").replace(/null/gi, "0");
+  const rpn = toRPN(substituted);
+  return calculateRPN(rpn);
+}
+function toRPN(expression) {
+  expression = expression.replace(/\s+/g, "");
+  const expr2 = [];
+  let lastToken = "";
+  for (let i = 0;i < expression.length; i++) {
+    const char = expression[i];
+    if (char === "-" && (i === 0 || OPERATOR_CHARS.has(expression[i - 1]) || expression[i - 1] === "(")) {
+      lastToken += char;
+    } else if (OPERATOR_CHARS.has(char)) {
+      expr2.push(lastToken !== "" ? lastToken : "0");
+      lastToken = "";
+      expr2.push(char);
+    } else {
+      lastToken += char;
+    }
+  }
+  expr2.push(lastToken !== "" ? lastToken : "0");
+  let outputQueue = "";
+  const operatorStack = [];
+  for (const token of expr2) {
+    if (parseFloat(token) || token === "0") {
+      outputQueue += token + " ";
+    } else if (OPERATOR_CHARS.has(token)) {
+      while (operatorStack.length > 0) {
+        const top = operatorStack[operatorStack.length - 1];
+        const op = OPERATORS[token];
+        const topOp = OPERATORS[top];
+        const drain = op.associativity === "Left" ? op.precedence <= topOp.precedence : op.precedence < topOp.precedence;
+        if (!drain)
+          break;
+        outputQueue += operatorStack.pop() + " ";
+      }
+      operatorStack.push(token);
+    }
+  }
+  while (operatorStack.length > 0)
+    outputQueue += operatorStack.pop() + " ";
+  return outputQueue.trim();
+}
+function calculateRPN(expression) {
+  const stack = [];
+  for (const token of expression.split(" ")) {
+    if (parseFloat(token) || token === "0") {
+      stack.push(parseFloat(token));
+    } else {
+      const b = stack.pop();
+      const a = stack.pop();
+      switch (token) {
+        case "+":
+          stack.push(a + b);
+          break;
+        case "-":
+          stack.push(a - b);
+          break;
+        case "*":
+          stack.push(a * b);
+          break;
+        case "/":
+          stack.push(a / b);
+          break;
+        case "^":
+          stack.push(a ** b);
+          break;
+        case "%":
+          stack.push(a % b);
+          break;
+        case "<":
+          stack.push(a < b ? 1 : 0);
+          break;
+        case ">":
+          stack.push(a > b ? 1 : 0);
+          break;
+        case "|":
+          stack.push(a || b);
+          break;
+        case "&":
+          stack.push(a && b);
+          break;
+        case "≤":
+          stack.push(a <= b ? 1 : 0);
+          break;
+        case "≥":
+          stack.push(a >= b ? 1 : 0);
+          break;
+        case "=":
+          stack.push(a === b ? 1 : 0);
+          break;
+        case "≠":
+          stack.push(a !== b ? 1 : 0);
+          break;
+        case "!":
+          stack.push(b ? 0 : 1);
+          break;
+      }
+    }
+  }
+  return stack.length === 0 ? 0 : stack.pop();
+}
+var OPERATORS, OPERATOR_CHARS;
+var init_risu_helpers = __esm(() => {
+  OPERATORS = {
+    "+": { precedence: 2, associativity: "Left" },
+    "-": { precedence: 2, associativity: "Left" },
+    "*": { precedence: 3, associativity: "Left" },
+    "/": { precedence: 3, associativity: "Left" },
+    "^": { precedence: 4, associativity: "Left" },
+    "%": { precedence: 3, associativity: "Left" },
+    "<": { precedence: 1, associativity: "Left" },
+    ">": { precedence: 1, associativity: "Left" },
+    "|": { precedence: 1, associativity: "Left" },
+    "&": { precedence: 1, associativity: "Left" },
+    "≤": { precedence: 1, associativity: "Left" },
+    "≥": { precedence: 1, associativity: "Left" },
+    "=": { precedence: 1, associativity: "Left" },
+    "≠": { precedence: 1, associativity: "Left" },
+    "!": { precedence: 5, associativity: "Right" }
+  };
+  OPERATOR_CHARS = new Set(Object.keys(OPERATORS));
+});
+
+// src/risu-compat/handlers/math.ts
+function register2(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Math", scoped: false });
+}
+var aggSource = (args) => args.length > 1 ? args : parseArray2(args[0] ?? "").map((v) => String(v)), toNum = (s) => {
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
+};
+var init_math = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register2("round", (_c, a) => Math.round(Number(a[0])).toString(), "Rounds to nearest integer (half-up).");
+  register2("floor", (_c, a) => Math.floor(Number(a[0])).toString(), "Floors (rounds toward negative infinity).");
+  register2("ceil", (_c, a) => Math.ceil(Number(a[0])).toString(), "Ceils (rounds toward positive infinity).");
+  register2("abs", (_c, a) => Math.abs(Number(a[0])).toString(), "Absolute value.");
+  register2("remaind", (_c, a) => (Number(a[0]) % Number(a[1])).toString(), "Returns (a % b) as string.");
+  register2("pow", (_c, a) => Math.pow(Number(a[0]), Number(a[1])).toString(), "Returns a^b.");
+  register2("min", (_c, a) => Math.min(...aggSource(a).map(toNum)).toString(), "Minimum of the given values (non-numeric treated as 0).");
+  register2("max", (_c, a) => Math.max(...aggSource(a).map(toNum)).toString(), "Maximum of the given values.");
+  register2("sum", (_c, a) => aggSource(a).map(toNum).reduce((x, y) => x + y, 0).toString(), "Sum of the given values.");
+  register2("average", (_c, a) => {
+    const src = aggSource(a);
+    if (src.length === 0)
+      return "NaN";
+    return (src.map(toNum).reduce((x, y) => x + y, 0) / src.length).toString();
+  }, "Arithmetic mean of the given values.");
+  register2("tonumber", (_c, a) => {
+    const s = a[0] ?? "";
+    let out = "";
+    for (const ch of s) {
+      if (!isNaN(Number(ch)) || ch === ".")
+        out += ch;
+    }
+    return out;
+  }, "Extracts digits (and decimal points) from the input string.");
+  register2("fixnum", (_c, a) => Number(a[0]).toFixed(Number(a[1])).toString(), "Rounds to N decimal places via toFixed.");
+  register2("calc", (ctx, a) => {
+    const expr = a[0] ?? "";
+    const n = calcString(expr, (name) => ctx.vars.get("local", name), (name) => ctx.vars.get("global", name));
+    return n.toString();
+  }, "Evaluates a mathematical expression. Supports + - * / ^ % and comparison operators; $x reads local var, @x reads global var.");
+});
+
+// src/risu-compat/handlers/logic.ts
+function register3(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Logic", scoped: false });
+}
+var bag = (a) => a.length > 1 ? a : parseArray2(a[0] ?? "").map((v) => String(v));
+var init_logic = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register3("equal", (_c, a) => a[0] === a[1] ? "1" : "0", "Returns '1' if args[0] === args[1] (string compare), else '0'.");
+  register3("notequal", (_c, a) => a[0] !== a[1] ? "1" : "0", "Returns '1' if args[0] !== args[1], else '0'.");
+  register3("greater", (_c, a) => Number(a[0]) > Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) > Number(args[1]).");
+  register3("less", (_c, a) => Number(a[0]) < Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) < Number(args[1]).");
+  register3("greaterequal", (_c, a) => Number(a[0]) >= Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) >= Number(args[1]).");
+  register3("lessequal", (_c, a) => Number(a[0]) <= Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) <= Number(args[1]).");
+  register3("and", (_c, a) => a[0] === "1" && a[1] === "1" ? "1" : "0", "Boolean AND: returns '1' if both args are the literal string '1'.");
+  register3("or", (_c, a) => a[0] === "1" || a[1] === "1" ? "1" : "0", "Boolean OR: returns '1' if either arg is '1'.");
+  register3("not", (_c, a) => a[0] === "1" ? "0" : "1", "Boolean NOT of a '1'/'0' value.");
+  register3("all", (_c, a) => bag(a).every((f) => f === "1") ? "1" : "0", "Returns '1' if every value is the literal string '1'.");
+  register3("any", (_c, a) => bag(a).some((f) => f === "1") ? "1" : "0", "Returns '1' if any value is '1'.");
+  register3("startswith", (_c, a) => (a[0] ?? "").startsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] starts with args[1].");
+  register3("endswith", (_c, a) => (a[0] ?? "").endsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] ends with args[1].");
+  register3("contains", (_c, a) => (a[0] ?? "").includes(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] contains args[1] anywhere.");
+  register3("iserror", (_c, a) => (a[0] ?? "").toLocaleLowerCase().startsWith("error:") ? "1" : "0", "Returns '1' if the argument begins with 'error:' (case-insensitive).");
+});
+
+// src/risu-compat/handlers/strings.ts
+function register4(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Strings", scoped: false });
+}
+var init_strings = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register4("replace", (_c, a) => (a[0] ?? "").replaceAll(a[1] ?? "", a[2] ?? ""), "Replaces all occurrences of needle with replacement.");
+  register4("split", (_c, a) => makeArray2((a[0] ?? "").split(a[1] ?? "")), "Splits a string on the delimiter and returns a JSON array.");
+  register4("join", (_c, a) => parseArray2(a[0] ?? "").join(a[1] ?? ""), "Joins a JSON array using the given separator.");
+  register4("spread", (_c, a) => parseArray2(a[0] ?? "").join("::"), "Joins a JSON array using :: as the separator.");
+  register4("trim", (_c, a) => (a[0] ?? "").trim(), "Strips leading/trailing whitespace.");
+  register4("length", (_c, a) => (a[0] ?? "").length.toString(), "Returns the character length of a string.");
+  register4("lower", (_c, a) => (a[0] ?? "").toLocaleLowerCase(), "Lowercases using locale-aware conversion.");
+  register4("upper", (_c, a) => (a[0] ?? "").toLocaleUpperCase(), "Uppercases using locale-aware conversion.");
+  register4("capitalize", (_c, a) => {
+    const s = a[0] ?? "";
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }, "Uppercases only the first character.");
+  register4("reverse", (_c, a) => [...a[0] ?? ""].reverse().join(""), "Reverses a string (code-point safe via iterator).");
+});
+
+// src/risu-compat/handlers/arrays.ts
+function register5(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Arrays", scoped: false });
+}
+var init_arrays = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register5("arraylength", (_c, a) => parseArray2(a[0] ?? "").length.toString(), "Returns the length of a JSON array.");
+  register5("arrayshift", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    arr.shift();
+    return makeArray2(arr);
+  }, "Removes and discards the first element.");
+  register5("arraypop", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    arr.pop();
+    return makeArray2(arr);
+  }, "Removes and discards the last element.");
+  register5("arraypush", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    arr.push(a[1] ?? "");
+    return makeArray2(arr);
+  }, "Appends a new element.");
+  register5("arraysplice", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    arr.splice(Number(a[1]), Number(a[2]), a[3] ?? "");
+    return makeArray2(arr);
+  }, "Risu-style splice: (array, start, deleteCount, newElement).");
+  register5("arrayassert", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    const idx = Number(a[1]);
+    if (idx >= arr.length)
+      arr[idx] = a[2] ?? "";
+    return makeArray2(arr);
+  }, "Sets arr[idx] = value if idx is out of bounds; else leaves array unchanged.");
+  register5("arrayelement", (_c, a) => {
+    const el = parseArray2(a[0] ?? "").at(Number(a[1])) ?? "null";
+    return typeof el === "object" ? JSON.stringify(el) : String(el);
+  }, "Returns the element at index (JSON-stringifies if object). 'null' if OOB.");
+  register5("dictelement", (_c, a) => {
+    const el = parseDict(a[0] ?? "")[a[1] ?? ""] ?? "null";
+    return typeof el === "object" ? JSON.stringify(el) : String(el);
+  }, "Returns dict[key] or 'null'.");
+  register5("objectassert", (_c, a) => {
+    const d = parseDict(a[0] ?? "");
+    if (!d[a[1] ?? ""])
+      d[a[1] ?? ""] = a[2] ?? "";
+    return JSON.stringify(d);
+  }, "Sets obj[key] = value if missing or falsy; returns JSON.");
+  register5("element", (_c, a) => {
+    try {
+      let current = a[0] ?? "";
+      for (const step of a.slice(1)) {
+        const parsed = JSON.parse(current);
+        if (parsed === null || typeof parsed !== "object" && !Array.isArray(parsed))
+          return "null";
+        current = parsed[step];
+        if (!current)
+          return "null";
+      }
+      return String(current);
+    } catch {
+      return "null";
+    }
+  }, "Walks a JSON structure by successive keys/indices. Returns 'null' if any step fails.");
+  register5("makearray", (_c, a) => makeArray2(a), "Creates a JSON array from the given arguments.");
+  register5("makedict", (_c, a) => {
+    const d = {};
+    for (let i = 0;i + 1 < a.length; i += 2) {
+      d[a[i] ?? ""] = a[i + 1] ?? "";
+    }
+    return JSON.stringify(d);
+  }, "Creates a JSON object from interleaved key-value arguments.");
+  register5("range", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    const start = arr.length > 1 ? Number(arr[0]) : 0;
+    const end = arr.length > 1 ? Number(arr[1]) : Number(arr[0]);
+    const step = arr.length > 2 ? Number(arr[2]) : 1;
+    const out = [];
+    if (step !== 0) {
+      for (let i = start;i < end; i += step)
+        out.push(i.toString());
+    }
+    return makeArray2(out);
+  }, "Creates a range. [n] → [0,1,…,n-1]. [a,b] → [a,…,b-1]. [a,b,s] → step s.");
+  register5("filter", (_c, a) => {
+    const arr = parseArray2(a[0] ?? "");
+    const mode = ["all", "nonempty", "unique"].indexOf(a[1] ?? "all");
+    const filterType = mode === -1 ? 0 : mode;
+    return makeArray2(arr.filter((f, i) => {
+      switch (filterType) {
+        case 0:
+          return f !== "" && i === arr.indexOf(f);
+        case 1:
+          return f !== "";
+        case 2:
+          return i === arr.indexOf(f);
+        default:
+          return true;
+      }
+    }));
+  }, "Filters an array. mode='all' (unique + nonempty), 'nonempty', or 'unique'.");
+});
+
+// src/risu-compat/handlers/random.ts
+function register6(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Random", scoped: false });
+}
+function randomPickImpl(args, rand) {
+  if (args.length === 0)
+    return rand.toString();
+  let arr;
+  if (args.length === 1) {
+    const s = args[0] ?? "";
+    if (s.startsWith("[") && s.endsWith("]")) {
+      arr = parseArray2(s);
+    } else {
+      arr = s.replace(/\\,/g, "§X").split(/:|,/);
+    }
+  } else {
+    arr = [...args];
+  }
+  const idx = Math.floor(rand * arr.length);
+  const el = arr[idx];
+  return typeof el === "string" ? el.replace(/\u00A7X/g, ",") : JSON.stringify(el) ?? "";
+}
+var init_random = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register6("random", (ctx, a) => randomPickImpl(a, ctx.rng.random()), "Random element picker. No args → returns a random [0,1) number. One arg → picks from a JSON array or a comma/colon-delimited string. Multiple args → random one.");
+  register6("pick", (ctx, a) => {
+    const rand = pickHashRand(ctx.messages.count(), ctx.character.chaId + ctx.chatId);
+    return randomPickImpl(a, rand);
+  }, "Hash-deterministic pick. Same inputs at the same chat position return the same element.");
+  register6("roll", (ctx, a) => {
+    if (a.length === 0)
+      return "1";
+    const notation = (a[0] ?? "").split("d");
+    let num = 1;
+    let sides = 6;
+    if (notation.length === 2) {
+      num = Number(notation[0] || 1);
+      sides = Number(notation[1] || 6);
+    } else if (notation.length === 1) {
+      sides = Number(notation[0]);
+    }
+    if (isNaN(num) || isNaN(sides) || num < 1 || sides < 1)
+      return "NaN";
+    let total = 0;
+    for (let i = 0;i < num; i++)
+      total += Math.floor(ctx.rng.random() * sides) + 1;
+    return total.toString();
+  }, "Dice roll. XdY syntax (default 1d6). Sum of N uniform rolls.");
+  register6("rollp", (ctx, a) => {
+    if (a.length === 0)
+      return "1";
+    const notation = (a[0] ?? "").split("d");
+    let num = 1;
+    let sides = 6;
+    if (notation.length === 2) {
+      num = Number(notation[0] || 1);
+      sides = Number(notation[1] || 6);
+    } else if (notation.length === 1) {
+      sides = Number(notation[0]);
+    }
+    if (isNaN(num) || isNaN(sides) || num < 1 || sides < 1)
+      return "NaN";
+    let total = 0;
+    for (let i = 0;i < num; i++) {
+      const cid = ctx.messages.count() + i * 15;
+      total += Math.floor(pickHashRand(cid, ctx.character.chaId + ctx.chatId) * sides) + 1;
+    }
+    return total.toString();
+  }, "Hash-deterministic dice roll. Same chat position returns the same outcome.");
+  register6("dice", (ctx, a) => {
+    const notation = (a[0] ?? "").split("d");
+    const num = Number(notation[0]);
+    const sides = Number(notation[1]);
+    if (isNaN(num) || isNaN(sides))
+      return "NaN";
+    let total = 0;
+    for (let i = 0;i < num; i++)
+      total += Math.floor(ctx.rng.random() * sides) + 1;
+    return total.toString();
+  }, "Dice roll via NdS notation. No defaults — both numbers required.");
+  register6("randint", (ctx, a) => {
+    const min = Number(a[0]);
+    const max = Number(a[1]);
+    if (isNaN(min) || isNaN(max))
+      return "NaN";
+    return (Math.floor(ctx.rng.random() * (max - min + 1)) + min).toString();
+  }, "Uniform random integer in [min, max] (inclusive).");
+  register6("hash", (_c, a) => {
+    const v = pickHashRand(0, a[0] ?? "");
+    return (v * 1e7 + 1).toFixed(0).padStart(7, "0");
+  }, "Returns a deterministic 7-digit hash of the input string.");
+});
+
+// src/risu-compat/handlers/variables.ts
+function register7(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Variables", scoped: false });
+}
+function setvarMode(ctx) {
+  if (ctx.rmVar)
+    return "hide";
+  if (ctx.runVar)
+    return "run";
+  return "literal";
+}
+function leaveVarLiteral(ctx) {
+  return !ctx.commit || ctx.promptRegexLiteralVars === true;
+}
+var init_variables = __esm(() => {
+  init_registry();
+  register7("getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a local chat variable. Empty string if unset.");
+  register7("setvar", (ctx, a) => {
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
+      return `{{setvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+    ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
+    return "";
+  }, "Sets a local chat variable.");
+  register7("addvar", (ctx, a) => {
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
+      return `{{addvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+    ctx.vars.add("local", a[0] ?? "", Number(a[1]));
+    return "";
+  }, "Adds delta to a local chat variable (coerces current value to number).");
+  register7("setdefaultvar", (ctx, a) => {
+    const mode = setvarMode(ctx);
+    if (mode === "hide")
+      return "";
+    if (mode === "literal")
+      return `{{setdefaultvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+    const name = a[0] ?? "";
+    const current = ctx.vars.get("local", name);
+    if (!current || current === "null") {
+      ctx.vars.set("local", name, a[1] ?? "");
+    }
+    return "";
+  }, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
+  register7("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""), "Reads a global chat variable.");
+  register7("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""), "Reads a temporary variable (per-evaluation scope).");
+  register7("settempvar", (ctx, a) => {
+    ctx.vars.set("temp", a[0] ?? "", a[1] ?? "");
+    return "";
+  }, "Sets a temporary variable.");
+  register7("deletevar", (ctx, a) => {
+    if (leaveVarLiteral(ctx))
+      return `{{deletevar::${a[0] ?? ""}}}`;
+    ctx.vars.delete("local", a[0] ?? "");
+    return "";
+  }, "Deletes a local chat variable.");
+  register7("flushvar", (ctx, a) => {
+    if (leaveVarLiteral(ctx))
+      return `{{flushvar::${a[0] ?? ""}}}`;
+    ctx.vars.delete("local", a[0] ?? "");
+    return "";
+  }, "Alias of deletevar.");
+  register7("getchatvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a chat-scoped variable (aliased to local in Risu).");
+  register7("setchatvar", (ctx, a) => {
+    if (leaveVarLiteral(ctx))
+      return `{{setchatvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+    ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
+    return "";
+  }, "Sets a chat-scoped variable.");
+  register7("return", (ctx, a) => {
+    ctx.vars.set("temp", "__force_return__", "1");
+    ctx.vars.set("temp", "__return__", a[0] ?? "");
+    return "";
+  }, "Halts further macro resolution, returns the given value as the entire parser output (Risu parity).");
+});
+
+// src/util/base64.ts
+function base64ToBytes(input) {
+  const sextets = [];
+  for (let i = 0;i < input.length; i++) {
+    const v = DECODE[input.charCodeAt(i)] ?? -1;
+    if (v >= 0)
+      sextets.push(v);
+  }
+  const out = new Uint8Array(sextets.length * 6 >> 3);
+  let bitBuf = 0;
+  let bitCount = 0;
+  let o = 0;
+  for (const s of sextets) {
+    bitBuf = bitBuf << 6 | s;
+    bitCount += 6;
+    if (bitCount >= 8) {
+      bitCount -= 8;
+      out[o++] = bitBuf >> bitCount & 255;
+    }
+  }
+  return out;
+}
+function base64ToUtf8(input) {
+  return new TextDecoder().decode(base64ToBytes(input));
+}
+function bytesToBase64(bytes) {
+  let out = "";
+  let i = 0;
+  for (;i + 2 < bytes.length; i += 3) {
+    const n = bytes[i] << 16 | bytes[i + 1] << 8 | bytes[i + 2];
+    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + B64_ALPHABET[n >> 6 & 63] + B64_ALPHABET[n & 63];
+  }
+  const rem = bytes.length - i;
+  if (rem === 1) {
+    const n = bytes[i] << 16;
+    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + "==";
+  } else if (rem === 2) {
+    const n = bytes[i] << 16 | bytes[i + 1] << 8;
+    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + B64_ALPHABET[n >> 6 & 63] + "=";
+  }
+  return out;
+}
+var B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", DECODE;
+var init_base64 = __esm(() => {
+  DECODE = new Int16Array(256).fill(-1);
+  for (let i = 0;i < B64_ALPHABET.length; i++) {
+    DECODE[B64_ALPHABET.charCodeAt(i)] = i;
+  }
+  DECODE[45] = 62;
+  DECODE[95] = 63;
+});
+
+// src/risu-compat/handlers/misc.ts
+function register8(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Misc", scoped: false });
+}
+function escapeButtonLabel(s) {
+  return s.replace(BARE_AMP_RE, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+var BARE_AMP_RE;
+var init_misc = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  init_base64();
+  register8("u", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Returns the character for a hex codepoint.");
+  register8("ue", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Alias for {{u}}.");
+  register8("unicodeencode", (_c, a) => (a[0] ?? "").charCodeAt(a[1] ? Number(a[1]) : 0).toString(), "Returns the Unicode code point of a character at the given index (default 0).");
+  register8("unicodedecode", (_c, a) => String.fromCharCode(Number(a[0] ?? "0")), "Converts a Unicode code point back to a character.");
+  register8("fromhex", (_c, a) => Number.parseInt(a[0] ?? "0", 16).toString(), "Converts a hex string to decimal.");
+  register8("tohex", (_c, a) => Number.parseInt(a[0] ?? "0").toString(16), "Converts a decimal number to hex.");
+  register8("xor", (_c, a) => {
+    const bytes = new TextEncoder().encode(a[0] ?? "");
+    for (let i = 0;i < bytes.length; i++)
+      bytes[i] ^= 255;
+    return bytesToBase64(bytes);
+  }, "XOR-encrypts a string with 0xFF and base64-encodes.");
+  register8("xordecrypt", (_c, a) => {
+    const bytes = base64ToBytes(a[0] ?? "");
+    for (let i = 0;i < bytes.length; i++)
+      bytes[i] ^= 255;
+    return new TextDecoder().decode(bytes);
+  }, "Decrypts an XOR-encrypted base64 string.");
+  register8("crypt", (_c, a) => {
+    let shift = a[1] ? Number(a[1]) : 32768;
+    if (isNaN(shift))
+      shift = 32768;
+    const input = a[0] ?? "";
+    let result = "";
+    for (let i = 0;i < input.length; i++) {
+      const code = input.charCodeAt(i);
+      if (code > 65535) {
+        result += input[i];
+        continue;
+      }
+      let shifted = code + shift;
+      if (shifted > 65535)
+        shifted -= 65536;
+      result += String.fromCharCode(shifted);
+    }
+    return result;
+  }, "Caesar-style Unicode shift cipher (default shift 32768 which self-inverts).");
+  register8("date", (ctx, a) => {
+    if (a.length === 0) {
+      const d = new Date(ctx.clock.now());
+      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    }
+    const t = a[1] ? Number(a[1]) : 0;
+    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
+  }, "Formats a date. No args → YYYY-M-D. First arg is format, optional second arg is unix ms.");
+  register8("datetimeformat", (ctx, a) => {
+    if (a.length === 0) {
+      const d = new Date(ctx.clock.now());
+      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    }
+    const t = a[1] ? Number(a[1]) : 0;
+    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
+  }, "Alias of {{date::fmt}}.");
+  register8("hiddenkey", () => "", "A key that activates lorebook entries without being sent to the model.");
+  register8("comment", (ctx, a) => {
+    if (ctx.commit || ctx.cbsContext)
+      return "";
+    return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
+  }, 'Comment macro. Empty at prompt time and in cbs; displays as <div class="risu-comment">…</div> at render time.');
+  registry.register({
+    name: "//",
+    handler: () => "",
+    description: "Inline comment. Returns empty string.",
+    category: "Risu / Misc",
+    scoped: false
+  });
+  register8("tex", (_c, a) => `$$${a[0] ?? ""}$$`, "LaTeX/math block.");
+  register8("ruby", (_c, a) => `<ruby>${a[0] ?? ""}<rp> (</rp><rt>${a[1] ?? ""}</rt><rp>) </rp></ruby>`, "Ruby (furigana) HTML wrapper.");
+  register8("codeblock", (_c, a) => {
+    const code = (a[a.length - 1] ?? "").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    if (a.length > 1)
+      return `<pre-hljs-placeholder lang="${a[0]}">${code}</pre-hljs-placeholder>`;
+    return `<pre><code>${code}</code></pre>`;
+  }, "Code-block HTML wrapper. One arg → plain. Two args → highlighted, first is lang.");
+  register8("risu", (_c, a) => {
+    const size = a[0] || "45";
+    return `<img src="/logo2.png" style="height:${size}px;width:${size}px" />`;
+  }, "Embeds the RisuAI logo image.");
+  BARE_AMP_RE = /&(?!#x[0-9a-fA-F]+;|#[0-9]+;|[a-zA-Z][a-zA-Z0-9]*;)/g;
+  register8("button", (_c, a) => {
+    const label = escapeButtonLabel(a[0] ?? "");
+    const trigger = (a[1] ?? "").replace(/"/g, "&quot;");
+    return `<button class="button-default x-risu-button-default" risu-trigger="${trigger}">${label}</button>`;
+  }, "HTML button that fires the named risu-trigger when clicked.");
+  register8("screenwidth", (ctx) => String(ctx.screenWidth ?? 0), "Viewport width in pixels. Read from the frontend-reported value; 0 before the first report.");
+  register8("screenheight", (ctx) => String(ctx.screenHeight ?? 0), "Viewport height in pixels. Read from the frontend-reported value; 0 before the first report.");
+  register8("moduleenabled", (ctx, a) => {
+    const ns = a[0] ?? "";
+    if (ns.length === 0)
+      return "0";
+    const map = ctx.modulesByNamespace;
+    if (map && map[ns])
+      return "1";
+    return "0";
+  }, "Returns 1 if a module with the specified namespace is attached, 0 otherwise.");
+  register8("moduleassetlist", (ctx, a) => {
+    const ns = a[0] ?? "";
+    if (ns.length === 0)
+      return "";
+    const map = ctx.modulesByNamespace;
+    if (!map)
+      return "";
+    const list = map[ns];
+    if (!list || list.length === 0)
+      return "";
+    return makeArray2(list);
+  }, "Returns a JSON array of asset names for the specified module namespace. Returns empty string if namespace not found.");
+  register8("metadata", (ctx, a) => {
+    const key = (a[0] ?? "").toLocaleLowerCase();
+    switch (key) {
+      case "imateapot":
+        return "\uD83E\uDED6";
+      case "mobile":
+      case "local":
+      case "node":
+        return "0";
+      case "risutype":
+        return "web";
+      case "modelname":
+      case "modelshortname":
+      case "modelinternalid":
+        return ctx.aiModel || "";
+      case "version":
+        return ctx.appVersion;
+      case "majorversion":
+      case "majorver":
+      case "major":
+        return ctx.appVersion.split(".")[0] ?? "";
+      case "maxcontext":
+        return ctx.maxContext.toString();
+      case "language":
+      case "locale":
+      case "lang":
+      case "browserlanguage":
+      case "browserlocale":
+      case "browserlang":
+        return ctx.language;
+      default:
+        return `Error: ${a[0]} is not a valid metadata key.`;
+    }
+  }, "Returns host metadata. Subset implemented — model fields read from ctx.aiModel; platform fields default to non-native; language and browserlanguage collapse to one value.");
+  register8("chatindex", (ctx) => {
+    const idx = ctx.currentMessageIndex;
+    return idx === null ? "" : idx.toString();
+  }, "Index of the current message being processed. Risu cbs() default returns -1.");
+  register8("firstmsgindex", (ctx) => {
+    const idx = ctx.character.selectedAlternateGreetingIndex;
+    return String(typeof idx === "number" ? idx : -1);
+  }, "Returns chat.fmIndex (selected alternate greeting index). -1 = default firstMessage.");
+});
+
+// src/risu-compat/handlers/chat-context.ts
+function register9(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Chat", scoped: false });
+}
+function selectedGreeting(ctx) {
+  const character = ctx.character;
+  if (character.selectedGreeting !== undefined)
+    return character.selectedGreeting;
+  return character.selectedAlternateGreetingIndex === -1 ? character.firstMessage : character.alternateGreetings[character.selectedAlternateGreetingIndex] ?? character.firstMessage;
+}
+function risuRole(r) {
+  return r === "assistant" ? "char" : r;
+}
+function toSerializableMsg(m) {
+  const out = {
+    role: risuRole(m.role),
+    data: m.content,
+    time: m.createdAt
+  };
+  if (m.speaker)
+    out.speaker = m.speaker;
+  return out;
+}
+function evalMsg(ctx, m) {
+  const data = ctx.evaluate ? ctx.evaluate(m.content) : m.content;
+  const out = {
+    role: risuRole(m.role),
+    data,
+    time: m.createdAt
+  };
+  if (m.speaker)
+    out.speaker = m.speaker;
+  return out;
+}
+var init_chat_context = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register9("lorebook", (ctx) => {
+    return makeArray2(ctx.lorebook.map((e) => JSON.stringify(e)));
+  }, "Returns all active lorebook entries as a JSON array (character + chat + module lore concatenated).");
+  register9("userhistory", (ctx) => {
+    const filtered = ctx.messages.all().filter((m) => m.role === "user").map((m) => JSON.stringify(evalMsg(ctx, m)));
+    return makeArray2(filtered);
+  }, "Returns all user messages as a JSON array, each .data recursively parsed.");
+  register9("charhistory", (ctx) => {
+    const filtered = ctx.messages.all().filter((m) => m.role === "assistant").map((m) => JSON.stringify(evalMsg(ctx, m)));
+    return makeArray2(filtered);
+  }, "Returns all character (assistant) messages as a JSON array, each .data recursively parsed.");
+  register9("history", (ctx, a) => {
+    const msgs = ctx.messages.all();
+    if (a.length === 0) {
+      const fm = selectedGreeting(ctx);
+      const head = [{
+        role: "char",
+        data: ctx.evaluate ? ctx.evaluate(fm) : fm,
+        time: 0
+      }];
+      return makeArray2([
+        ...head,
+        ...msgs.map((m) => ({
+          ...toSerializableMsg(m),
+          data: ctx.evaluate ? ctx.evaluate(m.content) : m.content
+        }))
+      ].map((v) => JSON.stringify(v)));
+    }
+    const withRole = a.includes("role");
+    return makeArray2(msgs.map((m) => withRole ? `${risuRole(m.role)}: ${m.content}` : m.content));
+  }, "No args → full JSON history with first-greeting at index 0. With 'role' arg → array of 'role: data' strings.");
+  register9("previouschatlog", (ctx, a) => {
+    const idx = Number(a[0]);
+    const msgs = ctx.messages.all();
+    return msgs[idx]?.content ?? "Out of range";
+  }, "Returns message[N].content, or 'Out of range' if index invalid.");
+  register9("previouscharchat", (ctx) => {
+    const msgs = ctx.messages.all();
+    const start = ctx.cbsContext ? msgs.length - 1 : ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1;
+    for (let i = start;i >= 0; i--) {
+      const m = msgs[i];
+      if (m && m.role === "assistant")
+        return m.content;
+    }
+    return selectedGreeting(ctx);
+  }, "Last character (assistant) message; cbs walks from chat-end, others from currentMessageIndex-1.");
+  register9("previoususerchat", (ctx) => {
+    if (ctx.cbsContext)
+      return "";
+    if (ctx.currentMessageIndex === null)
+      return "";
+    const msgs = ctx.messages.all();
+    for (let i = ctx.currentMessageIndex - 1;i >= 0; i--) {
+      const m = msgs[i];
+      if (m && m.role === "user")
+        return m.content;
+    }
+    return selectedGreeting(ctx);
+  }, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
+  register9("lastmessage", (ctx) => {
+    const last = ctx.messages.last();
+    return last?.content ?? "";
+  }, "Content of the most recent message, regardless of role.");
+  register9("lastmessageid", (ctx) => {
+    const n = ctx.messages.count();
+    return Math.max(-1, n - 1).toString();
+  }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");
+  register9("lastusermessage", (ctx) => {
+    const m = ctx.messages.lastOf("user");
+    return m?.content ?? "";
+  }, "Alias-style shortcut for the most recent user message. '' if none.");
+  register9("lastcharmessage", (ctx) => {
+    const m = ctx.messages.lastOf("assistant");
+    return m?.content ?? "";
+  }, "Alias-style shortcut for the most recent character (assistant) message.");
+  register9("jbtoggled", (ctx) => ctx.jailbreakToggle ? "1" : "0", "Returns '1' when the global jailbreak toggle is on.");
+  register9("maxcontext", (ctx) => ctx.maxContext.toString(), "Returns the configured max-context length as a string.");
+  register9("messagecount", (ctx) => ctx.messages.count().toString(), "Returns the total number of messages in the chat.");
+});
+
+// src/risu-compat/handlers/display.ts
+function register10(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Display", scoped: false });
+}
+var DOC_ONLY;
+var init_display = __esm(() => {
+  init_registry();
+  register10("decbo", () => "", "Displays as { without being re-lexed by the parser (PUA sentinel).");
+  register10("decbc", () => "", "Displays as } without being re-lexed.");
+  register10("bo", () => "", "Displays as {{ without being re-lexed.");
+  register10("bc", () => "", "Displays as }} without being re-lexed.");
+  register10("displayescapedbracketopen", () => "", "Displays as ( (PUA sentinel).");
+  register10("displayescapedbracketclose", () => "", "Displays as ).");
+  register10("displayescapedanglebracketopen", () => "", "Displays as < (PUA sentinel).");
+  register10("displayescapedanglebracketclose", () => "", "Displays as >.");
+  register10("displayescapedcolon", () => "", "Displays as : without being parsed as a CBS separator.");
+  register10("displayescapedsemicolon", () => "", "Displays as ;.");
+  register10("cbr", (_c, a) => {
+    if (a.length === 0)
+      return "\\n";
+    const n = Math.max(1, Number(a[0] ?? "1"));
+    return "\\n".repeat(n);
+  }, "Returns a literal '\\n'. With numeric arg, repeats that many times.");
+  register10("position", (ctx, args, raw) => {
+    if (ctx.cbsContext) {
+      const source = raw || `position::${args.join("::")}`;
+      return `{{${source}}}`;
+    }
+    const name = args[0];
+    if (typeof name !== "string" || name.length === 0)
+      return "";
+    const map = ctx.positionPt;
+    if (!map)
+      return "";
+    return map[name] ?? "";
+  }, "Risu {{position::NAME}}: joined content of active entries with @@position pt_<NAME>.");
+  DOC_ONLY = [
+    ["slot", "{{slot::VAR}} inside a scoped block. Resolved by #each/#func/call handlers."]
+  ];
+  for (const [name, desc] of DOC_ONLY) {
+    register10(name, () => "", desc);
+  }
+  register10("bkspc", () => "", "Removes the last word from the parser output buffer.");
+  register10("erase", () => "", "Removes the last sentence from the parser output buffer.");
+});
+
+// src/risu-compat/handlers/metadata.ts
+function register11(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Metadata", scoped: false });
+}
+var init_metadata = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  init_base64();
+  register11("declare", (ctx, a) => {
+    ctx.vars.set("temp", `__declared_${a[0] ?? ""}__`, "1");
+    return "";
+  }, "Declares a marker; {{declared::NAME}} reads it. Backed by the temp-scope store.");
+  register11("declared", (ctx, a) => {
+    return ctx.vars.get("temp", `__declared_${a[0] ?? ""}__`) === "1" ? "1" : "0";
+  }, "Reads a declaration marker set by {{declare::NAME}}.");
+  register11("emotionlist", (ctx) => {
+    return makeArray2(ctx.character.emotionImages.map((e) => e.name));
+  }, "JSON array of emotion image names for the current character.");
+  register11("assetlist", (ctx) => {
+    if (ctx.character.type === "group")
+      return "";
+    return makeArray2(ctx.character.additionalAssets.map((a) => a.name));
+  }, "JSON array of additional asset names. '' for group characters.");
+  register11("prefillsupported", (ctx) => {
+    return ctx.aiModel.startsWith("claude") ? "1" : "0";
+  }, "'1' if the current AI model id starts with 'claude' (Claude supports prefill).");
+  register11("file", (ctx, a) => {
+    const decode = ctx.cbsContext || ctx.commit;
+    if (!decode)
+      return `<br><div class="x-risu-risu-file">${a[0] ?? ""}</div><br>`;
+    const content = a[1] ?? "";
+    try {
+      return base64ToUtf8(content);
+    } catch {
+      return "";
+    }
+  }, 'Decodes base64 file content to UTF-8 (prompt and cbs paths); renders <div class="risu-file">…</div> in display path.');
+  register11("chardisplayasset", (ctx) => {
+    if (!ctx.character.prebuiltAssetCommand)
+      return makeArray2([]);
+    const excludes = ctx.character.prebuiltAssetExclude;
+    const list = ctx.character.additionalAssets.filter((a) => !excludes.includes(a.src)).map((a) => a.name);
+    return makeArray2(list);
+  }, "JSON array of character display assets, minus the excluded set. Empty array if prebuiltAssetCommand is off.");
+});
+
+// src/risu-compat/handlers/assets.ts
+function register12(name, handler, description) {
+  registry.register({ name, handler, description, category: "Risu / Assets", scoped: false });
+}
+function trimAssetKey(s) {
+  let out = s;
+  for (const e of TRIMMER_EXTS) {
+    if (out.endsWith("." + e)) {
+      out = out.substring(0, out.length - e.length - 1);
+      break;
+    }
+  }
+  return out.trim().replace(/[_ \-.]/g, "");
+}
+function getDistance(a, b) {
+  const h = a.length + 1;
+  const w = b.length + 1;
+  const d = new Int16Array(h * w);
+  for (let i = 0;i < h; i++)
+    d[i * w] = i;
+  for (let j = 0;j < w; j++)
+    d[j] = j;
+  for (let i = 1;i < h; i++) {
+    for (let j = 1;j < w; j++) {
+      d[i * w + j] = Math.min(d[(i - 1) * w + (j - 1)] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1), d[(i - 1) * w + j] + 1, d[i * w + (j - 1)] + 1);
+    }
+  }
+  return d[h * w - 1];
+}
+function findAsset(ctx, list, name, legacyMediaFindings) {
+  const norm = name.toLowerCase();
+  let matches = null;
+  for (const a of list) {
+    if (a.name.toLowerCase() === norm) {
+      if (matches === null)
+        matches = [a];
+      else
+        matches.push(a);
+    }
+  }
+  if (matches !== null) {
+    if (matches.length === 1)
+      return matches[0];
+    const chatID = ctx.currentMessageIndex ?? -1;
+    const seedWord = (ctx.character.chaId || "global") + String(chatID);
+    const cx = pickHashRand(chatID, seedWord);
+    const selIndex = Math.floor(cx * matches.length);
+    return matches[selIndex] ?? matches[0];
+  }
+  if (legacyMediaFindings)
+    return null;
+  const trimmedName = trimAssetKey(norm);
+  if (trimmedName.length === 0)
+    return null;
+  let closest = null;
+  let closestDist = Number.MAX_SAFE_INTEGER;
+  for (const a of list) {
+    const key = trimAssetKey(a.name.toLowerCase());
+    const dist = getDistance(trimmedName, key);
+    if (dist < closestDist) {
+      closest = a;
+      closestDist = dist;
+      if (dist === 0)
+        break;
+    }
+  }
+  if (closestDist > ASSET_MAX_DIFFERENCE)
+    return null;
+  return closest;
+}
+function imgTag(src) {
+  return `<img src="${src}" alt="${src}" style="${ASSET_WIDTH_STYLE} "/>`;
+}
+function videoTag(src, opts) {
+  const controls = opts.controls ? "controls " : "";
+  const muted = opts.muted ? "muted " : "";
+  return `<video ${controls}${muted}autoplay loop><source src="${src}" type="video/mp4"></video>
+`;
+}
+function literal(name, args) {
+  return `{{${name}${args.length > 0 ? "::" + args.join("::") : ""}}}`;
+}
+var ASSET_WIDTH_STYLE = "", VIDEO_EXTENSIONS, TRIMMER_EXTS, ASSET_MAX_DIFFERENCE = 4;
+var init_assets = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  VIDEO_EXTENSIONS = new Set(["mp4", "webm", "avi", "m4p", "m4v"]);
+  TRIMMER_EXTS = [
+    "webp",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "mp4",
+    "webm",
+    "avi",
+    "m4p",
+    "m4v",
+    "mp3",
+    "wav",
+    "ogg"
+  ];
+  register12("path", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("path", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    return hit?.src ?? "";
+  }, "Asset URL by name, plain string (for src=/url()). parser.svelte.ts.");
+  register12("img", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("img", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return imgTag(hit.src);
+  }, "Inline <img> for a named asset. parser.svelte.ts.");
+  register12("image", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("image", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="${hit.src}" alt="${hit.src}" style="${ASSET_WIDTH_STYLE}"/></div>
+`;
+  }, "Inlay image wrapper. parser.svelte.ts.");
+  register12("emotion", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("emotion", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.emotionImages, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return imgTag(hit.src);
+  }, "Emotion image by name. parser.svelte.ts.");
+  register12("asset", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("asset", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    if (hit.ext && VIDEO_EXTENSIONS.has(hit.ext.toLowerCase())) {
+      return videoTag(hit.src, { controls: false, muted: true });
+    }
+    return `${imgTag(hit.src)}
+`;
+  }, "Asset by name — img or video depending on extension. parser.svelte.ts.");
+  register12("bg", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("bg", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return `<div style="width:100%;height:100%;background: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),url(${hit.src}); background-size: cover;"></div>`;
+  }, "Background panel. parser.svelte.ts.");
+  register12("video", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("video", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return videoTag(hit.src, { controls: true, muted: false });
+  }, "Full-featured video. parser.svelte.ts.");
+  register12("video-img", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("video-img", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return videoTag(hit.src, { controls: false, muted: true });
+  }, "Muted autoplay video (image-substitute). parser.svelte.ts.");
+  register12("audio", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("audio", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return `<audio controls autoplay loop><source src="${hit.src}" type="audio/mpeg"></audio>
+`;
+  }, "Audio player. parser.svelte.ts.");
+  register12("bgm", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("bgm", args);
+    const name = String(args[0] ?? "");
+    if (!name)
+      return "";
+    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
+    if (!hit)
+      return "";
+    return `<div risu-ctrl="bgm___auto___${hit.src}" style="display:none;"></div>
+`;
+  }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
+  register12("inlay", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("inlay", args);
+    const id = String(args[0] ?? "");
+    if (!id)
+      return "";
+    return `<img src="/api/v1/images/${id}"/>`;
+  }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
+  register12("inlayed", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("inlayed", args);
+    const id = String(args[0] ?? "");
+    if (!id)
+      return "";
+    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>
+
+`;
+  }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
+  register12("inlayeddata", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("inlayeddata", args);
+    const id = String(args[0] ?? "");
+    if (!id)
+      return "";
+    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>
+
+`;
+  }, "Wrapped inlay image (data variant). Risu parser.svelte.ts + 688.");
+  register12("source", (ctx, args) => {
+    if (ctx.cbsContext)
+      return literal("source", args);
+    const kind = String(args[0] ?? "").toLowerCase();
+    if (kind === "char")
+      return ctx.character.image;
+    if (kind === "user")
+      return ctx.identity.personaImage;
+    return "";
+  }, "{{source::char}} / {{source::user}} avatar URLs. parser.svelte.ts. Empty string when no avatar uploaded.");
+});
+
+// src/risu-compat/handlers/index.ts
+var init_handlers = __esm(() => {
+  init_trigger_id();
+  init_context_reads();
+  init_math();
+  init_logic();
+  init_strings();
+  init_arrays();
+  init_random();
+  init_variables();
+  init_misc();
+  init_chat_context();
+  init_display();
+  init_metadata();
+  init_assets();
 });
 // src/core/cbs/parser.ts
 function normalizeMacroName(raw) {
@@ -4567,37 +5990,6 @@ var init_catalog = __esm(() => {
   init_schema();
   init_loader();
 });
-// src/core/cbs/rewrite/encode.ts
-function decodeOpaqueBody(s) {
-  return s.replaceAll(COLON_A + COLON_B, "::").replaceAll(CLOSE_BRACE_A + CLOSE_BRACE_B, "}}").replaceAll(OPEN_BRACE_A + OPEN_BRACE_B, "{{");
-}
-var OPEN_BRACE_A = "", OPEN_BRACE_B = "", CLOSE_BRACE_A = "", CLOSE_BRACE_B = "", COLON_A = "", COLON_B = "";
-var init_encode = () => {};
-
-// src/core/cbs/rewrite/blocks.ts
-var STRUCTURAL_KINDS, OPAQUE_KINDS2;
-var init_blocks = __esm(() => {
-  init_encode();
-  STRUCTURAL_KINDS = new Set([
-    "if",
-    "when",
-    "unknown"
-  ]);
-  OPAQUE_KINDS2 = new Set([
-    "each",
-    "func",
-    "pure",
-    "pure_display",
-    "ignore",
-    "escape",
-    "code"
-  ]);
-});
-// src/core/cbs/rewrite/index.ts
-var init_rewrite = __esm(() => {
-  init_encode();
-  init_blocks();
-});
 // src/core/cbs/runtime/mock.ts
 class MockVariableStore {
   data = {
@@ -4648,1876 +6040,7 @@ var init_runtime = __esm(() => {
 var init_cbs = __esm(() => {
   init_parser();
   init_catalog();
-  init_rewrite();
   init_runtime();
-});
-
-// src/risu-compat/handlers/opaque-blocks.ts
-function parseOpaqueArgs(args) {
-  if (args.length === 0)
-    return { mode: null, body: "" };
-  if (args.length === 1)
-    return { mode: null, body: decodeOpaqueBody(args[0]) };
-  const raw = args[args.length - 1];
-  const mode = args.slice(0, -1).join("::");
-  return { mode, body: decodeOpaqueBody(raw) };
-}
-function risuEscape2(text) {
-  let out = "";
-  for (let i = 0;i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    if (c === 123)
-      out += "";
-    else if (c === 125)
-      out += "";
-    else if (c === 40)
-      out += "";
-    else if (c === 41)
-      out += "";
-    else
-      out += text[i];
-  }
-  return out;
-}
-function processUnicodeEscapes(s) {
-  let out = "";
-  let i = 0;
-  while (i < s.length) {
-    if (s[i] === "\\" && s[i + 1] === "u" && i + 6 <= s.length) {
-      const hex = s.slice(i + 2, i + 6);
-      if (/^[0-9A-Fa-f]{4}$/.test(hex)) {
-        out += String.fromCharCode(parseInt(hex, 16));
-        i += 6;
-        continue;
-      }
-    }
-    out += s[i];
-    i++;
-  }
-  return out;
-}
-function processBackslashEscapes(s) {
-  let out = "";
-  let i = 0;
-  while (i < s.length) {
-    if (s[i] === "\\" && i + 1 < s.length) {
-      const next = s[i + 1];
-      switch (next) {
-        case "n":
-          out += `
-`;
-          break;
-        case "r":
-          out += "\r";
-          break;
-        case "t":
-          out += "\t";
-          break;
-        case "b":
-          out += "\b";
-          break;
-        case "f":
-          out += "\f";
-          break;
-        case "v":
-          out += "\v";
-          break;
-        case "a":
-          out += "\x07";
-          break;
-        case "x":
-          out += "\x00";
-          break;
-        default:
-          out += next;
-      }
-      i += 2;
-      continue;
-    }
-    out += s[i];
-    i++;
-  }
-  return out;
-}
-var ignoreHandler = () => "", pureHandler = (_ctx, args) => {
-  const { body } = parseOpaqueArgs(args);
-  return body.trim();
-}, pureDisplayHandler = (_ctx, args) => {
-  const { body } = parseOpaqueArgs(args);
-  return body.trim().replaceAll("{{", "\\{\\{").replaceAll("}}", "\\}\\}");
-}, escapeHandler = (_ctx, args) => {
-  const { mode, body } = parseOpaqueArgs(args);
-  return risuEscape2(mode === "keep" ? body : body.trim());
-}, codeHandler = (_ctx, args) => {
-  const { body } = parseOpaqueArgs(args);
-  let s = body.trim().replaceAll(`
-`, "").replaceAll("\t", "");
-  s = processUnicodeEscapes(s);
-  s = processBackslashEscapes(s);
-  return s;
-};
-var init_opaque_blocks = __esm(() => {
-  init_cbs();
-  init_registry();
-  registry.register({
-    name: "risu_ignore",
-    handler: ignoreHandler,
-    description: "Discards the block body and returns empty string.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_pure",
-    handler: pureHandler,
-    description: "Returns the block body as literal text without evaluating inner macros.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_pure_display",
-    handler: pureDisplayHandler,
-    description: "Returns the block body with {{ and }} backslash-escaped so nothing downstream re-parses them.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_escape",
-    handler: escapeHandler,
-    description: "Replaces { } ( ) with Private Use Area characters so they don't parse as macro/function syntax.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_code",
-    handler: codeHandler,
-    description: "Normalizes a block of code text: trims, removes newlines/tabs, and processes backslash escape sequences.",
-    category: "Risu / Control",
-    scoped: false
-  });
-});
-
-// src/risu-compat/handlers/structural-blocks.ts
-function splitOnElse(body) {
-  const idx = body.indexOf(ELSE_MARKER);
-  if (idx < 0)
-    return { truthy: body, falsy: "" };
-  return { truthy: body.substring(0, idx), falsy: body.substring(idx + ELSE_MARKER.length) };
-}
-function evaluateWhen(statement, readVar, readToggle) {
-  const stack = [...statement];
-  let mode = "normal";
-  while (stack.length > 1) {
-    const condition = stack.pop();
-    const operator = stack.pop();
-    switch (operator) {
-      case "not":
-        stack.push(isTruthy2(condition) ? "0" : "1");
-        break;
-      case "keep":
-        mode = "keep";
-        stack.push(condition);
-        break;
-      case "legacy":
-        mode = "legacy";
-        stack.push(condition);
-        break;
-      case "and": {
-        const c2 = stack.pop();
-        stack.push(isTruthy2(condition) && isTruthy2(c2) ? "1" : "0");
-        break;
-      }
-      case "or": {
-        const c2 = stack.pop();
-        stack.push(isTruthy2(condition) || isTruthy2(c2) ? "1" : "0");
-        break;
-      }
-      case "is": {
-        const c2 = stack.pop();
-        stack.push(condition === c2 ? "1" : "0");
-        break;
-      }
-      case "isnot": {
-        const c2 = stack.pop();
-        stack.push(condition !== c2 ? "1" : "0");
-        break;
-      }
-      case "var": {
-        stack.push(isTruthy2(readVar(condition)) ? "1" : "0");
-        break;
-      }
-      case "toggle": {
-        stack.push(isTruthy2(readToggle(condition)) ? "1" : "0");
-        break;
-      }
-      case "vis": {
-        const name = stack.pop();
-        stack.push(readVar(name) === condition ? "1" : "0");
-        break;
-      }
-      case "visnot": {
-        const name = stack.pop();
-        stack.push(readVar(name) !== condition ? "1" : "0");
-        break;
-      }
-      case "tis": {
-        const name = stack.pop();
-        stack.push(readToggle(name) === condition ? "1" : "0");
-        break;
-      }
-      case "tisnot": {
-        const name = stack.pop();
-        stack.push(readToggle(name) !== condition ? "1" : "0");
-        break;
-      }
-      case ">": {
-        const c2 = stack.pop();
-        stack.push(parseFloat(c2) > parseFloat(condition) ? "1" : "0");
-        break;
-      }
-      case "<": {
-        const c2 = stack.pop();
-        stack.push(parseFloat(c2) < parseFloat(condition) ? "1" : "0");
-        break;
-      }
-      case ">=": {
-        const c2 = stack.pop();
-        stack.push(parseFloat(c2) >= parseFloat(condition) ? "1" : "0");
-        break;
-      }
-      case "<=": {
-        const c2 = stack.pop();
-        stack.push(parseFloat(c2) <= parseFloat(condition) ? "1" : "0");
-        break;
-      }
-      default:
-        stack.push(isTruthy2(condition) ? "1" : "0");
-    }
-  }
-  return { truthy: isTruthy2(stack[0] ?? "0"), mode };
-}
-function trimLines2(s) {
-  const lines = s.split(`
-`);
-  while (lines.length > 0 && lines[0].trim() === "")
-    lines.shift();
-  while (lines.length > 0 && lines[lines.length - 1].trim() === "")
-    lines.pop();
-  return lines.join(`
-`);
-}
-var ELSE_MARKER = "\x00ELSE_MARKER\x00", isTruthy2 = (s) => {
-  const t = s.trim();
-  return t === "true" || t === "1";
-}, ifHandler = (_ctx, args) => {
-  if (args.length < 1)
-    return "";
-  const cond = args[0];
-  const body = args.length >= 2 ? args[args.length - 1] : "";
-  const branches = splitOnElse(body);
-  return isTruthy2(cond) ? trimLines2(branches.truthy) : trimLines2(branches.falsy);
-}, whenHandler = (ctx, args) => {
-  if (args.length < 1)
-    return "";
-  const body = args[args.length - 1];
-  const statement = args.slice(0, -1);
-  const readVar = (name) => ctx.vars.get("local", name);
-  const readToggle = (name) => ctx.vars.get("global", "toggle_" + name);
-  if (statement.length <= 1) {
-    const state = statement[0] ?? "";
-    const branches2 = splitOnElse(body);
-    return isTruthy2(state) ? branches2.truthy : branches2.falsy;
-  }
-  const result = evaluateWhen(statement, readVar, readToggle);
-  const branches = splitOnElse(body);
-  if (result.truthy) {
-    if (result.mode === "keep")
-      return branches.truthy;
-    if (result.mode === "legacy")
-      return branches.truthy;
-    return trimLines2(branches.truthy);
-  }
-  if (result.mode === "keep")
-    return branches.falsy;
-  if (result.mode === "legacy")
-    return branches.falsy;
-  return trimLines2(branches.falsy);
-}, unknownHandler = (_ctx, args) => {
-  return args.length > 0 ? args[args.length - 1] ?? "" : "";
-};
-var init_structural_blocks = __esm(() => {
-  init_registry();
-  registry.register({
-    name: "risu_if",
-    handler: ifHandler,
-    description: "Conditional block. Returns body if the condition argument is truthy ('1' or 'true'), else empty (or the {{else}} branch).",
-    category: "Risu / Control",
-    scoped: true
-  });
-  registry.register({
-    name: "risu_when",
-    handler: whenHandler,
-    description: "Conditional block with operator chain. Supports and/or/is/isnot/not/var/vis/visnot/toggle/tis/tisnot/>/</>=/<= and whitespace modes (keep, legacy).",
-    category: "Risu / Control",
-    scoped: true
-  });
-  registry.register({
-    name: "risu_unknown",
-    handler: unknownHandler,
-    description: "Fallback for unknown block constructs. Emits the body as-is without interpretation.",
-    category: "Risu / Control",
-    scoped: true
-  });
-});
-
-// src/risu-compat/handlers/iteration-blocks.ts
-function parseArray2(s) {
-  try {
-    const arr = JSON.parse(s);
-    if (Array.isArray(arr))
-      return arr;
-  } catch {}
-  return s.split("§");
-}
-function stringify(v) {
-  return typeof v === "string" ? v : JSON.stringify(v);
-}
-function trimLines3(s) {
-  return s.split(`
-`).map((v) => v.trimStart()).join(`
-`).trim();
-}
-function splitOnce(s, sep) {
-  const idx = s.indexOf(sep);
-  if (idx === -1)
-    return [s, null];
-  return [s.substring(0, idx), s.substring(idx + sep.length)];
-}
-var eachHandler = (_ctx, args) => {
-  if (args.length < 2)
-    return "";
-  const rawHeader = args[0];
-  const encodedBody = args[args.length - 1];
-  const body = decodeOpaqueBody(encodedBody);
-  let header = rawHeader.trim();
-  let mode = "normal";
-  if (header.startsWith("::keep ")) {
-    mode = "keep";
-    header = header.substring(7).trim();
-  } else if (header.startsWith("keep ")) {
-    mode = "keep";
-    header = header.substring(5).trim();
-  }
-  if (header.startsWith("as "))
-    header = header.substring(3).trim();
-  let sub;
-  let arrayExpr;
-  const asIdx = header.lastIndexOf(" as ");
-  if (asIdx !== -1) {
-    sub = header.substring(asIdx + 4).trim();
-    arrayExpr = header.substring(0, asIdx);
-  } else {
-    const spaceIdx = header.lastIndexOf(" ");
-    if (spaceIdx === -1)
-      return "";
-    sub = header.substring(spaceIdx + 1).trim();
-    arrayExpr = header.substring(0, spaceIdx);
-  }
-  const array = parseArray2(arrayExpr);
-  const needle = "{{slot::" + sub + "}}";
-  const repeatBody = mode === "keep" ? body : trimLines3(body.trim());
-  let out = "";
-  for (let i = 0;i < array.length; i++) {
-    out += repeatBody.replaceAll(needle, stringify(array[i]));
-  }
-  return mode === "keep" ? out : out.trim();
-}, funcHandler = (ctx, args) => {
-  if (args.length < 2)
-    return "";
-  const header = args[0];
-  const encodedBody = args[args.length - 1];
-  const body = decodeOpaqueBody(encodedBody);
-  const parts = header.trim().split(" ").filter((p) => p.length > 0);
-  if (parts.length === 0)
-    return "";
-  const name = parts[0];
-  const argNames = parts.slice(1);
-  ctx.functions.define(name, body, argNames);
-  return "";
-}, callHandler = (ctx, args, raw) => {
-  if (args.length === 0)
-    return `{{${raw}}}`;
-  const funcName = args[0];
-  const fn = ctx.functions.get(funcName);
-  if (!fn)
-    return `{{${raw}}}`;
-  let out = fn.body;
-  for (let i = 0;i < args.length - 1; i++) {
-    out = out.replaceAll("{{arg::" + i + "}}", args[i + 1] ?? "");
-  }
-  for (let i = args.length - 1;i < fn.argNames.length + 10; i++) {
-    out = out.replaceAll("{{arg::" + i + "}}", "");
-  }
-  return out;
-}, legacyHandler = (_ctx, args) => {
-  if (args.length === 0)
-    return "";
-  const raw = decodeOpaqueBody(args[0]);
-  const nl = raw.indexOf(`
-`);
-  if (nl === -1)
-    return "";
-  const logic = raw.substring(0, nl);
-  const content = raw.substring(nl + 1);
-  const [keyword, condRaw] = splitOnce(logic, " ");
-  if (keyword !== "if")
-    return "";
-  const cond = (condRaw ?? "").trim();
-  if (cond.length === 0)
-    return "";
-  return `{{#risu_if::${cond}}}${content}{{/risu_if}}`;
-};
-var init_iteration_blocks = __esm(() => {
-  init_cbs();
-  init_registry();
-  registry.register({
-    name: "risu_each",
-    handler: eachHandler,
-    description: "Iterates over a JSON or §-delimited array, substituting {{slot::name}} per iteration. Known deviation: inner macros are not re-evaluated per iteration.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_func",
-    handler: funcHandler,
-    description: "Defines a reusable function; later invoked via {{call::name::arg0::arg1}}. Arguments referenced in the body as {{arg::0}}, {{arg::1}}, etc.",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "call",
-    handler: callHandler,
-    description: "Invokes a function previously defined by #func. Arguments are passed as additional :: tokens and referenced inside the function body as {{arg::0}}, {{arg::1}}, …",
-    category: "Risu / Control",
-    scoped: false
-  });
-  registry.register({
-    name: "risu_legacy",
-    handler: legacyHandler,
-    description: "Legacy {#if cond\\ncontent#} form. Returns trimmed content if cond is not '', '0', or '-1'.",
-    category: "Risu / Control",
-    scoped: false
-  });
-});
-
-// src/util/role-coerce.ts
-function risuRoleToLumi(r) {
-  return r === "user" ? "user" : "assistant";
-}
-function lumiRoleToRisu(r) {
-  return r === "user" ? "user" : "char";
-}
-function normalizeRoleToLumi(r) {
-  if (r === "user" || r === "assistant" || r === "system")
-    return r;
-  if (r === "char" || r === "bot")
-    return "assistant";
-  if (r === "sys")
-    return "system";
-  return null;
-}
-
-// src/risu-compat/handlers/context-reads.ts
-function register(name, handler, description) {
-  registry.register({
-    name,
-    handler,
-    description,
-    category: "Risu / Context",
-    scoped: false
-  });
-}
-function recurse(ctx, field) {
-  return ctx.evaluate ? ctx.evaluate(field) : field;
-}
-function formatDuration(ms) {
-  let seconds = Math.floor(ms / 1000);
-  let minutes = Math.floor(seconds / 60);
-  let hours = Math.floor(minutes / 60);
-  seconds = seconds % 60;
-  minutes = minutes % 60;
-  return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-}
-function makeArray(arr) {
-  return JSON.stringify(arr.map((v) => {
-    if (typeof v === "string")
-      return v.replaceAll("::", "\\u003A\\u003A");
-    return v;
-  }));
-}
-var init_context_reads = __esm(() => {
-  init_registry();
-  register("risu_description", (ctx) => recurse(ctx, ctx.character.description), "Returns the character description, recursively parsed.");
-  register("risu_personality", (ctx) => recurse(ctx, ctx.character.personality), "Returns the character personality field, recursively parsed.");
-  register("risu_scenario", (ctx) => recurse(ctx, ctx.character.scenario), "Returns the character scenario field, recursively parsed.");
-  register("risu_persona", (ctx) => recurse(ctx, ctx.identity.personaText), "Returns the user persona prompt, recursively parsed.");
-  register("exampledialogue", (ctx) => recurse(ctx, ctx.character.exampleDialogue), "Returns the character's example dialogue field, recursively parsed.");
-  register("mainprompt", (ctx) => recurse(ctx, ctx.character.mainPrompt), "Returns the system/main prompt configured for the current character, recursively parsed.");
-  register("jb", (ctx) => recurse(ctx, ctx.character.jailbreakPrompt), "Returns the jailbreak prompt text, recursively parsed.");
-  register("globalnote", (ctx) => recurse(ctx, ctx.character.globalNote), "Returns the global note (system note / ujb), recursively parsed.");
-  register("authornote", (ctx) => recurse(ctx, ctx.character.authorsNote), "Returns the author's note for the current chat, recursively parsed.");
-  register("risu_model", (ctx) => ctx.aiModel, "Returns the id of the currently selected AI model.");
-  register("axmodel", (ctx) => ctx.axModel, "Returns the id of the auxiliary/secondary model.");
-  register("role", (ctx) => {
-    if (ctx.cbsContext)
-      return "null";
-    if (ctx.role !== null)
-      return lumiRoleToRisu(ctx.role);
-    if (ctx.promptRegexLiteralVars)
-      return "null";
-    if (ctx.isFirstMessage)
-      return "char";
-    return "null";
-  }, "Returns the role of the current message ('user', 'char'/'assistant', 'system').");
-  register("isfirstmsg", (ctx) => {
-    if (ctx.cbsContext)
-      return "0";
-    if (ctx.promptRegexLiteralVars)
-      return "0";
-    if (ctx.currentMessageIndex !== null && ctx.currentMessageIndex !== undefined) {
-      return ctx.currentMessageIndex === -1 ? "1" : "0";
-    }
-    return ctx.isFirstMessage ? "1" : "0";
-  }, "Returns '1' if the current context is the first (greeting) message, '0' otherwise.");
-  register("unixtime", (ctx) => Math.floor(ctx.clock.now() / 1000).toString(), "Returns the current unix timestamp in seconds.");
-  register("risu_time", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
-  }, "Returns the current local time in H:M:S format (unpadded, matching Risu).");
-  register("isotime", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getUTCHours()}:${d.getUTCMinutes()}:${d.getUTCSeconds()}`;
-  }, "Returns the current UTC time in H:M:S format.");
-  register("isodate", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
-  }, "Returns the current UTC date in YYYY-M-D format (month/day not zero-padded, matching Risu).");
-  register("messagetime", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    const msg = msgs[ctx.currentMessageIndex];
-    if (!msg)
-      return "[Cannot get time]";
-    if (!msg.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return new Date(msg.createdAt).toLocaleTimeString();
-  }, "Returns the local time the current message was sent.");
-  register("messagedate", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    const msg = msgs[ctx.currentMessageIndex];
-    if (!msg)
-      return "[Cannot get time]";
-    if (!msg.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return new Date(msg.createdAt).toLocaleDateString();
-  }, "Returns the local date the current message was sent.");
-  register("messageunixtimearray", (ctx) => {
-    const arr = ctx.messages.all().map((m) => String(m.createdAt ?? 0));
-    return makeArray(arr);
-  }, "Returns a JSON-encoded array of all message unix timestamps (milliseconds).");
-  register("idleduration", (ctx) => {
-    const msgs = ctx.messages.all();
-    if (msgs.length === 0)
-      return "00:00:00";
-    const last = msgs[msgs.length - 1];
-    if (!last.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return formatDuration(ctx.clock.now() - last.createdAt);
-  }, "Returns HH:MM:SS since the most recent message.");
-  register("messageidleduration", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    let pointer = ctx.currentMessageIndex;
-    let message;
-    let previous;
-    let stage = "findLast";
-    while (pointer >= 0) {
-      const m = msgs[pointer];
-      if (m && m.role === "user") {
-        if (stage === "findLast") {
-          message = m;
-          stage = "findSecondLast";
-        } else {
-          previous = m;
-          break;
-        }
-      }
-      pointer--;
-    }
-    if (!message)
-      return "[No user message found]";
-    if (!previous)
-      return "[No previous user message found]";
-    if (!message.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    if (!previous.createdAt)
-      return "[Cannot get time, previous message was sent in older version]";
-    return formatDuration(message.createdAt - previous.createdAt);
-  }, "Returns HH:MM:SS between the current and the previous user message.");
-  register("br", () => `
-`, "Returns a literal newline character.");
-  register("blank", () => "", "Returns an empty string.");
-});
-
-// src/risu-compat/risu-helpers.ts
-function parseArray3(s) {
-  try {
-    const arr = JSON.parse(s);
-    if (Array.isArray(arr))
-      return arr;
-  } catch {}
-  return s.split("§");
-}
-function parseDict(s) {
-  try {
-    const v = JSON.parse(s);
-    if (v && typeof v === "object" && !Array.isArray(v))
-      return v;
-  } catch {}
-  return {};
-}
-function makeArray2(arr) {
-  return JSON.stringify(arr.map((v) => {
-    if (typeof v === "string")
-      return v.replaceAll("::", "\\u003A\\u003A");
-    return v;
-  }));
-}
-function sfc32(a, b, c, d) {
-  return function() {
-    a |= 0;
-    b |= 0;
-    c |= 0;
-    d |= 0;
-    const t = (a + b | 0) + d | 0;
-    d = d + 1 | 0;
-    a = b ^ b >>> 9;
-    b = c + (c << 3) | 0;
-    c = c << 21 | c >>> 11;
-    c = c + t | 0;
-    return (t >>> 0) / 4294967296;
-  };
-}
-function pickHashRand(cid, word) {
-  let hashAddress = 5515;
-  const rand = (w) => {
-    for (let counter = 0;counter < w.length; counter++) {
-      hashAddress = (hashAddress << 5) + hashAddress + w.charCodeAt(counter);
-    }
-    return hashAddress;
-  };
-  const randF = sfc32(rand(word), rand(word), rand(word), rand(word));
-  const v = cid % 1000;
-  for (let i = 0;i < v; i++)
-    randF();
-  return randF();
-}
-function dateTimeFormat(main, time = 0) {
-  const date = time === 0 ? new Date : new Date(time);
-  if (!main)
-    return "";
-  if (main.startsWith(":"))
-    main = main.substring(1);
-  if (main.length > 300)
-    return "";
-  return main.replace(/YYYY/g, date.getFullYear().toString()).replace(/YY/g, date.getFullYear().toString().substring(2)).replace(/MMMM/g, new Intl.DateTimeFormat("en", { month: "long" }).format(date)).replace(/MMM/g, new Intl.DateTimeFormat("en", { month: "short" }).format(date)).replace(/MM/g, (date.getMonth() + 1).toString().padStart(2, "0")).replace(/DDDD/g, Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)).toString()).replace(/DD/g, date.getDate().toString().padStart(2, "0")).replace(/dddd/g, new Intl.DateTimeFormat("en", { weekday: "long" }).format(date)).replace(/ddd/g, new Intl.DateTimeFormat("en", { weekday: "short" }).format(date)).replace(/HH/g, date.getHours().toString().padStart(2, "0")).replace(/hh/g, (date.getHours() % 12 || 12).toString().padStart(2, "0")).replace(/mm/g, date.getMinutes().toString().padStart(2, "0")).replace(/ss/g, date.getSeconds().toString().padStart(2, "0")).replace(/X/g, Math.floor(date.getTime() / 1000).toString()).replace(/x/g, date.getTime().toString()).replace(/A/g, date.getHours() >= 12 ? "PM" : "AM");
-}
-function calcString(text, readLocal, readGlobal) {
-  const depthText = [""];
-  for (let i = 0;i < text.length; i++) {
-    if (text[i] === "(") {
-      depthText.push("");
-    } else if (text[i] === ")" && depthText.length > 1) {
-      const inner = depthText.pop();
-      const result = executeRPN(inner, readLocal, readGlobal);
-      depthText[depthText.length - 1] += result;
-    } else {
-      depthText[depthText.length - 1] += text[i];
-    }
-  }
-  return executeRPN(depthText.join(""), readLocal, readGlobal);
-}
-function executeRPN(text, readLocal, readGlobal) {
-  const substituted = text.replace(/\$([a-zA-Z0-9_]+)/g, (_, p1) => {
-    const v = readLocal(p1);
-    const parsed = parseFloat(v);
-    return isNaN(parsed) ? "0" : parsed.toString();
-  }).replace(/@([a-zA-Z0-9_]+)/g, (_, p1) => {
-    const v = readGlobal(p1);
-    const parsed = parseFloat(v);
-    return isNaN(parsed) ? "0" : parsed.toString();
-  }).replace(/&&/g, "&").replace(/\|\|/g, "|").replace(/<=/g, "≤").replace(/>=/g, "≥").replace(/==/g, "=").replace(/!=/g, "≠").replace(/null/gi, "0");
-  const rpn = toRPN(substituted);
-  return calculateRPN(rpn);
-}
-function toRPN(expression) {
-  expression = expression.replace(/\s+/g, "");
-  const expr2 = [];
-  let lastToken = "";
-  for (let i = 0;i < expression.length; i++) {
-    const char = expression[i];
-    if (char === "-" && (i === 0 || OPERATOR_CHARS.has(expression[i - 1]) || expression[i - 1] === "(")) {
-      lastToken += char;
-    } else if (OPERATOR_CHARS.has(char)) {
-      expr2.push(lastToken !== "" ? lastToken : "0");
-      lastToken = "";
-      expr2.push(char);
-    } else {
-      lastToken += char;
-    }
-  }
-  expr2.push(lastToken !== "" ? lastToken : "0");
-  let outputQueue = "";
-  const operatorStack = [];
-  for (const token of expr2) {
-    if (parseFloat(token) || token === "0") {
-      outputQueue += token + " ";
-    } else if (OPERATOR_CHARS.has(token)) {
-      while (operatorStack.length > 0) {
-        const top = operatorStack[operatorStack.length - 1];
-        const op = OPERATORS[token];
-        const topOp = OPERATORS[top];
-        const drain = op.associativity === "Left" ? op.precedence <= topOp.precedence : op.precedence < topOp.precedence;
-        if (!drain)
-          break;
-        outputQueue += operatorStack.pop() + " ";
-      }
-      operatorStack.push(token);
-    }
-  }
-  while (operatorStack.length > 0)
-    outputQueue += operatorStack.pop() + " ";
-  return outputQueue.trim();
-}
-function calculateRPN(expression) {
-  const stack = [];
-  for (const token of expression.split(" ")) {
-    if (parseFloat(token) || token === "0") {
-      stack.push(parseFloat(token));
-    } else {
-      const b = stack.pop();
-      const a = stack.pop();
-      switch (token) {
-        case "+":
-          stack.push(a + b);
-          break;
-        case "-":
-          stack.push(a - b);
-          break;
-        case "*":
-          stack.push(a * b);
-          break;
-        case "/":
-          stack.push(a / b);
-          break;
-        case "^":
-          stack.push(a ** b);
-          break;
-        case "%":
-          stack.push(a % b);
-          break;
-        case "<":
-          stack.push(a < b ? 1 : 0);
-          break;
-        case ">":
-          stack.push(a > b ? 1 : 0);
-          break;
-        case "|":
-          stack.push(a || b);
-          break;
-        case "&":
-          stack.push(a && b);
-          break;
-        case "≤":
-          stack.push(a <= b ? 1 : 0);
-          break;
-        case "≥":
-          stack.push(a >= b ? 1 : 0);
-          break;
-        case "=":
-          stack.push(a === b ? 1 : 0);
-          break;
-        case "≠":
-          stack.push(a !== b ? 1 : 0);
-          break;
-        case "!":
-          stack.push(b ? 0 : 1);
-          break;
-      }
-    }
-  }
-  return stack.length === 0 ? 0 : stack.pop();
-}
-var OPERATORS, OPERATOR_CHARS;
-var init_risu_helpers = __esm(() => {
-  OPERATORS = {
-    "+": { precedence: 2, associativity: "Left" },
-    "-": { precedence: 2, associativity: "Left" },
-    "*": { precedence: 3, associativity: "Left" },
-    "/": { precedence: 3, associativity: "Left" },
-    "^": { precedence: 4, associativity: "Left" },
-    "%": { precedence: 3, associativity: "Left" },
-    "<": { precedence: 1, associativity: "Left" },
-    ">": { precedence: 1, associativity: "Left" },
-    "|": { precedence: 1, associativity: "Left" },
-    "&": { precedence: 1, associativity: "Left" },
-    "≤": { precedence: 1, associativity: "Left" },
-    "≥": { precedence: 1, associativity: "Left" },
-    "=": { precedence: 1, associativity: "Left" },
-    "≠": { precedence: 1, associativity: "Left" },
-    "!": { precedence: 5, associativity: "Right" }
-  };
-  OPERATOR_CHARS = new Set(Object.keys(OPERATORS));
-});
-
-// src/risu-compat/handlers/math.ts
-function register2(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Math", scoped: false });
-}
-var aggSource = (args) => args.length > 1 ? args : parseArray3(args[0] ?? "").map((v) => String(v)), toNum = (s) => {
-  const n = Number(s);
-  return isNaN(n) ? 0 : n;
-};
-var init_math = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register2("risu_round", (_c, a) => Math.round(Number(a[0])).toString(), "Rounds to nearest integer (half-up).");
-  register2("risu_floor", (_c, a) => Math.floor(Number(a[0])).toString(), "Floors (rounds toward negative infinity).");
-  register2("risu_ceil", (_c, a) => Math.ceil(Number(a[0])).toString(), "Ceils (rounds toward positive infinity).");
-  register2("risu_abs", (_c, a) => Math.abs(Number(a[0])).toString(), "Absolute value.");
-  register2("remaind", (_c, a) => (Number(a[0]) % Number(a[1])).toString(), "Returns (a % b) as string.");
-  register2("pow", (_c, a) => Math.pow(Number(a[0]), Number(a[1])).toString(), "Returns a^b.");
-  register2("risu_min", (_c, a) => Math.min(...aggSource(a).map(toNum)).toString(), "Minimum of the given values (non-numeric treated as 0).");
-  register2("risu_max", (_c, a) => Math.max(...aggSource(a).map(toNum)).toString(), "Maximum of the given values.");
-  register2("sum", (_c, a) => aggSource(a).map(toNum).reduce((x, y) => x + y, 0).toString(), "Sum of the given values.");
-  register2("average", (_c, a) => {
-    const src = aggSource(a);
-    if (src.length === 0)
-      return "NaN";
-    return (src.map(toNum).reduce((x, y) => x + y, 0) / src.length).toString();
-  }, "Arithmetic mean of the given values.");
-  register2("tonumber", (_c, a) => {
-    const s = a[0] ?? "";
-    let out = "";
-    for (const ch of s) {
-      if (!isNaN(Number(ch)) || ch === ".")
-        out += ch;
-    }
-    return out;
-  }, "Extracts digits (and decimal points) from the input string.");
-  register2("fixnum", (_c, a) => Number(a[0]).toFixed(Number(a[1])).toString(), "Rounds to N decimal places via toFixed.");
-  register2("risu_calc", (ctx, a) => {
-    const expr = a[0] ?? "";
-    const n = calcString(expr, (name) => ctx.vars.get("local", name), (name) => ctx.vars.get("global", name));
-    return n.toString();
-  }, "Evaluates a mathematical expression. Supports + - * / ^ % and comparison operators; $x reads local var, @x reads global var.");
-});
-
-// src/risu-compat/handlers/logic.ts
-function register3(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Logic", scoped: false });
-}
-var bag = (a) => a.length > 1 ? a : parseArray3(a[0] ?? "").map((v) => String(v));
-var init_logic = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register3("equal", (_c, a) => a[0] === a[1] ? "1" : "0", "Returns '1' if args[0] === args[1] (string compare), else '0'.");
-  register3("notequal", (_c, a) => a[0] !== a[1] ? "1" : "0", "Returns '1' if args[0] !== args[1], else '0'.");
-  register3("risu_greater", (_c, a) => Number(a[0]) > Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) > Number(args[1]).");
-  register3("less", (_c, a) => Number(a[0]) < Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) < Number(args[1]).");
-  register3("greaterequal", (_c, a) => Number(a[0]) >= Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) >= Number(args[1]).");
-  register3("lessequal", (_c, a) => Number(a[0]) <= Number(a[1]) ? "1" : "0", "Returns '1' if Number(args[0]) <= Number(args[1]).");
-  register3("risu_and", (_c, a) => a[0] === "1" && a[1] === "1" ? "1" : "0", "Boolean AND: returns '1' if both args are the literal string '1'.");
-  register3("or", (_c, a) => a[0] === "1" || a[1] === "1" ? "1" : "0", "Boolean OR: returns '1' if either arg is '1'.");
-  register3("risu_not", (_c, a) => a[0] === "1" ? "0" : "1", "Boolean NOT of a '1'/'0' value.");
-  register3("all", (_c, a) => bag(a).every((f) => f === "1") ? "1" : "0", "Returns '1' if every value is the literal string '1'.");
-  register3("any", (_c, a) => bag(a).some((f) => f === "1") ? "1" : "0", "Returns '1' if any value is '1'.");
-  register3("startswith", (_c, a) => (a[0] ?? "").startsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] starts with args[1].");
-  register3("endswith", (_c, a) => (a[0] ?? "").endsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] ends with args[1].");
-  register3("contains", (_c, a) => (a[0] ?? "").includes(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] contains args[1] anywhere.");
-  register3("iserror", (_c, a) => (a[0] ?? "").toLocaleLowerCase().startsWith("error:") ? "1" : "0", "Returns '1' if the argument begins with 'error:' (case-insensitive).");
-});
-
-// src/risu-compat/handlers/strings.ts
-function register4(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Strings", scoped: false });
-}
-var init_strings = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register4("risu_replace", (_c, a) => (a[0] ?? "").replaceAll(a[1] ?? "", a[2] ?? ""), "Replaces all occurrences of needle with replacement.");
-  register4("risu_split", (_c, a) => makeArray2((a[0] ?? "").split(a[1] ?? "")), "Splits a string on the delimiter and returns a JSON array.");
-  register4("risu_join", (_c, a) => parseArray3(a[0] ?? "").join(a[1] ?? ""), "Joins a JSON array using the given separator.");
-  register4("spread", (_c, a) => parseArray3(a[0] ?? "").join("::"), "Joins a JSON array using :: as the separator.");
-  register4("trim", (_c, a) => (a[0] ?? "").trim(), "Strips leading/trailing whitespace.");
-  register4("risu_length", (_c, a) => (a[0] ?? "").length.toString(), "Returns the character length of a string.");
-  register4("risu_lower", (_c, a) => (a[0] ?? "").toLocaleLowerCase(), "Lowercases using locale-aware conversion.");
-  register4("risu_upper", (_c, a) => (a[0] ?? "").toLocaleUpperCase(), "Uppercases using locale-aware conversion.");
-  register4("risu_capitalize", (_c, a) => {
-    const s = a[0] ?? "";
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }, "Uppercases only the first character.");
-  register4("reverse", (_c, a) => [...a[0] ?? ""].reverse().join(""), "Reverses a string (code-point safe via iterator).");
-});
-
-// src/risu-compat/handlers/arrays.ts
-function register5(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Arrays", scoped: false });
-}
-var init_arrays = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register5("arraylength", (_c, a) => parseArray3(a[0] ?? "").length.toString(), "Returns the length of a JSON array.");
-  register5("arrayshift", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    arr.shift();
-    return makeArray2(arr);
-  }, "Removes and discards the first element.");
-  register5("arraypop", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    arr.pop();
-    return makeArray2(arr);
-  }, "Removes and discards the last element.");
-  register5("arraypush", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    arr.push(a[1] ?? "");
-    return makeArray2(arr);
-  }, "Appends a new element.");
-  register5("arraysplice", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    arr.splice(Number(a[1]), Number(a[2]), a[3] ?? "");
-    return makeArray2(arr);
-  }, "Risu-style splice: (array, start, deleteCount, newElement).");
-  register5("arrayassert", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    const idx = Number(a[1]);
-    if (idx >= arr.length)
-      arr[idx] = a[2] ?? "";
-    return makeArray2(arr);
-  }, "Sets arr[idx] = value if idx is out of bounds; else leaves array unchanged.");
-  register5("arrayelement", (_c, a) => {
-    const el = parseArray3(a[0] ?? "").at(Number(a[1])) ?? "null";
-    return typeof el === "object" ? JSON.stringify(el) : String(el);
-  }, "Returns the element at index (JSON-stringifies if object). 'null' if OOB.");
-  register5("dictelement", (_c, a) => {
-    const el = parseDict(a[0] ?? "")[a[1] ?? ""] ?? "null";
-    return typeof el === "object" ? JSON.stringify(el) : String(el);
-  }, "Returns dict[key] or 'null'.");
-  register5("objectassert", (_c, a) => {
-    const d = parseDict(a[0] ?? "");
-    if (!d[a[1] ?? ""])
-      d[a[1] ?? ""] = a[2] ?? "";
-    return JSON.stringify(d);
-  }, "Sets obj[key] = value if missing or falsy; returns JSON.");
-  register5("element", (_c, a) => {
-    try {
-      let current = a[0] ?? "";
-      for (const step of a.slice(1)) {
-        const parsed = JSON.parse(current);
-        if (parsed === null || typeof parsed !== "object" && !Array.isArray(parsed))
-          return "null";
-        current = parsed[step];
-        if (!current)
-          return "null";
-      }
-      return String(current);
-    } catch {
-      return "null";
-    }
-  }, "Walks a JSON structure by successive keys/indices. Returns 'null' if any step fails.");
-  register5("makearray", (_c, a) => makeArray2(a), "Creates a JSON array from the given arguments.");
-  register5("makedict", (_c, a) => {
-    const d = {};
-    for (let i = 0;i + 1 < a.length; i += 2) {
-      d[a[i] ?? ""] = a[i + 1] ?? "";
-    }
-    return JSON.stringify(d);
-  }, "Creates a JSON object from interleaved key-value arguments.");
-  register5("range", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    const start = arr.length > 1 ? Number(arr[0]) : 0;
-    const end = arr.length > 1 ? Number(arr[1]) : Number(arr[0]);
-    const step = arr.length > 2 ? Number(arr[2]) : 1;
-    const out = [];
-    if (step !== 0) {
-      for (let i = start;i < end; i += step)
-        out.push(i.toString());
-    }
-    return makeArray2(out);
-  }, "Creates a range. [n] → [0,1,…,n-1]. [a,b] → [a,…,b-1]. [a,b,s] → step s.");
-  register5("filter", (_c, a) => {
-    const arr = parseArray3(a[0] ?? "");
-    const mode = ["all", "nonempty", "unique"].indexOf(a[1] ?? "all");
-    const filterType = mode === -1 ? 0 : mode;
-    return makeArray2(arr.filter((f, i) => {
-      switch (filterType) {
-        case 0:
-          return f !== "" && i === arr.indexOf(f);
-        case 1:
-          return f !== "";
-        case 2:
-          return i === arr.indexOf(f);
-        default:
-          return true;
-      }
-    }));
-  }, "Filters an array. mode='all' (unique + nonempty), 'nonempty', or 'unique'.");
-});
-
-// src/risu-compat/handlers/random.ts
-function register6(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Random", scoped: false });
-}
-function randomPickImpl(args, rand) {
-  if (args.length === 0)
-    return rand.toString();
-  let arr;
-  if (args.length === 1) {
-    const s = args[0] ?? "";
-    if (s.startsWith("[") && s.endsWith("]")) {
-      arr = parseArray3(s);
-    } else {
-      arr = s.replace(/\\,/g, "§X").split(/:|,/);
-    }
-  } else {
-    arr = [...args];
-  }
-  const idx = Math.floor(rand * arr.length);
-  const el = arr[idx];
-  return typeof el === "string" ? el.replace(/\u00A7X/g, ",") : JSON.stringify(el) ?? "";
-}
-var init_random = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register6("risu_random", (ctx, a) => randomPickImpl(a, ctx.rng.random()), "Random element picker. No args → returns a random [0,1) number. One arg → picks from a JSON array or a comma/colon-delimited string. Multiple args → random one.");
-  register6("pick", (ctx, a) => {
-    const seed = ctx.identity.charName + ":" + ctx.messages.count();
-    const rand = pickHashRand(ctx.messages.count(), seed);
-    return randomPickImpl(a, rand);
-  }, "Hash-deterministic pick. Same inputs at the same chat position return the same element.");
-  register6("risu_roll", (ctx, a) => {
-    if (a.length === 0)
-      return "1";
-    const notation = (a[0] ?? "").split("d");
-    let num = 1;
-    let sides = 6;
-    if (notation.length === 2) {
-      num = Number(notation[0] || 1);
-      sides = Number(notation[1] || 6);
-    } else if (notation.length === 1) {
-      sides = Number(notation[0]);
-    }
-    if (isNaN(num) || isNaN(sides) || num < 1 || sides < 1)
-      return "NaN";
-    let total = 0;
-    for (let i = 0;i < num; i++)
-      total += Math.floor(ctx.rng.random() * sides) + 1;
-    return total.toString();
-  }, "Dice roll. XdY syntax (default 1d6). Sum of N uniform rolls.");
-  register6("rollp", (ctx, a) => {
-    if (a.length === 0)
-      return "1";
-    const notation = (a[0] ?? "").split("d");
-    let num = 1;
-    let sides = 6;
-    if (notation.length === 2) {
-      num = Number(notation[0] || 1);
-      sides = Number(notation[1] || 6);
-    } else if (notation.length === 1) {
-      sides = Number(notation[0]);
-    }
-    if (isNaN(num) || isNaN(sides) || num < 1 || sides < 1)
-      return "NaN";
-    let total = 0;
-    for (let i = 0;i < num; i++) {
-      const cid = ctx.messages.count() + i * 15;
-      const seed = ctx.identity.charName;
-      total += Math.floor(pickHashRand(cid, seed) * sides) + 1;
-    }
-    return total.toString();
-  }, "Hash-deterministic dice roll. Same chat position returns the same outcome.");
-  register6("dice", (ctx, a) => {
-    const notation = (a[0] ?? "").split("d");
-    const num = Number(notation[0]);
-    const sides = Number(notation[1]);
-    if (isNaN(num) || isNaN(sides))
-      return "NaN";
-    let total = 0;
-    for (let i = 0;i < num; i++)
-      total += Math.floor(ctx.rng.random() * sides) + 1;
-    return total.toString();
-  }, "Dice roll via NdS notation. No defaults — both numbers required.");
-  register6("randint", (ctx, a) => {
-    const min = Number(a[0]);
-    const max = Number(a[1]);
-    if (isNaN(min) || isNaN(max))
-      return "NaN";
-    return (Math.floor(ctx.rng.random() * (max - min + 1)) + min).toString();
-  }, "Uniform random integer in [min, max] (inclusive).");
-  register6("hash", (_c, a) => {
-    const v = pickHashRand(0, a[0] ?? "");
-    return (v * 1e7 + 1).toFixed(0).padStart(7, "0");
-  }, "Returns a deterministic 7-digit hash of the input string.");
-});
-
-// src/risu-compat/handlers/variables.ts
-function register7(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Variables", scoped: false });
-}
-function setvarMode(ctx) {
-  if (ctx.rmVar)
-    return "hide";
-  if (ctx.runVar)
-    return "run";
-  return "literal";
-}
-function leaveVarLiteral(ctx) {
-  return !ctx.commit || ctx.promptRegexLiteralVars === true;
-}
-var init_variables = __esm(() => {
-  init_registry();
-  register7("risu_getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a local chat variable. Empty string if unset.");
-  register7("risu_setvar", (ctx, a) => {
-    const mode = setvarMode(ctx);
-    if (mode === "hide")
-      return "";
-    if (mode === "literal")
-      return `{{setvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
-    return "";
-  }, "Sets a local chat variable.");
-  register7("risu_addvar", (ctx, a) => {
-    const mode = setvarMode(ctx);
-    if (mode === "hide")
-      return "";
-    if (mode === "literal")
-      return `{{addvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    ctx.vars.add("local", a[0] ?? "", Number(a[1]));
-    return "";
-  }, "Adds delta to a local chat variable (coerces current value to number).");
-  register7("setdefaultvar", (ctx, a) => {
-    const mode = setvarMode(ctx);
-    if (mode === "hide")
-      return "";
-    if (mode === "literal")
-      return `{{setdefaultvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    const name = a[0] ?? "";
-    if (!ctx.vars.get("local", name)) {
-      ctx.vars.set("local", name, a[1] ?? "");
-    }
-    return "";
-  }, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
-  register7("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""), "Reads a global chat variable.");
-  register7("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""), "Reads a temporary variable (per-evaluation scope).");
-  register7("settempvar", (ctx, a) => {
-    ctx.vars.set("temp", a[0] ?? "", a[1] ?? "");
-    return "";
-  }, "Sets a temporary variable.");
-  register7("deletevar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
-      return `{{deletevar::${a[0] ?? ""}}}`;
-    ctx.vars.delete("local", a[0] ?? "");
-    return "";
-  }, "Deletes a local chat variable.");
-  register7("flushvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
-      return `{{flushvar::${a[0] ?? ""}}}`;
-    ctx.vars.delete("local", a[0] ?? "");
-    return "";
-  }, "Alias of deletevar.");
-  register7("risu_getchatvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a chat-scoped variable (aliased to local in Risu).");
-  register7("risu_setchatvar", (ctx, a) => {
-    if (leaveVarLiteral(ctx))
-      return `{{setchatvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
-    ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
-    return "";
-  }, "Sets a chat-scoped variable.");
-  register7("return", (ctx, a) => {
-    ctx.vars.set("temp", "__force_return__", "1");
-    ctx.vars.set("temp", "__return__", a[0] ?? "");
-    return "";
-  }, "Halts further macro resolution, returns the given value as the entire parser output (Risu parity).");
-});
-
-// src/util/base64.ts
-function base64ToBytes(input) {
-  const sextets = [];
-  for (let i = 0;i < input.length; i++) {
-    const v = DECODE[input.charCodeAt(i)] ?? -1;
-    if (v >= 0)
-      sextets.push(v);
-  }
-  const out = new Uint8Array(sextets.length * 6 >> 3);
-  let bitBuf = 0;
-  let bitCount = 0;
-  let o = 0;
-  for (const s of sextets) {
-    bitBuf = bitBuf << 6 | s;
-    bitCount += 6;
-    if (bitCount >= 8) {
-      bitCount -= 8;
-      out[o++] = bitBuf >> bitCount & 255;
-    }
-  }
-  return out;
-}
-function base64ToUtf8(input) {
-  return new TextDecoder().decode(base64ToBytes(input));
-}
-function bytesToBase64(bytes) {
-  let out = "";
-  let i = 0;
-  for (;i + 2 < bytes.length; i += 3) {
-    const n = bytes[i] << 16 | bytes[i + 1] << 8 | bytes[i + 2];
-    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + B64_ALPHABET[n >> 6 & 63] + B64_ALPHABET[n & 63];
-  }
-  const rem = bytes.length - i;
-  if (rem === 1) {
-    const n = bytes[i] << 16;
-    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + "==";
-  } else if (rem === 2) {
-    const n = bytes[i] << 16 | bytes[i + 1] << 8;
-    out += B64_ALPHABET[n >> 18 & 63] + B64_ALPHABET[n >> 12 & 63] + B64_ALPHABET[n >> 6 & 63] + "=";
-  }
-  return out;
-}
-var B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", DECODE;
-var init_base64 = __esm(() => {
-  DECODE = new Int16Array(256).fill(-1);
-  for (let i = 0;i < B64_ALPHABET.length; i++) {
-    DECODE[B64_ALPHABET.charCodeAt(i)] = i;
-  }
-  DECODE[45] = 62;
-  DECODE[95] = 63;
-});
-
-// src/risu-compat/handlers/misc.ts
-function register8(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Misc", scoped: false });
-}
-function escapeButtonLabel(s) {
-  return s.replace(BARE_AMP_RE, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-var BARE_AMP_RE;
-var init_misc = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  init_base64();
-  register8("u", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Returns the character for a hex codepoint.");
-  register8("ue", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Alias for {{u}}.");
-  register8("unicodeencode", (_c, a) => (a[0] ?? "").charCodeAt(a[1] ? Number(a[1]) : 0).toString(), "Returns the Unicode code point of a character at the given index (default 0).");
-  register8("unicodedecode", (_c, a) => String.fromCharCode(Number(a[0] ?? "0")), "Converts a Unicode code point back to a character.");
-  register8("fromhex", (_c, a) => Number.parseInt(a[0] ?? "0", 16).toString(), "Converts a hex string to decimal.");
-  register8("tohex", (_c, a) => Number.parseInt(a[0] ?? "0").toString(16), "Converts a decimal number to hex.");
-  register8("xor", (_c, a) => {
-    const bytes = new TextEncoder().encode(a[0] ?? "");
-    for (let i = 0;i < bytes.length; i++)
-      bytes[i] ^= 255;
-    return bytesToBase64(bytes);
-  }, "XOR-encrypts a string with 0xFF and base64-encodes.");
-  register8("xordecrypt", (_c, a) => {
-    const bytes = base64ToBytes(a[0] ?? "");
-    for (let i = 0;i < bytes.length; i++)
-      bytes[i] ^= 255;
-    return new TextDecoder().decode(bytes);
-  }, "Decrypts an XOR-encrypted base64 string.");
-  register8("crypt", (_c, a) => {
-    let shift = a[1] ? Number(a[1]) : 32768;
-    if (isNaN(shift))
-      shift = 32768;
-    const input = a[0] ?? "";
-    let result = "";
-    for (let i = 0;i < input.length; i++) {
-      const code = input.charCodeAt(i);
-      if (code > 65535) {
-        result += input[i];
-        continue;
-      }
-      let shifted = code + shift;
-      if (shifted > 65535)
-        shifted -= 65536;
-      result += String.fromCharCode(shifted);
-    }
-    return result;
-  }, "Caesar-style Unicode shift cipher (default shift 32768 which self-inverts).");
-  register8("risu_date", (ctx, a) => {
-    if (a.length === 0) {
-      const d = new Date(ctx.clock.now());
-      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-    }
-    const t = a[1] ? Number(a[1]) : 0;
-    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
-  }, "Formats a date. No args → YYYY-M-D. First arg is format, optional second arg is unix ms.");
-  register8("datetimeformat", (ctx, a) => {
-    if (a.length === 0) {
-      const d = new Date(ctx.clock.now());
-      return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-    }
-    const t = a[1] ? Number(a[1]) : 0;
-    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
-  }, "Alias of {{date::fmt}}.");
-  register8("hiddenkey", () => "", "A key that activates lorebook entries without being sent to the model.");
-  register8("risu_comment", (ctx, a) => {
-    if (ctx.commit || ctx.cbsContext)
-      return "";
-    return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
-  }, 'Comment macro. Empty at prompt time and in cbs; displays as <div class="risu-comment">…</div> at render time.');
-  registry.register({
-    name: "//",
-    handler: () => "",
-    description: "Inline comment. Returns empty string.",
-    category: "Risu / Misc",
-    scoped: false
-  });
-  register8("tex", (_c, a) => `$$${a[0] ?? ""}$$`, "LaTeX/math block.");
-  register8("ruby", (_c, a) => `<ruby>${a[0] ?? ""}<rp> (</rp><rt>${a[1] ?? ""}</rt><rp>) </rp></ruby>`, "Ruby (furigana) HTML wrapper.");
-  register8("codeblock", (_c, a) => {
-    const code = (a[a.length - 1] ?? "").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    if (a.length > 1)
-      return `<pre-hljs-placeholder lang="${a[0]}">${code}</pre-hljs-placeholder>`;
-    return `<pre><code>${code}</code></pre>`;
-  }, "Code-block HTML wrapper. One arg → plain. Two args → highlighted, first is lang.");
-  register8("risu", (_c, a) => {
-    const size = a[0] || "45";
-    return `<img src="/logo2.png" style="height:${size}px;width:${size}px" />`;
-  }, "Embeds the RisuAI logo image.");
-  BARE_AMP_RE = /&(?!#x[0-9a-fA-F]+;|#[0-9]+;|[a-zA-Z][a-zA-Z0-9]*;)/g;
-  register8("button", (_c, a) => {
-    const label = escapeButtonLabel(a[0] ?? "");
-    const trigger = (a[1] ?? "").replace(/"/g, "&quot;");
-    return `<button class="button-default x-risu-button-default" risu-trigger="${trigger}">${label}</button>`;
-  }, "HTML button that fires the named risu-trigger when clicked.");
-  register8("screenwidth", (ctx) => String(ctx.screenWidth ?? 0), "Viewport width in pixels. Read from the frontend-reported value; 0 before the first report.");
-  register8("screenheight", (ctx) => String(ctx.screenHeight ?? 0), "Viewport height in pixels. Read from the frontend-reported value; 0 before the first report.");
-  register8("moduleenabled", (ctx, a) => {
-    const ns = a[0] ?? "";
-    if (ns.length === 0)
-      return "0";
-    const map = ctx.modulesByNamespace;
-    if (map && map[ns])
-      return "1";
-    return "0";
-  }, "Returns 1 if a module with the specified namespace is attached, 0 otherwise.");
-  register8("moduleassetlist", (ctx, a) => {
-    const ns = a[0] ?? "";
-    if (ns.length === 0)
-      return "";
-    const map = ctx.modulesByNamespace;
-    if (!map)
-      return "";
-    const list = map[ns];
-    if (!list || list.length === 0)
-      return "";
-    return makeArray2(list);
-  }, "Returns a JSON array of asset names for the specified module namespace. Returns empty string if namespace not found.");
-  register8("metadata", (ctx, a) => {
-    const key = (a[0] ?? "").toLocaleLowerCase();
-    switch (key) {
-      case "imateapot":
-        return "\uD83E\uDED6";
-      case "mobile":
-      case "local":
-      case "node":
-        return "0";
-      case "risutype":
-        return "web";
-      case "modelname":
-      case "modelshortname":
-      case "modelinternalid":
-        return ctx.aiModel || "";
-      default:
-        return `Error: ${a[0]} is not a valid metadata key.`;
-    }
-  }, "Returns host metadata. Subset implemented — model fields read from ctx.aiModel; platform fields default to non-native.");
-  register8("chatindex", (ctx) => {
-    const idx = ctx.currentMessageIndex;
-    return idx === null ? "" : idx.toString();
-  }, "Index of the current message being processed. Risu cbs() default returns -1.");
-  register8("firstmsgindex", (ctx) => {
-    const idx = ctx.character.selectedAlternateGreetingIndex;
-    return String(typeof idx === "number" ? idx : -1);
-  }, "Returns chat.fmIndex (selected alternate greeting index). -1 = default firstMessage.");
-});
-
-// src/risu-compat/handlers/chat-context.ts
-function register9(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Chat", scoped: false });
-}
-function risuRole(r) {
-  return r === "assistant" ? "char" : r;
-}
-function toSerializableMsg(m) {
-  const out = {
-    role: risuRole(m.role),
-    data: m.content,
-    time: m.createdAt
-  };
-  if (m.speaker)
-    out.speaker = m.speaker;
-  return out;
-}
-function evalMsg(ctx, m) {
-  const data = ctx.evaluate ? ctx.evaluate(m.content) : m.content;
-  const out = {
-    role: risuRole(m.role),
-    data,
-    time: m.createdAt
-  };
-  if (m.speaker)
-    out.speaker = m.speaker;
-  return out;
-}
-var init_chat_context = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  register9("lorebook", (ctx) => {
-    return makeArray2(ctx.lorebook.map((e) => JSON.stringify(e)));
-  }, "Returns all active lorebook entries as a JSON array (character + chat + module lore concatenated).");
-  register9("userhistory", (ctx) => {
-    const filtered = ctx.messages.all().filter((m) => m.role === "user").map((m) => JSON.stringify(evalMsg(ctx, m)));
-    return makeArray2(filtered);
-  }, "Returns all user messages as a JSON array, each .data recursively parsed.");
-  register9("charhistory", (ctx) => {
-    const filtered = ctx.messages.all().filter((m) => m.role === "assistant").map((m) => JSON.stringify(evalMsg(ctx, m)));
-    return makeArray2(filtered);
-  }, "Returns all character (assistant) messages as a JSON array, each .data recursively parsed.");
-  register9("history", (ctx, a) => {
-    const msgs = ctx.messages.all();
-    if (a.length === 0) {
-      const fm = ctx.character.selectedAlternateGreetingIndex === -1 ? ctx.character.firstMessage : ctx.character.alternateGreetings[ctx.character.selectedAlternateGreetingIndex] ?? ctx.character.firstMessage;
-      const head = [{ role: "char", data: fm, time: 0 }];
-      return makeArray2([...head, ...msgs.map(toSerializableMsg)].map((v) => JSON.stringify(v)));
-    }
-    const withRole = a.includes("role");
-    return makeArray2(msgs.map((m) => withRole ? `${risuRole(m.role)}: ${m.content}` : m.content));
-  }, "No args → full JSON history with first-greeting at index 0. With 'role' arg → array of 'role: data' strings.");
-  register9("previouschatlog", (ctx, a) => {
-    const idx = Number(a[0]);
-    const msgs = ctx.messages.all();
-    return msgs[idx]?.content ?? "Out of range";
-  }, "Returns message[N].content, or 'Out of range' if index invalid.");
-  register9("previouscharchat", (ctx) => {
-    const msgs = ctx.messages.all();
-    const start = ctx.cbsContext ? msgs.length - 1 : ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1;
-    for (let i = start;i >= 0; i--) {
-      const m = msgs[i];
-      if (m && m.role === "assistant")
-        return m.content;
-    }
-    const c = ctx.character;
-    return c.selectedAlternateGreetingIndex === -1 ? c.firstMessage : c.alternateGreetings[c.selectedAlternateGreetingIndex] ?? c.firstMessage;
-  }, "Last character (assistant) message; cbs walks from chat-end, others from currentMessageIndex-1.");
-  register9("previoususerchat", (ctx) => {
-    if (ctx.cbsContext)
-      return "";
-    if (ctx.currentMessageIndex === null)
-      return "";
-    const msgs = ctx.messages.all();
-    for (let i = ctx.currentMessageIndex - 1;i >= 0; i--) {
-      const m = msgs[i];
-      if (m && m.role === "user")
-        return m.content;
-    }
-    const c = ctx.character;
-    return c.selectedAlternateGreetingIndex === -1 ? c.firstMessage : c.alternateGreetings[c.selectedAlternateGreetingIndex] ?? c.firstMessage;
-  }, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
-  register9("risu_lastmessage", (ctx) => {
-    const last = ctx.messages.last();
-    return last?.content ?? "";
-  }, "Content of the most recent message, regardless of role.");
-  register9("risu_lastmessageid", (ctx) => {
-    const n = ctx.messages.count();
-    return Math.max(-1, n - 1).toString();
-  }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");
-  register9("lastusermessage", (ctx) => {
-    const m = ctx.messages.lastOf("user");
-    return m?.content ?? "";
-  }, "Alias-style shortcut for the most recent user message. '' if none.");
-  register9("lastcharmessage", (ctx) => {
-    const m = ctx.messages.lastOf("assistant");
-    return m?.content ?? "";
-  }, "Alias-style shortcut for the most recent character (assistant) message.");
-  register9("jbtoggled", (ctx) => ctx.jailbreakToggle ? "1" : "0", "Returns '1' when the global jailbreak toggle is on.");
-  register9("maxcontext", (ctx) => ctx.maxContext.toString(), "Returns the configured max-context length as a string.");
-  register9("messagecount", (ctx) => ctx.messages.count().toString(), "Returns the total number of messages in the chat.");
-});
-
-// src/risu-compat/handlers/display.ts
-function register10(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Display", scoped: false });
-}
-var DOC_ONLY;
-var init_display = __esm(() => {
-  init_registry();
-  register10("decbo", () => "", "Displays as { without being re-lexed by the parser (PUA sentinel).");
-  register10("decbc", () => "", "Displays as } without being re-lexed.");
-  register10("bo", () => "", "Displays as {{ without being re-lexed.");
-  register10("bc", () => "", "Displays as }} without being re-lexed.");
-  register10("displayescapedbracketopen", () => "", "Displays as ( (PUA sentinel).");
-  register10("displayescapedbracketclose", () => "", "Displays as ).");
-  register10("displayescapedanglebracketopen", () => "", "Displays as < (PUA sentinel).");
-  register10("displayescapedanglebracketclose", () => "", "Displays as >.");
-  register10("displayescapedcolon", () => "", "Displays as : without being parsed as a CBS separator.");
-  register10("displayescapedsemicolon", () => "", "Displays as ;.");
-  register10("cbr", (_c, a) => {
-    if (a.length === 0)
-      return "\\n";
-    const n = Math.max(1, Number(a[0] ?? "1"));
-    return "\\n".repeat(n);
-  }, "Returns a literal '\\n'. With numeric arg, repeats that many times.");
-  register10("position", (ctx, args) => {
-    const name = args[0];
-    if (typeof name !== "string" || name.length === 0)
-      return "";
-    const map = ctx.positionPt;
-    if (!map)
-      return "";
-    return map[name] ?? "";
-  }, "Risu {{position::NAME}}: joined content of active entries with @@position pt_<NAME>.");
-  DOC_ONLY = [
-    ["slot", "{{slot::VAR}} inside a scoped block. Resolved by #each/#func/call handlers."]
-  ];
-  for (const [name, desc] of DOC_ONLY) {
-    register10(name, () => "", desc);
-  }
-  register10("bkspc", () => "", "Risu's buffer-rewind (removes last word). No buffer access in risu-compat → shim '', known deviation.");
-  register10("erase", () => "", "Risu's buffer-rewind (removes last sentence). Shim '', known deviation.");
-});
-
-// src/risu-compat/handlers/metadata.ts
-function register11(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Metadata", scoped: false });
-}
-var init_metadata = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  init_base64();
-  register11("declare", (ctx, a) => {
-    ctx.vars.set("temp", `__declared_${a[0] ?? ""}__`, "1");
-    return "";
-  }, "Declares a marker; {{declared::NAME}} reads it. Backed by the temp-scope store.");
-  register11("declared", (ctx, a) => {
-    return ctx.vars.get("temp", `__declared_${a[0] ?? ""}__`) === "1" ? "1" : "0";
-  }, "Reads a declaration marker set by {{declare::NAME}}.");
-  register11("emotionlist", (ctx) => {
-    return makeArray2(ctx.character.emotionImages.map((e) => e.name));
-  }, "JSON array of emotion image names for the current character.");
-  register11("assetlist", (ctx) => {
-    if (ctx.character.type === "group")
-      return "";
-    return makeArray2(ctx.character.additionalAssets.map((a) => a.name));
-  }, "JSON array of additional asset names. '' for group characters.");
-  register11("prefillsupported", (ctx) => {
-    return ctx.aiModel.startsWith("claude") ? "1" : "0";
-  }, "'1' if the current AI model id starts with 'claude' (Claude supports prefill).");
-  register11("file", (ctx, a) => {
-    const decode = ctx.cbsContext || ctx.commit;
-    if (!decode)
-      return `<br><div class="x-risu-risu-file">${a[0] ?? ""}</div><br>`;
-    const content = a[1] ?? "";
-    try {
-      return base64ToUtf8(content);
-    } catch {
-      return "";
-    }
-  }, 'Decodes base64 file content to UTF-8 (prompt and cbs paths); renders <div class="risu-file">…</div> in display path.');
-  register11("chardisplayasset", (ctx) => {
-    if (!ctx.character.prebuiltAssetCommand)
-      return makeArray2([]);
-    const excludes = ctx.character.prebuiltAssetExclude;
-    const list = ctx.character.additionalAssets.filter((a) => !excludes.includes(a.src)).map((a) => a.name);
-    return makeArray2(list);
-  }, "JSON array of character display assets, minus the excluded set. Empty array if prebuiltAssetCommand is off.");
-});
-
-// src/risu-compat/handlers/assets.ts
-function register12(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Assets", scoped: false });
-}
-function trimAssetKey(s) {
-  let out = s;
-  for (const e of TRIMMER_EXTS) {
-    if (out.endsWith("." + e)) {
-      out = out.substring(0, out.length - e.length - 1);
-      break;
-    }
-  }
-  return out.trim().replace(/[_ \-.]/g, "");
-}
-function getDistance(a, b) {
-  const h = a.length + 1;
-  const w = b.length + 1;
-  const d = new Int16Array(h * w);
-  for (let i = 0;i < h; i++)
-    d[i * w] = i;
-  for (let j = 0;j < w; j++)
-    d[j] = j;
-  for (let i = 1;i < h; i++) {
-    for (let j = 1;j < w; j++) {
-      d[i * w + j] = Math.min(d[(i - 1) * w + (j - 1)] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1), d[(i - 1) * w + j] + 1, d[i * w + (j - 1)] + 1);
-    }
-  }
-  return d[h * w - 1];
-}
-function findAsset(ctx, list, name, legacyMediaFindings) {
-  const norm = name.toLowerCase();
-  let matches = null;
-  for (const a of list) {
-    if (a.name.toLowerCase() === norm) {
-      if (matches === null)
-        matches = [a];
-      else
-        matches.push(a);
-    }
-  }
-  if (matches !== null) {
-    if (matches.length === 1)
-      return matches[0];
-    const chatID = ctx.currentMessageIndex ?? -1;
-    const seedWord = (ctx.character.chaId || "global") + String(chatID);
-    const cx = pickHashRand(chatID, seedWord);
-    const selIndex = Math.floor(cx * matches.length);
-    return matches[selIndex] ?? matches[0];
-  }
-  if (legacyMediaFindings)
-    return null;
-  const trimmedName = trimAssetKey(norm);
-  if (trimmedName.length === 0)
-    return null;
-  let closest = null;
-  let closestDist = Number.MAX_SAFE_INTEGER;
-  for (const a of list) {
-    const key = trimAssetKey(a.name.toLowerCase());
-    const dist = getDistance(trimmedName, key);
-    if (dist < closestDist) {
-      closest = a;
-      closestDist = dist;
-      if (dist === 0)
-        break;
-    }
-  }
-  if (closestDist > ASSET_MAX_DIFFERENCE)
-    return null;
-  return closest;
-}
-function imgTag(src) {
-  return `<img src="${src}" alt="${src}" style="${ASSET_WIDTH_STYLE} "/>`;
-}
-function videoTag(src, opts) {
-  const controls = opts.controls ? "controls " : "";
-  const muted = opts.muted ? "muted " : "";
-  return `<video ${controls}${muted}autoplay loop><source src="${src}" type="video/mp4"></video>
-`;
-}
-function literal(name, args) {
-  return `{{${name}${args.length > 0 ? "::" + args.join("::") : ""}}}`;
-}
-var ASSET_WIDTH_STYLE = "", VIDEO_EXTENSIONS, TRIMMER_EXTS, ASSET_MAX_DIFFERENCE = 4;
-var init_assets = __esm(() => {
-  init_registry();
-  init_risu_helpers();
-  VIDEO_EXTENSIONS = new Set(["mp4", "webm", "avi", "m4p", "m4v"]);
-  TRIMMER_EXTS = [
-    "webp",
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "mp4",
-    "webm",
-    "avi",
-    "m4p",
-    "m4v",
-    "mp3",
-    "wav",
-    "ogg"
-  ];
-  register12("path", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("path", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    return hit?.src ?? "";
-  }, "Asset URL by name, plain string (for src=/url()). parser.svelte.ts.");
-  register12("img", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("img", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return imgTag(hit.src);
-  }, "Inline <img> for a named asset. parser.svelte.ts.");
-  register12("image", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("image", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="${hit.src}" alt="${hit.src}" style="${ASSET_WIDTH_STYLE}"/></div>
-`;
-  }, "Inlay image wrapper. parser.svelte.ts.");
-  register12("emotion", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("emotion", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.emotionImages, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return imgTag(hit.src);
-  }, "Emotion image by name. parser.svelte.ts.");
-  register12("asset", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("asset", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    if (hit.ext && VIDEO_EXTENSIONS.has(hit.ext.toLowerCase())) {
-      return videoTag(hit.src, { controls: false, muted: true });
-    }
-    return `${imgTag(hit.src)}
-`;
-  }, "Asset by name — img or video depending on extension. parser.svelte.ts.");
-  register12("bg", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("bg", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return `<div style="width:100%;height:100%;background: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),url(${hit.src}); background-size: cover;"></div>`;
-  }, "Background panel. parser.svelte.ts.");
-  register12("video", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("video", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return videoTag(hit.src, { controls: true, muted: false });
-  }, "Full-featured video. parser.svelte.ts.");
-  register12("video-img", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("video-img", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return videoTag(hit.src, { controls: false, muted: true });
-  }, "Muted autoplay video (image-substitute). parser.svelte.ts.");
-  register12("audio", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("audio", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return `<audio controls autoplay loop><source src="${hit.src}" type="audio/mpeg"></audio>
-`;
-  }, "Audio player. parser.svelte.ts.");
-  register12("bgm", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("bgm", args);
-    const name = String(args[0] ?? "");
-    if (!name)
-      return "";
-    const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
-    if (!hit)
-      return "";
-    return `<div risu-ctrl="bgm___auto___${hit.src}" style="display:none;"></div>
-`;
-  }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
-  register12("inlay", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlay", args);
-    const id = String(args[0] ?? "");
-    if (!id)
-      return "";
-    return `<img src="/api/v1/images/${id}"/>`;
-  }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
-  register12("inlayed", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlayed", args);
-    const id = String(args[0] ?? "");
-    if (!id)
-      return "";
-    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>
-
-`;
-  }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
-  register12("inlayeddata", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlayeddata", args);
-    const id = String(args[0] ?? "");
-    if (!id)
-      return "";
-    return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>
-
-`;
-  }, "Wrapped inlay image (data variant). Risu parser.svelte.ts + 688.");
-  register12("source", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("source", args);
-    const kind = String(args[0] ?? "").toLowerCase();
-    if (kind === "char")
-      return ctx.character.image;
-    if (kind === "user")
-      return ctx.identity.personaImage;
-    return "";
-  }, "{{source::char}} / {{source::user}} avatar URLs. parser.svelte.ts. Empty string when no avatar uploaded.");
-});
-
-// src/risu-compat/handlers/index.ts
-var init_handlers = __esm(() => {
-  init_trigger_id();
-  init_opaque_blocks();
-  init_structural_blocks();
-  init_iteration_blocks();
-  init_context_reads();
-  init_math();
-  init_logic();
-  init_strings();
-  init_arrays();
-  init_random();
-  init_variables();
-  init_misc();
-  init_chat_context();
-  init_display();
-  init_metadata();
-  init_assets();
 });
 
 // src/core/cbs/catalog/risu-macros.json
@@ -8318,7 +7841,7 @@ var init_risu_macros = __esm(() => {
       lumiverseCollision: {
         name: "lastmessageid",
         compatible: false,
-        notes: "Risu: chat.message[].length - 1 (greeting excluded) → -1 on greeting-only. Lumi: messages.length - 1 (greeting included as msg 0) → 0 on greeting-only. Off-by-one. Card-level literal comparisons like {{equal::lastmessageid::-1}} require Risu-frame — the rewriter emits {{risu_lastmessageid}} and our handler returns the Risu-frame value."
+        notes: "Risu: chat.message[].length - 1 (greeting excluded) → -1 on greeting-only. Lumi: messages.length - 1 (greeting included as msg 0) → 0 on greeting-only. Card-level literal comparisons like {{equal::lastmessageid::-1}} require the compatibility evaluator's Risu-frame handler."
       },
       risuFile: "src/ts/cbs.ts",
       risuLine: 737,
@@ -8619,7 +8142,7 @@ var init_risu_macros = __esm(() => {
       lumiverseCollision: null,
       risuFile: "src/ts/cbs.ts",
       risuLine: 1863,
-      summary: "Host metadata. Supported: imateapot, mobile/local/node, risutype, modelname/modelshortname/modelinternalid. Other keys return 'Error: X is not a valid metadata key.'.",
+      summary: "Host metadata. Supported: imateapot, mobile/local/node, risutype, modelname/modelshortname/modelinternalid, version, majorversion/majorver/major, maxcontext, language/locale/lang, browserlanguage/browserlocale/browserlang. Unsupported (still error): modelformat, modelprovider, modeltokenizer.",
       notes: ""
     },
     {
@@ -9850,22 +9373,6 @@ content#} form. Returns trimmed content if cond is not the empty string, 0, or -
       notes: "Deprecated Risu form; preserved for compatibility."
     },
     {
-      name: "unknown",
-      aliases: [],
-      category: "control_flow",
-      argShape: "any + body",
-      minArgs: 0,
-      maxArgs: -1,
-      pure: true,
-      readsState: [],
-      writesState: [],
-      lumiverseCollision: null,
-      risuFile: "packages/core/src/cbs/rewrite/blocks.ts",
-      risuLine: 1,
-      summary: `Fallback handler for unrecognized block kinds. Returns body verbatim without interpretation, matching Risu's "nothing" type fall-through.`,
-      notes: "Synthetic name emitted by the rewriter when it sees {{#someUnknownBlock}}…{{/someUnknownBlock}}. Not a Risu macro."
-    },
-    {
       name: "deletevar",
       aliases: [],
       category: "variables",
@@ -10118,9 +9625,6 @@ function init() {
   initialised = true;
   for (const reg of registry.entries()) {
     registerInto(reg.name, reg.handler, reg.scoped);
-    if (reg.name.startsWith("risu_")) {
-      registerInto(reg.name.slice(5), reg.handler, reg.scoped);
-    }
   }
   try {
     const catalog2 = new CatalogIndex(parseCatalog(risu_macros_default));
@@ -10203,6 +9707,43 @@ function dispatchLeaf(payload, ctx, callStack) {
   } catch {
     return null;
   }
+}
+function rewindLastWord(root) {
+  if (!root)
+    return root;
+  const trimmed = root.trimEnd();
+  let trimPointer = trimmed.length - 1;
+  for (;trimPointer >= 0; trimPointer--) {
+    const char = trimmed[trimPointer];
+    if (trimPointer === 0 || char === " " || char === `
+` || char === "\t")
+      break;
+  }
+  if (trimPointer === -1)
+    trimPointer = 0;
+  return trimmed.substring(0, trimPointer).trimEnd();
+}
+function rewindLastSentence(root) {
+  if (!root)
+    return root;
+  const trimmed = root.trimEnd();
+  let trimPointer = trimmed.length - 1;
+  let sentenceEndFound = false;
+  for (;trimPointer >= 0; trimPointer--) {
+    const char = trimmed[trimPointer];
+    if (char === "." || char === "!" || char === "?" || char === `
+`) {
+      sentenceEndFound = true;
+      break;
+    }
+    if (trimPointer === 0)
+      break;
+  }
+  if (trimPointer === -1)
+    trimPointer = 0;
+  else if (sentenceEndFound)
+    trimPointer += 1;
+  return trimmed.substring(0, trimPointer).trimEnd();
 }
 function evaluate(template, ctx, opts = {}) {
   const callStack = (opts.callStack ?? ctx.callStack ?? 0) + 1;
@@ -10346,6 +9887,15 @@ function evaluate(template, ctx, opts = {}) {
             nested[0] += evaluate(data, innerCtx, { callStack });
             break;
           }
+        }
+        const leafName = normalizeMacroName(splitMacroArgs(dat).name);
+        if (!isPureMode() && leafName === "bkspc") {
+          nested[0] = rewindLastWord(nested[0] ?? "");
+          break;
+        }
+        if (!isPureMode() && leafName === "erase") {
+          nested[0] = rewindLastSentence(nested[0] ?? "");
+          break;
         }
         const mc = isPureMode() ? null : dispatchLeaf(dat, innerCtx, callStack);
         if (mc == null) {
@@ -22782,9 +22332,9 @@ var require_url_parse = __commonJS((exports, module) => {
     url.href = url.toString();
     return url;
   }
-  function toString(stringify2) {
-    if (!stringify2 || typeof stringify2 !== "function")
-      stringify2 = qs.stringify;
+  function toString(stringify) {
+    if (!stringify || typeof stringify !== "function")
+      stringify = qs.stringify;
     var query, url = this, host = url.host, protocol = url.protocol;
     if (protocol && protocol.charAt(protocol.length - 1) !== ":")
       protocol += ":";
@@ -22804,7 +22354,7 @@ var require_url_parse = __commonJS((exports, module) => {
       host += ":";
     }
     result += host + url.pathname;
-    query = typeof url.query === "object" ? stringify2(url.query) : url.query;
+    query = typeof url.query === "object" ? stringify(url.query) : url.query;
     if (query)
       result += query.charAt(0) !== "?" ? "?" + query : query;
     if (url.hash)
@@ -22821,10 +22371,58 @@ var require_url_parse = __commonJS((exports, module) => {
 
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
+// spindle.json
+var spindle_default = {
+  version: "0.8.0",
+  name: "LumiRealm",
+  identifier: "lumirealm",
+  author: "amousepad",
+  github: "https://github.com/AMousePad/LumiRealm",
+  homepage: "https://github.com/AMousePad/LumiRealm",
+  description: "Bringing RisuRealm into Lumiverse",
+  permissions: [
+    "generation",
+    "interceptor",
+    "tools",
+    "cors_proxy",
+    "context_handler",
+    "ephemeral_storage",
+    "chat_mutation",
+    "event_tracking",
+    "ui_panels",
+    "app_manipulation",
+    "oauth",
+    "characters",
+    "chats",
+    "world_books",
+    "regex_scripts",
+    "databanks",
+    "personas",
+    "presets",
+    "push_notification",
+    "image_gen",
+    "images",
+    "generation_parameters",
+    "macro_interceptor",
+    "web_search"
+  ],
+  requested_capabilities: [
+    "base64_decode"
+  ],
+  entry_backend: "dist/backend.js",
+  entry_frontend: "dist/frontend.js",
+  minimum_lumiverse_version: "1.1.0",
+  lumirealm: {
+    risu_app_version: "2026.6.215",
+    risu_language: "en-US"
+  }
+};
 
 // src/interpreter/evaluator/context.ts
+var RISU_APP_VERSION = spindle_default.lumirealm.risu_app_version;
+var RISU_LANGUAGE = spindle_default.lumirealm.risu_language;
 var spindleGlobal = typeof spindle !== "undefined" ? spindle : undefined;
-var sessionFunctions = (() => {
+function makeFunctionRegistry() {
   const table2 = new Map;
   return {
     define: (name, body, argNames) => {
@@ -22836,7 +22434,7 @@ var sessionFunctions = (() => {
     },
     has: (name) => table2.has(name)
   };
-})();
+}
 var varOverlays = new Map;
 var MAX_OVERLAYS = 100;
 function getOverlay(chatId) {
@@ -23073,6 +22671,7 @@ function buildEvaluatorContext(input) {
     firstMessage: card.firstMessage ?? "",
     alternateGreetings: card.alternateGreetings ?? [],
     selectedAlternateGreetingIndex: card.selectedAlternateGreetingIndex ?? -1,
+    ...card.selectedGreeting !== undefined ? { selectedGreeting: card.selectedGreeting } : {},
     type: "character",
     additionalAssets: indexToCharacterAssets(card.additionalAssets),
     emotionImages: indexToCharacterAssets(card.emotionImages),
@@ -23082,12 +22681,7 @@ function buildEvaluatorContext(input) {
     image: card.image ?? ""
   };
   const lorebook = input.lorebook ?? [];
-  const functions = commit ? sessionFunctions : {
-    define: () => {},
-    get: (name) => sessionFunctions.get(name),
-    delete: () => {},
-    has: (name) => sessionFunctions.has(name)
-  };
+  const functions = makeFunctionRegistry();
   const rng = recorder ? { random: () => {
     recorder.volatile = true;
     return Math.random();
@@ -23097,6 +22691,7 @@ function buildEvaluatorContext(input) {
     return Date.now();
   } } : { now: () => Date.now() };
   const out = {
+    chatId,
     vars,
     identity,
     character,
@@ -23113,8 +22708,8 @@ function buildEvaluatorContext(input) {
     lorebook,
     jailbreakToggle: false,
     maxContext: Number(input.system?.maxContext ?? 0),
-    language: "",
-    appVersion: "",
+    language: RISU_LANGUAGE,
+    appVersion: RISU_APP_VERSION,
     screenWidth: Number(input.screenWidth ?? 0),
     screenHeight: Number(input.screenHeight ?? 0),
     commit,
@@ -23169,6 +22764,22 @@ function runPipeline(input, opts) {
     commit
   });
   return evaluate(input.template, ctx);
+}
+
+// src/util/coerce.ts
+function errMsg(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+function toStr(v) {
+  if (v === undefined || v === null)
+    return "";
+  if (typeof v === "string")
+    return v;
+  try {
+    return String(v);
+  } catch {
+    return "";
+  }
 }
 
 // src/log/store.ts
@@ -23385,6 +22996,252 @@ function makeSafeLogger(prefix) {
     debug: (m) => emit("debug", m),
     trace: (m) => emit("trace", m)
   };
+}
+
+// src/interpreter/at-actions-runtime.ts
+var log = makeSafeLogger("atActions.runForPhase");
+function isRowlessAtAction(action) {
+  return (action.sourceOrigin ?? "character") === "character";
+}
+function actionFromLiveScript(live) {
+  if (!live.phase)
+    return null;
+  const directAction = inferDirectAction(live.out);
+  const flagActions = live.flagActions ?? [];
+  const action = directAction ?? primaryFlagAction(flagActions);
+  if (!action)
+    return null;
+  return {
+    action,
+    ...directAction ? { directAction } : {},
+    ...flagActions.length > 0 ? { flagActions } : {},
+    findRegex: live.findRegex,
+    flag: live.flag,
+    out: live.out,
+    phase: live.phase,
+    order: live.order ?? 0,
+    ...live.hasExplicitOrder === true ? { hasExplicitOrder: true } : {},
+    ...live.sourceIndex !== undefined ? { sourceIndex: live.sourceIndex } : {},
+    ...live.sourceRowIndex !== undefined ? { sourceRowIndex: live.sourceRowIndex } : {},
+    ...live.sourceOrigin !== undefined ? { sourceOrigin: live.sourceOrigin } : {},
+    ...live.liveScriptId !== undefined ? { liveScriptId: live.liveScriptId } : {}
+  };
+}
+function getRuntimeAtActionDependencies(action) {
+  const direct = action.directAction ?? inferDirectAction(action.out);
+  const flags = action.flagActions ?? [];
+  const inject = direct === "inject" || flags.includes("inject");
+  const repeat = direct === "repeat_back" || flags.includes("repeat_back");
+  return {
+    messages: inject || repeat,
+    effects: direct === "emo" || inject
+  };
+}
+function bindAtActionToLiveScript(raw, live) {
+  const directAction = inferDirectAction(live.out);
+  const flagActions = raw.flagActions ?? [];
+  const action = directAction ?? primaryFlagAction(flagActions);
+  if (!action)
+    return null;
+  return {
+    action,
+    ...directAction ? { directAction } : {},
+    ...flagActions.length > 0 ? { flagActions } : {},
+    findRegex: live.findRegex,
+    flag: live.flag,
+    out: live.out,
+    phase: live.phase ?? raw.phase,
+    order: live.order ?? raw.order,
+    ...(live.hasExplicitOrder ?? raw.hasExplicitOrder) === true ? { hasExplicitOrder: true } : {},
+    ...raw.sourceIndex !== undefined ? { sourceIndex: raw.sourceIndex } : {},
+    ...raw.sourceRowIndex !== undefined ? { sourceRowIndex: raw.sourceRowIndex } : {},
+    ...raw.sourceOrigin !== undefined ? { sourceOrigin: raw.sourceOrigin } : {},
+    ...raw.liveScriptId !== undefined ? { liveScriptId: raw.liveScriptId } : {}
+  };
+}
+async function runAtActionsForPhase(actions, phase, data, ctx) {
+  const eligible = actions.filter((a) => a.phase === phase).slice();
+  if (actions.some((a) => a.hasExplicitOrder === true)) {
+    eligible.sort((a, b) => b.order - a.order);
+  }
+  if (eligible.length === 0)
+    return data;
+  log.info(`phase=${phase} eligible=${eligible.length} data_len=${data.length} chatIndex=${ctx.chatIndex}`);
+  let current = data;
+  for (let i = 0;i < eligible.length; i++) {
+    const action = eligible[i];
+    try {
+      current = await applyOne(action, current, ctx);
+    } catch (err) {
+      log.warn(`action[${i}] kind=${action.action} phase=${phase} THREW — ${errMsg(err)}; keeping prior data`);
+    }
+  }
+  return current;
+}
+async function applyOne(action, data, ctx) {
+  const flagActions = new Set(action.flagActions ?? []);
+  const directAction = action.directAction ?? inferDirectAction(action.out);
+  const moveTop = directAction === "move_top" || flagActions.has("move_top");
+  const moveBottom = directAction === "move_bottom" || flagActions.has("move_bottom");
+  const moveAction = moveTop || moveBottom;
+  const rawFind = flagActions.has("cbs") && ctx.resolveTemplate ? await ctx.resolveTemplate(action.findRegex) : action.findRegex;
+  const findRegex = typeof rawFind === "string" ? rawFind : String(rawFind);
+  let regexFlag = action.flag;
+  if (moveAction)
+    regexFlag = regexFlag.replace(/g/g, "");
+  regexFlag = sanitizeRegexFlag(regexFlag);
+  let regex;
+  try {
+    regex = new RegExp(findRegex, regexFlag);
+  } catch (err) {
+    throw new Error(`atAction ${action.action}: invalid regex /${findRegex}/${regexFlag} — ${err.message}`);
+  }
+  const matched = regex.test(data);
+  regex.lastIndex = 0;
+  const outScript = normalizeOutScript(action.out, flagActions);
+  if (matched) {
+    if (directAction === "emo") {
+      const name = action.out.substring(6).trim();
+      if (name)
+        await setExpression(ctx.api, name);
+      return data;
+    }
+    if ((directAction === "inject" || flagActions.has("inject")) && ctx.chatIndex !== -1) {
+      await persistCurrentText(ctx, data);
+      return data.replace(regex, "");
+    }
+    if (moveAction) {
+      return applyMove(data, regex, outScript, moveTop ? "move_top" : "move_bottom");
+    }
+    const replaced = data.replace(regex, outScript);
+    return ctx.resolveTemplate ? await ctx.resolveTemplate(replaced) : replaced;
+  }
+  if ((directAction === "repeat_back" || flagActions.has("repeat_back")) && ctx.chatIndex !== -1) {
+    return applyRepeatBack(outScript, data, regex, ctx);
+  }
+  return data;
+}
+async function applyRepeatBack(outScript, data, regex, ctx) {
+  const messages = await ctx.api.chat.getMessages();
+  const lumiIndex = ctx.chatIndex + 1;
+  const targetRole = ctx.role ?? messages[lumiIndex]?.role;
+  let priorContent = messages[0]?.content ?? "";
+  for (let i = lumiIndex - 1;i >= 1; i--) {
+    const message = messages[i];
+    if (!message)
+      continue;
+    if (targetRole && message.role !== targetRole)
+      continue;
+    priorContent = message.content;
+    break;
+  }
+  const priorMatch = priorContent.match(regex);
+  if (!priorMatch)
+    return data;
+  const piece = priorMatch[0];
+  const position = outScript.split(" ", 2)[1];
+  if (!position)
+    return data + piece;
+  switch (position) {
+    case "start":
+      return piece + data;
+    case "end":
+      return data + piece;
+    case "start_nl":
+      return piece + `
+` + data;
+    case "end_nl":
+      return data + `
+` + piece;
+    default:
+      return data;
+  }
+}
+async function setExpression(api, name) {
+  if (api.characters.setExpression) {
+    await api.characters.setExpression(name);
+    return;
+  }
+  if (api.chat.setExpression) {
+    await api.chat.setExpression(name);
+    return;
+  }
+  api.broadcast?.emit?.("risu:emotion", { name });
+}
+async function persistCurrentText(ctx, data) {
+  const messages = await ctx.api.chat.getMessages();
+  const message = messages[ctx.chatIndex + 1];
+  if (!message)
+    return;
+  await ctx.api.chat.editMessage(message.id, data);
+}
+function applyMove(data, regex, outScript, direction) {
+  const matched = data.match(regex);
+  if (!matched)
+    return data;
+  const withoutMatch = data.replace(regex, "");
+  const inData = matched[0];
+  const out = stripMoveDirective(outScript).replace(/(?<!\$)\$[0-9]+/g, (token) => {
+    const index = Number.parseInt(token.slice(1), 10);
+    return index < matched.length ? matched[index] : token;
+  }).replace(/\$\&/g, inData).replace(/(?<!\$)\$<([^>]+)>/g, (token, name) => {
+    const groupName = Number.parseInt(name, 10);
+    const groups = matched.groups;
+    return groups?.[String(groupName)] || token;
+  });
+  return direction === "move_top" ? `${out}
+${withoutMatch}` : `${withoutMatch}
+${out}`;
+}
+function stripMoveDirective(out) {
+  return out.replace("@@move_top ", "").replace("@@move_bottom ", "");
+}
+function normalizeOutScript(out, flagActions) {
+  let normalized = out.replaceAll("$n", `
+`);
+  if (normalized.endsWith(">") && !flagActions.has("no_end_nl")) {
+    normalized += `
+`;
+  }
+  return normalized;
+}
+function sanitizeRegexFlag(flag) {
+  const seen = new Set;
+  let normalized = "";
+  for (const char of flag.trim()) {
+    if (!"dgimsuvy".includes(char) || seen.has(char))
+      continue;
+    seen.add(char);
+    normalized += char;
+  }
+  return normalized.length > 0 ? normalized : "u";
+}
+function inferDirectAction(out) {
+  if (out.startsWith("@@emo "))
+    return "emo";
+  if (out.startsWith("@@inject"))
+    return "inject";
+  if (out.startsWith("@@move_top"))
+    return "move_top";
+  if (out.startsWith("@@move_bottom"))
+    return "move_bottom";
+  if (out.startsWith("@@repeat_back"))
+    return "repeat_back";
+  return;
+}
+function primaryFlagAction(actions) {
+  if (actions.includes("inject"))
+    return "inject";
+  if (actions.includes("move_top"))
+    return "move_top";
+  if (actions.includes("move_bottom"))
+    return "move_bottom";
+  if (actions.includes("repeat_back"))
+    return "repeat_back";
+  if (actions.includes("cbs") || actions.includes("no_end_nl")) {
+    return "replace";
+  }
+  return;
 }
 
 // src/display/snapshot.ts
@@ -23608,28 +23465,19 @@ function buildRisuChatView(input) {
   if (stripped > 0)
     adjustments.push(`stripped:${stripped}-trailing-empty-assistant`);
   let greeting;
+  let greetingIndex;
   if (messages.length > 0 && messages[0].role !== "user") {
     greeting = messages[0].content;
+    greetingIndex = messages[0].greetingIndex;
     messages.shift();
     adjustments.push("stripped:1-leading-greeting");
   }
-  return greeting !== undefined ? { messages, adjustments, greeting } : { messages, adjustments };
-}
-
-// src/util/coerce.ts
-function errMsg(err) {
-  return err instanceof Error ? err.message : String(err);
-}
-function toStr(v) {
-  if (v === undefined || v === null)
-    return "";
-  if (typeof v === "string")
-    return v;
-  try {
-    return String(v);
-  } catch {
-    return "";
-  }
+  return greeting !== undefined ? {
+    messages,
+    adjustments,
+    greeting,
+    ...greetingIndex !== undefined ? { greetingIndex } : {}
+  } : { messages, adjustments };
 }
 
 // src/interpreter/defaults-cache.ts
@@ -23660,15 +23508,22 @@ function makeVarsApi(state) {
     const fromCache = state.varsCache["$" + n];
     if (fromCache !== undefined)
       return toStr(fromCache);
-    const defaults = getScriptstateDefaultsByCharacter(state.characterId);
+    const defaults = state.scriptstateDefaults ?? getScriptstateDefaultsByCharacter(state.characterId);
     const fromDefaults = defaults?.[n];
     if (fromDefaults !== undefined)
       return toStr(fromDefaults);
+    const fromTemp = state.tempVars?.[n];
+    if (fromTemp !== undefined)
+      return toStr(fromTemp);
     return "null";
   }
   function setVar(name, value) {
     const n = toStr(name);
     const v = toStr(value);
+    if (state.tempVars) {
+      state.tempVars[n] = v;
+      return;
+    }
     state.varsCache["$" + n] = v;
     state.dirty.value = true;
     _log.info(`$${n}=${JSON.stringify(v.slice(0, 80))}`);
@@ -24066,44 +23921,74 @@ function keyToArray(k) {
   const s = toStr(k);
   return s ? s.split(",").map((p) => p.trim()).filter(Boolean) : [];
 }
+function risuArrayIndex(entry) {
+  const extensions = entry["extensions"];
+  if (!extensions || typeof extensions !== "object")
+    return null;
+  const value = extensions["_risu_array_index"];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function sortLorebookEntriesBySourceOrder(entries) {
+  return entries.map((entry, index) => ({ entry, index, risuIndex: risuArrayIndex(entry) })).sort((a, b) => {
+    if (a.risuIndex !== null && b.risuIndex !== null)
+      return a.risuIndex - b.risuIndex;
+    if (a.risuIndex !== null)
+      return -1;
+    if (b.risuIndex !== null)
+      return 1;
+    return a.index - b.index;
+  }).map(({ entry }) => entry);
+}
 function makeLorebookApi(api, lorebook) {
+  const characterEntries = () => lorebook.primaryBookId ? lorebook.entries.filter((entry) => entry.worldBookId === lorebook.primaryBookId) : lorebook.entries;
+  const replaceEntry = (entry, updated) => {
+    const index = lorebook.entries.indexOf(entry);
+    if (index >= 0)
+      lorebook.entries[index] = { ...entry, ...updated };
+  };
   return {
     getLorebookCount() {
-      return lorebook.entries.length;
+      return characterEntries().length;
     },
     getLorebookEntry(index) {
-      const e = lorebook.entries[Number(index)];
-      return e ? toStr(e.content) : "";
+      const numericIndex = Number(index);
+      const e = characterEntries()[Number.isNaN(numericIndex) ? 0 : numericIndex];
+      return e ? toStr(e.content) : "null";
     },
     getLorebookByIndex(index) {
-      const e = lorebook.entries[Number(index)];
-      return e ? toStr(e.content) : "";
+      const numericIndex = Number(index);
+      if (Number.isNaN(numericIndex) || numericIndex < 0)
+        return "null";
+      const e = characterEntries()[numericIndex];
+      return e ? toStr(e.content) : "null";
     },
     getLorebookByKey(target) {
       const needle = toStr(target).toLowerCase();
-      for (const e of lorebook.entries) {
+      for (const e of characterEntries()) {
         const keys = keyToArray(e.key);
         if (keys.some((k) => k.toLowerCase() === needle))
           return toStr(e.content);
       }
-      return "";
+      return "null";
     },
     getLorebookIndexViaName(name) {
       const needle = toStr(name);
-      for (let i = 0;i < lorebook.entries.length; i++) {
-        if (toStr(lorebook.entries[i].comment) === needle)
+      const entries = characterEntries();
+      for (let i = 0;i < entries.length; i++) {
+        if (toStr(entries[i].comment) === needle)
           return i;
       }
       return -1;
     },
     getAllLorebooks() {
-      return lorebook.entries.map((e) => toStr(e.comment));
+      return characterEntries().map((e) => toStr(e.content));
     },
     getLorebookByName(name) {
-      const needle = toStr(name);
+      const matcher = new RegExp(toStr(name), "i");
       const out = [];
-      for (let i = 0;i < lorebook.entries.length; i++) {
-        if (toStr(lorebook.entries[i].comment) === needle)
+      const entries = characterEntries();
+      for (let i = 0;i < entries.length; i++) {
+        if (matcher.test(toStr(entries[i].comment)))
           out.push(i);
       }
       return out;
@@ -24112,8 +23997,9 @@ function makeLorebookApi(api, lorebook) {
       if (!api.worldInfo?.entries)
         return;
       const needle = toStr(target).toLowerCase();
-      for (let i = 0;i < lorebook.entries.length; i++) {
-        const e = lorebook.entries[i];
+      const entries = characterEntries();
+      for (let i = 0;i < entries.length; i++) {
+        const e = entries[i];
         const keys = keyToArray(e.key);
         if (keys.some((k) => k.toLowerCase() === needle)) {
           try {
@@ -24122,24 +24008,27 @@ function makeLorebookApi(api, lorebook) {
               content: toStr(value),
               comment: toStr(e.comment)
             });
-            lorebook.entries[i] = { ...e, ...updated };
+            replaceEntry(e, updated);
           } catch {}
           return;
         }
       }
     },
     async modifyLorebookByIndex(index, name, key, content, order) {
-      const e = lorebook.entries[Number(index)];
+      const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries)
         return;
       try {
+        const oldOrder = Number(e.orderValue);
+        const replacedOrder = toStr(order).replace(/{{slot}}/g, Number.isFinite(oldOrder) ? String(oldOrder) : "100");
+        const nextOrder = Number(replacedOrder);
         const updated = await api.worldInfo.entries.update(e.id, {
-          comment: toStr(name),
-          key: keyToArray(key),
-          content: toStr(content),
-          orderValue: Number(order) || 0
+          comment: toStr(name).replace(/{{slot}}/g, toStr(e.comment)),
+          key: keyToArray(toStr(key).replace(/{{slot}}/g, keyToArray(e.key).join(","))),
+          content: toStr(content).replace(/{{slot}}/g, toStr(e.content)),
+          ...Number.isNaN(nextOrder) ? {} : { orderValue: nextOrder }
         });
-        lorebook.entries[Number(index)] = { ...e, ...updated };
+        replaceEntry(e, updated);
       } catch {}
     },
     async createLorebook(name, key, content, order) {
@@ -24150,23 +24039,24 @@ function makeLorebookApi(api, lorebook) {
           comment: toStr(name),
           key: keyToArray(key),
           content: toStr(content),
-          orderValue: Number(order) || 0
+          orderValue: Number.isNaN(Number(order)) ? 100 : Number(order)
         });
         lorebook.entries.push({ ...created, worldBookId: lorebook.primaryBookId });
-        lorebook.entries.sort((a, b) => Number(b.orderValue || 0) - Number(a.orderValue || 0));
       } catch {}
     },
     async deleteLorebookByIndex(index) {
-      const e = lorebook.entries[Number(index)];
+      const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries)
         return;
       try {
         await api.worldInfo.entries.delete(e.id);
-        lorebook.entries.splice(Number(index), 1);
+        const actualIndex = lorebook.entries.indexOf(e);
+        if (actualIndex >= 0)
+          lorebook.entries.splice(actualIndex, 1);
       } catch {}
     },
     async setLorebookActivation(index, value) {
-      const e = lorebook.entries[Number(index)];
+      const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries)
         return;
       try {
@@ -24176,11 +24066,11 @@ function makeLorebookApi(api, lorebook) {
           comment: toStr(e.comment),
           disabled: !value
         });
-        lorebook.entries[Number(index)] = { ...e, ...updated };
+        replaceEntry(e, updated);
       } catch {}
     },
     async setLorebookAlwaysActive(index, value) {
-      const e = lorebook.entries[Number(index)];
+      const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries)
         return;
       try {
@@ -24190,16 +24080,19 @@ function makeLorebookApi(api, lorebook) {
           comment: toStr(e.comment),
           constant: !!value
         });
-        lorebook.entries[Number(index)] = { ...e, ...updated };
+        replaceEntry(e, updated);
       } catch {}
     }
   };
 }
 
 // src/interpreter/runtime/display-state.ts
-function makeDisplayStateApi() {
-  const displayState = { text: "" };
-  const requestState = [];
+function makeDisplayStateApi(initialDisplayState = "", initialRequestState = []) {
+  const displayState = { text: toStr(initialDisplayState) };
+  const requestState = initialRequestState.map((message) => ({
+    role: toStr(message.role),
+    content: toStr(message.content)
+  }));
   return {
     getDisplayState() {
       return displayState.text;
@@ -24208,26 +24101,30 @@ function makeDisplayStateApi() {
       displayState.text = toStr(v);
     },
     getRequestState(i) {
-      return toStr(requestState[Number(i)]?.content ?? "");
+      return requestState[Number(i)]?.content ?? "null";
     },
     setRequestState(i, v) {
       const n = Number(i);
-      while (requestState.length <= n)
-        requestState.push({ role: "user", content: "" });
+      if (!requestState[n])
+        throw new RangeError(`request state index out of range: ${n}`);
       requestState[n] = { ...requestState[n], content: toStr(v) };
     },
     getRequestStateRole(i) {
-      return toStr(requestState[Number(i)]?.role ?? "");
+      return requestState[Number(i)]?.role ?? "null";
     },
     setRequestStateRole(i, v) {
       const n = Number(i);
-      while (requestState.length <= n)
-        requestState.push({ role: "user", content: "" });
-      requestState[n] = { ...requestState[n], role: toStr(v) };
+      if (!requestState[n])
+        throw new RangeError(`request state index out of range: ${n}`);
+      const role = toStr(v);
+      if (role !== "user" && role !== "assistant" && role !== "system")
+        return;
+      requestState[n] = { ...requestState[n], role };
     },
     getRequestStateLength() {
       return requestState.length;
-    }
+    },
+    getRequestStateMessages: () => requestState.map((message) => ({ ...message }))
   };
 }
 
@@ -24766,6 +24663,23 @@ async function loadVars(api, chatId) {
     return {};
   }
 }
+async function loadGlobalVars(api) {
+  try {
+    const raw = await api.chat.getMetadata("macro_variables");
+    if (!raw || typeof raw !== "object")
+      return {};
+    const global2 = raw.global;
+    if (!global2 || typeof global2 !== "object")
+      return {};
+    const out = {};
+    for (const [key, value] of Object.entries(global2)) {
+      out[key] = toStr(value);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 async function saveVars(api, vars, chatId) {
   const write = async () => {
     const bare = {};
@@ -24876,7 +24790,7 @@ async function makeRisuRegexRuntime(api, data, scriptNs, opts = {}) {
     currentText = toStr(t);
     dirty = true;
   }
-  async function setExpression(name) {
+  async function setExpression2(name) {
     try {
       if (api.characters.setExpression) {
         await api.characters.setExpression(toStr(name));
@@ -24924,7 +24838,7 @@ async function makeRisuRegexRuntime(api, data, scriptNs, opts = {}) {
   return {
     text,
     setCurrentText,
-    setExpression,
+    setExpression: setExpression2,
     inject,
     repeatBack,
     applyMatchTemplate,
@@ -24938,6 +24852,7 @@ var _logMake = makeSafeLogger("runtime.makeRisuTriggerRuntime");
 var _logTriggercode = makeSafeLogger("runtime.triggercode");
 var _logRunLua = makeSafeLogger("runtime.runLua");
 var _logSetChat = makeSafeLogger("runtime.setChat");
+var _logSetFullChat = makeSafeLogger("runtime.setFullChat");
 var _logAddChat = makeSafeLogger("runtime.addChat");
 var _logLLMMain = makeSafeLogger("runtime.LLMMain");
 var _logAxLLMMain = makeSafeLogger("runtime.axLLMMain");
@@ -25001,6 +24916,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   }
   const preloaded = opts.preloaded;
   const _factoryStart = Date.now();
+  const globalVarsPromise = preloaded?.globalVars ? Promise.resolve({ ...preloaded.globalVars }) : loadGlobalVars(api);
   let varsCache;
   let isInheritedVarsCache = false;
   let _tVars = 0;
@@ -25018,6 +24934,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     varsCache = await loadVars(api);
     _tVars = Date.now() - _t0;
   }
+  const globalVarsCache = await globalVarsPromise;
   let messagesCache = [];
   let firstMessage;
   let _msgsCount = 0;
@@ -25076,12 +24993,10 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
               const res = await api.worldInfo.entries.list(bid, { limit: 1000 });
               if (res && Array.isArray(res.data)) {
                 _entryCount += res.data.length;
-                for (const e of res.data)
-                  lorebook.entries.push({ ...e, worldBookId: e.worldBookId || bid });
+                lorebook.entries.push(...sortLorebookEntriesBySourceOrder(res.data.map((e) => ({ ...e, worldBookId: e.worldBookId || bid }))));
               }
             } catch {}
           }
-          lorebook.entries.sort((a, b) => Number(b.orderValue || 0) - Number(a.orderValue || 0));
           _tLore = Date.now() - _tLoreStart;
         }
       }
@@ -25090,10 +25005,136 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const _factoryTotal = Date.now() - _factoryStart;
   _logMake.info(`factory.timing total=${_factoryTotal}ms vars=${_tVars}ms (src=${_varsSrc}) ` + `msgs=${_tMsgs}ms (n=${_msgsCount} src=${_msgsSrc}) chars.get=${_tCharGet}ms ` + `lore=${_tLore}ms (books=${_bookCount} entries=${_entryCount} src=${_loreSrc}) ` + `inherited=${isInheritedVarsCache} chatId=${portalChatId ?? "<none>"} ` + `binding=${binding} characterId=${characterId ?? "<none>"}`);
   const pendingSendIds = new WeakMap;
-  const pendingChatOps = [];
+  let chatMutationTail = Promise.resolve();
+  function enqueueChatMutation(label, operation) {
+    const next = chatMutationTail.then(operation);
+    chatMutationTail = next.catch((err) => {
+      _logSetFullChat.warn(`${label} failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    return chatMutationTail;
+  }
+  function trackPendingSend(entry, completion) {
+    pendingSendIds.set(entry, completion.then(() => entry.id));
+  }
+  function inheritPendingSend(previous, next) {
+    const pendingId = pendingSendIds.get(previous);
+    if (!pendingId)
+      return;
+    pendingSendIds.set(next, pendingId);
+    pendingId.then((id) => {
+      if (id)
+        next.id = id;
+    });
+  }
+  async function resolveHostMessageId(entry) {
+    return pendingSendIds.get(entry) ?? entry.id;
+  }
+  async function persistChatSend(entry) {
+    try {
+      const result = await api.chat.sendMessage(entry.content, { role: entry.role });
+      const id = result && typeof result.id === "string" ? result.id : "";
+      if (id)
+        entry.id = id;
+    } catch (err) {
+      _logSetFullChat.warn(`send threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  async function persistChatDelete(entry) {
+    try {
+      const id = await resolveHostMessageId(entry);
+      if (id)
+        await api.chat.deleteMessage(id);
+    } catch (err) {
+      _logSetFullChat.warn(`delete msgId=${entry.id} threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  async function persistChatEdit(previous, next) {
+    try {
+      const id = await resolveHostMessageId(previous);
+      if (!id)
+        return;
+      if (rememberOurWrite && portalChatId) {
+        try {
+          rememberOurWrite(portalChatId, id, next.content);
+        } catch {}
+      }
+      await api.chat.editMessage(id, next.content);
+    } catch (err) {
+      _logSetFullChat.warn(`edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  function reconcileFullChat(value) {
+    let parsed;
+    try {
+      parsed = JSON.parse(toStr(value));
+    } catch (err) {
+      _logSetFullChat.warn(`invalid JSON ignored: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    if (!Array.isArray(parsed)) {
+      _logSetFullChat.warn("non-array payload ignored");
+      return;
+    }
+    const previous = [...messagesCache];
+    const desired = parsed.map((raw) => {
+      const item = raw && typeof raw === "object" ? raw : {};
+      return {
+        role: risuRoleToLumi(toStr(item.role)),
+        content: toStr(item.data)
+      };
+    });
+    const overlap = Math.min(previous.length, desired.length);
+    const roleChange = previous.findIndex((entry, index) => index < overlap && entry.role !== desired[index].role);
+    const stablePrefixLength = roleChange >= 0 ? roleChange : overlap;
+    const edits = [];
+    const deletes = previous.slice(roleChange >= 0 ? roleChange : overlap);
+    const sends = [];
+    const next = [];
+    for (let i = 0;i < stablePrefixLength; i++) {
+      const oldEntry = previous[i];
+      const wanted = desired[i];
+      if (oldEntry.content === wanted.content) {
+        next.push(oldEntry);
+        continue;
+      }
+      const replacement = { ...oldEntry, content: wanted.content };
+      inheritPendingSend(oldEntry, replacement);
+      edits.push({ previous: oldEntry, next: replacement });
+      next.push(replacement);
+    }
+    const desiredTailStart = roleChange >= 0 ? roleChange : overlap;
+    for (let i = desiredTailStart;i < desired.length; i++) {
+      const wanted = desired[i];
+      const added = { id: "", role: wanted.role, content: wanted.content };
+      sends.push(added);
+      next.push(added);
+    }
+    messagesCache.splice(0, messagesCache.length, ...next);
+    if (edits.length > 0 || deletes.length > 0 || sends.length > 0) {
+      const completion = enqueueChatMutation("setFullChat", async () => {
+        for (const edit of edits)
+          await persistChatEdit(edit.previous, edit.next);
+        for (const entry of deletes)
+          await persistChatDelete(entry);
+        for (const entry of sends)
+          await persistChatSend(entry);
+      });
+      for (const entry of sends)
+        trackPendingSend(entry, completion);
+    }
+    _logSetFullChat.info(`reconciled old=${previous.length} new=${next.length} edits=${edits.length} ` + `deletes=${deletes.length} sends=${sends.length} chatId=${portalChatId ?? "<none>"}`);
+  }
   const dirty = { value: false };
   const localScopes = new Map;
-  const _vars = makeVarsApi({ varsCache, localScopes, dirty, characterId });
+  const tempVars = displayMode ? {} : undefined;
+  const _vars = makeVarsApi({
+    varsCache,
+    localScopes,
+    dirty,
+    characterId,
+    ...preloaded?.scriptstateDefaults !== undefined ? { scriptstateDefaults: preloaded.scriptstateDefaults } : {},
+    ...tempVars !== undefined ? { tempVars } : {}
+  });
   const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal } = _vars;
   let stopSending = false;
   let sendAIprompt = false;
@@ -25308,7 +25349,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     return {
       getChatVar: (_id, key) => getVar(toStr(key)),
       setChatVar: (_id, key, value) => setVar(toStr(key), toStr(value)),
-      getGlobalVar: (_id, key) => getVar(toStr(key)),
+      getGlobalVar: (_id, key) => globalVarsCache[toStr(key)] ?? "null",
       stopChat: (_id) => {
         stopSending = true;
       },
@@ -25375,36 +25416,23 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         const oldEntry = messagesCache[real];
         const newEntry = { ...oldEntry, content: raw };
         messagesCache[real] = newEntry;
-        if (rememberOurWrite && portalChatId) {
-          try {
-            rememberOurWrite(portalChatId, msgId, raw);
-          } catch {}
-        }
-        _logSetChat.info(`index=${index} (real=${real}) msgId=${msgId} ` + `len=${raw.length} chatId=${portalChatId ?? "<none>"} ` + `rememberOurWrite=${rememberOurWrite && portalChatId ? "called" : "skipped"}`);
-        const pend = pendingSendIds.get(oldEntry);
-        if (pend) {
-          pendingSendIds.set(newEntry, pend);
-          const ed = pend.then((rid) => {
-            if (!rid)
-              return;
-            if (rememberOurWrite && portalChatId) {
-              try {
-                rememberOurWrite(portalChatId, rid, raw);
-              } catch {}
-            }
-            return api.chat.editMessage?.(rid, raw);
-          }).catch(() => {});
-          pendingChatOps.push(ed);
-          return;
-        }
-        try {
-          api.chat.editMessage?.(msgId, raw);
-        } catch {}
+        _logSetChat.info(`index=${index} (real=${real}) msgId=${msgId} ` + `len=${raw.length} chatId=${portalChatId ?? "<none>"}`);
+        inheritPendingSend(oldEntry, newEntry);
+        enqueueChatMutation("setChat", () => persistChatEdit(oldEntry, newEntry));
       },
       setChatRole: (_id, index, value) => {
         const n = Number(index);
-        if (messagesCache[n])
-          messagesCache[n] = { ...messagesCache[n], role: risuRoleToLumi(toStr(value)) };
+        if (!messagesCache[n])
+          return;
+        const desired = messagesCache.map((message) => ({
+          role: lumiRoleToRisu(message.role),
+          data: message.content
+        }));
+        desired[n] = {
+          ...desired[n],
+          role: lumiRoleToRisu(risuRoleToLumi(toStr(value)))
+        };
+        reconcileFullChat(JSON.stringify(desired));
       },
       cutChat: (_id, start, end) => {
         cutChat(start, end);
@@ -25418,22 +25446,8 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         if (start >= len)
           return;
         const m = messagesCache[start];
-        if (m) {
-          const pend = pendingSendIds.get(m);
-          if (pend) {
-            const del = pend.then((rid) => {
-              if (rid)
-                return api.chat.deleteMessage?.(rid);
-            }).catch(() => {});
-            pendingChatOps.push(del);
-          } else if (m.id) {
-            try {
-              const del = api.chat.deleteMessage?.(m.id);
-              if (del && typeof del.then === "function")
-                pendingChatOps.push(del);
-            } catch {}
-          }
-        }
+        if (m)
+          enqueueChatMutation("removeChat", () => persistChatDelete(m));
         messagesCache.splice(start, 1);
       },
       addChat: (_id, role, value) => {
@@ -25442,36 +25456,23 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         const entry = { id: "", role: lumiRole, content: raw };
         messagesCache.push(entry);
         _logAddChat.info(`role=${toStr(role)} len=${raw.length} chatId=${portalChatId ?? "<none>"}`);
-        try {
-          const send = api.chat.sendMessage?.(raw, { role: lumiRole });
-          if (send && typeof send.then === "function") {
-            const idP = send.then((r) => {
-              const realId = r && typeof r.id === "string" ? r.id : "";
-              if (realId)
-                entry.id = realId;
-              return realId;
-            }).catch(() => "");
-            pendingSendIds.set(entry, idP);
-            pendingChatOps.push(idP);
-          }
-        } catch {}
+        trackPendingSend(entry, enqueueChatMutation("addChat", () => persistChatSend(entry)));
       },
       insertChat: (_id, index, role, value) => {
-        messagesCache.splice(Number(index), 0, { id: String(Date.now()), role: risuRoleToLumi(toStr(role)), content: toStr(value) });
+        const desired = messagesCache.map((message) => ({
+          role: lumiRoleToRisu(message.role),
+          data: message.content
+        }));
+        desired.splice(Number(index), 0, {
+          role: lumiRoleToRisu(risuRoleToLumi(toStr(role))),
+          data: toStr(value)
+        });
+        reconcileFullChat(JSON.stringify(desired));
       },
       getChatLength: (_id) => messagesCache.length,
       getFullChatMain: (_id) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
       setFullChatMain: (_id, value) => {
-        try {
-          const arr = JSON.parse(toStr(value));
-          if (Array.isArray(arr)) {
-            messagesCache.length = 0;
-            for (let i = 0;i < arr.length; i++) {
-              const entry = arr[i];
-              messagesCache.push({ id: String(i + 1), role: risuRoleToLumi(toStr(entry.role)), content: toStr(entry.data) });
-            }
-          }
-        } catch {}
+        reconcileFullChat(value);
       },
       sleep: (_id, ms) => new Promise((r) => setTimeout(r, Math.max(0, Number(ms) || 0))),
       cbsMain: async (value) => {
@@ -25507,15 +25508,51 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       reloadChat: (_id, _index) => {
         notifyStateChanged("reloadChat");
       },
-      getName: (_id) => toStr(data.characterName || ""),
-      setName: (_id, _name) => {},
-      getDescription: (_id) => getVar("__risu_char_desc__") || "",
-      setDescription: (_id, desc) => setVar("__risu_char_desc__", toStr(desc)),
-      getCharacterFirstMessage: (_id) => getVar("__risu_first_msg__") || "",
-      setCharacterFirstMessage: (_id, v) => setVar("__risu_first_msg__", toStr(v)),
+      getNameMain: async (_id) => {
+        const cid = characterId || data.characterId;
+        if (!cid)
+          return "";
+        try {
+          return toStr((await api.characters.get(cid)).name);
+        } catch {
+          return toStr(data.characterName || "");
+        }
+      },
+      setNameMain: async (_id, name) => {
+        const cid = characterId || data.characterId;
+        if (cid)
+          await api.characters.update(cid, { name: toStr(name) });
+      },
+      getDescriptionMain: (_id) => _charNote.getCharacterDesc(),
+      setDescriptionMain: (_id, desc) => _charNote.setCharacterDesc(desc),
+      getCharacterFirstMessageMain: async (_id) => {
+        const cid = characterId || data.characterId;
+        if (!cid)
+          return toStr(firstMessage ?? "");
+        try {
+          return toStr((await api.characters.get(cid)).firstMessage);
+        } catch {
+          return toStr(firstMessage ?? "");
+        }
+      },
+      setCharacterFirstMessageMain: async (_id, value) => {
+        const cid = characterId || data.characterId;
+        if (cid)
+          await api.characters.update(cid, { firstMessage: toStr(value) });
+      },
       getPersonaName: (_id) => toStr(data.userName || "user"),
-      getPersonaDescription: (_id) => getVar("__risu_persona_desc__") || "",
-      getAuthorsNote: (_id) => getVar("__risu_author_note__") || "",
+      getPersonaDescriptionMain: async (_id) => {
+        const description = await _charNote.getPersonaDesc();
+        const resolver = capturedResolveTemplate;
+        if (!resolver)
+          return description;
+        try {
+          return await resolver(description);
+        } catch {
+          return description;
+        }
+      },
+      getAuthorsNoteMain: (_id) => _charNote.getAuthorNote(),
       getBackgroundEmbedding: (_id) => "",
       setBackgroundEmbedding: (_id, _data) => {},
       getCharacterLastMessage: (_id) => {
@@ -25751,7 +25788,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     setLorebookActivation,
     setLorebookAlwaysActive
   } = _lore;
-  const _displayState = makeDisplayStateApi();
+  const _displayState = makeDisplayStateApi(opts.displayData, opts.requestData);
   const {
     getDisplayState,
     setDisplayState,
@@ -25759,7 +25796,8 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     setRequestState,
     getRequestStateRole,
     setRequestStateRole,
-    getRequestStateLength
+    getRequestStateLength,
+    getRequestStateMessages
   } = _displayState;
   function loopTick() {
     return ++loopCounter.value;
@@ -25783,11 +25821,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       }
     }
     dirty.value = false;
-    if (pendingChatOps.length > 0) {
-      const ops = pendingChatOps.splice(0);
-      flog(`draining ${ops.length} pending chat op(s)`);
-      await Promise.allSettled(ops);
-    }
+    await chatMutationTail;
     flog(`DONE`);
   }
   const publicApi = {
@@ -25897,6 +25931,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     getRequestStateRole,
     setRequestStateRole,
     getRequestStateLength,
+    getRequestStateMessages,
     flush,
     warnDroppedTriggerCode
   };
@@ -25904,20 +25939,21 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
 }
 
 // src/interpreter/listenedit-preload.ts
-var log = makeSafeLogger("listenEdit.preload");
+var log2 = makeSafeLogger("listenEdit.preload");
 var CACHE_TTL_MS = 150;
 var cache2 = new Map;
 async function preloadForListenEditChain(api, chatId, characterId) {
   if (chatId) {
     const cached = cache2.get(chatId);
     if (cached && Date.now() - cached.ts < CACHE_TTL_MS && cached.characterId === (characterId ?? null)) {
-      log.trace(`cache.hit chat=${chatId} age=${Date.now() - cached.ts}ms ` + `entries=${cached.snapshot.lorebook?.entries.length ?? 0} msgs=${cached.snapshot.messagesRaw?.length ?? 0}`);
+      log2.trace(`cache.hit chat=${chatId} age=${Date.now() - cached.ts}ms ` + `entries=${cached.snapshot.lorebook?.entries.length ?? 0} msgs=${cached.snapshot.messagesRaw?.length ?? 0}`);
       return cached.snapshot;
     }
   }
   const t0 = Date.now();
-  const [varsResult, msgsResult, charResult] = await Promise.allSettled([
+  const [varsResult, globalVarsResult, msgsResult, charResult] = await Promise.allSettled([
     loadVars(api, chatId),
+    loadGlobalVars(api),
     api.chat.getMessages(),
     characterId && api.characters?.get ? api.characters.get(characterId) : Promise.resolve(null)
   ]);
@@ -25926,12 +25962,17 @@ async function preloadForListenEditChain(api, chatId, characterId) {
   if (varsResult.status === "fulfilled")
     varsCache = varsResult.value;
   else
-    log.warn(`loadVars failed — ${varsResult.reason?.message ?? varsResult.reason}`);
+    log2.warn(`loadVars failed — ${varsResult.reason?.message ?? varsResult.reason}`);
+  let globalVars;
+  if (globalVarsResult.status === "fulfilled")
+    globalVars = globalVarsResult.value;
+  else
+    log2.warn(`loadGlobalVars failed — ${globalVarsResult.reason?.message ?? globalVarsResult.reason}`);
   let messagesRaw;
   if (msgsResult.status === "fulfilled")
     messagesRaw = msgsResult.value;
   else
-    log.warn(`getMessages failed — ${msgsResult.reason?.message ?? msgsResult.reason}`);
+    log2.warn(`getMessages failed — ${msgsResult.reason?.message ?? msgsResult.reason}`);
   let lorebook;
   if (charResult.status === "fulfilled" && charResult.value) {
     const char = charResult.value;
@@ -25943,33 +25984,34 @@ async function preloadForListenEditChain(api, chatId, characterId) {
       for (const r of lists) {
         if (r.status !== "fulfilled" || !r.value.res || !Array.isArray(r.value.res.data))
           continue;
-        for (const e of r.value.res.data) {
-          entries.push({ ...e, worldBookId: e.worldBookId || r.value.bid });
-        }
+        entries.push(...sortLorebookEntriesBySourceOrder(r.value.res.data.map((e) => ({
+          ...e,
+          worldBookId: e.worldBookId || r.value.bid
+        }))));
       }
-      entries.sort((a, b) => Number(b.orderValue || 0) - Number(a.orderValue || 0));
       lorebook = { entries, primaryBookId: bookIds[0] ?? null };
-      log.debug(`lorebook fetched chat=${chatId ?? "<none>"} books=${bookIds.length} entries=${entries.length} elapsed=${Date.now() - tLore}ms`);
+      log2.debug(`lorebook fetched chat=${chatId ?? "<none>"} books=${bookIds.length} entries=${entries.length} elapsed=${Date.now() - tLore}ms`);
     } else {
       lorebook = { entries: [], primaryBookId: bookIds[0] ?? null };
     }
   } else if (charResult.status === "rejected") {
-    log.warn(`characters.get failed — ${charResult.reason?.message ?? charResult.reason}`);
+    log2.warn(`characters.get failed — ${charResult.reason?.message ?? charResult.reason}`);
   }
   const snapshot = {
     ...varsCache !== undefined ? { varsCache } : {},
+    ...globalVars !== undefined ? { globalVars } : {},
     ...messagesRaw !== undefined ? { messagesRaw } : {},
     ...lorebook !== undefined ? { lorebook } : {}
   };
   if (chatId) {
     cache2.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null });
   }
-  log.trace(`preload.done chat=${chatId ?? "<none>"} parallel_fetch=${tParallel}ms ` + `total=${Date.now() - t0}ms ` + `vars=${varsCache ? Object.keys(varsCache).length : "<failed>"} ` + `msgs=${messagesRaw?.length ?? "<failed>"} ` + `lore_entries=${lorebook?.entries.length ?? "<failed>"} ` + `cached=${chatId ? "yes" : "no"}`);
+  log2.trace(`preload.done chat=${chatId ?? "<none>"} parallel_fetch=${tParallel}ms ` + `total=${Date.now() - t0}ms ` + `vars=${varsCache ? Object.keys(varsCache).length : "<failed>"} ` + `globalVars=${globalVars ? Object.keys(globalVars).length : "<failed>"} ` + `msgs=${messagesRaw?.length ?? "<failed>"} ` + `lore_entries=${lorebook?.entries.length ?? "<failed>"} ` + `cached=${chatId ? "yes" : "no"}`);
   return snapshot;
 }
 
 // src/interpreter/listen-edit.ts
-var log2 = makeSafeLogger("listenEdit.runChain");
+var log3 = makeSafeLogger("listenEdit.runChain");
 async function runListenEditChain(triggers, mode2, value, meta, api, data, scriptNS, opts = {}) {
   const eligible = triggers.filter((t) => {
     const luaTrigger = t.source.effect?.[0]?.type === "triggerlua";
@@ -25983,7 +26025,7 @@ async function runListenEditChain(triggers, mode2, value, meta, api, data, scrip
     effApi = rest;
   }
   const chainStart = Date.now();
-  log2.trace(`chain.start mode=${mode2} eligible=${eligible.length}/${triggers.length} ` + `value_len=${typeof value === "string" ? value.length : Array.isArray(value) ? value.length : -1} ` + `chatId=${opts.chatId ?? "<none>"} characterId=${opts.characterId ?? "<none>"}`);
+  log3.trace(`chain.start mode=${mode2} eligible=${eligible.length}/${triggers.length} ` + `value_len=${typeof value === "string" ? value.length : Array.isArray(value) ? value.length : -1} ` + `chatId=${opts.chatId ?? "<none>"} characterId=${opts.characterId ?? "<none>"}`);
   const tPreload = Date.now();
   const preloaded = opts.preloaded ?? await preloadForListenEditChain(api, opts.chatId, opts.characterId ?? null);
   const preloadMs = Date.now() - tPreload;
@@ -26023,112 +26065,53 @@ async function runListenEditChain(triggers, mode2, value, meta, api, data, scrip
       try {
         await runtime2.flush();
       } catch (err) {
-        log2.warn(`trigger[${i}] mode=${mode2} flush failed — ${errMsg(err)}; continuing chain`);
+        log3.warn(`trigger[${i}] mode=${mode2} flush failed — ${errMsg(err)}; continuing chain`);
       }
       if (typeof result === "string") {
         try {
           const parsed = JSON.parse(result);
           current = parsed;
         } catch (err) {
-          log2.warn(`trigger[${i}] returned non-JSON, keeping prior value — ${errMsg(err)}`);
+          log3.warn(`trigger[${i}] returned non-JSON, keeping prior value — ${errMsg(err)}`);
         }
       } else if (result === undefined) {} else {
-        log2.warn(`trigger[${i}] returned unexpected type=${typeof result}; keeping prior value`);
+        log3.warn(`trigger[${i}] returned unexpected type=${typeof result}; keeping prior value`);
       }
       const triggerTotal = Date.now() - tStart;
       const otherMs = triggerTotal - factoryMs - serdeMs - runLuaMs;
-      log2.trace(`trigger[${i}] mode=${mode2} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `other=${otherMs}ms (lua_len=${t.luaCode.length})`);
+      log3.trace(`trigger[${i}] mode=${mode2} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `other=${otherMs}ms (lua_len=${t.luaCode.length})`);
     } catch (err) {
-      log2.warn(`trigger[${i}] mode=${mode2} elapsed=${Date.now() - tStart}ms THREW — ${errMsg(err)}; keeping prior value`);
+      log3.warn(`trigger[${i}] mode=${mode2} elapsed=${Date.now() - tStart}ms THREW — ${errMsg(err)}; keeping prior value`);
     }
   }
   const chainTotal = Date.now() - chainStart;
-  log2.trace(`chain.done mode=${mode2} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms ` + `factory_sum=${totalFactoryMs}ms runLua_sum=${totalRunLuaMs}ms ` + `serde_sum=${totalSerdeMs}ms ` + `other=${chainTotal - preloadMs - totalFactoryMs - totalRunLuaMs - totalSerdeMs}ms ` + `chatId=${opts.chatId ?? "<none>"}`);
+  log3.trace(`chain.done mode=${mode2} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms ` + `factory_sum=${totalFactoryMs}ms runLua_sum=${totalRunLuaMs}ms ` + `serde_sum=${totalSerdeMs}ms ` + `other=${chainTotal - preloadMs - totalFactoryMs - totalRunLuaMs - totalSerdeMs}ms ` + `chatId=${opts.chatId ?? "<none>"}`);
   return current;
-}
-
-// src/interpreter/at-actions-runtime.ts
-var log3 = makeSafeLogger("atActions.runForPhase");
-async function runAtActionsForPhase(actions, phase, data, ctx) {
-  const eligible = actions.filter((a) => a.phase === phase).slice().sort((a, b) => a.order - b.order);
-  if (eligible.length === 0)
-    return data;
-  log3.info(`phase=${phase} eligible=${eligible.length} data_len=${data.length} chatIndex=${ctx.chatIndex}`);
-  let current = data;
-  for (let i = 0;i < eligible.length; i++) {
-    const a = eligible[i];
-    try {
-      current = await applyOne(a, current, ctx);
-    } catch (err) {
-      log3.warn(`action[${i}] kind=${a.action} phase=${phase} THREW — ${errMsg(err)}; keeping prior data`);
-    }
-  }
-  return current;
-}
-async function applyOne(a, data, ctx) {
-  let regex;
-  try {
-    regex = new RegExp(a.findRegex, a.flag);
-  } catch (err) {
-    throw new Error(`atAction ${a.action}: invalid regex /${a.findRegex}/${a.flag} — ${err.message}`);
-  }
-  const matched = regex.test(data);
-  regex.lastIndex = 0;
-  if (matched) {
-    if (a.action === "emo") {
-      const name = a.out.substring(6).trim();
-      if (name && ctx.api.characters.setExpression) {
-        await ctx.api.characters.setExpression(name);
-      }
-    }
-    return data;
-  }
-  if (a.action === "repeat_back") {
-    if (ctx.chatIndex === -1)
-      return data;
-    return await applyRepeatBack(a, data, regex, ctx);
-  }
-  return data;
-}
-async function applyRepeatBack(a, data, regex, ctx) {
-  const messages = await ctx.api.chat.getMessages();
-  const lumiIdx = ctx.chatIndex + 1;
-  const targetRole = ctx.role;
-  let priorMatch = null;
-  for (let i = lumiIdx - 1;i >= 0; i--) {
-    const m = messages[i];
-    if (!m)
-      continue;
-    if (targetRole && m.role !== targetRole)
-      continue;
-    const r = m.content.match(regex);
-    if (r) {
-      priorMatch = r;
-      break;
-    }
-  }
-  if (!priorMatch)
-    return data;
-  const piece = priorMatch[0];
-  const v = a.out.split(/\s+/, 2)[1] ?? "end";
-  switch (v) {
-    case "start":
-      return piece + data;
-    case "end":
-      return data + piece;
-    case "start_nl":
-      return piece + `
-` + data;
-    case "end_nl":
-      return data + `
-` + piece;
-    default:
-      return data + piece;
-  }
 }
 
 // src/display/host-shim.ts
 var log4 = makeSafeLogger("display-shim");
+function withCurrentDisplayMessage(snap, context2, content) {
+  const idIndex = context2.messageId ? snap.messagesHost.findIndex((message) => message.id === context2.messageId) : -1;
+  const contextIndex = context2.messageIndex;
+  const index = idIndex >= 0 ? idIndex : typeof contextIndex === "number" && Number.isInteger(contextIndex) ? contextIndex : -1;
+  if (index < 0 || index > snap.messagesHost.length)
+    return snap;
+  const messagesHost = [...snap.messagesHost];
+  const current = messagesHost[index];
+  const next = {
+    id: context2.messageId ?? current?.id ?? "",
+    role: context2.role ?? current?.role ?? (context2.isUser ? "user" : "assistant"),
+    content
+  };
+  if (current?.id === next.id && current.role === next.role && current.content === next.content)
+    return snap;
+  if (current)
+    messagesHost[index] = next;
+  else
+    messagesHost.push(next);
+  return { ...snap, messagesHost };
+}
 function buildPreloaded(snap) {
   const varsCache = {};
   for (const [k, v] of Object.entries(snap.vars.local))
@@ -26137,10 +26120,42 @@ function buildPreloaded(snap) {
     entries: [...snap.lorebookHost],
     primaryBookId: snap.lorebookHost[0]?.worldBookId ?? null
   };
-  return { varsCache, messagesRaw: snap.messagesHost, lorebook };
+  return {
+    varsCache,
+    globalVars: { ...snap.vars.global },
+    scriptstateDefaults: snap.scriptstateDefaults,
+    messagesRaw: snap.messagesHost,
+    lorebook
+  };
 }
-function makeSnapshotHostApi(snap, onVarWrite) {
+function makeSnapshotHostApi(snap, onVarWrite, onEffect) {
   const noWrite = async () => {};
+  const emitEffect = async (effect) => {
+    await onEffect?.(effect);
+  };
+  const setExpression2 = async (label) => {
+    const imageId = snap.character.emotionImages[label]?.imageIds[0];
+    if (!imageId)
+      return;
+    await emitEffect({
+      kind: "set-expression",
+      chatId: snap.chatId,
+      characterId: snap.characterId,
+      label,
+      imageId
+    });
+  };
+  const editMessage = async (messageId, content) => {
+    const current = snap.messagesHost.find((message) => message.id === messageId);
+    if (current?.content === content)
+      return;
+    await emitEffect({
+      kind: "edit-message",
+      chatId: snap.chatId,
+      messageId,
+      content
+    });
+  };
   const setMetadata = async (key, value) => {
     if (key !== "chat_variables" || !onVarWrite)
       return;
@@ -26172,15 +26187,17 @@ function makeSnapshotHostApi(snap, onVarWrite) {
       getChatId: () => snap.chatId,
       getMessages: () => Promise.resolve(snap.messagesHost),
       sendMessage: async () => ({ id: "" }),
-      editMessage: noWrite,
+      editMessage,
       deleteMessage: noWrite,
       getMetadata,
       setMetadata,
-      inject: noWrite
+      inject: noWrite,
+      setExpression: setExpression2
     },
     characters: {
       get: (id) => Promise.resolve({ id, description: snap.character.description, worldBookIds: [], imageId: snap.character.imageId }),
-      update: noWrite
+      update: noWrite,
+      setExpression: setExpression2
     },
     personas: {
       getActive: () => Promise.resolve({ id: "", description: snap.personaText, imageId: snap.personaImageId }),
@@ -26276,6 +26293,43 @@ var TIER2_DECORATOR_NAMES = new Set([
   "inject_replace",
   "inject_prepend"
 ]);
+
+// src/core/mappers/lorebook-hash.ts
+var LEGACY_ENTRY_HASH_FIELDS_V1 = [
+  "key",
+  "keysecondary",
+  "content",
+  "comment",
+  "position",
+  "depth",
+  "role",
+  "order_value",
+  "selective",
+  "constant",
+  "disabled",
+  "group_name",
+  "group_override",
+  "group_weight",
+  "probability",
+  "scan_depth",
+  "case_sensitive",
+  "match_whole_words",
+  "automation_id",
+  "use_regex",
+  "prevent_recursion",
+  "exclude_recursion",
+  "delay_until_recursion",
+  "priority",
+  "sticky",
+  "cooldown",
+  "delay",
+  "selective_logic",
+  "use_probability"
+];
+var ENTRY_HASH_FIELDS = [
+  ...LEGACY_ENTRY_HASH_FIELDS_V1,
+  "exclude_greeting"
+];
 // src/core/mappers/island-merge.ts
 var VOID_ELEMENTS = new Set([
   "input",
@@ -27299,8 +27353,8 @@ function emitV2GetDictValues(op, ctx) {
 function emitV2GetCharacterDesc(op, ctx) {
   const e = op;
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getCharacterDesc()`)};`),
-    needsAwait: false
+    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getCharacterDesc()`)};`),
+    needsAwait: true
   };
 }
 function emitV2SetCharacterDesc(op, ctx) {
@@ -27313,8 +27367,8 @@ function emitV2SetCharacterDesc(op, ctx) {
 function emitV2GetPersonaDesc(op, ctx) {
   const e = op;
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getPersonaDesc()`)};`),
-    needsAwait: false
+    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getPersonaDesc()`)};`),
+    needsAwait: true
   };
 }
 function emitV2SetPersonaDesc(op, ctx) {
@@ -27327,8 +27381,8 @@ function emitV2SetPersonaDesc(op, ctx) {
 function emitV2GetReplaceGlobalNote(op, ctx) {
   const e = op;
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getReplaceGlobalNote()`)};`),
-    needsAwait: false
+    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getReplaceGlobalNote()`)};`),
+    needsAwait: true
   };
 }
 function emitV2SetReplaceGlobalNote(op, ctx) {
@@ -27341,8 +27395,8 @@ function emitV2SetReplaceGlobalNote(op, ctx) {
 function emitV2GetAuthorNote(op, ctx) {
   const e = op;
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getAuthorNote()`)};`),
-    needsAwait: false
+    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getAuthorNote()`)};`),
+    needsAwait: true
   };
 }
 function emitV2SetAuthorNote(op, ctx) {
@@ -28472,6 +28526,14 @@ function log(value)
   logMain(json.encode(value))
 end
 
+function getLoreBooks(id, search)
+  return json.decode(getLoreBooksMain(id, search))
+end
+
+function loadLoreBooks(id)
+  return json.decode(loadLoreBooksMain(id):await())
+end
+
 -- Risu scriptings.ts.
 function getCharacterImage(id)
   return getCharacterImageMain(id):await()
@@ -28497,6 +28559,38 @@ end
 -- Risu parity: cards write cbs("...") and get a string. JS-side cbsMain is async because resolveTemplate routes through resolveReadonly IPC.
 function cbs(value)
   return cbsMain(value):await()
+end
+
+function getName(id)
+  return getNameMain(id):await()
+end
+
+function setName(id, value)
+  return setNameMain(id, value):await()
+end
+
+function getDescription(id)
+  return getDescriptionMain(id):await()
+end
+
+function setDescription(id, value)
+  return setDescriptionMain(id, value):await()
+end
+
+function getPersonaDescription(id)
+  return getPersonaDescriptionMain(id):await()
+end
+
+function getAuthorsNote(id)
+  return getAuthorsNoteMain(id):await()
+end
+
+function getCharacterFirstMessage(id)
+  return getCharacterFirstMessageMain(id):await()
+end
+
+function setCharacterFirstMessage(id, value)
+  return setCharacterFirstMessageMain(id, value):await()
 end
 
 local editRequestFuncs = {}
@@ -29123,33 +29217,33 @@ var LEAVES = {
     const e = op;
     rt.setVar(e.outputVar, JSON.stringify(rt.dictValues(rt.resolve(e.var, e.varType))));
   },
-  v2GetCharacterDesc: (op, { rt }) => {
+  v2GetCharacterDesc: async (op, { rt }) => {
     const e = op;
-    rt.setVar(e.outputVar, rt.getCharacterDesc());
+    rt.setVar(e.outputVar, await rt.getCharacterDesc());
   },
   v2SetCharacterDesc: async (op, { rt }) => {
     const e = op;
     await rt.setCharacterDesc(rt.resolve(e.value, e.valueType));
   },
-  v2GetPersonaDesc: (op, { rt }) => {
+  v2GetPersonaDesc: async (op, { rt }) => {
     const e = op;
-    rt.setVar(e.outputVar, rt.getPersonaDesc());
+    rt.setVar(e.outputVar, await rt.getPersonaDesc());
   },
   v2SetPersonaDesc: async (op, { rt }) => {
     const e = op;
     await rt.setPersonaDesc(rt.resolve(e.value, e.valueType));
   },
-  v2GetReplaceGlobalNote: (op, { rt }) => {
+  v2GetReplaceGlobalNote: async (op, { rt }) => {
     const e = op;
-    rt.setVar(e.outputVar, rt.getReplaceGlobalNote());
+    rt.setVar(e.outputVar, await rt.getReplaceGlobalNote());
   },
   v2SetReplaceGlobalNote: async (op, { rt }) => {
     const e = op;
     await rt.setReplaceGlobalNote(rt.resolve(e.value, e.valueType));
   },
-  v2GetAuthorNote: (op, { rt }) => {
+  v2GetAuthorNote: async (op, { rt }) => {
     const e = op;
-    rt.setVar(e.outputVar, rt.getAuthorNote());
+    rt.setVar(e.outputVar, await rt.getAuthorNote());
   },
   v2SetAuthorNote: async (op, { rt }) => {
     const e = op;
@@ -29484,6 +29578,38 @@ function cbs(value)
   return cbsMain(value):await()
 end
 
+function getName(id)
+  return getNameMain(id):await()
+end
+
+function setName(id, value)
+  return setNameMain(id, value):await()
+end
+
+function getDescription(id)
+  return getDescriptionMain(id):await()
+end
+
+function setDescription(id, value)
+  return setDescriptionMain(id, value):await()
+end
+
+function getPersonaDescription(id)
+  return getPersonaDescriptionMain(id):await()
+end
+
+function getAuthorsNote(id)
+  return getAuthorsNoteMain(id):await()
+end
+
+function getCharacterFirstMessage(id)
+  return getCharacterFirstMessageMain(id):await()
+end
+
+function setCharacterFirstMessage(id, value)
+  return setCharacterFirstMessageMain(id, value):await()
+end
+
 local editRequestFuncs = {}
 local editDisplayFuncs = {}
 local editInputFuncs = {}
@@ -29579,6 +29705,13 @@ function getEngineEntry(key) {
 async function executeWasmoon(code, globals, opts) {
   const entry = await getEngineEntry(opts.wasmoonKey);
   const run = entry.tail.then(async () => {
+    if (entry.code !== null && entry.code !== code) {
+      entry.engine.global.close?.();
+      const factory = await ensureFactory();
+      entry.engine = await factory.createEngine({ injectObjects: true });
+      entry.code = null;
+      entry.bound.clear();
+    }
     const engine = entry.engine;
     entry.current = globals;
     for (const name of Object.keys(globals)) {
@@ -29587,7 +29720,7 @@ async function executeWasmoon(code, globals, opts) {
       engine.global.set(name, (...args) => entry.current[name](...args));
       entry.bound.add(name);
     }
-    if (entry.code !== code) {
+    if (entry.code === null) {
       await engine.doString(PRELUDE + `
 ` + code);
       entry.code = code;
@@ -29607,18 +29740,19 @@ async function executeWasmoon(code, globals, opts) {
 // src/display/lua-runner.ts
 setWasmoonExecutor(executeWasmoon);
 function risuChatIndex(context2, snap) {
+  if (typeof context2.messageIndex === "number")
+    return Math.max(-1, context2.messageIndex - 1);
   const dyn = context2.dynamicMacros;
   const chatIndexStr = dyn?.chat_index;
-  if (typeof chatIndexStr === "string" && /^-?\d+$/.test(chatIndexStr))
-    return parseInt(chatIndexStr, 10) - 1;
-  if (typeof context2.messageIndex === "number")
-    return context2.messageIndex - 1;
-  return snap.chat.lastMessageId - 1;
+  if (typeof chatIndexStr === "string" && /^-?\d+$/.test(chatIndexStr)) {
+    return Math.max(-1, parseInt(chatIndexStr, 10) - 1);
+  }
+  return Math.max(-1, snap.chat.lastMessageId - 1);
 }
-async function runEditDisplayChain(snap, content, context2, resolveTemplate, onVarWrite) {
+async function runEditDisplayChain(snap, content, context2, resolveTemplate, onVarWrite, onEffect) {
   if (snap.luaTriggers.length === 0)
     return content;
-  const api = makeSnapshotHostApi(snap, onVarWrite);
+  const api = makeSnapshotHostApi(snap, onVarWrite, onEffect);
   const scriptNS = makeDispatcherScriptNS();
   registerManualTriggers(scriptNS, snap.compiledLibraries, api);
   const data = {
@@ -29632,23 +29766,277 @@ async function runEditDisplayChain(snap, content, context2, resolveTemplate, onV
     characterId: snap.characterId,
     resolveTemplate,
     preloaded: buildPreloaded(snap),
-    wasmoonKey: snap.characterId
+    wasmoonKey: "editDisplay"
   });
 }
-async function runEditDisplayAtActions(snap, content, context2) {
-  if (snap.atActions.length === 0)
+async function runEditDisplayAtActions(snap, content, context2, actions = snap.atActions, options = {}) {
+  if (actions.length === 0)
     return content;
-  const api = makeSnapshotHostApi(snap);
+  const api = makeSnapshotHostApi(snap, undefined, options.onEffect);
   const role = context2.role ?? undefined;
-  return runAtActionsForPhase(snap.atActions, "editdisplay", content, {
+  return runAtActionsForPhase(actions, "editdisplay", content, {
     api,
     chatIndex: risuChatIndex(context2, snap),
-    ...role ? { role } : {}
+    ...role ? { role } : {},
+    ...options.resolveTemplate ? { resolveTemplate: options.resolveTemplate } : {}
   });
 }
 
+// src/interpreter/restricted-trigger.ts
+var SAFE_EFFECT_TYPES = [
+  "v2SetVar",
+  "v2If",
+  "v2IfAdvanced",
+  "v2Else",
+  "v2EndIndent",
+  "v2Loop",
+  "v2LoopNTimes",
+  "v2BreakLoop",
+  "v2ConsoleLog",
+  "v2StopTrigger",
+  "v2Random",
+  "v2ExtractRegex",
+  "v2RegexTest",
+  "v2GetCharAt",
+  "v2GetCharCount",
+  "v2ToLowerCase",
+  "v2ToUpperCase",
+  "v2SetCharAt",
+  "v2SplitString",
+  "v2JoinArrayVar",
+  "v2ConcatString",
+  "v2MakeArrayVar",
+  "v2GetArrayVarLength",
+  "v2GetArrayVar",
+  "v2SetArrayVar",
+  "v2PushArrayVar",
+  "v2PopArrayVar",
+  "v2ShiftArrayVar",
+  "v2UnshiftArrayVar",
+  "v2SpliceArrayVar",
+  "v2SliceArrayVar",
+  "v2GetIndexOfValueInArrayVar",
+  "v2RemoveIndexFromArrayVar",
+  "v2Calculate",
+  "v2Comment",
+  "v2DeclareLocalVar"
+];
+var ALLOWED_BY_MODE = {
+  display: new Set([
+    "v2GetDisplayState",
+    "v2SetDisplayState",
+    ...SAFE_EFFECT_TYPES
+  ]),
+  request: new Set([
+    "v2GetRequestState",
+    "v2SetRequestState",
+    "v2GetRequestStateRole",
+    "v2SetRequestStateRole",
+    "v2GetRequestStateLength",
+    ...SAFE_EFFECT_TYPES
+  ])
+};
+function matchesBinding(source, mode2) {
+  const firstType = source.effect?.[0]?.type;
+  return firstType === "triggerlua" || firstType === "triggercode" || source.type === mode2;
+}
+function restrictEffects(source, mode2) {
+  const allowed = ALLOWED_BY_MODE[mode2];
+  return {
+    ...source,
+    effect: source.effect.map((effect) => {
+      if (allowed.has(effect.type))
+        return effect;
+      const indent2 = "indent" in effect && typeof effect.indent === "number" ? effect.indent : 0;
+      return { type: "v2Comment", value: "", indent: indent2 };
+    })
+  };
+}
+function selectRestrictedTriggers(sources, mode2) {
+  return sources.filter((source) => matchesBinding(source, mode2)).map((source) => restrictEffects(source, mode2)).filter((source) => source.conditions.length > 0 || source.effect.some((effect) => effect.type !== "v2Comment"));
+}
+
+// src/display/trigger-runner.ts
+var log5 = makeSafeLogger("display-trigger");
+function formatConsoleArgs(args) {
+  return args.map((value) => {
+    try {
+      return typeof value === "string" ? value : JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }).join(" ").slice(0, 600);
+}
+var triggerConsole = {
+  log: (...args) => log5.info(`console.log: ${formatConsoleArgs(args)}`),
+  warn: (...args) => log5.warn(`console.warn: ${formatConsoleArgs(args)}`),
+  error: (...args) => log5.error(`console.error: ${formatConsoleArgs(args)}`),
+  info: (...args) => log5.info(`console.info: ${formatConsoleArgs(args)}`)
+};
+async function runDisplayTriggerChain(snap, content) {
+  const triggers2 = selectRestrictedTriggers(snap.luaTriggers.map((entry) => entry.source), "display");
+  if (triggers2.length === 0)
+    return { content, ran: false };
+  try {
+    const runtime2 = await makeRisuTriggerRuntime(makeSnapshotHostApi(snap), {
+      characterId: snap.characterId,
+      characterName: snap.charName,
+      userName: snap.userName
+    }, makeDispatcherScriptNS(), {
+      chatId: snap.chatId,
+      characterId: snap.characterId,
+      binding: "display",
+      displayMode: true,
+      displayData: content,
+      preloaded: buildPreloaded(snap)
+    });
+    try {
+      for (const trigger of triggers2) {
+        await interpretTrigger(trigger, runtime2, triggerConsole, {
+          displayMode: true,
+          lowLevelAccess: Boolean(trigger.lowLevelAccess)
+        });
+      }
+      return { content: runtime2.getDisplayState(), ran: true };
+    } catch (err) {
+      log5.warn(`display trigger chain failed: ${String(err)}`);
+      return { content, ran: true };
+    } finally {
+      await runtime2.flush();
+    }
+  } catch (err) {
+    log5.warn(`display trigger runtime failed: ${String(err)}`);
+    return { content, ran: true };
+  }
+}
+
+// src/display/module-action-plan.ts
+function buildModuleDisplayPlan(scripts, actions) {
+  const moduleActions = actions.filter((action) => (action.sourceOrigin ?? "character").startsWith("module:"));
+  const byLiveId = groupBy(moduleActions.filter((action) => typeof action.liveScriptId === "string" && action.liveScriptId.length > 0), (action) => action.liveScriptId);
+  const bySource = groupBy(moduleActions.filter((action) => typeof action.sourceOrigin === "string" && typeof action.sourceRowIndex === "number" && Number.isInteger(action.sourceRowIndex)), (action) => sourceKey(action.sourceOrigin, action.sourceRowIndex));
+  return scripts.map((script) => {
+    const rawMetadata = readRisuMetadata(script);
+    const identity = readModuleIdentity(rawMetadata);
+    const idMatches = byLiveId.get(script.id) ?? [];
+    if (!identity) {
+      if (idMatches.length > 0 || hasModuleTag(rawMetadata) && actionFromLiveScript({
+        findRegex: script.find_regex,
+        flag: script.flags,
+        out: script.replace_string,
+        phase: "editdisplay"
+      })) {
+        return {
+          kind: "skip",
+          script,
+          reason: "module action row has incomplete source identity"
+        };
+      }
+      return { kind: "script", script };
+    }
+    const origin = `module:${identity.moduleId}`;
+    const sourceMatches = bySource.get(sourceKey(origin, identity.sourceRowIndex)) ?? [];
+    if (sourceMatches.length > 0) {
+      if (sourceMatches.length !== 1 || idMatches.length !== 1 || sourceMatches[0] !== idMatches[0]) {
+        return {
+          kind: "skip",
+          script,
+          reason: "module action row identity is missing or ambiguous"
+        };
+      }
+      const raw = sourceMatches[0];
+      if (!bindingMatches(raw, identity, script.id)) {
+        return {
+          kind: "skip",
+          script,
+          reason: "module action row identity does not match its source"
+        };
+      }
+      const action2 = bindAtActionToLiveScript(raw, {
+        findRegex: script.find_regex,
+        flag: script.flags,
+        out: script.replace_string,
+        phase: identity.phase,
+        order: identity.order ?? raw.order,
+        hasExplicitOrder: identity.order !== undefined
+      });
+      return action2 ? { kind: "action", script, action: action2 } : { kind: "script", script };
+    }
+    if (idMatches.length > 0 || identity.hasFlagActions) {
+      return {
+        kind: "skip",
+        script,
+        reason: "module action metadata has no matching runtime source"
+      };
+    }
+    const action = actionFromLiveScript({
+      findRegex: script.find_regex,
+      flag: script.flags,
+      out: script.replace_string,
+      phase: identity.phase,
+      order: identity.order ?? 0,
+      hasExplicitOrder: identity.order !== undefined,
+      sourceIndex: identity.sourceIndex,
+      sourceRowIndex: identity.sourceRowIndex,
+      sourceOrigin: origin,
+      liveScriptId: script.id
+    });
+    return action ? { kind: "action", script, action } : { kind: "script", script };
+  });
+}
+function bindingMatches(action, identity, liveScriptId) {
+  return action.liveScriptId === liveScriptId && action.sourceOrigin === `module:${identity.moduleId}` && action.sourceIndex === identity.sourceIndex && action.sourceRowIndex === identity.sourceRowIndex && action.phase === identity.phase;
+}
+function readRisuMetadata(script) {
+  const metadata = script.metadata;
+  if (!metadata || typeof metadata !== "object")
+    return null;
+  const risu = metadata["_risu"];
+  return risu && typeof risu === "object" ? risu : null;
+}
+function hasModuleTag(metadata) {
+  return typeof metadata?.["module_id"] === "string";
+}
+function readModuleIdentity(metadata) {
+  if (!metadata)
+    return null;
+  const moduleId = metadata["module_id"];
+  const phase = metadata["phase"];
+  const sourceIndex = metadata["source_index"];
+  const sourceRowIndex = metadata["source_row_index"];
+  if (typeof moduleId !== "string" || moduleId.length === 0 || !isAtActionPhase(phase) || typeof sourceIndex !== "number" || !Number.isInteger(sourceIndex) || typeof sourceRowIndex !== "number" || !Number.isInteger(sourceRowIndex))
+    return null;
+  const order = metadata["order_flag"];
+  return {
+    moduleId,
+    phase,
+    sourceIndex,
+    sourceRowIndex,
+    ...typeof order === "number" && Number.isFinite(order) ? { order } : {},
+    hasFlagActions: Array.isArray(metadata["flag_actions"]) && metadata["flag_actions"].length > 0
+  };
+}
+function sourceKey(origin, sourceRowIndex) {
+  return `${origin}\x00${sourceRowIndex}`;
+}
+function groupBy(values, keyOf) {
+  const grouped = new Map;
+  for (const value of values) {
+    const key = keyOf(value);
+    const current = grouped.get(key);
+    if (current)
+      current.push(value);
+    else
+      grouped.set(key, [value]);
+  }
+  return grouped;
+}
+function isAtActionPhase(value) {
+  return value === "editinput" || value === "editoutput" || value === "editprocess" || value === "editdisplay" || value === "edittrans";
+}
+
 // src/display/resolver.ts
-var log5 = makeSafeLogger("display-resolver");
+var log6 = makeSafeLogger("display-resolver");
 var DBG_MARKS = ["\uD83D\uDD04", "<CombatChoice", "<ActivityChoice", "<Panel>", "■■■", "intro", "★■", "\uD83E\uDDB6"];
 function dbgMarks(s) {
   return DBG_MARKS.filter((m) => s.includes(m)).join(",");
@@ -29661,14 +30049,14 @@ async function getSnapshotOrWait(chatId) {
   const ok = await waitForSnapshot(chatId, SNAPSHOT_WAIT_MS);
   if (ok)
     return getDisplaySnapshot(chatId);
-  log5.error(`[FE-DISPLAY] snapshot did not arrive for owned chat=${chatId} within ${SNAPSHOT_WAIT_MS}ms — ` + `failing LOUD (raw content shown). The host must NOT fall back to backend resolution for an owned chat.`);
+  log6.error(`[FE-DISPLAY] snapshot did not arrive for owned chat=${chatId} within ${SNAPSHOT_WAIT_MS}ms — ` + `failing LOUD (raw content shown). The host must NOT fall back to backend resolution for an owned chat.`);
   return;
 }
 function buildInput(snap, content, context2) {
   const dyn = context2.dynamicMacros;
   const lastIdx = snap.chat.messages.length - 1;
   const chatIndexStr = dyn?.chat_index;
-  const idxOverride = typeof context2.depth === "number" && context2.depth >= 0 ? lastIdx - context2.depth : typeof chatIndexStr === "string" && /^-?\d+$/.test(chatIndexStr) ? parseInt(chatIndexStr, 10) - 1 : undefined;
+  const idxOverride = typeof context2.messageIndex === "number" ? context2.messageIndex - 1 : typeof chatIndexStr === "string" && /^-?\d+$/.test(chatIndexStr) ? parseInt(chatIndexStr, 10) - 1 : typeof context2.depth === "number" && context2.depth >= 0 ? lastIdx - context2.depth : undefined;
   const role = context2.role ?? dyn?.role;
   return {
     template: content,
@@ -29767,43 +30155,91 @@ async function fetchBackendApply(args) {
     return null;
   }
 }
-function runApply(snap, args, recorder) {
+var warnedActionBindings = new Set;
+function warnActionBinding(scriptId, reason) {
+  const key = `${scriptId}\x00${reason}`;
+  if (warnedActionBindings.has(key))
+    return;
+  if (warnedActionBindings.size >= 256)
+    warnedActionBindings.clear();
+  warnedActionBindings.add(key);
+  log6.warn(`applyScripts: skipped module row=${scriptId}: ${reason}`);
+}
+function scriptApplies(script, context2) {
+  if (script.disabled === true)
+    return false;
+  const placement = context2.isUser ? "user_input" : "ai_output";
+  if (!script.placement.includes(placement))
+    return false;
+  if (script.min_depth !== null && context2.depth < script.min_depth)
+    return false;
+  if (script.max_depth !== null && context2.depth > script.max_depth)
+    return false;
+  return true;
+}
+function toCoreScript(script) {
+  return {
+    find_regex: script.find_regex,
+    replace_string: script.replace_string,
+    flags: script.flags,
+    substitute_macros: script.substitute_macros,
+    placement: script.placement,
+    target: "display",
+    min_depth: script.min_depth,
+    max_depth: script.max_depth,
+    trim_strings: script.trim_strings,
+    ...script.disabled !== undefined ? { disabled: script.disabled } : {}
+  };
+}
+async function runApply(snap, args, recorder, onEffect) {
   const ctx = args.context;
   const placement = ctx.isUser ? "user_input" : "ai_output";
   const scripts = args.scripts;
-  const coreScripts = scripts.map((script) => {
-    const preFind = args.resolvedFindPatterns?.[script.id];
-    const preReplace = args.resolvedReplacements?.[script.id];
-    return {
-      find_regex: script.find_regex,
-      replace_string: script.replace_string,
-      flags: script.flags,
-      substitute_macros: script.substitute_macros,
-      placement: script.placement,
-      target: "display",
-      min_depth: script.min_depth,
-      max_depth: script.max_depth,
-      trim_strings: script.trim_strings,
-      ...script.disabled !== undefined ? { disabled: script.disabled } : {},
-      ...preFind !== undefined ? { preResolvedFind: preFind } : {},
-      ...preReplace !== undefined ? { preResolvedReplace: preReplace } : {}
-    };
-  });
-  return applyRegexScriptsCore(args.content, coreScripts, {
-    placement,
-    depth: ctx.depth,
-    evalTemplate: (text) => {
-      try {
-        return evalTemplate(snap, text, ctx, recorder);
-      } catch (err) {
+  const plan = buildModuleDisplayPlan(scripts, snap.atActions);
+  let content = args.content;
+  for (let index = 0;index < plan.length; index++) {
+    const step = plan[index];
+    if (step.kind === "skip") {
+      warnActionBinding(step.script.id, step.reason);
+      continue;
+    }
+    if (step.kind === "action") {
+      if (!scriptApplies(step.script, ctx))
+        continue;
+      const dependencies = getRuntimeAtActionDependencies(step.action);
+      if (dependencies.messages)
+        recorder.touched.add(MSG_DEP_KEY);
+      if (dependencies.effects)
         recorder.volatile = true;
-        throw err;
-      }
-    },
-    reResolveAfterRule: true
-  });
+      content = await runEditDisplayAtActions(snap, content, ctx, [step.action], {
+        resolveTemplate: (text) => evalTemplate(snap, text, ctx, recorder),
+        ...onEffect ? { onEffect } : {}
+      });
+      continue;
+    }
+    const coreScripts = [toCoreScript(step.script)];
+    while (plan[index + 1]?.kind === "script") {
+      const next = plan[++index];
+      if (next.kind === "script")
+        coreScripts.push(toCoreScript(next.script));
+    }
+    content = applyRegexScriptsCore(content, coreScripts, {
+      placement,
+      depth: ctx.depth,
+      evalTemplate: (text) => {
+        try {
+          return evalTemplate(snap, text, ctx, recorder);
+        } catch (err) {
+          recorder.volatile = true;
+          throw err;
+        }
+      },
+      reResolveAfterRule: true
+    });
+  }
+  return content;
 }
-function createDisplayResolver(writeback) {
+function createDisplayResolver(writeback, onEffect) {
   return {
     ready(chatId) {
       return isDisplayResolutionReady(chatId);
@@ -29818,27 +30254,43 @@ function createDisplayResolver(writeback) {
       let feContent;
       const recorder = { touched: new Set, volatile: false };
       try {
+        const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
+        const liveSnap = snap.luaTriggers.length > 0 || rowlessAtActions.length > 0 ? withCurrentDisplayMessage(snap, args.context, args.content) : snap;
         let body = args.content;
-        if (snap.luaTriggers.length > 0) {
-          body = runPipeline(buildInput(snap, body, args.context), { recorder });
-          body = await runEditDisplayChain(snap, body, args.context, (t) => Promise.resolve(runPipeline(buildInput(snap, t, args.context), { recorder })), (vars) => writeback?.(chatId, vars));
+        if (liveSnap.luaTriggers.length > 0) {
+          body = await runEditDisplayChain(liveSnap, body, args.context, (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })), (vars) => writeback?.(chatId, vars), onEffect);
         }
-        if (snap.atActions.length > 0) {
-          body = await runEditDisplayAtActions(snap, body, args.context);
+        const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
+        body = displayTriggerResult.content;
+        if (displayTriggerResult.ran)
+          recorder.volatile = true;
+        body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
+        if (rowlessAtActions.length > 0) {
+          for (const action of rowlessAtActions) {
+            const dependencies = getRuntimeAtActionDependencies(action);
+            if (dependencies.messages)
+              recorder.touched.add(MSG_DEP_KEY);
+            if (dependencies.effects)
+              recorder.volatile = true;
+          }
+          body = await runEditDisplayAtActions(liveSnap, body, args.context, rowlessAtActions, {
+            resolveTemplate: (text) => evalTemplate(liveSnap, text, args.context, recorder),
+            ...onEffect ? { onEffect } : {}
+          });
         }
-        feContent = runPipeline(buildInput(snap, body, args.context), { recorder });
+        feContent = body;
       } catch (err) {
-        log5.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log6.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;
       }
-      log5.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
+      log6.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
       const mode2 = getDisplayResolutionMode();
       if (mode2 === "shadow") {
         const beContent = await fetchBackendBody(chatId, args.context.messageId, args.context.role, args.content);
         if (beContent !== feContent) {
-          log5.warn(`[shadow] body mismatch chat=${chatId} msg=${args.context.messageId ?? "?"} ` + `feLen=${feContent.length} beLen=${beContent.length} ` + `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` + `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`);
+          log6.warn(`[shadow] body mismatch chat=${chatId} msg=${args.context.messageId ?? "?"} ` + `feLen=${feContent.length} beLen=${beContent.length} ` + `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` + `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`);
         } else {
-          log5.trace(`[shadow] body match chat=${chatId} msg=${args.context.messageId ?? "?"} len=${feContent.length}`);
+          log6.trace(`[shadow] body match chat=${chatId} msg=${args.context.messageId ?? "?"} len=${feContent.length}`);
         }
         return { content: beContent };
       }
@@ -29866,7 +30318,7 @@ function createDisplayResolver(writeback) {
           cacheable[key] = !recorder.volatile;
         }
       } catch (err) {
-        log5.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log6.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;
       }
       const mode2 = getDisplayResolutionMode();
@@ -29875,7 +30327,7 @@ function createDisplayResolver(writeback) {
         for (const key of Object.keys(args.templates)) {
           const beVal = be[key];
           if (typeof beVal === "string" && beVal !== resolved[key]) {
-            log5.warn(`[shadow] template mismatch chat=${chatId} key=${key} ` + `fe=${JSON.stringify((resolved[key] ?? "").slice(0, 120))} ` + `be=${JSON.stringify(beVal.slice(0, 120))}`);
+            log6.warn(`[shadow] template mismatch chat=${chatId} key=${key} ` + `fe=${JSON.stringify((resolved[key] ?? "").slice(0, 120))} ` + `be=${JSON.stringify(beVal.slice(0, 120))}`);
           }
         }
         return { resolved: { ...resolved, ...be } };
@@ -29892,12 +30344,12 @@ function createDisplayResolver(writeback) {
       let feContent;
       const recorder = { touched: new Set, volatile: false };
       try {
-        feContent = runApply(snap, args, recorder);
+        feContent = await runApply(snap, args, recorder, onEffect);
       } catch (err) {
-        log5.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log6.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;
       }
-      log5.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} placement=${args.context.isUser ? "user" : "ai"} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
+      log6.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} placement=${args.context.isUser ? "user" : "ai"} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
       const mode2 = getDisplayResolutionMode();
       if (mode2 === "shadow") {
         const beContent = await fetchBackendApply(args);
@@ -29905,9 +30357,9 @@ function createDisplayResolver(writeback) {
           return { content: feContent, touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
         }
         if (beContent !== feContent) {
-          log5.warn(`[shadow] apply mismatch chat=${chatId} msg=${args.context.messageId ?? "?"} ` + `feLen=${feContent.length} beLen=${beContent.length} ` + `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` + `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`);
+          log6.warn(`[shadow] apply mismatch chat=${chatId} msg=${args.context.messageId ?? "?"} ` + `feLen=${feContent.length} beLen=${beContent.length} ` + `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` + `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`);
         } else {
-          log5.trace(`[shadow] apply match chat=${chatId} msg=${args.context.messageId ?? "?"} len=${feContent.length}`);
+          log6.trace(`[shadow] apply match chat=${chatId} msg=${args.context.messageId ?? "?"} len=${feContent.length}`);
         }
         return { content: beContent };
       }
@@ -31977,11 +32429,177 @@ var styles_default = `.risu-compat-drawer {\r
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));\r
   line-height: 1.4;\r
 }\r
+/* Rendered markdown / HTML. Descriptions are card-authored, so headings and\r
+   spacing are damped down to card-body scale rather than document scale. */\r
+.lr-modules-drawer .lrm-module-desc > *:first-child { margin-top: 0; }\r
+.lr-modules-drawer .lrm-module-desc > *:last-child { margin-bottom: 0; }\r
+.lr-modules-drawer .lrm-module-desc p,\r
+.lr-modules-drawer .lrm-module-desc ul,\r
+.lr-modules-drawer .lrm-module-desc ol,\r
+.lr-modules-drawer .lrm-module-desc blockquote {\r
+  margin: 4px 0;\r
+}\r
+.lr-modules-drawer .lrm-module-desc ul,\r
+.lr-modules-drawer .lrm-module-desc ol {\r
+  padding-left: 18px;\r
+}\r
+.lr-modules-drawer .lrm-module-desc h1,\r
+.lr-modules-drawer .lrm-module-desc h2,\r
+.lr-modules-drawer .lrm-module-desc h3,\r
+.lr-modules-drawer .lrm-module-desc h4,\r
+.lr-modules-drawer .lrm-module-desc h5,\r
+.lr-modules-drawer .lrm-module-desc h6 {\r
+  margin: 6px 0 3px 0;\r
+  font-size: 12px;\r
+  font-weight: 600;\r
+  color: var(--lumiverse-text, rgba(255, 255, 255, 0.85));\r
+}\r
+.lr-modules-drawer .lrm-module-desc code {\r
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\r
+  font-size: 10.5px;\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.06));\r
+  border-radius: 3px;\r
+  padding: 0 3px;\r
+}\r
+.lr-modules-drawer .lrm-module-desc pre {\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.06));\r
+  border-radius: 4px;\r
+  padding: 6px 8px;\r
+  overflow-x: auto;\r
+  margin: 4px 0;\r
+}\r
+.lr-modules-drawer .lrm-module-desc pre code {\r
+  background: none;\r
+  padding: 0;\r
+}\r
+.lr-modules-drawer .lrm-module-desc blockquote {\r
+  border-left: 2px solid var(--lumiverse-border, rgba(255, 255, 255, 0.15));\r
+  padding-left: 8px;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
+}\r
+.lr-modules-drawer .lrm-module-desc hr {\r
+  border: none;\r
+  border-top: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.12));\r
+  margin: 6px 0;\r
+}\r
+.lr-modules-drawer .lrm-module-desc a {\r
+  color: var(--lumiverse-primary, #6c9cff);\r
+}\r
+.lr-modules-drawer .lrm-module-desc img {\r
+  max-width: 100%;\r
+  height: auto;\r
+  border-radius: 3px;\r
+}\r
+.lr-modules-drawer .lrm-module-desc summary {\r
+  cursor: pointer;\r
+  color: var(--lumiverse-text, rgba(255, 255, 255, 0.8));\r
+  font-weight: 600;\r
+  margin: 4px 0;\r
+}\r
+.lr-modules-drawer .lrm-module-desc details {\r
+  margin: 4px 0;\r
+}\r
+/* Long license tables shouldn't widen the drawer. */\r
+.lr-modules-drawer .lrm-module-desc table {\r
+  display: block;\r
+  overflow-x: auto;\r
+  border-collapse: collapse;\r
+  max-width: 100%;\r
+  margin: 4px 0;\r
+}\r
+.lr-modules-drawer .lrm-module-desc th,\r
+.lr-modules-drawer .lrm-module-desc td {\r
+  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.12));\r
+  padding: 2px 6px;\r
+  text-align: left;\r
+}\r
 .lr-modules-drawer .lrm-module-actions {\r
   display: flex;\r
   gap: 4px;\r
   align-items: center;\r
   margin-top: 4px;\r
+}\r
+\r
+/* Global modules pillbox */\r
+.lr-modules-drawer .lrm-globalbox {\r
+  display: flex;\r
+  flex-direction: column;\r
+  gap: 6px;\r
+  padding: 8px 10px;\r
+  margin-bottom: 6px;\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04));\r
+  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.08));\r
+  border-radius: 5px;\r
+}\r
+.lr-modules-drawer .lrm-globalbox-head {\r
+  display: flex;\r
+  gap: 8px;\r
+  align-items: baseline;\r
+  flex-wrap: wrap;\r
+}\r
+.lr-modules-drawer .lrm-globalbox-title {\r
+  font-size: 12px;\r
+  font-weight: 600;\r
+  color: var(--lumiverse-text, inherit);\r
+}\r
+.lr-modules-drawer .lrm-globalbox-hint {\r
+  font-size: 10.5px;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
+}\r
+.lr-modules-drawer .lrm-chips {\r
+  display: flex;\r
+  flex-wrap: wrap;\r
+  gap: 4px;\r
+  align-items: center;\r
+  min-height: 22px;\r
+}\r
+.lr-modules-drawer .lrm-chips-empty {\r
+  font-size: 11px;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.45));\r
+}\r
+.lr-modules-drawer .lrm-chip {\r
+  display: inline-flex;\r
+  align-items: center;\r
+  gap: 4px;\r
+  max-width: 100%;\r
+  padding: 2px 4px 2px 8px;\r
+  font-size: 11px;\r
+  border-radius: 999px;\r
+  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.16));\r
+  border: 1px solid var(--lumiverse-primary, rgba(120, 160, 255, 0.45));\r
+  color: var(--lumiverse-text, inherit);\r
+}\r
+.lr-modules-drawer .lrm-chip-missing {\r
+  background: rgba(255, 130, 130, 0.12);\r
+  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));\r
+}\r
+.lr-modules-drawer .lrm-chip-label {\r
+  overflow: hidden;\r
+  text-overflow: ellipsis;\r
+  white-space: nowrap;\r
+  max-width: 220px;\r
+}\r
+.lr-modules-drawer .lrm-chip-x {\r
+  appearance: none;\r
+  background: none;\r
+  border: none;\r
+  color: inherit;\r
+  cursor: pointer;\r
+  font-size: 13px;\r
+  line-height: 1;\r
+  padding: 0 3px;\r
+  border-radius: 999px;\r
+  opacity: 0.65;\r
+}\r
+.lr-modules-drawer .lrm-chip-x:hover {\r
+  opacity: 1;\r
+  background: rgba(255, 255, 255, 0.12);\r
+}\r
+@media (hover: none) and (pointer: coarse) {\r
+  .lr-modules-drawer .lrm-chip-x {\r
+    padding: 2px 6px;\r
+    font-size: 15px;\r
+  }\r
 }\r
 .lr-modules-drawer .lrm-characters-list {\r
   display: flex;\r
@@ -32376,6 +32994,91 @@ var styles_default = `.risu-compat-drawer {\r
 }\r
 .lr-viewer-drawer .lrv-btn-primary:hover {\r
   background: var(--lumiverse-primary, rgba(120, 160, 255, 0.4));\r
+}\r
+.lr-viewer-drawer .lrv-btn-active {\r
+  background: var(--lumiverse-primary, rgba(120, 160, 255, 0.3));\r
+  border-color: var(--lumiverse-primary, rgba(120, 160, 255, 0.6));\r
+  color: var(--lumiverse-text, inherit);\r
+}\r
+.lr-viewer-drawer .lrv-btn-danger {\r
+  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));\r
+  color: var(--lumiverse-danger, rgba(255, 130, 130, 0.95));\r
+}\r
+.lr-viewer-drawer .lrv-btn-danger:hover {\r
+  background: rgba(255, 130, 130, 0.12);\r
+}\r
+\r
+/* Bulk-selection bar, shown under the toolbar while in select mode */\r
+.lr-viewer-drawer .lrv-asset-selbar {\r
+  display: flex;\r
+  gap: 8px;\r
+  align-items: center;\r
+  padding: 6px 10px;\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.05));\r
+  border-bottom: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.05));\r
+  flex-wrap: wrap;\r
+}\r
+.lr-viewer-drawer .lrv-asset-selbar-count {\r
+  font-size: 12px;\r
+  font-weight: 600;\r
+  color: var(--lumiverse-text, inherit);\r
+}\r
+.lr-viewer-drawer .lrv-asset-selbar .lrv-asset-action {\r
+  flex: 0 0 auto;\r
+}\r
+.lr-viewer-drawer .lrv-asset-selbar .lrv-asset-action:disabled {\r
+  opacity: 0.4;\r
+  cursor: default;\r
+}\r
+.lr-viewer-drawer .lrv-asset-selbar-hint {\r
+  margin-left: auto;\r
+  font-size: 10px;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
+}\r
+\r
+/* Selection affordances on tiles */\r
+.lr-viewer-drawer .lrv-asset-tile-selectable {\r
+  cursor: pointer;\r
+  position: relative;\r
+}\r
+.lr-viewer-drawer .lrv-asset-tile-selected {\r
+  border-color: var(--lumiverse-primary, rgba(120, 160, 255, 0.85));\r
+  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.12));\r
+}\r
+.lr-viewer-drawer .lrv-asset-tile-check {\r
+  position: absolute;\r
+  top: 6px;\r
+  left: 6px;\r
+  z-index: 2;\r
+  width: 16px;\r
+  height: 16px;\r
+  cursor: pointer;\r
+  accent-color: var(--lumiverse-primary, #6c9cff);\r
+  /* Media fills the tile, so the box needs its own backing to stay visible. */\r
+  background: rgba(0, 0, 0, 0.55);\r
+  border-radius: 3px;\r
+}\r
+/* Touch: the whole tile toggles, so the box is an indicator, but keep it a\r
+   usable target for people who aim at it anyway. */\r
+@media (hover: none) and (pointer: coarse) {\r
+  .lr-viewer-drawer .lrv-asset-tile-check {\r
+    width: 22px;\r
+    height: 22px;\r
+  }\r
+  .lr-viewer-drawer .lrv-asset-selbar .lrv-asset-action {\r
+    padding: 6px 10px;\r
+    font-size: 12px;\r
+  }\r
+  /* Long-press is ours. Without these iOS raises the copy/share callout and\r
+     starts a text selection partway through the hold. */\r
+  .lr-viewer-drawer .lrv-asset-tile {\r
+    -webkit-touch-callout: none;\r
+    -webkit-user-select: none;\r
+    user-select: none;\r
+  }\r
+  .lr-viewer-drawer .lrv-asset-tile img {\r
+    -webkit-touch-callout: none;\r
+  }\r
 }\r
 .lr-viewer-drawer .lrv-asset-upload-status {\r
   font-size: 11px;\r
@@ -33654,7 +34357,7 @@ var error_default = DetailedError;
 
 // node_modules/tus-js-client/lib.esm/logger.js
 var isEnabled = false;
-function log6(msg) {
+function log7(msg) {
   if (!isEnabled)
     return;
   console.log(msg);
@@ -34490,9 +35193,9 @@ var BaseUpload = /* @__PURE__ */ function() {
       }
       this.options.fingerprint(file, this.options).then(function(fingerprint) {
         if (fingerprint == null) {
-          log6("No fingerprint was calculated meaning that the upload cannot be stored in the URL storage.");
+          log7("No fingerprint was calculated meaning that the upload cannot be stored in the URL storage.");
         } else {
-          log6("Calculated fingerprint: ".concat(fingerprint));
+          log7("Calculated fingerprint: ".concat(fingerprint));
         }
         _this2._fingerprint = fingerprint;
         if (_this2._source) {
@@ -34597,7 +35300,7 @@ var BaseUpload = /* @__PURE__ */ function() {
           return;
         }
         _this3.url = resolveUrl(_this3.options.endpoint, location2);
-        log6("Created upload at ".concat(_this3.url));
+        log7("Created upload at ".concat(_this3.url));
         _this3._emitSuccess(res);
       })["catch"](function(err) {
         _this3._emitError(err);
@@ -34608,17 +35311,17 @@ var BaseUpload = /* @__PURE__ */ function() {
     value: function _startSingleUpload() {
       this._aborted = false;
       if (this.url != null) {
-        log6("Resuming upload from previous URL: ".concat(this.url));
+        log7("Resuming upload from previous URL: ".concat(this.url));
         this._resumeUpload();
         return;
       }
       if (this.options.uploadUrl != null) {
-        log6("Resuming upload from provided URL: ".concat(this.options.uploadUrl));
+        log7("Resuming upload from provided URL: ".concat(this.options.uploadUrl));
         this.url = this.options.uploadUrl;
         this._resumeUpload();
         return;
       }
-      log6("Creating a new upload");
+      log7("Creating a new upload");
       this._createUpload();
     }
   }, {
@@ -34749,7 +35452,7 @@ var BaseUpload = /* @__PURE__ */ function() {
           return;
         }
         _this6.url = resolveUrl(_this6.options.endpoint, location2);
-        log6("Created upload at ".concat(_this6.url));
+        log7("Created upload at ".concat(_this6.url));
         if (typeof _this6.options.onUploadUrlAvailable === "function") {
           _this6.options.onUploadUrlAvailable();
         }
@@ -36201,8 +36904,8 @@ var UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 var PROCESSING_TIMEOUT_MS = 60000;
 var EXTENSION_IDENTIFIER = "lumirealm";
 function mountCardsPanel(opts) {
-  const { ctx, sendToBackend, log: log7 } = opts;
-  log7.info("cards-panel: mounting");
+  const { ctx, sendToBackend, log: log8 } = opts;
+  log8.info("cards-panel: mounting");
   const root = opts.root;
   const actionRow = document.createElement("div");
   actionRow.className = "lrm-toolbar";
@@ -36225,18 +36928,18 @@ function mountCardsPanel(opts) {
   async function onImportClicked() {
     if (importBtn.disabled)
       return;
-    log7.info("drawer: Import button clicked — opening file picker");
+    log8.info("drawer: Import button clicked — opening file picker");
     let file = null;
     try {
       const [picked] = await ctx.uploads.pickFile({ accept: ACCEPT_EXTENSIONS });
       if (!picked) {
-        log7.info("drawer: picker dismissed without selection");
+        log8.info("drawer: picker dismissed without selection");
         return;
       }
       file = { name: picked.name, bytes: picked.bytes };
-      log7.info(`drawer: picked file=${picked.name} size=${picked.bytes.byteLength} mime=${picked.mimeType}`);
+      log8.info(`drawer: picked file=${picked.name} size=${picked.bytes.byteLength} mime=${picked.mimeType}`);
     } catch (err) {
-      log7.error("drawer: pickFile threw", err);
+      log8.error("drawer: pickFile threw", err);
       state.notices = [`File picker failed: ${errMsg(err)}`];
       render();
       return;
@@ -36247,7 +36950,7 @@ function mountCardsPanel(opts) {
     render();
     const fileName = file.name;
     const totalBytes = file.bytes.byteLength;
-    log7.info(`drawer: upload file=${fileName} bytes=${totalBytes}`);
+    log8.info(`drawer: upload file=${fileName} bytes=${totalBytes}`);
     let cancelled = false;
     opts.onImportStart?.(fileName, () => {
       cancelled = true;
@@ -36256,7 +36959,7 @@ function mountCardsPanel(opts) {
         activeTus = null;
       }
       clearNoProgress();
-      log7.info("drawer: upload cancel requested");
+      log8.info("drawer: upload cancel requested");
     }, totalBytes);
     state.progress = { phase: "decoding", message: "Starting upload…", fraction: 0 };
     render();
@@ -36270,7 +36973,7 @@ function mountCardsPanel(opts) {
         activeTus = null;
         if (cancelled)
           return;
-        log7.error("drawer: tus upload failed", err);
+        log8.error("drawer: tus upload failed", err);
         state.optimistic = false;
         state.progress = { phase: "error", message: `Upload failed: ${errMsg(err)}`, fraction: null };
         state.notices = [errMsg(err)];
@@ -36297,7 +37000,7 @@ function mountCardsPanel(opts) {
           render();
           return;
         }
-        log7.info(`drawer: upload complete uploadId=${uploadId} — requesting import`);
+        log8.info(`drawer: upload complete uploadId=${uploadId} — requesting import`);
         state.progress = { phase: "translating", message: "Processing on server…", fraction: null };
         render();
         sendToBackend({ type: "import_card_from_upload", uploadId, fileName });
@@ -36325,7 +37028,7 @@ function mountCardsPanel(opts) {
     clearNoProgress();
     noProgressTimer = setTimeout(() => {
       noProgressTimer = undefined;
-      log7.error(`drawer: no import_progress within ${timeoutMs}ms after upload — failing`);
+      log8.error(`drawer: no import_progress within ${timeoutMs}ms after upload — failing`);
       state.optimistic = false;
       state.progress = {
         phase: "error",
@@ -36340,10 +37043,10 @@ function mountCardsPanel(opts) {
     onImportClicked();
   });
   async function onInstallRegexScripts(msg) {
-    log7.info(`drawer: install_regex_scripts characterId=${msg.characterId} name=${msg.characterName} count=${msg.scripts.length}`);
+    log8.info(`drawer: install_regex_scripts characterId=${msg.characterId} name=${msg.characterName} count=${msg.scripts.length}`);
     const sampleDisplay = msg.scripts.find((s) => s.target === "display");
     if (sampleDisplay) {
-      log7.info(`drawer: first display rule name=${sampleDisplay.name} ` + `scope=${sampleDisplay.scope} scope_id=${sampleDisplay.scope_id} ` + `sub_macros=${sampleDisplay.substitute_macros} find=${JSON.stringify(sampleDisplay.find_regex).slice(0, 100)} ` + `replace[0..400]=${JSON.stringify(sampleDisplay.replace_string).slice(0, 400)}`);
+      log8.info(`drawer: first display rule name=${sampleDisplay.name} ` + `scope=${sampleDisplay.scope} scope_id=${sampleDisplay.scope_id} ` + `sub_macros=${sampleDisplay.substitute_macros} find=${JSON.stringify(sampleDisplay.find_regex).slice(0, 100)} ` + `replace[0..400]=${JSON.stringify(sampleDisplay.replace_string).slice(0, 400)}`);
     }
     const t0 = performance.now();
     try {
@@ -36352,7 +37055,7 @@ function mountCardsPanel(opts) {
         const body = await existingResp.json();
         const existingIds = (body.data ?? []).filter((r) => r.scope === "character" && r.scope_id === msg.characterId && !r.metadata?._risu?.module_id && !r.metadata?._risu?.imported_regex).map((r) => r.id);
         if (existingIds.length > 0) {
-          log7.info(`drawer: pre-clean removing ${existingIds.length} existing character-scoped rule(s) for char=${msg.characterId}`);
+          log8.info(`drawer: pre-clean removing ${existingIds.length} existing character-scoped rule(s) for char=${msg.characterId}`);
           const delResp = await fetch("/api/v1/regex-scripts/bulk-delete", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -36360,22 +37063,22 @@ function mountCardsPanel(opts) {
             credentials: "include"
           });
           if (!delResp.ok) {
-            log7.warn(`drawer: pre-clean bulk-delete HTTP ${delResp.status} — proceeding with install anyway (will accumulate)`);
+            log8.warn(`drawer: pre-clean bulk-delete HTTP ${delResp.status} — proceeding with install anyway (will accumulate)`);
           } else {
             const delBody = await delResp.json();
-            log7.info(`drawer: pre-clean deleted=${delBody?.count ?? "?"}`);
+            log8.info(`drawer: pre-clean deleted=${delBody?.count ?? "?"}`);
           }
         } else {
-          log7.info(`drawer: pre-clean no existing character-scoped rules for char=${msg.characterId}`);
+          log8.info(`drawer: pre-clean no existing character-scoped rules for char=${msg.characterId}`);
         }
       } else {
-        log7.warn(`drawer: pre-clean list fetch HTTP ${existingResp.status} — proceeding without pre-clean`);
+        log8.warn(`drawer: pre-clean list fetch HTTP ${existingResp.status} — proceeding without pre-clean`);
       }
     } catch (err) {
-      log7.warn(`drawer: pre-clean threw — proceeding with install`, err);
+      log8.warn(`drawer: pre-clean threw — proceeding with install`, err);
     }
     if (msg.scripts.length === 0) {
-      log7.info(`drawer: install_regex_scripts done (cleanup-only, nothing to install) for char=${msg.characterId}`);
+      log8.info(`drawer: install_regex_scripts done (cleanup-only, nothing to install) for char=${msg.characterId}`);
       return;
     }
     try {
@@ -36396,13 +37099,13 @@ function mountCardsPanel(opts) {
       const imported = body?.imported ?? 0;
       const skipped = body?.skipped ?? 0;
       const errors2 = Array.isArray(body?.errors) ? body.errors : [];
-      log7.info(`drawer: regex import response imported=${imported} skipped=${skipped} errors=${errors2.length} ` + `httpStatus=${resp.status} elapsed=${Math.round(performance.now() - t0)}ms ` + `expected=${msg.scripts.length}`);
+      log8.info(`drawer: regex import response imported=${imported} skipped=${skipped} errors=${errors2.length} ` + `httpStatus=${resp.status} elapsed=${Math.round(performance.now() - t0)}ms ` + `expected=${msg.scripts.length}`);
       if (errors2.length > 0) {
         for (const e of errors2)
-          log7.warn(`drawer: regex error — ${e}`);
+          log8.warn(`drawer: regex error — ${e}`);
       }
       if (imported !== msg.scripts.length) {
-        log7.warn(`drawer: regex install count mismatch — sent ${msg.scripts.length}, Lumi accepted ${imported}. ` + `Display-target rules may be incomplete for this character.`);
+        log8.warn(`drawer: regex install count mismatch — sent ${msg.scripts.length}, Lumi accepted ${imported}. ` + `Display-target rules may be incomplete for this character.`);
       }
       if (skipped > 0 || errors2.length > 0) {
         const notices = [...state.notices];
@@ -36415,7 +37118,7 @@ function mountCardsPanel(opts) {
         render();
       }
     } catch (err) {
-      log7.error(`drawer: regex import failed`, err);
+      log8.error(`drawer: regex import failed`, err);
       const notices = [...state.notices];
       notices.push(`Failed to install ${msg.scripts.length} regex rule(s): ${errMsg(err)}`);
       state.notices = notices;
@@ -36423,7 +37126,7 @@ function mountCardsPanel(opts) {
     }
   }
   async function cleanupCharacterArtifacts(characterId, worldBookIds) {
-    log7.info(`drawer.cleanup: characterId=${characterId} worldBookCount=${worldBookIds.length}`);
+    log8.info(`drawer.cleanup: characterId=${characterId} worldBookCount=${worldBookIds.length}`);
     try {
       const listResp = await fetch(`/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(characterId)}&limit=2000`, { credentials: "include" });
       if (listResp.ok) {
@@ -36438,18 +37141,18 @@ function mountCardsPanel(opts) {
           });
           if (delResp.ok) {
             const delBody = await delResp.json();
-            log7.info(`drawer.cleanup: regex deleted=${delBody?.count ?? "?"} (sent ${ids.length})`);
+            log8.info(`drawer.cleanup: regex deleted=${delBody?.count ?? "?"} (sent ${ids.length})`);
           } else {
-            log7.warn(`drawer.cleanup: regex bulk-delete HTTP ${delResp.status}`);
+            log8.warn(`drawer.cleanup: regex bulk-delete HTTP ${delResp.status}`);
           }
         } else {
-          log7.info(`drawer.cleanup: no character-scoped regex to remove for ${characterId}`);
+          log8.info(`drawer.cleanup: no character-scoped regex to remove for ${characterId}`);
         }
       } else {
-        log7.warn(`drawer.cleanup: regex list HTTP ${listResp.status}`);
+        log8.warn(`drawer.cleanup: regex list HTTP ${listResp.status}`);
       }
     } catch (err) {
-      log7.warn(`drawer.cleanup: regex cleanup threw`, err);
+      log8.warn(`drawer.cleanup: regex cleanup threw`, err);
     }
     for (const wbId of worldBookIds) {
       try {
@@ -36458,22 +37161,22 @@ function mountCardsPanel(opts) {
           credentials: "include"
         });
         if (resp.ok) {
-          log7.info(`drawer.cleanup: world_book deleted id=${wbId}`);
+          log8.info(`drawer.cleanup: world_book deleted id=${wbId}`);
         } else if (resp.status === 404) {
-          log7.info(`drawer.cleanup: world_book ${wbId} already absent`);
+          log8.info(`drawer.cleanup: world_book ${wbId} already absent`);
         } else {
-          log7.warn(`drawer.cleanup: world_book delete HTTP ${resp.status} id=${wbId}`);
+          log8.warn(`drawer.cleanup: world_book delete HTTP ${resp.status} id=${wbId}`);
         }
       } catch (err) {
-        log7.warn(`drawer.cleanup: world_book delete threw id=${wbId}`, err);
+        log8.warn(`drawer.cleanup: world_book delete threw id=${wbId}`, err);
       }
     }
   }
   async function installModuleArtifacts(msg) {
-    log7.info(`drawer.installModuleArtifacts: char=${msg.characterId} module=${msg.moduleId} ` + `lorebookEntries=${msg.lorebookEntries.length} regexScripts=${msg.regexScripts.length}`);
+    log8.info(`drawer.installModuleArtifacts: char=${msg.characterId} module=${msg.moduleId} ` + `lorebookEntries=${msg.lorebookEntries.length} regexScripts=${msg.regexScripts.length}`);
     let worldBookId = null;
     const regexScriptIds = [];
-    if (msg.lorebookEntries.length > 0) {
+    if (msg.lorebookEntries.length > 0 && msg.characterId !== null) {
       try {
         const createResp = await fetch("/api/v1/world-books", {
           method: "POST",
@@ -36492,7 +37195,7 @@ function mountCardsPanel(opts) {
               credentials: "include"
             });
             if (!importResp.ok) {
-              log7.warn(`drawer.installModuleArtifacts: world_book entries import HTTP ${importResp.status} ` + `for module=${msg.moduleId} — book created but entries may be missing`);
+              log8.warn(`drawer.installModuleArtifacts: world_book entries import HTTP ${importResp.status} ` + `for module=${msg.moduleId} — book created but entries may be missing`);
             }
             const charResp = await fetch(`/api/v1/characters/${encodeURIComponent(msg.characterId)}`, { credentials: "include" });
             if (charResp.ok) {
@@ -36508,16 +37211,16 @@ function mountCardsPanel(opts) {
                   credentials: "include"
                 });
                 if (!updResp.ok) {
-                  log7.warn(`drawer.installModuleArtifacts: character world_book_ids update HTTP ${updResp.status} ` + `for module=${msg.moduleId} — book exists but isn't attached`);
+                  log8.warn(`drawer.installModuleArtifacts: character world_book_ids update HTTP ${updResp.status} ` + `for module=${msg.moduleId} — book exists but isn't attached`);
                 }
               }
             }
           }
         } else {
-          log7.warn(`drawer.installModuleArtifacts: world_book create HTTP ${createResp.status} for module=${msg.moduleId}`);
+          log8.warn(`drawer.installModuleArtifacts: world_book create HTTP ${createResp.status} for module=${msg.moduleId}`);
         }
       } catch (err) {
-        log7.warn(`drawer.installModuleArtifacts: world_book pipeline threw`, err);
+        log8.warn(`drawer.installModuleArtifacts: world_book pipeline threw`, err);
       }
     }
     if (msg.regexScripts.length > 0) {
@@ -36529,32 +37232,37 @@ function mountCardsPanel(opts) {
           credentials: "include"
         });
         if (resp.ok) {
-          const body = await resp.json();
-          if (Array.isArray(body.imported_ids)) {
-            for (const id of body.imported_ids) {
-              if (typeof id === "string")
-                regexScriptIds.push(id);
-            }
-          } else {
-            try {
-              const listResp = await fetch(`/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=2000`, { credentials: "include" });
-              if (listResp.ok) {
-                const listBody = await listResp.json();
-                for (const r of listBody.data ?? []) {
-                  if (r.metadata?._risu?.module_id === msg.moduleId) {
-                    regexScriptIds.push(r.id);
-                  }
-                }
+          try {
+            const listQuery = msg.characterId === null ? "scope=global" : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
+            const listResp = await fetch(`/api/v1/regex-scripts?${listQuery}&limit=2000`, { credentials: "include" });
+            if (listResp.ok) {
+              const listBody = await listResp.json();
+              const moduleRows = (listBody.data ?? []).filter((row) => row.metadata?._risu?.module_id === msg.moduleId);
+              const rowsByScriptId = new Map;
+              for (const row of moduleRows) {
+                if (typeof row.script_id !== "string")
+                  continue;
+                const ids = rowsByScriptId.get(row.script_id) ?? [];
+                ids.push(row.id);
+                rowsByScriptId.set(row.script_id, ids);
               }
-            } catch (err) {
-              log7.warn(`drawer.installModuleArtifacts: id-recovery list fetch threw`, err);
+              const ordered = msg.regexScripts.map((script) => rowsByScriptId.get(script.script_id) ?? []);
+              if (ordered.every((ids) => ids.length === 1)) {
+                for (const ids of ordered)
+                  regexScriptIds.push(ids[0]);
+              } else {
+                regexScriptIds.push(...moduleRows.map((row) => row.id));
+                log8.warn(`drawer.installModuleArtifacts: could not pair every imported row by script_id ` + `for module=${msg.moduleId}; stored cleanup ids only`);
+              }
             }
+          } catch (err) {
+            log8.warn(`drawer.installModuleArtifacts: id-recovery list fetch threw`, err);
           }
         } else {
-          log7.warn(`drawer.installModuleArtifacts: regex import HTTP ${resp.status} for module=${msg.moduleId}`);
+          log8.warn(`drawer.installModuleArtifacts: regex import HTTP ${resp.status} for module=${msg.moduleId}`);
         }
       } catch (err) {
-        log7.warn(`drawer.installModuleArtifacts: regex pipeline threw`, err);
+        log8.warn(`drawer.installModuleArtifacts: regex pipeline threw`, err);
       }
     }
     sendToBackend({
@@ -36566,9 +37274,9 @@ function mountCardsPanel(opts) {
     });
   }
   async function uninstallModuleArtifacts(msg) {
-    log7.info(`drawer.uninstallModuleArtifacts: char=${msg.characterId} module=${msg.moduleId} ` + `worldBookId=${msg.worldBookId ?? "null"} regex=${msg.regexScriptIds.length}`);
+    log8.info(`drawer.uninstallModuleArtifacts: char=${msg.characterId} module=${msg.moduleId} ` + `worldBookId=${msg.worldBookId ?? "null"} regex=${msg.regexScriptIds.length}`);
     let ok = true;
-    if (msg.worldBookId) {
+    if (msg.worldBookId && msg.characterId !== null) {
       try {
         const charResp = await fetch(`/api/v1/characters/${encodeURIComponent(msg.characterId)}`, { credentials: "include" });
         if (charResp.ok) {
@@ -36588,16 +37296,17 @@ function mountCardsPanel(opts) {
         const delResp = await fetch(`/api/v1/world-books/${encodeURIComponent(msg.worldBookId)}`, { method: "DELETE", credentials: "include" });
         if (!delResp.ok && delResp.status !== 404) {
           ok = false;
-          log7.warn(`drawer.uninstallModuleArtifacts: world_book delete HTTP ${delResp.status} id=${msg.worldBookId}`);
+          log8.warn(`drawer.uninstallModuleArtifacts: world_book delete HTTP ${delResp.status} id=${msg.worldBookId}`);
         }
       } catch (err) {
         ok = false;
-        log7.warn(`drawer.uninstallModuleArtifacts: world_book pipeline threw`, err);
+        log8.warn(`drawer.uninstallModuleArtifacts: world_book pipeline threw`, err);
       }
     }
     const idsToDelete = new Set(msg.regexScriptIds);
     try {
-      const listResp = await fetch(`/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=2000`, { credentials: "include" });
+      const uninstallQuery = msg.characterId === null ? "scope=global" : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
+      const listResp = await fetch(`/api/v1/regex-scripts?${uninstallQuery}&limit=2000`, { credentials: "include" });
       if (listResp.ok) {
         const body = await listResp.json();
         for (const r of body.data ?? []) {
@@ -36606,10 +37315,10 @@ function mountCardsPanel(opts) {
           }
         }
       } else {
-        log7.warn(`drawer.uninstallModuleArtifacts: list HTTP ${listResp.status}, falling back to stashed IDs only`);
+        log8.warn(`drawer.uninstallModuleArtifacts: list HTTP ${listResp.status}, falling back to stashed IDs only`);
       }
     } catch (err) {
-      log7.warn(`drawer.uninstallModuleArtifacts: list threw, falling back to stashed IDs only`, err);
+      log8.warn(`drawer.uninstallModuleArtifacts: list threw, falling back to stashed IDs only`, err);
     }
     if (idsToDelete.size > 0) {
       try {
@@ -36621,13 +37330,13 @@ function mountCardsPanel(opts) {
         });
         if (!resp.ok) {
           ok = false;
-          log7.warn(`drawer.uninstallModuleArtifacts: regex bulk-delete HTTP ${resp.status} (sent ${idsToDelete.size})`);
+          log8.warn(`drawer.uninstallModuleArtifacts: regex bulk-delete HTTP ${resp.status} (sent ${idsToDelete.size})`);
         } else {
-          log7.info(`drawer.uninstallModuleArtifacts: regex bulk-deleted ${idsToDelete.size} (stashed=${msg.regexScriptIds.length})`);
+          log8.info(`drawer.uninstallModuleArtifacts: regex bulk-deleted ${idsToDelete.size} (stashed=${msg.regexScriptIds.length})`);
         }
       } catch (err) {
         ok = false;
-        log7.warn(`drawer.uninstallModuleArtifacts: regex pipeline threw`, err);
+        log8.warn(`drawer.uninstallModuleArtifacts: regex pipeline threw`, err);
       }
     }
     sendToBackend({
@@ -36638,10 +37347,10 @@ function mountCardsPanel(opts) {
     });
   }
   function handleBackendMessage(msg) {
-    log7.info(`drawer.handle: ${msg.type}`);
+    log8.info(`drawer.handle: ${msg.type}`);
     switch (msg.type) {
       case "cards_updated":
-        log7.info(`drawer.cards_updated: count=${msg.cards.length}`);
+        log8.info(`drawer.cards_updated: count=${msg.cards.length}`);
         state.cards = msg.cards;
         render();
         break;
@@ -36655,7 +37364,7 @@ function mountCardsPanel(opts) {
         uninstallModuleArtifacts(msg);
         break;
       case "import_progress":
-        log7.info(`drawer.import_progress: phase=${msg.phase} frac=${msg.fraction ?? "?"}`);
+        log8.info(`drawer.import_progress: phase=${msg.phase} frac=${msg.fraction ?? "?"}`);
         clearNoProgress();
         state.progress = {
           phase: msg.phase,
@@ -36669,7 +37378,7 @@ function mountCardsPanel(opts) {
           importBtn.disabled = false;
           if (msg.error)
             state.notices = [msg.error];
-          log7.warn(`drawer: import error surfaced: ${msg.error ?? "(no detail)"}`);
+          log8.warn(`drawer: import error surfaced: ${msg.error ?? "(no detail)"}`);
         }
         render();
         break;
@@ -36679,7 +37388,7 @@ function mountCardsPanel(opts) {
       case "notify_legacy_card_needs_reimport":
         break;
       case "error":
-        log7.error(`drawer.error: ${msg.message}`);
+        log8.error(`drawer.error: ${msg.message}`);
         clearNoProgress();
         state.progress = {
           phase: "error",
@@ -36693,11 +37402,11 @@ function mountCardsPanel(opts) {
     }
   }
   render();
-  log7.info("cards-panel: ready");
+  log8.info("cards-panel: ready");
   return {
     handleBackendMessage,
     destroy() {
-      log7.info("cards-panel: destroy");
+      log8.info("cards-panel: destroy");
       try {
         root.replaceChildren();
       } catch {}
@@ -36711,8 +37420,8 @@ var SUB_TABS = [
   { id: "lumi", label: "Lumi", title: "Lumi-native global + chat scopes. Read-only, Risu cards do not use these." }
 ];
 function mountVariablesPanel(opts) {
-  const { sendToBackend, log: log7 } = opts;
-  log7.info("variables-panel: mounting");
+  const { sendToBackend, log: log8 } = opts;
+  log8.info("variables-panel: mounting");
   const root = opts.root;
   root.classList.add("risu-vars-drawer");
   const intro = document.createElement("p");
@@ -36776,7 +37485,7 @@ function mountVariablesPanel(opts) {
     if (activeSubTab === id)
       return;
     activeSubTab = id;
-    log7.info(`variables-tab: subtab → ${id}`);
+    log8.info(`variables-tab: subtab → ${id}`);
     render();
   }
   function renderSubnav() {
@@ -37129,7 +37838,7 @@ If the character has a default for this key, getChatVar will fall back to it. Ot
   function sendSetLocal(key2, value) {
     if (!activeChatId)
       return;
-    log7.info(`variables-tab: set_variable chat=${activeChatId} key=${key2} len=${value.length}`);
+    log8.info(`variables-tab: set_variable chat=${activeChatId} key=${key2} len=${value.length}`);
     sendToBackend({
       type: "set_variable",
       chatId: activeChatId,
@@ -37141,7 +37850,7 @@ If the character has a default for this key, getChatVar will fall back to it. Ot
   function sendDeleteLocal(key2) {
     if (!activeChatId)
       return;
-    log7.info(`variables-tab: delete_variable chat=${activeChatId} key=${key2}`);
+    log8.info(`variables-tab: delete_variable chat=${activeChatId} key=${key2}`);
     sendToBackend({
       type: "delete_variable",
       chatId: activeChatId,
@@ -37165,10 +37874,10 @@ If the character has a default for this key, getChatVar will fall back to it. Ot
   });
   refreshBtn.addEventListener("click", () => {
     if (!activeChatId) {
-      log7.info("variables-tab: refresh clicked but no active chat");
+      log8.info("variables-tab: refresh clicked but no active chat");
       return;
     }
-    log7.info(`variables-tab: refresh chat=${activeChatId}`);
+    log8.info(`variables-tab: refresh chat=${activeChatId}`);
     sendToBackend({ type: "request_variables_snapshot", chatId: activeChatId });
   });
   copyBtn.addEventListener("click", () => {
@@ -37181,14 +37890,14 @@ If the character has a default for this key, getChatVar will fall back to it. Ot
       window.setTimeout(() => {
         copyBtn.textContent = original;
       }, 1200);
-    }, (err) => log7.warn("variables-tab: copy failed", err));
+    }, (err) => log8.warn("variables-tab: copy failed", err));
   });
   function handleBackendMessage(msg) {
     if (msg.type !== "set_variables")
       return;
-    log7.info(`variables-tab.set_variables: chatId=${msg.chatId} seq=${msg.seq} ts=${msg.ts}`);
+    log8.info(`variables-tab.set_variables: chatId=${msg.chatId} seq=${msg.seq} ts=${msg.ts}`);
     if (snapshot && snapshot.chatId === msg.chatId && snapshot.seq > msg.seq) {
-      log7.info(`variables-tab: ignoring older snapshot seq=${msg.seq} (have=${snapshot.seq})`);
+      log8.info(`variables-tab: ignoring older snapshot seq=${msg.seq} (have=${snapshot.seq})`);
       return;
     }
     snapshot = {
@@ -37205,7 +37914,7 @@ If the character has a default for this key, getChatVar will fall back to it. Ot
   function setActiveChatId(chatId) {
     if (activeChatId === chatId)
       return;
-    log7.info(`variables-tab.setActiveChatId: ${activeChatId ?? "null"} -> ${chatId ?? "null"}`);
+    log8.info(`variables-tab.setActiveChatId: ${activeChatId ?? "null"} -> ${chatId ?? "null"}`);
     activeChatId = chatId;
     editBuffers.clear();
     addRow.local = { open: false, name: "", value: "" };
@@ -37219,12 +37928,12 @@ If the character has a default for this key, getChatVar will fall back to it. Ot
     render();
   }
   render();
-  log7.info("variables-panel: ready");
+  log8.info("variables-panel: ready");
   return {
     handleBackendMessage,
     setActiveChatId,
     destroy() {
-      log7.info("variables-panel: destroy");
+      log8.info("variables-panel: destroy");
       try {
         root.replaceChildren();
       } catch {}
@@ -37628,8 +38337,8 @@ var LEVEL_OPTIONS = [
   { value: "trace", label: "Trace", title: "Everything: WS frame traffic, [macro-tap], per-Lua-call ctx, periodic summaries. Very noisy." }
 ];
 function mountLogsPanel(opts) {
-  const { root, sendToBackend, log: log7 } = opts;
-  log7.info("logs-tab: mounting");
+  const { root, sendToBackend, log: log8 } = opts;
+  log8.info("logs-tab: mounting");
   const state = {
     enabled: false,
     includeChatData: false,
@@ -37696,7 +38405,7 @@ function mountLogsPanel(opts) {
       if (value === null)
         return;
       const next = value;
-      log7.info(`logs-tab: level set to ${next}`);
+      log8.info(`logs-tab: level set to ${next}`);
       sendToBackend({
         type: "log_set_state",
         enabled: state.enabled,
@@ -37721,7 +38430,7 @@ function mountLogsPanel(opts) {
       flash("Nothing to download. Enable logging first.");
       return;
     }
-    log7.info("logs-tab: requesting export");
+    log8.info("logs-tab: requesting export");
     sendToBackend({ type: "log_request_export" });
     flash("Preparing bundle…");
   });
@@ -37778,7 +38487,7 @@ function mountLogsPanel(opts) {
     }
   }
   function destroy() {
-    log7.info("logs-tab: destroy");
+    log8.info("logs-tab: destroy");
     if (flashTimer !== undefined)
       window.clearTimeout(flashTimer);
     levelSelect.destroy();
@@ -37965,8 +38674,8 @@ var SAMPLER_DEFS = [
   { key: "repetitionPenalty", label: "Rep Penalty", type: "float", min: 0, max: 2, step: 0.01, defaultHint: 0 }
 ];
 function mountSettingsPanel(opts) {
-  const { sendToBackend, log: log7 } = opts;
-  log7.info("settings-panel: mounting");
+  const { sendToBackend, log: log8 } = opts;
+  log8.info("settings-panel: mounting");
   const root = opts.root;
   root.classList.add("risu-settings-drawer");
   let settings = null;
@@ -38020,7 +38729,7 @@ function mountSettingsPanel(opts) {
     emptyMessage: "No matching connections",
     items: [],
     onChange(value) {
-      log7.info(`settings-tab: connection changed to "${value ?? "<default>"}"`);
+      log8.info(`settings-tab: connection changed to "${value ?? "<default>"}"`);
       sendToBackend({
         type: "update_settings",
         patch: { auxConnectionId: value }
@@ -38117,7 +38826,7 @@ function mountSettingsPanel(opts) {
     emptyMessage: "No matching connections",
     items: [],
     onChange(value) {
-      log7.info(`settings-tab: submodel connection changed to "${value ?? "<inherit-aux>"}"`);
+      log8.info(`settings-tab: submodel connection changed to "${value ?? "<inherit-aux>"}"`);
       sendToBackend({
         type: "update_settings",
         patch: { submodelConnectionId: value }
@@ -38270,7 +38979,7 @@ function mountSettingsPanel(opts) {
   const logsMount = document.createElement("div");
   logsHost.appendChild(logsMount);
   debugBody.appendChild(logsHost);
-  const logsHandle = mountLogsPanel({ root: logsMount, sendToBackend, log: log7 });
+  const logsHandle = mountLogsPanel({ root: logsMount, sendToBackend, log: log8 });
   const cleanupBody = document.createElement("section");
   cleanupBody.className = "lr-settings-tab-body";
   const cleanupIntro = document.createElement("p");
@@ -38414,7 +39123,7 @@ owner: ${o.ownerCharacterId}` : ""}`;
   scanBtn.addEventListener("click", () => {
     if (cleanupScanning)
       return;
-    log7.info("settings-tab: orphan scan requested");
+    log8.info("settings-tab: orphan scan requested");
     cleanupScanning = true;
     cleanupOrphans = [];
     cleanupSelected.clear();
@@ -38441,7 +39150,7 @@ owner: ${o.ownerCharacterId}` : ""}`;
     const count = cleanupSelected.size;
     if (!confirm(`Delete ${count} orphan asset${count === 1 ? "" : "s"}? This cannot be undone.`))
       return;
-    log7.info(`settings-tab: orphan delete count=${count}`);
+    log8.info(`settings-tab: orphan delete count=${count}`);
     cleanupDeleting = true;
     cleanupSummary.textContent = `Deleting ${count} asset${count === 1 ? "" : "s"}…`;
     refreshCleanupActionState();
@@ -38576,7 +39285,7 @@ owner: ${o.ownerCharacterId}` : ""}`;
 ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ? "Re-translation may take a while for large libraries." : ""}`)) {
         return;
       }
-      log7.info(`settings-tab: repair apply ${JSON.stringify(repairChecked)}`);
+      log8.info(`settings-tab: repair apply ${JSON.stringify(repairChecked)}`);
       repairApplying = true;
       applyBtn.disabled = true;
       applyBtn.textContent = "Applying…";
@@ -38595,7 +39304,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
   repairScanBtn.addEventListener("click", () => {
     if (repairScanning || repairApplying)
       return;
-    log7.info("settings-tab: repair scan requested");
+    log8.info("settings-tab: repair scan requested");
     repairScanning = true;
     repairLastSummary = null;
     repairResultBox.style.display = "none";
@@ -38821,7 +39530,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       return;
     const baseBag = channel === "aux" ? settings.auxSamplers : settings.submodelSamplers;
     const next = { ...baseBag, [key2]: value };
-    log7.info(`settings-tab: ${channel} sampler ${key2}=${value === null ? "<inherit>" : String(value)}`);
+    log8.info(`settings-tab: ${channel} sampler ${key2}=${value === null ? "<inherit>" : String(value)}`);
     if (channel === "aux") {
       sendToBackend({ type: "update_settings", patch: { auxSamplers: next } });
     } else {
@@ -38876,7 +39585,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
   }
   saveModelBtn.addEventListener("click", () => {
     const raw = modelInput.value.trim();
-    log7.info(`settings-tab: model override saved as "${raw}"`);
+    log8.info(`settings-tab: model override saved as "${raw}"`);
     sendToBackend({
       type: "update_settings",
       patch: { auxModelOverride: raw === "" ? null : raw }
@@ -38895,7 +39604,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
   resetBtn.addEventListener("click", () => {
     if (!confirm("Reset auxiliary model settings to defaults? Connection, model override, and all samplers will be cleared."))
       return;
-    log7.info("settings-tab: reset to defaults");
+    log8.info("settings-tab: reset to defaults");
     const clearedSamplers = {
       temperature: null,
       maxTokens: null,
@@ -38917,14 +39626,14 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     });
   });
   refreshBtn.addEventListener("click", () => {
-    log7.info("settings-tab: refresh connections clicked");
+    log8.info("settings-tab: refresh connections clicked");
     connections = null;
     renderConnectionSelect();
     sendToBackend({ type: "request_connections_list" });
   });
   submodelSaveModelBtn.addEventListener("click", () => {
     const raw = submodelModelInput.value.trim();
-    log7.info(`settings-tab: submodel model override saved as "${raw}"`);
+    log8.info(`settings-tab: submodel model override saved as "${raw}"`);
     sendToBackend({
       type: "update_settings",
       patch: { submodelModelOverride: raw === "" ? null : raw }
@@ -38943,7 +39652,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
   submodelResetBtn.addEventListener("click", () => {
     if (!confirm("Reset submodel settings to defaults? Connection, model override, and all submodel samplers will be cleared (falls back to Aux Model)."))
       return;
-    log7.info("settings-tab: submodel reset to defaults");
+    log8.info("settings-tab: submodel reset to defaults");
     const clearedSamplers = {
       temperature: null,
       maxTokens: null,
@@ -38965,29 +39674,29 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     });
   });
   auxPrefillCheck.addEventListener("change", () => {
-    log7.info(`settings-tab: auxPrefillCompat=${auxPrefillCheck.checked}`);
+    log8.info(`settings-tab: auxPrefillCompat=${auxPrefillCheck.checked}`);
     sendToBackend({ type: "update_settings", patch: { auxPrefillCompat: auxPrefillCheck.checked } });
   });
   submodelPrefillCheck.addEventListener("change", () => {
-    log7.info(`settings-tab: submodelPrefillCompat=${submodelPrefillCheck.checked}`);
+    log8.info(`settings-tab: submodelPrefillCompat=${submodelPrefillCheck.checked}`);
     sendToBackend({ type: "update_settings", patch: { submodelPrefillCompat: submodelPrefillCheck.checked } });
   });
   reqCheck.addEventListener("change", () => {
-    log7.info(`settings-tab: auxDebugCaptureRequest=${reqCheck.checked}`);
+    log8.info(`settings-tab: auxDebugCaptureRequest=${reqCheck.checked}`);
     sendToBackend({
       type: "update_settings",
       patch: { auxDebugCaptureRequest: reqCheck.checked }
     });
   });
   resCheck.addEventListener("change", () => {
-    log7.info(`settings-tab: auxDebugCaptureResponse=${resCheck.checked}`);
+    log8.info(`settings-tab: auxDebugCaptureResponse=${resCheck.checked}`);
     sendToBackend({
       type: "update_settings",
       patch: { auxDebugCaptureResponse: resCheck.checked }
     });
   });
   legacyMediaCheck.addEventListener("change", () => {
-    log7.info(`settings-tab: legacyMediaFindings=${legacyMediaCheck.checked}`);
+    log8.info(`settings-tab: legacyMediaFindings=${legacyMediaCheck.checked}`);
     sendToBackend({
       type: "update_settings",
       patch: { legacyMediaFindings: legacyMediaCheck.checked }
@@ -38998,7 +39707,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
   function handleBackendMessage(msg) {
     if (msg.type === "settings_pushed") {
       const setSamplers = Object.entries(msg.settings.auxSamplers).filter(([, v]) => v !== null).map(([k]) => k);
-      log7.info(`settings-tab: settings_pushed auxConn=${msg.settings.auxConnectionId ?? "<default>"} ` + `auxModel=${msg.settings.auxModelOverride ?? "<connection>"} ` + `samplersSet=[${setSamplers.join(",")}]`);
+      log8.info(`settings-tab: settings_pushed auxConn=${msg.settings.auxConnectionId ?? "<default>"} ` + `auxModel=${msg.settings.auxModelOverride ?? "<connection>"} ` + `samplersSet=[${setSamplers.join(",")}]`);
       settings = {
         auxConnectionId: msg.settings.auxConnectionId,
         auxModelOverride: msg.settings.auxModelOverride,
@@ -39017,7 +39726,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       return;
     }
     if (msg.type === "connections_list_pushed") {
-      log7.info(`settings-tab: connections_list_pushed count=${msg.connections.length}`);
+      log8.info(`settings-tab: connections_list_pushed count=${msg.connections.length}`);
       connections = msg.connections;
       render();
       return;
@@ -39025,7 +39734,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     if (msg.type === "open_settings_cleanup") {
       activateSubTab("cleanup");
       if (!cleanupScanning && !cleanupDeleting) {
-        log7.info("settings-tab: open_settings_cleanup, auto-firing scan");
+        log8.info("settings-tab: open_settings_cleanup, auto-firing scan");
         cleanupScanning = true;
         cleanupOrphans = [];
         cleanupSelected.clear();
@@ -39057,7 +39766,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       }
       renderCleanupList();
       refreshCleanupActionState();
-      log7.info(`settings-tab: orphan_scan_result orphans=${msg.orphans.length} ` + `total=${msg.summary.totalOrphans} truncated=${msg.summary.truncated} ` + `error=${msg.error ?? "<none>"}`);
+      log8.info(`settings-tab: orphan_scan_result orphans=${msg.orphans.length} ` + `total=${msg.summary.totalOrphans} truncated=${msg.summary.truncated} ` + `error=${msg.error ?? "<none>"}`);
       return;
     }
     if (msg.type === "orphan_delete_result") {
@@ -39092,7 +39801,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       }
       renderCleanupList();
       refreshCleanupActionState();
-      log7.info(`settings-tab: orphan_delete_result removed=${removedCount} ` + `failed=${msg.failed} skipped=${msg.skipped} error=${msg.error ?? "<none>"}`);
+      log8.info(`settings-tab: orphan_delete_result removed=${removedCount} ` + `failed=${msg.failed} skipped=${msg.skipped} error=${msg.error ?? "<none>"}`);
       return;
     }
     if (msg.type === "repair_scan_result") {
@@ -39110,7 +39819,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
         renderRepairResult();
       }
       refreshRepairUi();
-      log7.info(`settings-tab: repair_scan_result ${JSON.stringify(msg.summary)} error=${msg.error ?? "<none>"}`);
+      log8.info(`settings-tab: repair_scan_result ${JSON.stringify(msg.summary)} error=${msg.error ?? "<none>"}`);
       return;
     }
     if (msg.type === "repair_apply_result") {
@@ -39143,7 +39852,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       rescanBtn.className = "lrm-btn";
       rescanBtn.textContent = "Re-scan";
       rescanBtn.addEventListener("click", () => {
-        log7.info("settings-tab: repair re-scan after apply");
+        log8.info("settings-tab: repair re-scan after apply");
         repairScanning = true;
         repairLastSummary = null;
         repairResultBox.style.display = "none";
@@ -39152,21 +39861,21 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       });
       repairResultBox.appendChild(rescanBtn);
       refreshRepairUi();
-      log7.info(`settings-tab: repair_apply_result ${JSON.stringify(r)} error=${msg.error ?? "<none>"}`);
+      log8.info(`settings-tab: repair_apply_result ${JSON.stringify(r)} error=${msg.error ?? "<none>"}`);
       return;
     }
     try {
       logsHandle.handleBackendMessage(msg);
     } catch (err) {
-      log7.warn("settings-tab: logs panel handler threw:", err);
+      log8.warn("settings-tab: logs panel handler threw:", err);
     }
   }
   render();
-  log7.info("settings-panel: ready");
+  log8.info("settings-panel: ready");
   return {
     handleBackendMessage,
     destroy() {
-      log7.info("settings-panel: destroy");
+      log8.info("settings-panel: destroy");
       try {
         connSelect.destroy();
       } catch {}
@@ -39743,1006 +40452,6 @@ function setupTranslateOrchestrator(opts) {
   };
 }
 
-// src/ui/import-text-upload.ts
-var SINGLE_MAX_BYTES = 1e6;
-var UPLOAD_ENDPOINT2 = "/api/v1/spindle-uploads";
-var UPLOAD_CHUNK_BYTES2 = 16 * 1024 * 1024;
-var EXTENSION_IDENTIFIER2 = "lumirealm";
-function tusUploadBytes(bytes, fileName) {
-  return new Promise((resolve, reject) => {
-    const upload = new Upload(new Blob([bytes]), {
-      endpoint: UPLOAD_ENDPOINT2,
-      chunkSize: UPLOAD_CHUNK_BYTES2,
-      retryDelays: [0, 1000, 3000, 5000],
-      removeFingerprintOnSuccess: true,
-      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER2 },
-      onError: reject,
-      onSuccess: () => {
-        const id = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
-        if (id)
-          resolve(id);
-        else
-          reject(new Error("upload finished but no id was returned"));
-      }
-    });
-    upload.start();
-  });
-}
-async function sendImportText(send, args, uploadBytes = tusUploadBytes) {
-  const encoded = new TextEncoder().encode(args.text);
-  if (encoded.byteLength <= SINGLE_MAX_BYTES) {
-    if (args.kind === "lorebook") {
-      send({ type: "import_lorebook", characterId: args.characterId, json: args.text, ...args.filename ? { filename: args.filename } : {} });
-    } else {
-      send({ type: "import_regex", json: args.text, characterId: args.characterId, ...args.filename ? { filename: args.filename } : {} });
-    }
-    return { chunked: false };
-  }
-  const uploadId = await uploadBytes(encoded, args.filename ?? `${args.kind}.json`);
-  send({
-    type: "import_text_from_upload",
-    uploadId,
-    kind: args.kind,
-    characterId: args.characterId,
-    ...args.filename ? { filename: args.filename } : {}
-  });
-  return { chunked: true };
-}
-
-// src/ui/modules-tab.ts
-var UPLOAD_ENDPOINT3 = "/api/v1/spindle-uploads";
-var UPLOAD_CHUNK_BYTES3 = 16 * 1024 * 1024;
-var EXTENSION_IDENTIFIER3 = "lumirealm";
-var PROCESSING_TIMEOUT_MS2 = 120000;
-var ACCEPT_EXTENSIONS2 = [".risum"];
-var liveVizTimers = new Set;
-function vizStartTimer(t) {
-  t.startedAt = Date.now();
-  t.timer = setTimeout(() => {
-    t.timer = null;
-    if (t.cancelled)
-      return;
-    liveVizTimers.delete(t);
-    t.onFire();
-  }, t.remainingMs);
-}
-function vizSetTimeout(ms, onFire) {
-  const t = { remainingMs: ms, startedAt: 0, timer: null, onFire, cancelled: false };
-  liveVizTimers.add(t);
-  if (typeof document === "undefined" || document.visibilityState === "visible") {
-    vizStartTimer(t);
-  }
-  return t;
-}
-function vizClearTimeout(t) {
-  t.cancelled = true;
-  if (t.timer !== null) {
-    clearTimeout(t.timer);
-    t.timer = null;
-  }
-  liveVizTimers.delete(t);
-}
-if (typeof document !== "undefined") {
-  document.addEventListener("visibilitychange", () => {
-    const visible = document.visibilityState === "visible";
-    for (const t of liveVizTimers) {
-      if (t.cancelled)
-        continue;
-      if (visible && t.timer === null) {
-        vizStartTimer(t);
-      } else if (!visible && t.timer !== null) {
-        const elapsed = Date.now() - t.startedAt;
-        t.remainingMs = Math.max(0, t.remainingMs - elapsed);
-        clearTimeout(t.timer);
-        t.timer = null;
-      }
-    }
-  });
-}
-function mountModulesPanel(opts) {
-  const { sendToBackend, log: log7 } = opts;
-  log7.info("modules-panel: mounting");
-  const root = opts.root;
-  root.classList.add("lr-modules-drawer");
-  let modules = null;
-  let cards = [];
-  const attachedByCharacter = new Map;
-  let activeTus = null;
-  let processingTimer = null;
-  const expandedCharacters = new Set;
-  const expandedModules = new Set;
-  let lastError = null;
-  const SUB_TABS2 = [
-    { id: "characters", label: "Characters", title: "Imported Risu cards. Click any row to manage attached modules." },
-    { id: "modules", label: "Modules", title: "Module library. Click any row for details / delete." },
-    { id: "lorebooks", label: "Lorebooks", title: "Standalone lorebook import. Creates an unattached world_book; attach via Lumiverse." },
-    { id: "regex", label: "Regex", title: "Standalone Risu regex import. Installs global regex rules grouped under a folder." }
-  ];
-  const subnav = document.createElement("div");
-  subnav.className = "lr-subtabs";
-  subnav.setAttribute("role", "tablist");
-  root.appendChild(subnav);
-  const subnavBtns = new Map;
-  for (const def of SUB_TABS2) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "lr-subtab";
-    btn.textContent = def.label;
-    btn.title = def.title;
-    btn.setAttribute("role", "tab");
-    btn.setAttribute("aria-selected", "false");
-    btn.addEventListener("click", () => activateSubTab(def.id));
-    subnav.appendChild(btn);
-    subnavBtns.set(def.id, btn);
-  }
-  let activeSubTab = "characters";
-  const charBody = document.createElement("section");
-  charBody.className = "lrm-section-body lrm-tab-body";
-  const charDesc = document.createElement("div");
-  charDesc.className = "lrm-section-desc";
-  charDesc.textContent = "Upload Risu character cards (.charx, .png, .json, .jpg/.jpeg). Click any row to manage attached modules. Delete characters through Lumiverse.";
-  charBody.appendChild(charDesc);
-  const charHeaderSlot = document.createElement("div");
-  charHeaderSlot.className = "lrm-character-header-slot";
-  charBody.appendChild(charHeaderSlot);
-  const charHeaderHandle = opts.mountCharactersHeader ? opts.mountCharactersHeader(charHeaderSlot) : null;
-  let charSearchTerm = "";
-  const charFilterRow = document.createElement("div");
-  charFilterRow.className = "lrm-list-filter";
-  const charSearch = document.createElement("input");
-  charSearch.type = "search";
-  charSearch.className = "lrm-list-search";
-  charSearch.placeholder = "Search characters…";
-  charSearch.spellcheck = false;
-  charFilterRow.appendChild(charSearch);
-  const charFilterCount = document.createElement("span");
-  charFilterCount.className = "lrm-list-filter-count";
-  charFilterRow.appendChild(charFilterCount);
-  charBody.appendChild(charFilterRow);
-  const charList = document.createElement("div");
-  charList.className = "lrm-characters-list";
-  charBody.appendChild(charList);
-  const libBody = document.createElement("section");
-  libBody.className = "lrm-section-body lrm-tab-body";
-  const libToolbar = document.createElement("div");
-  libToolbar.className = "lrm-toolbar";
-  const uploadBtn = document.createElement("button");
-  uploadBtn.type = "button";
-  uploadBtn.className = "lrm-btn lrm-btn-primary";
-  uploadBtn.textContent = "Upload .risum";
-  uploadBtn.title = "Pick a .risum module file.";
-  libToolbar.appendChild(uploadBtn);
-  const refreshBtn = document.createElement("button");
-  refreshBtn.type = "button";
-  refreshBtn.className = "lrm-btn";
-  refreshBtn.textContent = "Refresh";
-  refreshBtn.title = "Re-fetch the module list.";
-  libToolbar.appendChild(refreshBtn);
-  libBody.appendChild(libToolbar);
-  let moduleSearchTerm = "";
-  const libFilterRow = document.createElement("div");
-  libFilterRow.className = "lrm-list-filter";
-  const moduleSearch = document.createElement("input");
-  moduleSearch.type = "search";
-  moduleSearch.className = "lrm-list-search";
-  moduleSearch.placeholder = "Search modules…";
-  moduleSearch.spellcheck = false;
-  libFilterRow.appendChild(moduleSearch);
-  const libFilterCount = document.createElement("span");
-  libFilterCount.className = "lrm-list-filter-count";
-  libFilterRow.appendChild(libFilterCount);
-  libBody.appendChild(libFilterRow);
-  const libList = document.createElement("div");
-  libList.className = "lrm-modules-list";
-  libBody.appendChild(libList);
-  const lorebooksBody = document.createElement("section");
-  lorebooksBody.className = "lrm-section-body lrm-tab-body";
-  const lbToolbar = document.createElement("div");
-  lbToolbar.className = "lrm-toolbar";
-  const lbUploadBtn = document.createElement("button");
-  lbUploadBtn.type = "button";
-  lbUploadBtn.className = "lrm-btn lrm-btn-primary";
-  lbUploadBtn.textContent = "Upload lorebook…";
-  lbUploadBtn.title = "Pick a Risu native or CCSv3 lorebook JSON file.";
-  lbToolbar.appendChild(lbUploadBtn);
-  lorebooksBody.appendChild(lbToolbar);
-  const lbStatus = document.createElement("div");
-  lbStatus.className = "lrm-lorebook-status";
-  lorebooksBody.appendChild(lbStatus);
-  const regexBody = document.createElement("section");
-  regexBody.className = "lrm-section-body lrm-tab-body";
-  const rxDesc = document.createElement("div");
-  rxDesc.className = "lrm-section-desc";
-  rxDesc.textContent = "Upload a Risu regex export (.json). Choose Global (applies to every chat) or a character. Rules group under a folder named after the file.";
-  regexBody.appendChild(rxDesc);
-  const rxToolbar = document.createElement("div");
-  rxToolbar.className = "lrm-toolbar";
-  const regexTargetSelect = createSearchableSelect({
-    className: "lrm-regex-target",
-    placeholder: "Global (all chats)",
-    searchPlaceholder: "Search characters…",
-    emptyMessage: "No characters",
-    items: [{ value: "", label: "Global (all chats)" }],
-    value: "",
-    onChange: () => {}
-  });
-  rxToolbar.appendChild(regexTargetSelect.root);
-  const rxUploadBtn = document.createElement("button");
-  rxUploadBtn.type = "button";
-  rxUploadBtn.className = "lrm-btn lrm-btn-primary";
-  rxUploadBtn.textContent = "Upload regex…";
-  rxUploadBtn.title = "Pick a Risu regex export JSON file.";
-  rxToolbar.appendChild(rxUploadBtn);
-  regexBody.appendChild(rxToolbar);
-  const rxStatus = document.createElement("div");
-  rxStatus.className = "lrm-lorebook-status";
-  regexBody.appendChild(rxStatus);
-  const panelsHost = document.createElement("div");
-  panelsHost.className = "lr-subtab-panels";
-  panelsHost.appendChild(charBody);
-  panelsHost.appendChild(libBody);
-  panelsHost.appendChild(lorebooksBody);
-  panelsHost.appendChild(regexBody);
-  root.appendChild(panelsHost);
-  function activateSubTab(id) {
-    activeSubTab = id;
-    for (const [k, btn] of subnavBtns) {
-      const sel = k === id;
-      btn.classList.toggle("lr-subtab-active", sel);
-      btn.setAttribute("aria-selected", sel ? "true" : "false");
-    }
-    charBody.hidden = id !== "characters";
-    libBody.hidden = id !== "modules";
-    lorebooksBody.hidden = id !== "lorebooks";
-    regexBody.hidden = id !== "regex";
-  }
-  activateSubTab(activeSubTab);
-  function setStatus(_msg, _isError = false) {}
-  function renderModuleList() {
-    libList.replaceChildren();
-    if (modules === null) {
-      libFilterCount.textContent = "";
-      const loading = document.createElement("div");
-      loading.className = "lrm-empty";
-      loading.textContent = "Loading…";
-      libList.appendChild(loading);
-      return;
-    }
-    if (modules.length === 0) {
-      libFilterCount.textContent = "";
-      const empty = document.createElement("div");
-      empty.className = "lrm-empty";
-      empty.textContent = "No modules uploaded yet.";
-      libList.appendChild(empty);
-      return;
-    }
-    const filtered = moduleSearchTerm.trim().length === 0 ? modules.slice() : modules.filter((m) => matchesSearch(moduleSearchTerm, m.name, m.translatedName, m.id, m.filename));
-    libFilterCount.textContent = moduleSearchTerm.trim().length > 0 ? `${filtered.length} of ${modules.length}` : "";
-    if (filtered.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "lrm-empty";
-      empty.textContent = `No matches for "${moduleSearchTerm}".`;
-      libList.appendChild(empty);
-      return;
-    }
-    for (const m of filtered) {
-      libList.appendChild(renderModuleRow(m));
-    }
-  }
-  function pickModuleDisplayName(m) {
-    if (getTranslateEnabled() && m.translatedName)
-      return m.translatedName;
-    return m.name;
-  }
-  function pickModuleDisplayDescription(m) {
-    if (getTranslateEnabled() && m.translatedDescription)
-      return m.translatedDescription;
-    return m.description;
-  }
-  function pickAttachedDisplayName(a) {
-    if (getTranslateEnabled() && a.translatedName)
-      return a.translatedName;
-    return a.name;
-  }
-  function renderModuleRow(m) {
-    const det = document.createElement("details");
-    det.className = "lrm-module";
-    det.open = expandedModules.has(m.id);
-    det.addEventListener("toggle", () => {
-      if (det.open)
-        expandedModules.add(m.id);
-      else
-        expandedModules.delete(m.id);
-    });
-    const sum = document.createElement("summary");
-    sum.className = "lrm-module-summary";
-    const nameEl = document.createElement("span");
-    nameEl.className = "lrm-module-name";
-    const displayName = pickModuleDisplayName(m);
-    nameEl.textContent = displayName || "(unnamed)";
-    nameEl.title = `${m.name}
-id: ${m.id}
-filename: ${m.filename}`;
-    sum.appendChild(nameEl);
-    if (getTranslateEnabled() && !m.translatedName && m.name) {
-      translateModuleName(m.id, m.name).then((tx) => {
-        if (tx && tx !== m.name && nameEl.isConnected) {
-          nameEl.textContent = tx;
-        }
-      });
-    }
-    const attachedTo = countAttachments(m.id);
-    if (attachedTo > 0) {
-      const badge = document.createElement("span");
-      badge.className = "lrm-module-attached-badge";
-      badge.textContent = `${attachedTo} attached`;
-      sum.appendChild(badge);
-    }
-    det.appendChild(sum);
-    const body = document.createElement("div");
-    body.className = "lrm-module-body";
-    const sub = document.createElement("div");
-    sub.className = "lrm-module-sub";
-    const parts = [];
-    if (m.lorebook_count > 0)
-      parts.push(`${m.lorebook_count} lore`);
-    if (m.regex_count > 0)
-      parts.push(`${m.regex_count} regex`);
-    if (m.trigger_count > 0)
-      parts.push(`${m.trigger_count} trigger`);
-    if (m.asset_count > 0)
-      parts.push(`${m.asset_count} asset`);
-    sub.textContent = parts.join(" · ") || "(empty)";
-    body.appendChild(sub);
-    if (m.description) {
-      const desc = document.createElement("div");
-      desc.className = "lrm-module-desc";
-      const displayDesc = pickModuleDisplayDescription(m);
-      desc.textContent = displayDesc || m.description;
-      body.appendChild(desc);
-      if (getTranslateEnabled() && !m.translatedDescription) {
-        translateModuleDescription(m.id, m.description).then((tx) => {
-          if (tx && tx !== m.description && desc.isConnected) {
-            desc.textContent = tx;
-          }
-        });
-      }
-    }
-    const actions = document.createElement("div");
-    actions.className = "lrm-module-actions";
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "lrm-btn lrm-btn-danger";
-    del.textContent = "Delete";
-    del.title = `Remove "${displayName}" and detach from all characters.`;
-    del.addEventListener("click", () => {
-      if (!window.confirm(`Delete module "${displayName}"?`))
-        return;
-      log7.info(`modules-panel: delete_module id=${m.id}`);
-      sendToBackend({ type: "delete_module", moduleId: m.id });
-    });
-    actions.appendChild(del);
-    body.appendChild(actions);
-    det.appendChild(body);
-    return det;
-  }
-  function countAttachments(moduleId) {
-    let n = 0;
-    for (const list of attachedByCharacter.values()) {
-      if (list.some((a) => a.id === moduleId))
-        n += 1;
-    }
-    return n;
-  }
-  const attachSelectHandles = [];
-  function destroyAttachSelects() {
-    for (const h of attachSelectHandles)
-      h.destroy();
-    attachSelectHandles.length = 0;
-  }
-  function matchesSearch(term, ...parts) {
-    const q = term.trim().toLocaleLowerCase();
-    if (q.length === 0)
-      return true;
-    for (const p of parts) {
-      if (p && p.toLocaleLowerCase().includes(q))
-        return true;
-    }
-    return false;
-  }
-  function renderCharacterList() {
-    destroyAttachSelects();
-    charList.replaceChildren();
-    if (cards.length === 0) {
-      charFilterCount.textContent = "";
-      const empty = document.createElement("div");
-      empty.className = "lrm-empty";
-      empty.textContent = "No Risu cards imported yet.";
-      charList.appendChild(empty);
-      return;
-    }
-    const filtered = charSearchTerm.trim().length === 0 ? cards.slice() : cards.filter((c) => matchesSearch(charSearchTerm, c.character_name, c.translated_character_name, c.character_id));
-    charFilterCount.textContent = charSearchTerm.trim().length > 0 ? `${filtered.length} of ${cards.length}` : "";
-    if (filtered.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "lrm-empty";
-      empty.textContent = `No matches for "${charSearchTerm}".`;
-      charList.appendChild(empty);
-      return;
-    }
-    for (const c of filtered) {
-      charList.appendChild(renderCharacterRow(c));
-    }
-  }
-  function renderCharacterRow(card) {
-    const det = document.createElement("details");
-    det.className = "lrm-character";
-    det.open = expandedCharacters.has(card.character_id);
-    det.addEventListener("toggle", () => {
-      if (det.open)
-        expandedCharacters.add(card.character_id);
-      else
-        expandedCharacters.delete(card.character_id);
-    });
-    const summary = document.createElement("summary");
-    summary.className = "lrm-character-summary";
-    const summaryName = document.createElement("span");
-    summaryName.className = "lrm-character-name";
-    const original = card.character_name ?? "(character missing)";
-    const useTranslated = getTranslateEnabled() && card.translated_character_name;
-    summaryName.textContent = useTranslated ? card.translated_character_name : original;
-    if (useTranslated)
-      summaryName.title = original;
-    summary.appendChild(summaryName);
-    if (getTranslateEnabled() && !card.translated_character_name && card.character_name) {
-      setCharacterScopeLang(card.character_id, dominantScriptLang([card.character_name]));
-      translateCharacterName(card.character_id, card.character_name).then((tx) => {
-        if (tx && tx !== card.character_name && summaryName.isConnected) {
-          summaryName.textContent = tx;
-          summaryName.title = card.character_name ?? "";
-        }
-      });
-    }
-    const attachedList = attachedByCharacter.get(card.character_id) ?? [];
-    const summaryCount = document.createElement("span");
-    summaryCount.className = "lrm-character-count";
-    summaryCount.textContent = attachedList.length === 0 ? "manage modules" : `manage modules · ${attachedList.length} attached`;
-    summaryCount.title = "Open to attach or detach modules for this character.";
-    summary.appendChild(summaryCount);
-    det.appendChild(summary);
-    const body = document.createElement("div");
-    body.className = "lrm-character-body";
-    if (attachedList.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "lrm-character-empty";
-      empty.textContent = "No modules attached to this character.";
-      body.appendChild(empty);
-    } else {
-      const ul = document.createElement("ul");
-      ul.className = "lrm-attached-list";
-      for (const a of attachedList) {
-        const li = document.createElement("li");
-        li.className = "lrm-attached-row";
-        const label = document.createElement("span");
-        label.className = "lrm-attached-name";
-        const displayAttached = pickAttachedDisplayName(a);
-        label.textContent = displayAttached || a.id;
-        li.appendChild(label);
-        if (getTranslateEnabled() && !a.translatedName && a.name) {
-          translateModuleName(a.id, a.name).then((tx) => {
-            if (tx && tx !== a.name && label.isConnected) {
-              label.textContent = tx;
-            }
-          });
-        }
-        const detach = document.createElement("button");
-        detach.type = "button";
-        detach.className = "lrm-btn-mini lrm-btn-danger";
-        detach.textContent = "Detach";
-        detach.title = `Detach "${displayAttached || a.name}" from this character.`;
-        detach.addEventListener("click", () => {
-          log7.info(`modules-panel: detach_module char=${card.character_id} module=${a.id}`);
-          sendToBackend({
-            type: "detach_module",
-            characterId: card.character_id,
-            moduleId: a.id
-          });
-        });
-        li.appendChild(detach);
-        ul.appendChild(li);
-      }
-      body.appendChild(ul);
-    }
-    const attachable = (modules ?? []).filter((m) => !attachedList.some((a) => a.id === m.id)).slice().sort((a, b) => {
-      const an = (pickModuleDisplayName(a) || a.id).toLocaleLowerCase();
-      const bn = (pickModuleDisplayName(b) || b.id).toLocaleLowerCase();
-      return an.localeCompare(bn);
-    });
-    if (attachable.length > 0) {
-      const attachWrap = document.createElement("div");
-      attachWrap.className = "lrm-attach-wrap";
-      const label = document.createElement("label");
-      label.className = "lrm-attach-label";
-      label.textContent = "Attach module:";
-      const selectId = `lrm-attach-select-${card.character_id}`;
-      label.htmlFor = selectId;
-      attachWrap.appendChild(label);
-      for (const m of attachable) {
-        if (getTranslateEnabled() && !m.translatedName && m.name) {
-          translateModuleName(m.id, m.name);
-        }
-      }
-      const attachBtn = document.createElement("button");
-      attachBtn.type = "button";
-      attachBtn.className = "lrm-btn-mini lrm-btn-primary";
-      attachBtn.textContent = "Attach";
-      attachBtn.title = "Attach the selected module.";
-      attachBtn.disabled = true;
-      const ss = createSearchableSelect({
-        id: selectId,
-        className: "lrm-attach-trigger",
-        placeholder: `Select a module… (${attachable.length})`,
-        searchPlaceholder: "Search modules…",
-        emptyMessage: "No matching modules",
-        items: attachable.map((m) => {
-          const display = pickModuleDisplayName(m) || m.id;
-          const aliases = [];
-          if (m.name && m.name !== display)
-            aliases.push(m.name);
-          if (m.translatedName && m.translatedName !== display)
-            aliases.push(m.translatedName);
-          return {
-            value: m.id,
-            label: display,
-            ...m.translatedName && m.name && m.translatedName !== m.name ? { secondary: m.name } : {},
-            ...aliases.length > 0 ? { searchTerms: aliases } : {}
-          };
-        }),
-        onChange(selected) {
-          attachBtn.disabled = selected === null;
-        }
-      });
-      attachSelectHandles.push(ss);
-      attachWrap.appendChild(ss.root);
-      attachBtn.addEventListener("click", () => {
-        const moduleId = ss.getValue();
-        if (!moduleId)
-          return;
-        log7.info(`modules-panel: attach_module char=${card.character_id} module=${moduleId}`);
-        sendToBackend({
-          type: "attach_module",
-          characterId: card.character_id,
-          moduleId
-        });
-        ss.setValue(null);
-        attachBtn.disabled = true;
-      });
-      attachWrap.appendChild(attachBtn);
-      body.appendChild(attachWrap);
-    } else if ((modules ?? []).length > 0) {
-      const all = document.createElement("div");
-      all.className = "lrm-character-empty";
-      all.textContent = "Every available module is already attached.";
-      body.appendChild(all);
-    }
-    det.appendChild(body);
-    return det;
-  }
-  function render() {
-    populateRegexTarget();
-    renderModuleList();
-    renderCharacterList();
-    if (lastError)
-      setStatus(lastError, true);
-  }
-  const unsubTranslate = subscribeTranslateEnabled(() => render());
-  let charSearchTimer;
-  charSearch.addEventListener("input", () => {
-    if (charSearchTimer !== undefined)
-      window.clearTimeout(charSearchTimer);
-    charSearchTimer = window.setTimeout(() => {
-      charSearchTerm = charSearch.value;
-      renderCharacterList();
-    }, 80);
-  });
-  let moduleSearchTimer;
-  moduleSearch.addEventListener("input", () => {
-    if (moduleSearchTimer !== undefined)
-      window.clearTimeout(moduleSearchTimer);
-    moduleSearchTimer = window.setTimeout(() => {
-      moduleSearchTerm = moduleSearch.value;
-      renderModuleList();
-    }, 80);
-  });
-  uploadBtn.addEventListener("click", () => {
-    onUploadClicked();
-  });
-  refreshBtn.addEventListener("click", () => {
-    log7.info("modules-panel: refresh clicked");
-    sendToBackend({ type: "request_modules" });
-  });
-  let lorebookImportInFlight = false;
-  lbUploadBtn.addEventListener("click", () => {
-    onLorebookUploadClicked();
-  });
-  async function onLorebookUploadClicked() {
-    if (lorebookImportInFlight)
-      return;
-    let file;
-    try {
-      file = await pickLorebookFile();
-    } catch (err) {
-      setLorebookStatus(`File pick failed: ${errMsg(err)}`, true);
-      return;
-    }
-    if (!file)
-      return;
-    let text;
-    try {
-      text = await file.text();
-    } catch (err) {
-      setLorebookStatus(`Read failed: ${errMsg(err)}`, true);
-      return;
-    }
-    lorebookImportInFlight = true;
-    lbUploadBtn.disabled = true;
-    setLorebookStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    try {
-      const sent = await sendImportText(sendToBackend, { kind: "lorebook", text, filename: file.name, characterId: null });
-      log7.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length} viaUpload=${sent.chunked}`);
-    } catch (err) {
-      lorebookImportInFlight = false;
-      lbUploadBtn.disabled = false;
-      setLorebookStatus(`Upload failed: ${errMsg(err)}`, true);
-    }
-  }
-  function setLorebookStatus(msg, isError) {
-    lbStatus.textContent = msg;
-    lbStatus.classList.toggle("lrm-lorebook-status-error", isError);
-  }
-  let regexImportInFlight = false;
-  rxUploadBtn.addEventListener("click", () => {
-    onRegexUploadClicked();
-  });
-  function populateRegexTarget() {
-    regexTargetSelect.setItems([
-      { value: "", label: "Global (all chats)" },
-      ...cards.map((c) => ({ value: c.character_id, label: c.character_name ?? c.character_id }))
-    ]);
-    if (regexTargetSelect.getValue() === null)
-      regexTargetSelect.setValue("");
-  }
-  async function onRegexUploadClicked() {
-    if (regexImportInFlight)
-      return;
-    let file;
-    try {
-      file = await pickLorebookFile();
-    } catch (err) {
-      setRegexStatus(`File pick failed: ${errMsg(err)}`, true);
-      return;
-    }
-    if (!file)
-      return;
-    let text;
-    try {
-      text = await file.text();
-    } catch (err) {
-      setRegexStatus(`Read failed: ${errMsg(err)}`, true);
-      return;
-    }
-    const targetId = regexTargetSelect.getValue() || null;
-    regexImportInFlight = true;
-    rxUploadBtn.disabled = true;
-    setRegexStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
-    try {
-      const sent = await sendImportText(sendToBackend, { kind: "regex", text, filename: file.name, characterId: targetId });
-      log7.info(`modules-panel: import_regex file=${file.name} target=${targetId ?? "global"} bytes=${text.length} viaUpload=${sent.chunked}`);
-    } catch (err) {
-      regexImportInFlight = false;
-      rxUploadBtn.disabled = false;
-      setRegexStatus(`Upload failed: ${errMsg(err)}`, true);
-    }
-  }
-  function setRegexStatus(msg, isError) {
-    rxStatus.textContent = msg;
-    rxStatus.classList.toggle("lrm-lorebook-status-error", isError);
-  }
-  async function onStandaloneRegexInstall(msg) {
-    if (!msg.ok || msg.scripts.length === 0) {
-      regexImportInFlight = false;
-      rxUploadBtn.disabled = false;
-      setRegexStatus(msg.reason ?? "Import failed.", true);
-      return;
-    }
-    setRegexStatus(`Installing ${msg.scripts.length} rule(s)…`, false);
-    try {
-      const resp = await fetch("/api/v1/regex-scripts/import", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ scripts: msg.scripts, folder: msg.folder }),
-        credentials: "include"
-      });
-      if (!resp.ok) {
-        let detail = "";
-        try {
-          detail = " — " + (await resp.text()).slice(0, 200);
-        } catch {}
-        throw new Error(`HTTP ${resp.status}${detail}`);
-      }
-      const body = await resp.json();
-      const imported = body?.imported ?? 0;
-      const skipped = body?.skipped ?? 0;
-      const dropSuffix = msg.dropped > 0 ? `, ${msg.dropped} runtime-only rule(s) dropped` : "";
-      const skipSuffix = skipped > 0 ? `, ${skipped} rejected by Lumiverse` : "";
-      const where = msg.characterId ? `for "${cards.find((c) => c.character_id === msg.characterId)?.character_name ?? msg.characterId}"` : "global";
-      log7.info(`modules-panel: regex import imported=${imported} skipped=${skipped} ` + `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length} target=${msg.characterId ?? "global"}`);
-      setRegexStatus(`Installed ${imported} ${where} rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`, imported === 0);
-    } catch (err) {
-      log7.error("modules-panel: regex import POST failed", err);
-      setRegexStatus(`Install failed: ${errMsg(err)}`, true);
-    } finally {
-      regexImportInFlight = false;
-      rxUploadBtn.disabled = false;
-    }
-  }
-  async function onUploadClicked() {
-    if (uploadBtn.disabled)
-      return;
-    log7.info("modules-panel: upload clicked");
-    let file = null;
-    try {
-      file = await pickViaInput();
-    } catch (err) {
-      log7.error("modules-panel: file pick failed", err);
-      lastError = `File pick failed: ${errMsg(err)}`;
-      render();
-      return;
-    }
-    if (!file) {
-      log7.info("modules-panel: pick dismissed");
-      return;
-    }
-    lastError = null;
-    const fileName = file.name;
-    const totalBytes = file.bytes.byteLength;
-    setStatus(`Uploading ${fileName}…`);
-    uploadBtn.disabled = true;
-    log7.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
-    let cancelled = false;
-    opts.onImportStart?.(fileName, () => {
-      cancelled = true;
-      if (activeTus) {
-        activeTus.abort(true).catch(() => {});
-        activeTus = null;
-      }
-      clearProcessingTimer();
-      uploadBtn.disabled = false;
-      log7.info("modules-panel: upload cancel requested");
-    }, totalBytes);
-    const upload = new Upload(new Blob([file.bytes]), {
-      endpoint: UPLOAD_ENDPOINT3,
-      chunkSize: UPLOAD_CHUNK_BYTES3,
-      retryDelays: [0, 1000, 3000, 5000, 1e4],
-      removeFingerprintOnSuccess: true,
-      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER3 },
-      onError: (err) => {
-        activeTus = null;
-        if (cancelled)
-          return;
-        log7.error("modules-panel: tus upload failed", err);
-        lastError = `Upload failed: ${errMsg(err)}`;
-        setStatus(lastError, true);
-        uploadBtn.disabled = false;
-      },
-      onProgress: (sent, total) => {
-        const pct = total > 0 ? Math.round(sent / total * 100) : 0;
-        setStatus(`Uploading ${fileName}… (${pct}%)`);
-        opts.onUploadProgress?.(sent, total);
-      },
-      onSuccess: () => {
-        activeTus = null;
-        const uploadId = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
-        if (!uploadId) {
-          lastError = "Upload finished but no id was returned";
-          setStatus(lastError, true);
-          uploadBtn.disabled = false;
-          return;
-        }
-        log7.info(`modules-panel: upload complete uploadId=${uploadId} — requesting processing`);
-        setStatus("Processing on server…");
-        sendToBackend({ type: "process_module_from_upload", uploadId, fileName });
-        armProcessingTimer();
-      }
-    });
-    activeTus = upload;
-    try {
-      const prev = await upload.findPreviousUploads();
-      if (cancelled)
-        return;
-      if (prev[0])
-        upload.resumeFromPreviousUpload(prev[0]);
-    } catch {}
-    if (!cancelled)
-      upload.start();
-  }
-  function clearProcessingTimer() {
-    if (processingTimer) {
-      vizClearTimeout(processingTimer);
-      processingTimer = null;
-    }
-  }
-  function armProcessingTimer() {
-    clearProcessingTimer();
-    processingTimer = vizSetTimeout(PROCESSING_TIMEOUT_MS2, () => {
-      processingTimer = null;
-      lastError = "Server did not respond after upload. The module may still be processing.";
-      setStatus(lastError, true);
-      uploadBtn.disabled = false;
-    });
-  }
-  function finishModuleUpload() {
-    if (!processingTimer)
-      return;
-    clearProcessingTimer();
-    uploadBtn.disabled = false;
-    setStatus(null);
-  }
-  function handleBackendMessage(msg) {
-    if (charHeaderHandle) {
-      try {
-        charHeaderHandle.handleBackendMessage(msg);
-      } catch (err) {
-        log7.warn("characters header handler threw:", err);
-      }
-    }
-    switch (msg.type) {
-      case "cards_updated":
-        cards = msg.cards;
-        render();
-        break;
-      case "modules_pushed":
-        modules = msg.modules;
-        for (const m of modules) {
-          setModuleScopeLang(m.id, dominantScriptLang([m.name, m.description]));
-        }
-        if (msg.attached_by_character) {
-          for (const [charId, list] of Object.entries(msg.attached_by_character)) {
-            attachedByCharacter.set(charId, list);
-          }
-        }
-        finishModuleUpload();
-        render();
-        break;
-      case "attached_modules_pushed":
-        attachedByCharacter.set(msg.characterId, msg.attached);
-        render();
-        break;
-      case "lorebook_import_result":
-        if (msg.characterId === null) {
-          lorebookImportInFlight = false;
-          lbUploadBtn.disabled = false;
-          if (msg.ok) {
-            const nameSuffix = msg.worldBookName ? ` as "${msg.worldBookName}"` : "";
-            const dropSuffix = msg.dropped > 0 ? ` (${msg.dropped} dropped)` : "";
-            setLorebookStatus(`Imported ${msg.written} entr${msg.written === 1 ? "y" : "ies"}${nameSuffix}${dropSuffix}. Attach via Lumiverse to use.`, false);
-          } else {
-            setLorebookStatus(msg.reason ?? "Import failed.", true);
-          }
-        }
-        break;
-      case "standalone_regex_install":
-        onStandaloneRegexInstall(msg);
-        break;
-      case "import_progress":
-        if (processingTimer) {
-          if (msg.phase === "done") {
-            finishModuleUpload();
-          } else if (msg.phase === "error") {
-            clearProcessingTimer();
-            uploadBtn.disabled = false;
-            lastError = msg.error ?? msg.message;
-            setStatus(lastError, true);
-          } else {
-            armProcessingTimer();
-          }
-        }
-        break;
-      case "error":
-        if (processingTimer) {
-          clearProcessingTimer();
-          uploadBtn.disabled = false;
-        }
-        if (lastError === null) {
-          lastError = msg.message;
-          setStatus(lastError, true);
-        }
-        break;
-    }
-  }
-  function destroy() {
-    log7.info("modules-panel: destroy");
-    destroyAttachSelects();
-    try {
-      regexTargetSelect.destroy();
-    } catch {}
-    if (charHeaderHandle) {
-      try {
-        charHeaderHandle.destroy();
-      } catch {}
-    }
-    try {
-      unsubTranslate();
-    } catch {}
-    try {
-      root.replaceChildren();
-    } catch {}
-  }
-  sendToBackend({ type: "get_cards" });
-  sendToBackend({ type: "request_modules" });
-  render();
-  log7.info("modules-panel: ready");
-  return { handleBackendMessage, destroy };
-}
-function pickViaInput() {
-  return new Promise((resolve, reject) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ACCEPT_EXTENSIONS2.join(",");
-    input.style.display = "none";
-    document.body.appendChild(input);
-    let settled = false;
-    const done = (result, err) => {
-      if (settled)
-        return;
-      settled = true;
-      try {
-        document.body.removeChild(input);
-      } catch {}
-      if (err)
-        reject(err);
-      else
-        resolve(result);
-    };
-    input.addEventListener("change", () => {
-      const file = input.files?.[0];
-      if (!file)
-        return done(null);
-      file.arrayBuffer().then((ab) => done({ name: file.name, bytes: new Uint8Array(ab) }), (err) => done(null, err));
-    });
-    input.addEventListener("cancel", () => done(null));
-    input.click();
-  });
-}
-function pickLorebookFile() {
-  return new Promise((resolve, reject) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json,.lorebook,application/json";
-    input.style.display = "none";
-    document.body.appendChild(input);
-    let settled = false;
-    const done = (f, err) => {
-      if (settled)
-        return;
-      settled = true;
-      try {
-        document.body.removeChild(input);
-      } catch {}
-      if (err)
-        reject(err);
-      else
-        resolve(f);
-    };
-    input.addEventListener("change", () => {
-      const list = input.files;
-      done(list && list.length > 0 ? list.item(0) : null);
-    });
-    input.addEventListener("cancel", () => done(null));
-    input.click();
-  });
-}
-
 // src/realm/markdown.ts
 var ALLOWED_TAGS = new Set([
   "p",
@@ -40770,7 +40479,15 @@ var ALLOWED_TAGS = new Set([
   "a",
   "img",
   "span",
-  "div"
+  "div",
+  "details",
+  "summary",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td"
 ]);
 var DROP_TAGS = new Set([
   "style",
@@ -40903,13 +40620,15 @@ function isAllowedUrl(url) {
     return false;
   }
 }
+var TEXT_NODE = 3;
+var ELEMENT_NODE = 1;
 function sanitizeNode(input, target, doc) {
   const node = input;
-  if (node.nodeType === Node.TEXT_NODE) {
+  if (node.nodeType === TEXT_NODE) {
     target.appendChild(doc.createTextNode(node.data));
     return;
   }
-  if (node.nodeType !== Node.ELEMENT_NODE)
+  if (node.nodeType !== ELEMENT_NODE)
     return;
   const el = node;
   const tagName = el.tagName.toLowerCase();
@@ -40954,7 +40673,8 @@ function renderDescription(raw) {
   if (!raw)
     return frag;
   const html = blockMarkdownToHtml(raw);
-  const parsed = new DOMParser().parseFromString(`<div id="root">${html}</div>`, "text/html");
+  const parsed = doc.implementation.createHTMLDocument("");
+  parsed.body.innerHTML = `<div id="root">${html}</div>`;
   const sourceRoot = parsed.getElementById("root");
   if (!sourceRoot) {
     frag.appendChild(doc.createTextNode(raw));
@@ -40970,12 +40690,1145 @@ function renderDescription(raw) {
   return frag;
 }
 
+// src/ui/import-text-upload.ts
+var SINGLE_MAX_BYTES = 1e6;
+var UPLOAD_ENDPOINT2 = "/api/v1/spindle-uploads";
+var UPLOAD_CHUNK_BYTES2 = 16 * 1024 * 1024;
+var EXTENSION_IDENTIFIER2 = "lumirealm";
+function tusUploadBytes(bytes, fileName) {
+  return new Promise((resolve, reject) => {
+    const upload = new Upload(new Blob([bytes]), {
+      endpoint: UPLOAD_ENDPOINT2,
+      chunkSize: UPLOAD_CHUNK_BYTES2,
+      retryDelays: [0, 1000, 3000, 5000],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER2 },
+      onError: reject,
+      onSuccess: () => {
+        const id = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
+        if (id)
+          resolve(id);
+        else
+          reject(new Error("upload finished but no id was returned"));
+      }
+    });
+    upload.start();
+  });
+}
+async function sendImportText(send, args, uploadBytes = tusUploadBytes) {
+  const encoded = new TextEncoder().encode(args.text);
+  if (encoded.byteLength <= SINGLE_MAX_BYTES) {
+    if (args.kind === "lorebook") {
+      send({ type: "import_lorebook", characterId: args.characterId, json: args.text, ...args.filename ? { filename: args.filename } : {} });
+    } else {
+      send({ type: "import_regex", json: args.text, characterId: args.characterId, ...args.filename ? { filename: args.filename } : {} });
+    }
+    return { chunked: false };
+  }
+  const uploadId = await uploadBytes(encoded, args.filename ?? `${args.kind}.json`);
+  send({
+    type: "import_text_from_upload",
+    uploadId,
+    kind: args.kind,
+    characterId: args.characterId,
+    ...args.filename ? { filename: args.filename } : {}
+  });
+  return { chunked: true };
+}
+
+// src/ui/modules-tab.ts
+var UPLOAD_ENDPOINT3 = "/api/v1/spindle-uploads";
+var UPLOAD_CHUNK_BYTES3 = 16 * 1024 * 1024;
+var EXTENSION_IDENTIFIER3 = "lumirealm";
+var PROCESSING_TIMEOUT_MS2 = 120000;
+var ACCEPT_EXTENSIONS2 = [".risum", ".charx"];
+var liveVizTimers = new Set;
+function vizStartTimer(t) {
+  t.startedAt = Date.now();
+  t.timer = setTimeout(() => {
+    t.timer = null;
+    if (t.cancelled)
+      return;
+    liveVizTimers.delete(t);
+    t.onFire();
+  }, t.remainingMs);
+}
+function vizSetTimeout(ms, onFire) {
+  const t = { remainingMs: ms, startedAt: 0, timer: null, onFire, cancelled: false };
+  liveVizTimers.add(t);
+  if (typeof document === "undefined" || document.visibilityState === "visible") {
+    vizStartTimer(t);
+  }
+  return t;
+}
+function vizClearTimeout(t) {
+  t.cancelled = true;
+  if (t.timer !== null) {
+    clearTimeout(t.timer);
+    t.timer = null;
+  }
+  liveVizTimers.delete(t);
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    const visible = document.visibilityState === "visible";
+    for (const t of liveVizTimers) {
+      if (t.cancelled)
+        continue;
+      if (visible && t.timer === null) {
+        vizStartTimer(t);
+      } else if (!visible && t.timer !== null) {
+        const elapsed = Date.now() - t.startedAt;
+        t.remainingMs = Math.max(0, t.remainingMs - elapsed);
+        clearTimeout(t.timer);
+        t.timer = null;
+      }
+    }
+  });
+}
+function mountModulesPanel(opts) {
+  const { sendToBackend, log: log8 } = opts;
+  log8.info("modules-panel: mounting");
+  const root = opts.root;
+  root.classList.add("lr-modules-drawer");
+  let modules = null;
+  let globalModuleIds = [];
+  let globalSelectHandle = null;
+  let cards = [];
+  const attachedByCharacter = new Map;
+  let activeTus = null;
+  let processingTimer = null;
+  const expandedCharacters = new Set;
+  const expandedModules = new Set;
+  let lastError = null;
+  const SUB_TABS2 = [
+    { id: "characters", label: "Characters", title: "Imported Risu cards. Click any row to manage attached modules." },
+    { id: "modules", label: "Modules", title: "Module library. Click any row for details / delete." },
+    { id: "lorebooks", label: "Lorebooks", title: "Standalone lorebook import. Creates an unattached world_book; attach via Lumiverse." },
+    { id: "regex", label: "Regex", title: "Standalone Risu regex import. Installs global regex rules grouped under a folder." }
+  ];
+  const subnav = document.createElement("div");
+  subnav.className = "lr-subtabs";
+  subnav.setAttribute("role", "tablist");
+  root.appendChild(subnav);
+  const subnavBtns = new Map;
+  for (const def of SUB_TABS2) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lr-subtab";
+    btn.textContent = def.label;
+    btn.title = def.title;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", "false");
+    btn.addEventListener("click", () => activateSubTab(def.id));
+    subnav.appendChild(btn);
+    subnavBtns.set(def.id, btn);
+  }
+  let activeSubTab = "characters";
+  const charBody = document.createElement("section");
+  charBody.className = "lrm-section-body lrm-tab-body";
+  const charDesc = document.createElement("div");
+  charDesc.className = "lrm-section-desc";
+  charDesc.textContent = "Upload Risu character cards (.charx, .png, .json, .jpg/.jpeg). Click any row to manage attached modules. Delete characters through Lumiverse.";
+  charBody.appendChild(charDesc);
+  const charHeaderSlot = document.createElement("div");
+  charHeaderSlot.className = "lrm-character-header-slot";
+  charBody.appendChild(charHeaderSlot);
+  const charHeaderHandle = opts.mountCharactersHeader ? opts.mountCharactersHeader(charHeaderSlot) : null;
+  let charSearchTerm = "";
+  const charFilterRow = document.createElement("div");
+  charFilterRow.className = "lrm-list-filter";
+  const charSearch = document.createElement("input");
+  charSearch.type = "search";
+  charSearch.className = "lrm-list-search";
+  charSearch.placeholder = "Search characters…";
+  charSearch.spellcheck = false;
+  charFilterRow.appendChild(charSearch);
+  const charFilterCount = document.createElement("span");
+  charFilterCount.className = "lrm-list-filter-count";
+  charFilterRow.appendChild(charFilterCount);
+  charBody.appendChild(charFilterRow);
+  const charList = document.createElement("div");
+  charList.className = "lrm-characters-list";
+  charBody.appendChild(charList);
+  const libBody = document.createElement("section");
+  libBody.className = "lrm-section-body lrm-tab-body";
+  const libToolbar = document.createElement("div");
+  libToolbar.className = "lrm-toolbar";
+  const uploadBtn = document.createElement("button");
+  uploadBtn.type = "button";
+  uploadBtn.className = "lrm-btn lrm-btn-primary";
+  uploadBtn.textContent = "Upload .risum / .charx";
+  uploadBtn.title = "Pick a legacy .risum or CharX module file.";
+  libToolbar.appendChild(uploadBtn);
+  const refreshBtn = document.createElement("button");
+  refreshBtn.type = "button";
+  refreshBtn.className = "lrm-btn";
+  refreshBtn.textContent = "Refresh";
+  refreshBtn.title = "Re-fetch the module list.";
+  libToolbar.appendChild(refreshBtn);
+  libBody.appendChild(libToolbar);
+  let moduleSearchTerm = "";
+  const libFilterRow = document.createElement("div");
+  libFilterRow.className = "lrm-list-filter";
+  const moduleSearch = document.createElement("input");
+  moduleSearch.type = "search";
+  moduleSearch.className = "lrm-list-search";
+  moduleSearch.placeholder = "Search modules…";
+  moduleSearch.spellcheck = false;
+  libFilterRow.appendChild(moduleSearch);
+  const libFilterCount = document.createElement("span");
+  libFilterCount.className = "lrm-list-filter-count";
+  libFilterRow.appendChild(libFilterCount);
+  libBody.appendChild(libFilterRow);
+  const globalBox = document.createElement("div");
+  globalBox.className = "lrm-globalbox";
+  libBody.insertBefore(globalBox, libFilterRow);
+  const libList = document.createElement("div");
+  libList.className = "lrm-modules-list";
+  libBody.appendChild(libList);
+  const lorebooksBody = document.createElement("section");
+  lorebooksBody.className = "lrm-section-body lrm-tab-body";
+  const lbToolbar = document.createElement("div");
+  lbToolbar.className = "lrm-toolbar";
+  const lbUploadBtn = document.createElement("button");
+  lbUploadBtn.type = "button";
+  lbUploadBtn.className = "lrm-btn lrm-btn-primary";
+  lbUploadBtn.textContent = "Upload lorebook…";
+  lbUploadBtn.title = "Pick a Risu native or CCSv3 lorebook JSON file.";
+  lbToolbar.appendChild(lbUploadBtn);
+  lorebooksBody.appendChild(lbToolbar);
+  const lbStatus = document.createElement("div");
+  lbStatus.className = "lrm-lorebook-status";
+  lorebooksBody.appendChild(lbStatus);
+  const regexBody = document.createElement("section");
+  regexBody.className = "lrm-section-body lrm-tab-body";
+  const rxDesc = document.createElement("div");
+  rxDesc.className = "lrm-section-desc";
+  rxDesc.textContent = "Upload a Risu regex export (.json). Choose Global (applies to every chat) or a character. Rules group under a folder named after the file.";
+  regexBody.appendChild(rxDesc);
+  const rxToolbar = document.createElement("div");
+  rxToolbar.className = "lrm-toolbar";
+  const regexTargetSelect = createSearchableSelect({
+    className: "lrm-regex-target",
+    placeholder: "Global (all chats)",
+    searchPlaceholder: "Search characters…",
+    emptyMessage: "No characters",
+    items: [{ value: "", label: "Global (all chats)" }],
+    value: "",
+    onChange: () => {}
+  });
+  rxToolbar.appendChild(regexTargetSelect.root);
+  const rxUploadBtn = document.createElement("button");
+  rxUploadBtn.type = "button";
+  rxUploadBtn.className = "lrm-btn lrm-btn-primary";
+  rxUploadBtn.textContent = "Upload regex…";
+  rxUploadBtn.title = "Pick a Risu regex export JSON file.";
+  rxToolbar.appendChild(rxUploadBtn);
+  regexBody.appendChild(rxToolbar);
+  const rxStatus = document.createElement("div");
+  rxStatus.className = "lrm-lorebook-status";
+  regexBody.appendChild(rxStatus);
+  const panelsHost = document.createElement("div");
+  panelsHost.className = "lr-subtab-panels";
+  panelsHost.appendChild(charBody);
+  panelsHost.appendChild(libBody);
+  panelsHost.appendChild(lorebooksBody);
+  panelsHost.appendChild(regexBody);
+  root.appendChild(panelsHost);
+  function activateSubTab(id) {
+    activeSubTab = id;
+    for (const [k, btn] of subnavBtns) {
+      const sel = k === id;
+      btn.classList.toggle("lr-subtab-active", sel);
+      btn.setAttribute("aria-selected", sel ? "true" : "false");
+    }
+    charBody.hidden = id !== "characters";
+    libBody.hidden = id !== "modules";
+    lorebooksBody.hidden = id !== "lorebooks";
+    regexBody.hidden = id !== "regex";
+  }
+  activateSubTab(activeSubTab);
+  function setStatus(_msg, _isError = false) {}
+  function renderGlobalBox() {
+    if (globalSelectHandle) {
+      globalSelectHandle.destroy();
+      globalSelectHandle = null;
+    }
+    globalBox.replaceChildren();
+    if (modules === null)
+      return;
+    const head = document.createElement("div");
+    head.className = "lrm-globalbox-head";
+    const title = document.createElement("span");
+    title.className = "lrm-globalbox-title";
+    title.textContent = "Global modules";
+    head.appendChild(title);
+    const hint = document.createElement("span");
+    hint.className = "lrm-globalbox-hint";
+    hint.textContent = "Applied to every character, on top of its own attachments.";
+    head.appendChild(hint);
+    globalBox.appendChild(head);
+    const chips = document.createElement("div");
+    chips.className = "lrm-chips";
+    const byId = new Map(modules.map((m) => [m.id, m]));
+    if (globalModuleIds.length === 0) {
+      const none = document.createElement("span");
+      none.className = "lrm-chips-empty";
+      none.textContent = "None";
+      chips.appendChild(none);
+    }
+    for (const id of globalModuleIds) {
+      const m = byId.get(id);
+      const chip = document.createElement("span");
+      chip.className = "lrm-chip";
+      const label = document.createElement("span");
+      label.className = "lrm-chip-label";
+      label.textContent = m ? pickModuleDisplayName(m) || m.id : "(missing)";
+      if (!m)
+        chip.classList.add("lrm-chip-missing");
+      chip.appendChild(label);
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "lrm-chip-x";
+      x.textContent = "×";
+      x.title = `Remove ${label.textContent} from global modules`;
+      x.addEventListener("click", () => {
+        sendGlobalModules(globalModuleIds.filter((g) => g !== id));
+      });
+      chip.appendChild(x);
+      chips.appendChild(chip);
+    }
+    globalBox.appendChild(chips);
+    const addable = modules.filter((m) => !globalModuleIds.includes(m.id)).slice().sort((a, b) => b.uploaded_at - a.uploaded_at);
+    if (addable.length === 0)
+      return;
+    const addWrap = document.createElement("div");
+    addWrap.className = "lrm-attach-wrap";
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "lrm-btn-mini lrm-btn-primary";
+    addBtn.textContent = "Add";
+    addBtn.disabled = true;
+    const ss = createSearchableSelect({
+      id: "lrm-global-add-select",
+      className: "lrm-attach-trigger",
+      placeholder: `Add a global module… (${addable.length})`,
+      searchPlaceholder: "Search modules…",
+      emptyMessage: "No matching modules",
+      items: addable.map((m) => {
+        const display = pickModuleDisplayName(m) || m.id;
+        const aliases = [];
+        if (m.name && m.name !== display)
+          aliases.push(m.name);
+        if (m.translatedName && m.translatedName !== display)
+          aliases.push(m.translatedName);
+        return {
+          value: m.id,
+          label: display,
+          ...m.translatedName && m.name && m.translatedName !== m.name ? { secondary: m.name } : {},
+          ...aliases.length > 0 ? { searchTerms: aliases } : {}
+        };
+      }),
+      onChange(selected) {
+        addBtn.disabled = selected === null;
+      }
+    });
+    globalSelectHandle = ss;
+    addWrap.appendChild(ss.root);
+    addBtn.addEventListener("click", () => {
+      const id = ss.getValue();
+      if (!id)
+        return;
+      sendGlobalModules([...globalModuleIds, id]);
+    });
+    addWrap.appendChild(addBtn);
+    globalBox.appendChild(addWrap);
+  }
+  function sendGlobalModules(next) {
+    log8.info(`modules-panel: set_global_modules count=${next.length}`);
+    globalModuleIds = next;
+    renderGlobalBox();
+    sendToBackend({ type: "set_global_modules", moduleIds: next });
+  }
+  function renderModuleList() {
+    renderGlobalBox();
+    libList.replaceChildren();
+    if (modules === null) {
+      libFilterCount.textContent = "";
+      const loading = document.createElement("div");
+      loading.className = "lrm-empty";
+      loading.textContent = "Loading…";
+      libList.appendChild(loading);
+      return;
+    }
+    if (modules.length === 0) {
+      libFilterCount.textContent = "";
+      const empty = document.createElement("div");
+      empty.className = "lrm-empty";
+      empty.textContent = "No modules uploaded yet.";
+      libList.appendChild(empty);
+      return;
+    }
+    const filtered = moduleSearchTerm.trim().length === 0 ? modules.slice() : modules.filter((m) => matchesSearch(moduleSearchTerm, m.name, m.translatedName, m.id, m.filename));
+    libFilterCount.textContent = moduleSearchTerm.trim().length > 0 ? `${filtered.length} of ${modules.length}` : "";
+    if (filtered.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "lrm-empty";
+      empty.textContent = `No matches for "${moduleSearchTerm}".`;
+      libList.appendChild(empty);
+      return;
+    }
+    for (const m of filtered) {
+      libList.appendChild(renderModuleRow(m));
+    }
+  }
+  function pickModuleDisplayName(m) {
+    if (getTranslateEnabled() && m.translatedName)
+      return m.translatedName;
+    return m.name;
+  }
+  function pickModuleDisplayDescription(m) {
+    if (getTranslateEnabled() && m.translatedDescription)
+      return m.translatedDescription;
+    return m.description;
+  }
+  function pickAttachedDisplayName(a) {
+    if (getTranslateEnabled() && a.translatedName)
+      return a.translatedName;
+    return a.name;
+  }
+  function renderModuleRow(m) {
+    const det = document.createElement("details");
+    det.className = "lrm-module";
+    det.open = expandedModules.has(m.id);
+    det.addEventListener("toggle", () => {
+      if (det.open)
+        expandedModules.add(m.id);
+      else
+        expandedModules.delete(m.id);
+    });
+    const sum = document.createElement("summary");
+    sum.className = "lrm-module-summary";
+    const nameEl = document.createElement("span");
+    nameEl.className = "lrm-module-name";
+    const displayName = pickModuleDisplayName(m);
+    nameEl.textContent = displayName || "(unnamed)";
+    nameEl.title = `${m.name}
+id: ${m.id}
+filename: ${m.filename}`;
+    sum.appendChild(nameEl);
+    if (getTranslateEnabled() && !m.translatedName && m.name) {
+      translateModuleName(m.id, m.name).then((tx) => {
+        if (tx && tx !== m.name && nameEl.isConnected) {
+          nameEl.textContent = tx;
+        }
+      });
+    }
+    const attachedTo = countAttachments(m.id);
+    if (attachedTo > 0) {
+      const badge = document.createElement("span");
+      badge.className = "lrm-module-attached-badge";
+      badge.textContent = `${attachedTo} attached`;
+      sum.appendChild(badge);
+    }
+    det.appendChild(sum);
+    const body = document.createElement("div");
+    body.className = "lrm-module-body";
+    const sub = document.createElement("div");
+    sub.className = "lrm-module-sub";
+    const parts = [];
+    if (m.lorebook_count > 0)
+      parts.push(`${m.lorebook_count} lore`);
+    if (m.regex_count > 0)
+      parts.push(`${m.regex_count} regex`);
+    if (m.trigger_count > 0)
+      parts.push(`${m.trigger_count} trigger`);
+    if (m.asset_count > 0)
+      parts.push(`${m.asset_count} asset`);
+    sub.textContent = parts.join(" · ") || "(empty)";
+    body.appendChild(sub);
+    if (m.description) {
+      const desc = document.createElement("div");
+      desc.className = "lrm-module-desc";
+      const setDesc = (text) => {
+        desc.replaceChildren(renderDescription(text));
+      };
+      setDesc(pickModuleDisplayDescription(m) || m.description);
+      body.appendChild(desc);
+      if (getTranslateEnabled() && !m.translatedDescription) {
+        translateModuleDescription(m.id, m.description).then((tx) => {
+          if (tx && tx !== m.description && desc.isConnected) {
+            setDesc(tx);
+          }
+        });
+      }
+    }
+    const actions = document.createElement("div");
+    actions.className = "lrm-module-actions";
+    const exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.className = "lrm-btn";
+    exportBtn.textContent = "Export";
+    exportBtn.title = `Download "${displayName}" as a .lumirealm.module.charx archive.`;
+    exportBtn.addEventListener("click", () => {
+      log8.info(`modules-panel: export_module id=${m.id}`);
+      sendToBackend({ type: "export_module", moduleId: m.id });
+    });
+    actions.appendChild(exportBtn);
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "lrm-btn lrm-btn-danger";
+    del.textContent = "Delete";
+    del.title = `Remove "${displayName}" and detach from all characters.`;
+    del.addEventListener("click", () => {
+      if (!window.confirm(`Delete module "${displayName}"?`))
+        return;
+      log8.info(`modules-panel: delete_module id=${m.id}`);
+      sendToBackend({ type: "delete_module", moduleId: m.id });
+    });
+    actions.appendChild(del);
+    body.appendChild(actions);
+    det.appendChild(body);
+    return det;
+  }
+  function countAttachments(moduleId) {
+    let n = 0;
+    for (const list of attachedByCharacter.values()) {
+      if (list.some((a) => a.id === moduleId))
+        n += 1;
+    }
+    return n;
+  }
+  const attachSelectHandles = [];
+  function destroyAttachSelects() {
+    for (const h of attachSelectHandles)
+      h.destroy();
+    attachSelectHandles.length = 0;
+  }
+  function matchesSearch(term, ...parts) {
+    const q = term.trim().toLocaleLowerCase();
+    if (q.length === 0)
+      return true;
+    for (const p of parts) {
+      if (p && p.toLocaleLowerCase().includes(q))
+        return true;
+    }
+    return false;
+  }
+  function renderCharacterList() {
+    destroyAttachSelects();
+    charList.replaceChildren();
+    if (cards.length === 0) {
+      charFilterCount.textContent = "";
+      const empty = document.createElement("div");
+      empty.className = "lrm-empty";
+      empty.textContent = "No Risu cards imported yet.";
+      charList.appendChild(empty);
+      return;
+    }
+    const filtered = charSearchTerm.trim().length === 0 ? cards.slice() : cards.filter((c) => matchesSearch(charSearchTerm, c.character_name, c.translated_character_name, c.character_id));
+    charFilterCount.textContent = charSearchTerm.trim().length > 0 ? `${filtered.length} of ${cards.length}` : "";
+    if (filtered.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "lrm-empty";
+      empty.textContent = `No matches for "${charSearchTerm}".`;
+      charList.appendChild(empty);
+      return;
+    }
+    for (const c of filtered) {
+      charList.appendChild(renderCharacterRow(c));
+    }
+  }
+  function renderCharacterRow(card) {
+    const det = document.createElement("details");
+    det.className = "lrm-character";
+    det.open = expandedCharacters.has(card.character_id);
+    det.addEventListener("toggle", () => {
+      if (det.open)
+        expandedCharacters.add(card.character_id);
+      else
+        expandedCharacters.delete(card.character_id);
+    });
+    const summary = document.createElement("summary");
+    summary.className = "lrm-character-summary";
+    const summaryName = document.createElement("span");
+    summaryName.className = "lrm-character-name";
+    const original = card.character_name ?? "(character missing)";
+    const useTranslated = getTranslateEnabled() && card.translated_character_name;
+    summaryName.textContent = useTranslated ? card.translated_character_name : original;
+    if (useTranslated)
+      summaryName.title = original;
+    summary.appendChild(summaryName);
+    if (getTranslateEnabled() && !card.translated_character_name && card.character_name) {
+      setCharacterScopeLang(card.character_id, dominantScriptLang([card.character_name]));
+      translateCharacterName(card.character_id, card.character_name).then((tx) => {
+        if (tx && tx !== card.character_name && summaryName.isConnected) {
+          summaryName.textContent = tx;
+          summaryName.title = card.character_name ?? "";
+        }
+      });
+    }
+    const attachedList = attachedByCharacter.get(card.character_id) ?? [];
+    const summaryCount = document.createElement("span");
+    summaryCount.className = "lrm-character-count";
+    summaryCount.textContent = attachedList.length === 0 ? "manage modules" : `manage modules · ${attachedList.length} attached`;
+    summaryCount.title = "Open to attach or detach modules for this character.";
+    summary.appendChild(summaryCount);
+    det.appendChild(summary);
+    const body = document.createElement("div");
+    body.className = "lrm-character-body";
+    const charActions = document.createElement("div");
+    charActions.className = "lrm-module-actions";
+    const exportCharBtn = document.createElement("button");
+    exportCharBtn.type = "button";
+    exportCharBtn.className = "lrm-btn";
+    exportCharBtn.textContent = "Export card";
+    exportCharBtn.title = `Download "${original}" as a .lumirealm.charx archive. Attached modules are not included.`;
+    exportCharBtn.addEventListener("click", () => {
+      log8.info(`modules-panel: export_character id=${card.character_id}`);
+      sendToBackend({ type: "export_character", characterId: card.character_id });
+    });
+    charActions.appendChild(exportCharBtn);
+    body.appendChild(charActions);
+    if (attachedList.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "lrm-character-empty";
+      empty.textContent = "No modules attached to this character.";
+      body.appendChild(empty);
+    } else {
+      const ul = document.createElement("ul");
+      ul.className = "lrm-attached-list";
+      for (const a of attachedList) {
+        const li = document.createElement("li");
+        li.className = "lrm-attached-row";
+        const label = document.createElement("span");
+        label.className = "lrm-attached-name";
+        const displayAttached = pickAttachedDisplayName(a);
+        label.textContent = displayAttached || a.id;
+        li.appendChild(label);
+        if (getTranslateEnabled() && !a.translatedName && a.name) {
+          translateModuleName(a.id, a.name).then((tx) => {
+            if (tx && tx !== a.name && label.isConnected) {
+              label.textContent = tx;
+            }
+          });
+        }
+        const detach = document.createElement("button");
+        detach.type = "button";
+        detach.className = "lrm-btn-mini lrm-btn-danger";
+        detach.textContent = "Detach";
+        detach.title = `Detach "${displayAttached || a.name}" from this character.`;
+        detach.addEventListener("click", () => {
+          log8.info(`modules-panel: detach_module char=${card.character_id} module=${a.id}`);
+          sendToBackend({
+            type: "detach_module",
+            characterId: card.character_id,
+            moduleId: a.id
+          });
+        });
+        li.appendChild(detach);
+        ul.appendChild(li);
+      }
+      body.appendChild(ul);
+    }
+    const attachable = (modules ?? []).filter((m) => !attachedList.some((a) => a.id === m.id)).slice().sort((a, b) => b.uploaded_at - a.uploaded_at);
+    if (attachable.length > 0) {
+      const attachWrap = document.createElement("div");
+      attachWrap.className = "lrm-attach-wrap";
+      const label = document.createElement("label");
+      label.className = "lrm-attach-label";
+      label.textContent = "Attach module:";
+      const selectId = `lrm-attach-select-${card.character_id}`;
+      label.htmlFor = selectId;
+      attachWrap.appendChild(label);
+      for (const m of attachable) {
+        if (getTranslateEnabled() && !m.translatedName && m.name) {
+          translateModuleName(m.id, m.name);
+        }
+      }
+      const attachBtn = document.createElement("button");
+      attachBtn.type = "button";
+      attachBtn.className = "lrm-btn-mini lrm-btn-primary";
+      attachBtn.textContent = "Attach";
+      attachBtn.title = "Attach the selected module.";
+      attachBtn.disabled = true;
+      const ss = createSearchableSelect({
+        id: selectId,
+        className: "lrm-attach-trigger",
+        placeholder: `Select a module… (${attachable.length})`,
+        searchPlaceholder: "Search modules…",
+        emptyMessage: "No matching modules",
+        items: attachable.map((m) => {
+          const display = pickModuleDisplayName(m) || m.id;
+          const aliases = [];
+          if (m.name && m.name !== display)
+            aliases.push(m.name);
+          if (m.translatedName && m.translatedName !== display)
+            aliases.push(m.translatedName);
+          return {
+            value: m.id,
+            label: display,
+            ...m.translatedName && m.name && m.translatedName !== m.name ? { secondary: m.name } : {},
+            ...aliases.length > 0 ? { searchTerms: aliases } : {}
+          };
+        }),
+        onChange(selected) {
+          attachBtn.disabled = selected === null;
+        }
+      });
+      attachSelectHandles.push(ss);
+      attachWrap.appendChild(ss.root);
+      attachBtn.addEventListener("click", () => {
+        const moduleId = ss.getValue();
+        if (!moduleId)
+          return;
+        log8.info(`modules-panel: attach_module char=${card.character_id} module=${moduleId}`);
+        sendToBackend({
+          type: "attach_module",
+          characterId: card.character_id,
+          moduleId
+        });
+        ss.setValue(null);
+        attachBtn.disabled = true;
+      });
+      attachWrap.appendChild(attachBtn);
+      body.appendChild(attachWrap);
+    } else if ((modules ?? []).length > 0) {
+      const all = document.createElement("div");
+      all.className = "lrm-character-empty";
+      all.textContent = "Every available module is already attached.";
+      body.appendChild(all);
+    }
+    det.appendChild(body);
+    return det;
+  }
+  function render() {
+    populateRegexTarget();
+    renderModuleList();
+    renderCharacterList();
+    if (lastError)
+      setStatus(lastError, true);
+  }
+  const unsubTranslate = subscribeTranslateEnabled(() => render());
+  let charSearchTimer;
+  charSearch.addEventListener("input", () => {
+    if (charSearchTimer !== undefined)
+      window.clearTimeout(charSearchTimer);
+    charSearchTimer = window.setTimeout(() => {
+      charSearchTerm = charSearch.value;
+      renderCharacterList();
+    }, 80);
+  });
+  let moduleSearchTimer;
+  moduleSearch.addEventListener("input", () => {
+    if (moduleSearchTimer !== undefined)
+      window.clearTimeout(moduleSearchTimer);
+    moduleSearchTimer = window.setTimeout(() => {
+      moduleSearchTerm = moduleSearch.value;
+      renderModuleList();
+    }, 80);
+  });
+  uploadBtn.addEventListener("click", () => {
+    onUploadClicked();
+  });
+  refreshBtn.addEventListener("click", () => {
+    log8.info("modules-panel: refresh clicked");
+    sendToBackend({ type: "request_modules" });
+  });
+  let lorebookImportInFlight = false;
+  lbUploadBtn.addEventListener("click", () => {
+    onLorebookUploadClicked();
+  });
+  async function onLorebookUploadClicked() {
+    if (lorebookImportInFlight)
+      return;
+    let file;
+    try {
+      file = await pickLorebookFile();
+    } catch (err) {
+      setLorebookStatus(`File pick failed: ${errMsg(err)}`, true);
+      return;
+    }
+    if (!file)
+      return;
+    let text;
+    try {
+      text = await file.text();
+    } catch (err) {
+      setLorebookStatus(`Read failed: ${errMsg(err)}`, true);
+      return;
+    }
+    lorebookImportInFlight = true;
+    lbUploadBtn.disabled = true;
+    setLorebookStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
+    try {
+      const sent = await sendImportText(sendToBackend, { kind: "lorebook", text, filename: file.name, characterId: null });
+      log8.info(`modules-panel: import_lorebook standalone file=${file.name} bytes=${text.length} viaUpload=${sent.chunked}`);
+    } catch (err) {
+      lorebookImportInFlight = false;
+      lbUploadBtn.disabled = false;
+      setLorebookStatus(`Upload failed: ${errMsg(err)}`, true);
+    }
+  }
+  function setLorebookStatus(msg, isError) {
+    lbStatus.textContent = msg;
+    lbStatus.classList.toggle("lrm-lorebook-status-error", isError);
+  }
+  let regexImportInFlight = false;
+  rxUploadBtn.addEventListener("click", () => {
+    onRegexUploadClicked();
+  });
+  function populateRegexTarget() {
+    regexTargetSelect.setItems([
+      { value: "", label: "Global (all chats)" },
+      ...cards.map((c) => ({ value: c.character_id, label: c.character_name ?? c.character_id }))
+    ]);
+    if (regexTargetSelect.getValue() === null)
+      regexTargetSelect.setValue("");
+  }
+  async function onRegexUploadClicked() {
+    if (regexImportInFlight)
+      return;
+    let file;
+    try {
+      file = await pickLorebookFile();
+    } catch (err) {
+      setRegexStatus(`File pick failed: ${errMsg(err)}`, true);
+      return;
+    }
+    if (!file)
+      return;
+    let text;
+    try {
+      text = await file.text();
+    } catch (err) {
+      setRegexStatus(`Read failed: ${errMsg(err)}`, true);
+      return;
+    }
+    const targetId = regexTargetSelect.getValue() || null;
+    regexImportInFlight = true;
+    rxUploadBtn.disabled = true;
+    setRegexStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
+    try {
+      const sent = await sendImportText(sendToBackend, { kind: "regex", text, filename: file.name, characterId: targetId });
+      log8.info(`modules-panel: import_regex file=${file.name} target=${targetId ?? "global"} bytes=${text.length} viaUpload=${sent.chunked}`);
+    } catch (err) {
+      regexImportInFlight = false;
+      rxUploadBtn.disabled = false;
+      setRegexStatus(`Upload failed: ${errMsg(err)}`, true);
+    }
+  }
+  function setRegexStatus(msg, isError) {
+    rxStatus.textContent = msg;
+    rxStatus.classList.toggle("lrm-lorebook-status-error", isError);
+  }
+  async function onStandaloneRegexInstall(msg) {
+    if (!msg.ok || msg.scripts.length === 0) {
+      regexImportInFlight = false;
+      rxUploadBtn.disabled = false;
+      setRegexStatus(msg.reason ?? "Import failed.", true);
+      return;
+    }
+    setRegexStatus(`Installing ${msg.scripts.length} rule(s)…`, false);
+    try {
+      const resp = await fetch("/api/v1/regex-scripts/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scripts: msg.scripts, folder: msg.folder }),
+        credentials: "include"
+      });
+      if (!resp.ok) {
+        let detail = "";
+        try {
+          detail = " — " + (await resp.text()).slice(0, 200);
+        } catch {}
+        throw new Error(`HTTP ${resp.status}${detail}`);
+      }
+      const body = await resp.json();
+      const imported = body?.imported ?? 0;
+      const skipped = body?.skipped ?? 0;
+      const dropSuffix = msg.dropped > 0 ? `, ${msg.dropped} runtime-only rule(s) dropped` : "";
+      const skipSuffix = skipped > 0 ? `, ${skipped} rejected by Lumiverse` : "";
+      const where = msg.characterId ? `for "${cards.find((c) => c.character_id === msg.characterId)?.character_name ?? msg.characterId}"` : "global";
+      log8.info(`modules-panel: regex import imported=${imported} skipped=${skipped} ` + `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length} target=${msg.characterId ?? "global"}`);
+      setRegexStatus(`Installed ${imported} ${where} rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`, imported === 0);
+    } catch (err) {
+      log8.error("modules-panel: regex import POST failed", err);
+      setRegexStatus(`Install failed: ${errMsg(err)}`, true);
+    } finally {
+      regexImportInFlight = false;
+      rxUploadBtn.disabled = false;
+    }
+  }
+  async function onUploadClicked() {
+    if (uploadBtn.disabled)
+      return;
+    log8.info("modules-panel: upload clicked");
+    let file = null;
+    try {
+      file = await pickViaInput();
+    } catch (err) {
+      log8.error("modules-panel: file pick failed", err);
+      lastError = `File pick failed: ${errMsg(err)}`;
+      render();
+      return;
+    }
+    if (!file) {
+      log8.info("modules-panel: pick dismissed");
+      return;
+    }
+    lastError = null;
+    const fileName = file.name;
+    const totalBytes = file.bytes.byteLength;
+    setStatus(`Uploading ${fileName}…`);
+    uploadBtn.disabled = true;
+    log8.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
+    let cancelled = false;
+    opts.onImportStart?.(fileName, () => {
+      cancelled = true;
+      if (activeTus) {
+        activeTus.abort(true).catch(() => {});
+        activeTus = null;
+      }
+      clearProcessingTimer();
+      uploadBtn.disabled = false;
+      log8.info("modules-panel: upload cancel requested");
+    }, totalBytes);
+    const upload = new Upload(new Blob([file.bytes]), {
+      endpoint: UPLOAD_ENDPOINT3,
+      chunkSize: UPLOAD_CHUNK_BYTES3,
+      retryDelays: [0, 1000, 3000, 5000, 1e4],
+      removeFingerprintOnSuccess: true,
+      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER3 },
+      onError: (err) => {
+        activeTus = null;
+        if (cancelled)
+          return;
+        log8.error("modules-panel: tus upload failed", err);
+        lastError = `Upload failed: ${errMsg(err)}`;
+        setStatus(lastError, true);
+        uploadBtn.disabled = false;
+      },
+      onProgress: (sent, total) => {
+        const pct = total > 0 ? Math.round(sent / total * 100) : 0;
+        setStatus(`Uploading ${fileName}… (${pct}%)`);
+        opts.onUploadProgress?.(sent, total);
+      },
+      onSuccess: () => {
+        activeTus = null;
+        const uploadId = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
+        if (!uploadId) {
+          lastError = "Upload finished but no id was returned";
+          setStatus(lastError, true);
+          uploadBtn.disabled = false;
+          return;
+        }
+        log8.info(`modules-panel: upload complete uploadId=${uploadId} — requesting processing`);
+        setStatus("Processing on server…");
+        sendToBackend({ type: "process_module_from_upload", uploadId, fileName });
+        armProcessingTimer();
+      }
+    });
+    activeTus = upload;
+    try {
+      const prev = await upload.findPreviousUploads();
+      if (cancelled)
+        return;
+      if (prev[0])
+        upload.resumeFromPreviousUpload(prev[0]);
+    } catch {}
+    if (!cancelled)
+      upload.start();
+  }
+  function clearProcessingTimer() {
+    if (processingTimer) {
+      vizClearTimeout(processingTimer);
+      processingTimer = null;
+    }
+  }
+  function armProcessingTimer() {
+    clearProcessingTimer();
+    processingTimer = vizSetTimeout(PROCESSING_TIMEOUT_MS2, () => {
+      processingTimer = null;
+      lastError = "Server did not respond after upload. The module may still be processing.";
+      setStatus(lastError, true);
+      uploadBtn.disabled = false;
+    });
+  }
+  function finishModuleUpload() {
+    if (!processingTimer)
+      return;
+    clearProcessingTimer();
+    uploadBtn.disabled = false;
+    setStatus(null);
+  }
+  function handleBackendMessage(msg) {
+    if (charHeaderHandle) {
+      try {
+        charHeaderHandle.handleBackendMessage(msg);
+      } catch (err) {
+        log8.warn("characters header handler threw:", err);
+      }
+    }
+    switch (msg.type) {
+      case "cards_updated":
+        cards = msg.cards;
+        render();
+        break;
+      case "modules_pushed":
+        modules = msg.modules;
+        globalModuleIds = msg.global_module_ids ?? [];
+        for (const m of modules) {
+          setModuleScopeLang(m.id, dominantScriptLang([m.name, m.description]));
+        }
+        if (msg.attached_by_character) {
+          for (const [charId, list] of Object.entries(msg.attached_by_character)) {
+            attachedByCharacter.set(charId, list);
+          }
+        }
+        finishModuleUpload();
+        render();
+        break;
+      case "attached_modules_pushed":
+        attachedByCharacter.set(msg.characterId, msg.attached);
+        render();
+        break;
+      case "lorebook_import_result":
+        if (msg.characterId === null) {
+          lorebookImportInFlight = false;
+          lbUploadBtn.disabled = false;
+          if (msg.ok) {
+            const nameSuffix = msg.worldBookName ? ` as "${msg.worldBookName}"` : "";
+            const dropSuffix = msg.dropped > 0 ? ` (${msg.dropped} dropped)` : "";
+            setLorebookStatus(`Imported ${msg.written} entr${msg.written === 1 ? "y" : "ies"}${nameSuffix}${dropSuffix}. Attach via Lumiverse to use.`, false);
+          } else {
+            setLorebookStatus(msg.reason ?? "Import failed.", true);
+          }
+        }
+        break;
+      case "standalone_regex_install":
+        onStandaloneRegexInstall(msg);
+        break;
+      case "import_progress":
+        if (processingTimer) {
+          if (msg.phase === "done") {
+            finishModuleUpload();
+          } else if (msg.phase === "error") {
+            clearProcessingTimer();
+            uploadBtn.disabled = false;
+            lastError = msg.error ?? msg.message;
+            setStatus(lastError, true);
+          } else {
+            armProcessingTimer();
+          }
+        }
+        break;
+      case "error":
+        if (processingTimer) {
+          clearProcessingTimer();
+          uploadBtn.disabled = false;
+        }
+        if (lastError === null) {
+          lastError = msg.message;
+          setStatus(lastError, true);
+        }
+        break;
+    }
+  }
+  function destroy() {
+    log8.info("modules-panel: destroy");
+    destroyAttachSelects();
+    try {
+      globalSelectHandle?.destroy();
+    } catch {}
+    globalSelectHandle = null;
+    try {
+      regexTargetSelect.destroy();
+    } catch {}
+    if (charHeaderHandle) {
+      try {
+        charHeaderHandle.destroy();
+      } catch {}
+    }
+    try {
+      unsubTranslate();
+    } catch {}
+    try {
+      root.replaceChildren();
+    } catch {}
+  }
+  sendToBackend({ type: "get_cards" });
+  sendToBackend({ type: "request_modules" });
+  render();
+  log8.info("modules-panel: ready");
+  return { handleBackendMessage, destroy };
+}
+function pickViaInput() {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ACCEPT_EXTENSIONS2.join(",");
+    input.style.display = "none";
+    document.body.appendChild(input);
+    let settled = false;
+    const done = (result, err) => {
+      if (settled)
+        return;
+      settled = true;
+      try {
+        document.body.removeChild(input);
+      } catch {}
+      if (err)
+        reject(err);
+      else
+        resolve(result);
+    };
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (!file)
+        return done(null);
+      file.arrayBuffer().then((ab) => done({ name: file.name, bytes: new Uint8Array(ab) }), (err) => done(null, err));
+    });
+    input.addEventListener("cancel", () => done(null));
+    input.click();
+  });
+}
+function pickLorebookFile() {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,.lorebook,application/json";
+    input.style.display = "none";
+    document.body.appendChild(input);
+    let settled = false;
+    const done = (f, err) => {
+      if (settled)
+        return;
+      settled = true;
+      try {
+        document.body.removeChild(input);
+      } catch {}
+      if (err)
+        reject(err);
+      else
+        resolve(f);
+    };
+    input.addEventListener("change", () => {
+      const list = input.files;
+      done(list && list.length > 0 ? list.item(0) : null);
+    });
+    input.addEventListener("cancel", () => done(null));
+    input.click();
+  });
+}
+
 // src/ui/viewer-tab.ts
 var MAX_ASSET_MB = 50;
 var MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 function mountViewerPanel(opts) {
-  const { sendToBackend, log: log7 } = opts;
-  log7.info("viewer-panel: mounting");
+  const { sendToBackend, log: log8 } = opts;
+  log8.info("viewer-panel: mounting");
   const root = opts.root;
   root.classList.add("lr-viewer-drawer");
   let cards = [];
@@ -40995,6 +41848,9 @@ function mountViewerPanel(opts) {
   const attachedByCharacter = new Map;
   let assetUploadStatus = null;
   let renamingAssetName = null;
+  let assetSelectMode = false;
+  const assetSelected = new Set;
+  let assetLastClickedIndex = null;
   let editingTriggerIndex = null;
   let editingTriggerLua = "";
   let defaultsTextBuffer = null;
@@ -41055,7 +41911,7 @@ function mountViewerPanel(opts) {
     const key2 = `character::${characterId}`;
     if (selectedSourceKey === key2)
       return true;
-    log7.info(`viewer-panel: select character=${characterId} reason=${reason}`);
+    log8.info(`viewer-panel: select character=${characterId} reason=${reason}`);
     selectedSourceKey = key2;
     sourceSelect.setValue(key2);
     const o = parseSourceKey(key2);
@@ -41091,7 +41947,7 @@ function mountViewerPanel(opts) {
       if (c.translated_character_name && c.translated_character_name !== display)
         charAliases.push(c.translated_character_name);
       items.push({
-        value: sourceKey(o),
+        value: sourceKey2(o),
         label: `${display}${suffix}`,
         group: "Characters",
         ...translate && c.translated_character_name && c.character_name && c.translated_character_name !== c.character_name ? { secondary: c.character_name } : {},
@@ -41116,7 +41972,7 @@ function mountViewerPanel(opts) {
       if (m.translatedName && m.translatedName !== display)
         modAliases.push(m.translatedName);
       items.push({
-        value: sourceKey(o),
+        value: sourceKey2(o),
         label: display || "(unnamed)",
         group: "Modules",
         ...translate && m.translatedName && m.name && m.translatedName !== m.name ? { secondary: m.name } : {},
@@ -41133,16 +41989,16 @@ function mountViewerPanel(opts) {
       return;
     }
     sourceSelect.setDisabled(false);
-    if (prev && options.some((o) => sourceKey(o) === prev)) {
+    if (prev && options.some((o) => sourceKey2(o) === prev)) {
       sourceSelect.setValue(prev);
     } else {
       const first = options[0];
-      selectedSourceKey = sourceKey(first);
+      selectedSourceKey = sourceKey2(first);
       sourceSelect.setValue(selectedSourceKey);
       requestForSelection(first);
     }
   }
-  function sourceKey(o) {
+  function sourceKey2(o) {
     return `${o.kind}::${o.id}`;
   }
   function parseSourceKey(key2) {
@@ -41175,11 +42031,14 @@ function mountViewerPanel(opts) {
     bgHtmlTextBuffer = null;
     renamingAssetName = null;
     assetSearchTerm = "";
+    assetSelectMode = false;
+    assetSelected.clear();
+    assetLastClickedIndex = null;
     activeSubTab = o.kind === "character" ? "notes" : "assets";
     assetPagesShown = 1;
     renderStatus();
     renderSurfaces();
-    log7.info(`viewer-panel: request data kind=${o.kind} id=${o.id}`);
+    log8.info(`viewer-panel: request data kind=${o.kind} id=${o.id}`);
     sendToBackend({
       type: "request_viewer_data",
       source: o.kind === "character" ? { kind: "character", characterId: o.id } : { kind: "module", moduleId: o.id }
@@ -41191,7 +42050,7 @@ function mountViewerPanel(opts) {
     const o = parseSourceKey(selectedSourceKey);
     if (!o)
       return;
-    log7.info(`viewer-panel: soft refetch kind=${o.kind} id=${o.id}`);
+    log8.info(`viewer-panel: soft refetch kind=${o.kind} id=${o.id}`);
     sendToBackend({
       type: "request_viewer_data",
       source: o.kind === "character" ? { kind: "character", characterId: o.id } : { kind: "module", moduleId: o.id }
@@ -41285,8 +42144,12 @@ function mountViewerPanel(opts) {
         if (activeSubTab === t.id)
           return;
         activeSubTab = t.id;
-        if (t.id !== "assets")
+        if (t.id !== "assets") {
           assetPagesShown = 1;
+          assetSelectMode = false;
+          assetSelected.clear();
+          assetLastClickedIndex = null;
+        }
         render();
       });
       bar.appendChild(btn);
@@ -41402,7 +42265,7 @@ function mountViewerPanel(opts) {
       resetBtn.addEventListener("click", () => {
         if (!window.confirm("Reset background HTML to the card-side baseline? Your edits are discarded."))
           return;
-        log7.info(`viewer-panel: set_background_html charId=${characterId} reset`);
+        log8.info(`viewer-panel: set_background_html charId=${characterId} reset`);
         sendToBackend({ type: "set_background_html", characterId, html: null });
         bgHtmlTextBuffer = null;
       });
@@ -41428,11 +42291,11 @@ function mountViewerPanel(opts) {
       const out = text.length > 0 ? text : null;
       if (isModule) {
         const moduleId = src.moduleId;
-        log7.info(`viewer-panel: set_module_background_embedding moduleId=${moduleId} len=${text.length}`);
+        log8.info(`viewer-panel: set_module_background_embedding moduleId=${moduleId} len=${text.length}`);
         sendToBackend({ type: "set_module_background_embedding", moduleId, html: out });
       } else {
         const characterId = src.characterId;
-        log7.info(`viewer-panel: set_background_html charId=${characterId} len=${text.length}`);
+        log8.info(`viewer-panel: set_background_html charId=${characterId} len=${text.length}`);
         sendToBackend({ type: "set_background_html", characterId, html: out });
       }
       bgHtmlTextBuffer = null;
@@ -41513,7 +42376,7 @@ affection=0`;
       resetBtn.addEventListener("click", () => {
         if (!window.confirm("Reset default variables to the card-side baseline? This discards every edit you have saved."))
           return;
-        log7.info(`viewer-panel: set_default_variables_text char=${characterId} reset`);
+        log8.info(`viewer-panel: set_default_variables_text char=${characterId} reset`);
         sendToBackend({ type: "set_default_variables_text", characterId, text: null });
         defaultsTextBuffer = null;
       });
@@ -41546,7 +42409,7 @@ affection=0`;
     }
     function commitSave() {
       const text = defaultsTextBuffer ?? "";
-      log7.info(`viewer-panel: set_default_variables_text char=${characterId} len=${text.length}`);
+      log8.info(`viewer-panel: set_default_variables_text char=${characterId} len=${text.length}`);
       sendToBackend({ type: "set_default_variables_text", characterId, text });
       defaultsTextBuffer = null;
     }
@@ -41557,6 +42420,15 @@ affection=0`;
   }
   function renderAssetsSection(assets) {
     const det = document.createElement("section");
+    const term = assetSearchTerm.trim().toLowerCase();
+    const filtered = term ? assets.filter((a) => a.name.toLowerCase().includes(term)) : assets;
+    const filteredIndexByName = new Map(filtered.map((a, i) => [a.name, i]));
+    if (assetSelected.size > 0) {
+      const live = new Set(assets.map((a) => a.name));
+      for (const name of [...assetSelected])
+        if (!live.has(name))
+          assetSelected.delete(name);
+    }
     const toolbar2 = document.createElement("div");
     toolbar2.className = "lrv-asset-toolbar";
     const addBtn = document.createElement("button");
@@ -41567,6 +42439,17 @@ affection=0`;
       onAddAssetClicked();
     });
     toolbar2.appendChild(addBtn);
+    const selectBtn = document.createElement("button");
+    selectBtn.type = "button";
+    selectBtn.className = "lrv-btn";
+    if (assetSelectMode)
+      selectBtn.classList.add("lrv-btn-active");
+    selectBtn.textContent = assetSelectMode ? "Done" : "Select";
+    selectBtn.title = assetSelectMode ? "Leave selection mode." : "Select multiple assets to delete them in one pass.";
+    selectBtn.addEventListener("click", () => {
+      setAssetSelectMode(!assetSelectMode);
+    });
+    toolbar2.appendChild(selectBtn);
     const search = document.createElement("input");
     search.type = "search";
     search.className = "lrv-asset-search";
@@ -41576,7 +42459,19 @@ affection=0`;
     toolbar2.appendChild(search);
     const filterCount = document.createElement("span");
     filterCount.className = "lrv-asset-filter-count";
+    filterCount.textContent = term ? `${filtered.length} of ${assets.length}` : "";
     toolbar2.appendChild(filterCount);
+    if (!assetSelectMode && term && filtered.length > 0) {
+      const deleteMatchingBtn = document.createElement("button");
+      deleteMatchingBtn.type = "button";
+      deleteMatchingBtn.className = "lrv-btn lrv-btn-danger";
+      deleteMatchingBtn.textContent = `Delete all ${filtered.length} matching`;
+      deleteMatchingBtn.title = `Delete every asset matching "${assetSearchTerm}".`;
+      deleteMatchingBtn.addEventListener("click", () => {
+        confirmAndDeleteAssets(filtered.map((a) => a.name), `matching "${assetSearchTerm}"`);
+      });
+      toolbar2.appendChild(deleteMatchingBtn);
+    }
     if (assetUploadStatus !== null) {
       const status2 = document.createElement("span");
       status2.className = "lrv-asset-upload-status";
@@ -41587,9 +42482,9 @@ affection=0`;
       toolbar2.appendChild(status2);
     }
     det.appendChild(toolbar2);
-    const term = assetSearchTerm.trim().toLowerCase();
-    const filtered = term ? assets.filter((a) => a.name.toLowerCase().includes(term)) : assets;
-    filterCount.textContent = term ? `${filtered.length} of ${assets.length}` : "";
+    if (assetSelectMode) {
+      det.appendChild(renderSelectionBar(assets, filtered, term));
+    }
     if (assets.length === 0) {
       const empty = document.createElement("div");
       empty.className = "lrv-empty";
@@ -41610,7 +42505,7 @@ affection=0`;
       minTileWidth: ASSET_TILE_MIN_W,
       overscanRows: ASSET_OVERSCAN_ROWS,
       getItems: () => filtered,
-      renderItem: (a) => renderAssetTile(a),
+      renderItem: (a) => renderAssetTile(a, filteredIndexByName.get(a.name) ?? -1),
       pinnedIndices: () => {
         if (renamingAssetName === null)
           return [];
@@ -41641,19 +42536,241 @@ affection=0`;
     });
     return det;
   }
+  function isCoarsePointer() {
+    try {
+      return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+    } catch {
+      return false;
+    }
+  }
+  function setAssetSelectMode(on) {
+    assetSelectMode = on;
+    if (!on) {
+      assetSelected.clear();
+      assetLastClickedIndex = null;
+    } else {
+      renamingAssetName = null;
+    }
+    render();
+  }
+  function renderSelectionBar(assets, filtered, term) {
+    const bar = document.createElement("div");
+    bar.className = "lrv-asset-selbar";
+    const count = document.createElement("span");
+    count.className = "lrv-asset-selbar-count";
+    count.textContent = `${assetSelected.size} selected`;
+    bar.appendChild(count);
+    const selectAllBtn = document.createElement("button");
+    selectAllBtn.type = "button";
+    selectAllBtn.className = "lrv-asset-action";
+    selectAllBtn.textContent = term ? `Select all ${filtered.length} matching` : `Select all ${assets.length}`;
+    selectAllBtn.addEventListener("click", () => {
+      for (const a of filtered)
+        assetSelected.add(a.name);
+      render();
+    });
+    bar.appendChild(selectAllBtn);
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "lrv-asset-action";
+    clearBtn.textContent = "Clear";
+    clearBtn.disabled = assetSelected.size === 0;
+    clearBtn.addEventListener("click", () => {
+      assetSelected.clear();
+      assetLastClickedIndex = null;
+      render();
+    });
+    bar.appendChild(clearBtn);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "lrv-asset-action lrv-asset-action-danger";
+    deleteBtn.textContent = `Delete ${assetSelected.size}`;
+    deleteBtn.disabled = assetSelected.size === 0;
+    deleteBtn.addEventListener("click", () => {
+      confirmAndDeleteAssets([...assetSelected], "selected");
+    });
+    bar.appendChild(deleteBtn);
+    const hint = document.createElement("span");
+    hint.className = "lrv-asset-selbar-hint";
+    hint.textContent = isCoarsePointer() ? "Tap to select · hold to extend from the last one" : "Shift-click for a range · Esc to exit";
+    bar.appendChild(hint);
+    return bar;
+  }
+  function confirmAndDeleteAssets(names, scopeLabel) {
+    if (names.length === 0)
+      return;
+    const n = names.length;
+    const preview = names.slice(0, 5).map((s) => `  ${s}`).join(`
+`);
+    const more = n > 5 ? `
+  …and ${n - 5} more` : "";
+    if (!confirm(`Delete ${n} ${scopeLabel} asset${n === 1 ? "" : "s"}?
+
+${preview}${more}
+
+` + `Their image files are deleted too, unless something else still uses them. ` + `This cannot be undone.`))
+      return;
+    log8.info(`viewer-panel: delete_assets count=${n} scope=${scopeLabel}`);
+    sendCurrentSourceMutation({ type: "delete_assets", assetNames: names });
+    assetSelected.clear();
+    assetLastClickedIndex = null;
+    assetSelectMode = false;
+  }
+  function toggleAssetSelection(name, index, extend) {
+    if (extend && assetLastClickedIndex !== null) {
+      selectAssetRange(assetLastClickedIndex, index);
+    } else if (assetSelected.has(name)) {
+      assetSelected.delete(name);
+    } else {
+      assetSelected.add(name);
+    }
+    assetLastClickedIndex = index;
+    render();
+  }
+  function selectAssetRange(from, to) {
+    const list = currentFilteredAssets();
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    for (let i = lo;i <= hi; i++) {
+      const entry = list[i];
+      if (entry)
+        assetSelected.add(entry.name);
+    }
+  }
+  const LONG_PRESS_MS = 450;
+  const LONG_PRESS_SLOP_PX = 10;
+  let suppressNextTileClick = false;
+  function attachLongPress(tile, name, filteredIndex) {
+    let timer;
+    let startX = 0;
+    let startY = 0;
+    const cancel = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+    tile.addEventListener("pointerdown", (e) => {
+      suppressNextTileClick = false;
+      if (e.pointerType !== "touch")
+        return;
+      const t = e.target;
+      if (t && t.closest("video, audio, a, input, button"))
+        return;
+      startX = e.clientX;
+      startY = e.clientY;
+      cancel();
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        suppressNextTileClick = true;
+        try {
+          navigator.vibrate?.(15);
+        } catch {}
+        if (!assetSelectMode) {
+          assetSelectMode = true;
+          renamingAssetName = null;
+          assetSelected.add(name);
+          assetLastClickedIndex = filteredIndex;
+          render();
+          return;
+        }
+        if (assetLastClickedIndex !== null)
+          selectAssetRange(assetLastClickedIndex, filteredIndex);
+        else
+          assetSelected.add(name);
+        assetLastClickedIndex = filteredIndex;
+        render();
+      }, LONG_PRESS_MS);
+    });
+    tile.addEventListener("pointermove", (e) => {
+      if (timer === undefined)
+        return;
+      if (Math.abs(e.clientX - startX) > LONG_PRESS_SLOP_PX || Math.abs(e.clientY - startY) > LONG_PRESS_SLOP_PX)
+        cancel();
+    });
+    tile.addEventListener("pointerup", cancel);
+    tile.addEventListener("pointercancel", cancel);
+    tile.addEventListener("pointerleave", cancel);
+  }
+  function currentFilteredAssets() {
+    const all = viewerData?.assets ?? [];
+    const term = assetSearchTerm.trim().toLowerCase();
+    return term ? all.filter((a) => a.name.toLowerCase().includes(term)) : all;
+  }
+  const VIEWER_VIDEO_EXTS = new Set([
+    "mp4",
+    "webm",
+    "mov",
+    "m4v",
+    "m4p",
+    "ogv",
+    "mkv",
+    "avi",
+    "3gp",
+    "mpeg",
+    "mpg",
+    "ts",
+    "flv"
+  ]);
+  const VIEWER_AUDIO_EXTS = new Set([
+    "mp3",
+    "wav",
+    "ogg",
+    "oga",
+    "m4a",
+    "aac",
+    "flac",
+    "opus",
+    "weba"
+  ]);
   function assetMediaKind(ext) {
     if (!ext)
       return "image";
     const e = ext.toLowerCase();
-    if (e === "mp4" || e === "webm" || e === "mov" || e === "m4v" || e === "ogv")
+    if (VIEWER_VIDEO_EXTS.has(e))
       return "video";
-    if (e === "mp3" || e === "wav" || e === "ogg" || e === "oga" || e === "m4a" || e === "aac" || e === "flac" || e === "opus")
+    if (VIEWER_AUDIO_EXTS.has(e))
       return "audio";
     return "image";
   }
-  function renderAssetTile(a) {
+  function renderAssetTile(a, filteredIndex) {
     const tile = document.createElement("div");
     tile.className = "lrv-asset-tile";
+    attachLongPress(tile, a.name, filteredIndex);
+    tile.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+    });
+    if (assetSelectMode) {
+      tile.classList.add("lrv-asset-tile-selectable");
+      const selected = assetSelected.has(a.name);
+      if (selected)
+        tile.classList.add("lrv-asset-tile-selected");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.className = "lrv-asset-tile-check";
+      box.checked = selected;
+      box.setAttribute("aria-label", `Select ${a.name}`);
+      box.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (suppressNextTileClick) {
+          suppressNextTileClick = false;
+          return;
+        }
+        toggleAssetSelection(a.name, filteredIndex, e.shiftKey);
+      });
+      tile.appendChild(box);
+      tile.addEventListener("click", (e) => {
+        const t = e.target;
+        if (t && t.closest("video, audio, a, input, button"))
+          return;
+        e.preventDefault();
+        if (suppressNextTileClick) {
+          suppressNextTileClick = false;
+          return;
+        }
+        toggleAssetSelection(a.name, filteredIndex, e.shiftKey);
+      });
+    }
     const kind = assetMediaKind(a.ext);
     if (kind === "video") {
       const vid = document.createElement("video");
@@ -41757,9 +42874,7 @@ affection=0`;
       deleteBtn.textContent = "Delete";
       deleteBtn.title = `Remove "${a.name}" from the asset list.`;
       deleteBtn.addEventListener("click", () => {
-        if (!window.confirm(`Remove asset "${a.name}"?`))
-          return;
-        sendCurrentSourceMutation({ type: "delete_asset", assetName: a.name });
+        confirmAndDeleteAssets([a.name], "this");
       });
       actions.appendChild(deleteBtn);
       cap.appendChild(actions);
@@ -41785,7 +42900,7 @@ affection=0`;
     if (!viewerData)
       return;
     const source = viewerData.source.kind === "character" ? { kind: "character", characterId: viewerData.source.characterId } : { kind: "module", moduleId: viewerData.source.moduleId };
-    log7.info(`viewer-panel: ${partial.type} via current source kind=${source.kind}`);
+    log8.info(`viewer-panel: ${partial.type} via current source kind=${source.kind}`);
     sendToBackend({ ...partial, source });
   }
   async function onAddAssetClicked() {
@@ -41795,7 +42910,7 @@ affection=0`;
     try {
       files = await pickFiles();
     } catch (err) {
-      log7.error("viewer-panel: file pick threw", err);
+      log8.error("viewer-panel: file pick threw", err);
       assetUploadStatus = { kind: "error", message: `File pick failed: ${errMsg2(err)}` };
       render();
       return;
@@ -41852,7 +42967,7 @@ affection=0`;
         } catch (err) {
           const reason = errMsg2(err);
           failures.push({ filename: p.file.name, reason });
-          log7.warn(`viewer-panel: batch upload failed name="${p.assetName}" file="${p.file.name}": ${reason}`);
+          log8.warn(`viewer-panel: batch upload failed name="${p.assetName}" file="${p.file.name}": ${reason}`);
         }
         processed += 1;
         if (processed === total || processed % Math.max(1, Math.floor(total / 20)) === 0) {
@@ -41880,7 +42995,7 @@ affection=0`;
       message: `Saving ${results.length} asset${results.length === 1 ? "" : "s"}${tail}…`
     };
     render();
-    log7.info(`viewer-panel: add_assets via snapshot source kind=${startSource.kind} entries=${results.length}`);
+    log8.info(`viewer-panel: add_assets via snapshot source kind=${startSource.kind} entries=${results.length}`);
     sendToBackend({ type: "add_assets", source: startSource, entries: results });
   }
   function formatFailureList(failures) {
@@ -42089,7 +43204,7 @@ affection=0`;
     if (!viewerData)
       return;
     const source = viewerData.source.kind === "character" ? { kind: "character", characterId: viewerData.source.characterId } : { kind: "module", moduleId: viewerData.source.moduleId };
-    log7.info(`viewer-panel: set_trigger_lua index=${index} kind=${source.kind} luaLen=${editingTriggerLua.length}`);
+    log8.info(`viewer-panel: set_trigger_lua index=${index} kind=${source.kind} luaLen=${editingTriggerLua.length}`);
     sendToBackend({
       type: "set_trigger_lua",
       source,
@@ -42547,9 +43662,9 @@ affection=0`;
       }
       case "viewer_data_pushed": {
         const d = msg.data;
-        const expectedKey = sourceKey(d.source.kind === "character" ? { kind: "character", id: d.source.characterId, label: d.source.name } : { kind: "module", id: d.source.moduleId, label: d.source.name });
+        const expectedKey = sourceKey2(d.source.kind === "character" ? { kind: "character", id: d.source.characterId, label: d.source.name } : { kind: "module", id: d.source.moduleId, label: d.source.name });
         if (selectedSourceKey !== null && selectedSourceKey !== expectedKey) {
-          log7.info(`viewer-panel: ignoring stale push for ${expectedKey} (selected=${selectedSourceKey})`);
+          log8.info(`viewer-panel: ignoring stale push for ${expectedKey} (selected=${selectedSourceKey})`);
           return;
         }
         viewerData = d;
@@ -42580,8 +43695,18 @@ affection=0`;
         break;
     }
   }
+  function onEscapeKeyDown(e) {
+    if (e.key !== "Escape" || !assetSelectMode)
+      return;
+    e.stopPropagation();
+    setAssetSelectMode(false);
+  }
+  document.addEventListener("keydown", onEscapeKeyDown, true);
   function destroy() {
-    log7.info("viewer-panel: destroy");
+    log8.info("viewer-panel: destroy");
+    try {
+      document.removeEventListener("keydown", onEscapeKeyDown, true);
+    } catch {}
     try {
       sourceSelect.destroy();
     } catch {}
@@ -42596,14 +43721,14 @@ affection=0`;
   sendToBackend({ type: "request_modules" });
   updateCurrentBtn();
   render();
-  log7.info("viewer-panel: ready");
+  log8.info("viewer-panel: ready");
   return { handleBackendMessage, destroy };
 }
 
 // src/ui/toggles-tab.ts
 function mountTogglesPanel(opts) {
-  const { sendToBackend, log: log7 } = opts;
-  log7.info("toggles-panel: mounting");
+  const { sendToBackend, log: log8 } = opts;
+  log8.info("toggles-panel: mounting");
   const root = opts.root;
   root.classList.add("lr-toggles-drawer");
   const intro = document.createElement("p");
@@ -42898,7 +44023,7 @@ function mountTogglesPanel(opts) {
   function sendSet(key2, value) {
     if (!activeChatId)
       return;
-    log7.info(`toggles-tab: set chatId=${activeChatId} key=${key2} value=${value.length > 50 ? `<${value.length} chars>` : JSON.stringify(value)}`);
+    log8.info(`toggles-tab: set chatId=${activeChatId} key=${key2} value=${value.length > 50 ? `<${value.length} chars>` : JSON.stringify(value)}`);
     sendToBackend({
       type: "set_toggle",
       chatId: activeChatId,
@@ -42945,7 +44070,7 @@ function mountTogglesPanel(opts) {
         attribution: msg.attribution
       };
       seedScopeLangs(msg.toggles);
-      log7.info(`toggles-tab.set_toggle_definitions: chat=${msg.chatId} seq=${msg.seq} count=${msg.toggles.length}`);
+      log8.info(`toggles-tab.set_toggle_definitions: chat=${msg.chatId} seq=${msg.seq} count=${msg.toggles.length}`);
       render();
       return;
     }
@@ -42966,7 +44091,7 @@ function mountTogglesPanel(opts) {
   function setActiveChatId(chatId) {
     if (activeChatId === chatId)
       return;
-    log7.info(`toggles-tab.setActiveChatId: ${activeChatId ?? "null"} -> ${chatId ?? "null"}`);
+    log8.info(`toggles-tab.setActiveChatId: ${activeChatId ?? "null"} -> ${chatId ?? "null"}`);
     activeChatId = chatId;
     textEditBuffers.clear();
     if (chatId) {
@@ -42983,12 +44108,12 @@ function mountTogglesPanel(opts) {
     render();
   }
   render();
-  log7.info("toggles-panel: ready");
+  log8.info("toggles-panel: ready");
   return {
     handleBackendMessage,
     setActiveChatId,
     destroy() {
-      log7.info("toggles-panel: destroy");
+      log8.info("toggles-panel: destroy");
       try {
         unsubTranslate();
       } catch {}
@@ -43039,8 +44164,8 @@ var STATE_SUB_TABS = [
   { id: "toggles", label: "Toggles", title: "Custom toggles." }
 ];
 function createSidebar(opts) {
-  const { ctx, sendToBackend, log: log7 } = opts;
-  log7.info("sidebar: registering single drawer tab");
+  const { ctx, sendToBackend, log: log8 } = opts;
+  log8.info("sidebar: registering single drawer tab");
   const tab = ctx.ui.registerDrawerTab({
     id: "lumirealm",
     title: "LumiRealm",
@@ -43119,12 +44244,12 @@ function createSidebar(opts) {
         const modulesHandle = mountModulesPanel({
           root: host,
           sendToBackend,
-          log: log7,
+          log: log8,
           mountCharactersHeader: (slotRoot) => mountCardsPanel({
             root: slotRoot,
             ctx,
             sendToBackend,
-            log: log7,
+            log: log8,
             ...opts.onImportStart ? { onImportStart: opts.onImportStart } : {},
             ...opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}
           }),
@@ -43147,7 +44272,7 @@ function createSidebar(opts) {
         break;
       }
       case "viewer":
-        handle = mountViewerPanel({ root: host, sendToBackend, log: log7 });
+        handle = mountViewerPanel({ root: host, sendToBackend, log: log8 });
         break;
       case "state": {
         let activateSub = function(id2) {
@@ -43171,12 +44296,12 @@ function createSidebar(opts) {
           let sub;
           switch (id2) {
             case "variables":
-              sub = mountVariablesPanel({ root: h, sendToBackend, log: log7 });
+              sub = mountVariablesPanel({ root: h, sendToBackend, log: log8 });
               if (sub.setActiveChatId)
                 sub.setActiveChatId(cachedActiveChatId);
               break;
             case "toggles":
-              sub = mountTogglesPanel({ root: h, sendToBackend, log: log7 });
+              sub = mountTogglesPanel({ root: h, sendToBackend, log: log8 });
               if (sub.setActiveChatId)
                 sub.setActiveChatId(cachedActiveChatId);
               break;
@@ -43225,7 +44350,7 @@ function createSidebar(opts) {
               try {
                 sub.handleBackendMessage(msg);
               } catch (err) {
-                log7.error("state subpanel msg threw:", err);
+                log8.error("state subpanel msg threw:", err);
               }
             }
           },
@@ -43235,7 +44360,7 @@ function createSidebar(opts) {
                 try {
                   sub.setActiveChatId(chatId);
                 } catch (err) {
-                  log7.error("state subpanel chat threw:", err);
+                  log8.error("state subpanel chat threw:", err);
                 }
               }
             }
@@ -43254,7 +44379,7 @@ function createSidebar(opts) {
         break;
       }
       case "settings": {
-        const settingsHandle = mountSettingsPanel({ root: host, sendToBackend, log: log7 });
+        const settingsHandle = mountSettingsPanel({ root: host, sendToBackend, log: log8 });
         handle = {
           handleBackendMessage(msg) {
             settingsHandle.handleBackendMessage(msg);
@@ -43276,7 +44401,7 @@ function createSidebar(opts) {
       }
     }
     panels.set(id, handle);
-    log7.info(`sidebar: panel mounted id=${id}`);
+    log8.info(`sidebar: panel mounted id=${id}`);
     return handle;
   }
   function activateSubTab(id) {
@@ -43303,7 +44428,7 @@ function createSidebar(opts) {
       try {
         tab.activate();
       } catch (err) {
-        log7.warn("sidebar: tab.activate threw", err);
+        log8.warn("sidebar: tab.activate threw", err);
       }
       if (activeSubTab !== "settings")
         activateSubTab("settings");
@@ -43312,7 +44437,7 @@ function createSidebar(opts) {
       try {
         handle.handleBackendMessage(msg);
       } catch (err) {
-        log7.error("sidebar: panel handleBackendMessage threw:", err);
+        log8.error("sidebar: panel handleBackendMessage threw:", err);
       }
     }
   }
@@ -43323,13 +44448,13 @@ function createSidebar(opts) {
         try {
           handle.setActiveChatId(chatId);
         } catch (err) {
-          log7.error("sidebar: panel setActiveChatId threw:", err);
+          log8.error("sidebar: panel setActiveChatId threw:", err);
         }
       }
     }
   }
   function destroy() {
-    log7.info("sidebar: destroy");
+    log8.info("sidebar: destroy");
     for (const handle of panels.values()) {
       try {
         handle.destroy();
@@ -43352,8 +44477,8 @@ function createSidebar(opts) {
 
 // src/ui/aux-debug.ts
 var MAX_ENTRIES = 50;
-function createAuxDebugPanel(log7) {
-  log7.info("aux-debug: creating panel");
+function createAuxDebugPanel(log8) {
+  log8.info("aux-debug: creating panel");
   const host = document.createElement("div");
   host.className = "risu-aux-debug-host";
   host.hidden = true;
@@ -43438,7 +44563,7 @@ function createAuxDebugPanel(log7) {
     unread = 0;
     refreshListEmpty();
     refreshToggle();
-    log7.info("aux-debug: cleared");
+    log8.info("aux-debug: cleared");
   });
   function formatHeader(msg) {
     const ts = new Date(msg.ts);
@@ -43518,11 +44643,11 @@ function createAuxDebugPanel(log7) {
   function handleBackendMessage(msg) {
     if (msg.type !== "aux_debug_capture")
       return;
-    log7.info(`aux-debug: capture id=${msg.id} channel=${msg.channel ?? "aux"} kind=${msg.kind} ` + `chatId=${msg.chatId ?? "<none>"} elapsed=${msg.elapsedMs ?? "—"}ms`);
+    log8.info(`aux-debug: capture id=${msg.id} channel=${msg.channel ?? "aux"} kind=${msg.kind} ` + `chatId=${msg.chatId ?? "<none>"} elapsed=${msg.elapsedMs ?? "—"}ms`);
     addEntry(msg);
   }
   function destroy() {
-    log7.info("aux-debug: destroy");
+    log8.info("aux-debug: destroy");
     try {
       host.remove();
     } catch {}
@@ -43530,7 +44655,7 @@ function createAuxDebugPanel(log7) {
   }
   refreshListEmpty();
   refreshToggle();
-  log7.info("aux-debug: ready");
+  log8.info("aux-debug: ready");
   return { handleBackendMessage, destroy };
 }
 function formatJson(value) {
@@ -44280,7 +45405,7 @@ var PHASE_LABEL = {
   error: "Error"
 };
 var AUTO_HIDE_DELAY_MS = 1200;
-function setupImportOverlay(log7, sendToBackend) {
+function setupImportOverlay(log8, sendToBackend) {
   const overlay = document.createElement("div");
   overlay.className = "lr-import-overlay";
   overlay.hidden = true;
@@ -44372,7 +45497,7 @@ function setupImportOverlay(log7, sendToBackend) {
     dismissBtn.hidden = true;
     consentEl.hidden = true;
     overlay.hidden = false;
-    log7.info(`import-overlay: show label=${label}`);
+    log8.info(`import-overlay: show label=${label}`);
   }
   function lockCancel() {
     pendingCancel = null;
@@ -44386,7 +45511,7 @@ function setupImportOverlay(log7, sendToBackend) {
       try {
         cb();
       } catch (err) {
-        log7.warn("import-overlay: cancel callback threw", err);
+        log8.warn("import-overlay: cancel callback threw", err);
       }
     }
     hideNow();
@@ -44398,7 +45523,7 @@ function setupImportOverlay(log7, sendToBackend) {
     }
     visible = false;
     overlay.hidden = true;
-    log7.info("import-overlay: hidden");
+    log8.info("import-overlay: hidden");
   }
   function scheduleHide() {
     if (hideTimer)
@@ -44490,7 +45615,7 @@ function setupImportOverlay(log7, sendToBackend) {
     declineBtn.disabled = false;
     consentEl.hidden = false;
     setIndeterminate();
-    log7.info(`import-overlay: consent prompt requestId=${prompt2.requestId}`);
+    log8.info(`import-overlay: consent prompt requestId=${prompt2.requestId}`);
   }
   function resolveConsent(confirmed) {
     const requestId = pendingConsentRequestId;
@@ -44500,13 +45625,13 @@ function setupImportOverlay(log7, sendToBackend) {
     grantBtn.disabled = true;
     declineBtn.disabled = true;
     consentEl.hidden = true;
-    log7.info(`import-overlay: consent response requestId=${requestId} confirmed=${confirmed}`);
+    log8.info(`import-overlay: consent response requestId=${requestId} confirmed=${confirmed}`);
     sendToBackend({ type: "consent_response", requestId, confirmed });
   }
   grantBtn.addEventListener("click", () => resolveConsent(true));
   declineBtn.addEventListener("click", () => resolveConsent(false));
   function notifyImportStart(newLabel, source, onCancel, totalBytes) {
-    log7.info(`import-overlay: notifyImportStart label=${newLabel} source=${source} cancellable=${!!onCancel} totalBytes=${totalBytes ?? "?"}`);
+    log8.info(`import-overlay: notifyImportStart label=${newLabel} source=${source} cancellable=${!!onCancel} totalBytes=${totalBytes ?? "?"}`);
     uploadTotalBytes = typeof totalBytes === "number" && totalBytes > 0 ? totalBytes : 0;
     showOverlay(newLabel);
     pendingCancel = onCancel ?? null;
@@ -44602,7 +45727,7 @@ function parseBgmCtrl(ctrl) {
   const safe = Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0.5;
   return { volume: safe, url };
 }
-function setupBgmPlayer(log7) {
+function setupBgmPlayer(log8) {
   let bgmElement = null;
   let currentUrl = null;
   let pollHandle = null;
@@ -44617,7 +45742,7 @@ function setupBgmPlayer(log7) {
     if (bgmElement)
       return;
     const { volume: safeVolume, url } = parsed;
-    log7.info(`bgm: starting url=${url.slice(0, 60)}... volume=${safeVolume}`);
+    log8.info(`bgm: starting url=${url.slice(0, 60)}... volume=${safeVolume}`);
     try {
       const audio = new Audio(url);
       audio.volume = safeVolume;
@@ -44631,7 +45756,7 @@ function setupBgmPlayer(log7) {
         }
       });
       audio.addEventListener("error", (e) => {
-        log7.warn(`bgm: audio error url=${url.slice(0, 60)}... event=${String(e)}`);
+        log8.warn(`bgm: audio error url=${url.slice(0, 60)}... event=${String(e)}`);
         if (bgmElement === audio) {
           bgmElement = null;
           currentUrl = null;
@@ -44640,14 +45765,14 @@ function setupBgmPlayer(log7) {
       bgmElement = audio;
       currentUrl = url;
       audio.play().catch((err) => {
-        log7.warn(`bgm: play() rejected — ${err.message}. ` + `Browser autoplay policy may require user gesture.`);
+        log8.warn(`bgm: play() rejected — ${err.message}. ` + `Browser autoplay policy may require user gesture.`);
         if (bgmElement === audio) {
           bgmElement = null;
           currentUrl = null;
         }
       });
     } catch (err) {
-      log7.warn(`bgm: setup failed url=${url.slice(0, 60)}... — ${err.message}`);
+      log8.warn(`bgm: setup failed url=${url.slice(0, 60)}... — ${err.message}`);
     }
   }
   function walkSubtree(root) {
@@ -44685,7 +45810,7 @@ function setupBgmPlayer(log7) {
     try {
       walkSubtree(document.body);
     } catch (err) {
-      log7.warn(`bgm: scanRoot threw — ${err.message}`);
+      log8.warn(`bgm: scanRoot threw — ${err.message}`);
     }
   }
   let observer = null;
@@ -44705,7 +45830,7 @@ function setupBgmPlayer(log7) {
     });
     observer.observe(document.body, { childList: true, subtree: true });
   } catch (err) {
-    log7.warn(`bgm: MutationObserver setup failed — ${err.message}`);
+    log8.warn(`bgm: MutationObserver setup failed — ${err.message}`);
   }
   function poll() {
     if (stopped)
@@ -44714,7 +45839,7 @@ function setupBgmPlayer(log7) {
     pollHandle = setTimeout(poll, BGM_POLL_MS);
   }
   poll();
-  log7.info("bgm: setup ok (singleton observer + 100ms poll)");
+  log8.info("bgm: setup ok (singleton observer + 100ms poll)");
   return {
     destroy() {
       stopped = true;
@@ -44733,7 +45858,7 @@ function setupBgmPlayer(log7) {
         bgmElement = null;
       }
       currentUrl = null;
-      log7.info("bgm: destroyed");
+      log8.info("bgm: destroyed");
     }
   };
 }
@@ -44815,7 +45940,7 @@ async function uploadPng(png, filename) {
   }
 }
 function setupSvgRasterizer(opts) {
-  const { log: log7, sendToBackend } = opts;
+  const { log: log8, sendToBackend } = opts;
   async function rasterizeBatch(msg) {
     const tStart = performance.now();
     const total = msg.svgs.length;
@@ -44827,9 +45952,9 @@ function setupSvgRasterizer(opts) {
       });
       return;
     }
-    log7.info(`svg-raster: starting char=${msg.characterId} name=${msg.characterName} ` + `count=${total}`);
+    log8.info(`svg-raster: starting char=${msg.characterId} name=${msg.characterName} ` + `count=${total}`);
     const theme = snapshotTheme();
-    log7.info(`svg-raster: theme snapshot color=${theme.color} ` + `accent=${theme.accent || "<unset>"} text=${theme.text || "<unset>"}`);
+    log8.info(`svg-raster: theme snapshot color=${theme.color} ` + `accent=${theme.accent || "<unset>"} text=${theme.text || "<unset>"}`);
     const CONCURRENCY = 6;
     const queue = [...msg.svgs];
     const imageIdByMarker = {};
@@ -44846,7 +45971,7 @@ function setupSvgRasterizer(opts) {
           imageIdByMarker[String(task.markerN)] = null;
           failed += 1;
           done += 1;
-          log7.warn(`svg-raster: rasterizeOne failed markerN=${task.markerN} ` + `class=${task.classification} svg_len=${task.svg.length}`);
+          log8.warn(`svg-raster: rasterizeOne failed markerN=${task.markerN} ` + `class=${task.classification} svg_len=${task.svg.length}`);
           continue;
         }
         const fname = `svg-raster-${task.markerN}.png`;
@@ -44854,7 +45979,7 @@ function setupSvgRasterizer(opts) {
         if (!imageId) {
           imageIdByMarker[String(task.markerN)] = null;
           failed += 1;
-          log7.warn(`svg-raster: uploadPng failed markerN=${task.markerN} ` + `bytes=${png.byteLength}`);
+          log8.warn(`svg-raster: uploadPng failed markerN=${task.markerN} ` + `bytes=${png.byteLength}`);
         } else {
           imageIdByMarker[String(task.markerN)] = imageId;
         }
@@ -44863,7 +45988,7 @@ function setupSvgRasterizer(opts) {
     };
     const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker());
     await Promise.all(workers);
-    log7.info(`svg-raster: done char=${msg.characterId} total=${total} ` + `successful=${done - failed} failed=${failed} ` + `elapsed=${Math.round(performance.now() - tStart)}ms`);
+    log8.info(`svg-raster: done char=${msg.characterId} total=${total} ` + `successful=${done - failed} failed=${failed} ` + `elapsed=${Math.round(performance.now() - tStart)}ms`);
     sendToBackend({
       type: "register_svg_raster_index",
       characterId: msg.characterId,
@@ -44873,7 +45998,7 @@ function setupSvgRasterizer(opts) {
   return {
     handleRasterizeSvgsMessage(msg) {
       rasterizeBatch(msg).catch((err) => {
-        log7.error(`svg-raster: rasterizeBatch threw char=${msg.characterId}: ${err.message}`);
+        log8.error(`svg-raster: rasterizeBatch threw char=${msg.characterId}: ${err.message}`);
         sendToBackend({
           type: "register_svg_raster_index",
           characterId: msg.characterId,
@@ -45560,7 +46685,7 @@ function computeModalMaxHeight() {
   return Math.max(400, Math.min(MODAL_MAX_HEIGHT_CAP, vh - MODAL_VIEWPORT_MARGIN * 2));
 }
 function setupRealmModal(deps) {
-  const { ctx, sendToBackend, log: log7 } = deps;
+  const { ctx, sendToBackend, log: log8 } = deps;
   const cleanups = [];
   cleanups.push(ctx.dom.addStyle(REALM_STYLES));
   const state = {
@@ -45601,7 +46726,7 @@ function setupRealmModal(deps) {
   function open() {
     if (surface)
       return;
-    log7.info("realm: opening modal");
+    log8.info("realm: opening modal");
     let modalHandle;
     try {
       modalHandle = ctx.ui.showModal({
@@ -45610,7 +46735,7 @@ function setupRealmModal(deps) {
         maxHeight: computeModalMaxHeight()
       });
     } catch (err) {
-      log7.error("realm: showModal failed:", err);
+      log8.error("realm: showModal failed:", err);
       return;
     }
     const root = document.createElement("div");
@@ -45729,7 +46854,7 @@ function setupRealmModal(deps) {
       additionalEl
     };
     modalHandle.onDismiss(() => {
-      log7.info("realm: modal dismissed");
+      log8.info("realm: modal dismissed");
       surface = null;
       state.selected = null;
       state.promptOpen = false;
@@ -46139,7 +47264,7 @@ function setupRealmModal(deps) {
     state.errorText = "";
     const requestId = nextRequestId("search");
     state.pendingSearchReq = requestId;
-    log7.info(`realm modal: search req=${requestId} q=${JSON.stringify(state.search)} page=${state.page} sort=${state.sort} nsfw=${state.nsfw}`);
+    log8.info(`realm modal: search req=${requestId} q=${JSON.stringify(state.search)} page=${state.page} sort=${state.sort} nsfw=${state.nsfw}`);
     sendToBackend({
       type: "realm_search",
       requestId,
@@ -46156,7 +47281,7 @@ function setupRealmModal(deps) {
     state.downloading = true;
     const requestId = nextRequestId("download");
     state.pendingDownloadReq = requestId;
-    log7.info(`realm modal: download req=${requestId} id=${id}`);
+    log8.info(`realm modal: download req=${requestId} id=${id}`);
     const label = state.selected?.name || `RisuRealm character ${id}`;
     deps.onImportStart?.(label);
     sendToBackend({ type: "realm_download", requestId, id });
@@ -46257,14 +47382,14 @@ function setupRealmModal(deps) {
 
 // src/ui/alert-modal.ts
 function setupAlertModal(opts) {
-  const { ctx, sendToBackend, log: log7 } = opts;
+  const { ctx, sendToBackend, log: log8 } = opts;
   const open = new Map;
   function show(msg) {
     let modal;
     try {
       modal = ctx.ui.showModal({ title: "", width: 380 });
     } catch (err) {
-      log7.error("alert-modal: showModal failed", err);
+      log8.error("alert-modal: showModal failed", err);
       sendToBackend({ type: "alert_dismissed", requestId: msg.requestId });
       return;
     }
@@ -46318,14 +47443,14 @@ function setupAlertModal(opts) {
 
 // src/ui/pick-modal.ts
 function setupPickModal(opts) {
-  const { ctx, sendToBackend, log: log7 } = opts;
+  const { ctx, sendToBackend, log: log8 } = opts;
   const open = new Map;
   function show(msg) {
     let modal;
     try {
       modal = ctx.ui.showModal({ title: msg.title || "", width: 420 });
     } catch (err) {
-      log7.error("pick-modal: showModal failed", err);
+      log8.error("pick-modal: showModal failed", err);
       sendToBackend({ type: "pick_resolved", requestId: msg.requestId, value: null });
       return;
     }
@@ -46391,7 +47516,7 @@ function setupPickModal(opts) {
 
 // src/ui/legacy-reimport-modal.ts
 function setupLegacyReimportModal(opts) {
-  const { ctx, log: log7 } = opts;
+  const { ctx, log: log8 } = opts;
   opts.sendToBackend;
   const open = new Map;
   const shownThisSession = new Set;
@@ -46403,7 +47528,7 @@ function setupLegacyReimportModal(opts) {
     try {
       modal = ctx.ui.showModal({ title: "Legacy Card Detected", width: 460 });
     } catch (err) {
-      log7.error("legacy-reimport-modal: showModal failed", err);
+      log8.error("legacy-reimport-modal: showModal failed", err);
       return;
     }
     open.set(msg.characterId, modal);
@@ -46473,7 +47598,7 @@ function setupLegacyReimportModal(opts) {
 
 // src/ui/host-version-modal.ts
 function setupHostVersionModal(opts) {
-  const { ctx, log: log7 } = opts;
+  const { ctx, log: log8 } = opts;
   opts.sendToBackend;
   let current = null;
   let shownThisSession = false;
@@ -46485,7 +47610,7 @@ function setupHostVersionModal(opts) {
     try {
       modal = ctx.ui.showModal({ title: "Update Lumiverse", width: 460 });
     } catch (err) {
-      log7.error("host-version-modal: showModal failed", err);
+      log8.error("host-version-modal: showModal failed", err);
       return;
     }
     current = modal;
@@ -46567,7 +47692,7 @@ function setupHostVersionModal(opts) {
 
 // src/ui/permissions-modal.ts
 function setupPermissionsModal(opts) {
-  const { ctx, log: log7 } = opts;
+  const { ctx, log: log8 } = opts;
   opts.sendToBackend;
   let current = null;
   let lastShownKey = null;
@@ -46596,7 +47721,7 @@ function setupPermissionsModal(opts) {
     try {
       modal = ctx.ui.showModal({ title: "LumiRealm: missing permissions", width: 520 });
     } catch (err) {
-      log7.error("permissions-modal: showModal failed", err);
+      log8.error("permissions-modal: showModal failed", err);
       return;
     }
     current = modal;
@@ -46684,7 +47809,7 @@ function labelFor(id) {
   return EXT_LABELS[id] ?? id;
 }
 function setupBridgeStatusBanner(opts) {
-  const { log: log7 } = opts;
+  const { log: log8 } = opts;
   let host = null;
   let lastKey = null;
   const dismissedKeys = new Set;
@@ -46797,7 +47922,7 @@ function setupBridgeStatusBanner(opts) {
       host.appendChild(actions);
       document.body.appendChild(host);
     } catch (err) {
-      log7.warn("bridge-status-banner: render failed", err);
+      log8.warn("bridge-status-banner: render failed", err);
       clearBanner();
     }
   }
@@ -46992,6 +48117,1067 @@ function downloadBundle(bundle) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// node_modules/fflate/esm/browser.js
+var u8 = Uint8Array;
+var u16 = Uint16Array;
+var i32 = Int32Array;
+var fleb = new u8([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0, 0, 0, 0]);
+var fdeb = new u8([0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 0, 0]);
+var clim = new u8([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]);
+var freb = function(eb, start) {
+  var b = new u16(31);
+  for (var i = 0;i < 31; ++i) {
+    b[i] = start += 1 << eb[i - 1];
+  }
+  var r = new i32(b[30]);
+  for (var i = 1;i < 30; ++i) {
+    for (var j = b[i];j < b[i + 1]; ++j) {
+      r[j] = j - b[i] << 5 | i;
+    }
+  }
+  return { b, r };
+};
+var _a = freb(fleb, 2);
+var fl = _a.b;
+var revfl = _a.r;
+fl[28] = 258, revfl[258] = 28;
+var _b = freb(fdeb, 0);
+var fd = _b.b;
+var revfd = _b.r;
+var rev = new u16(32768);
+for (i = 0;i < 32768; ++i) {
+  x = (i & 43690) >> 1 | (i & 21845) << 1;
+  x = (x & 52428) >> 2 | (x & 13107) << 2;
+  x = (x & 61680) >> 4 | (x & 3855) << 4;
+  rev[i] = ((x & 65280) >> 8 | (x & 255) << 8) >> 1;
+}
+var x;
+var i;
+var hMap = function(cd, mb, r) {
+  var s = cd.length;
+  var i2 = 0;
+  var l = new u16(mb);
+  for (;i2 < s; ++i2) {
+    if (cd[i2])
+      ++l[cd[i2] - 1];
+  }
+  var le = new u16(mb);
+  for (i2 = 1;i2 < mb; ++i2) {
+    le[i2] = le[i2 - 1] + l[i2 - 1] << 1;
+  }
+  var co;
+  if (r) {
+    co = new u16(1 << mb);
+    var rvb = 15 - mb;
+    for (i2 = 0;i2 < s; ++i2) {
+      if (cd[i2]) {
+        var sv = i2 << 4 | cd[i2];
+        var r_1 = mb - cd[i2];
+        var v = le[cd[i2] - 1]++ << r_1;
+        for (var m = v | (1 << r_1) - 1;v <= m; ++v) {
+          co[rev[v] >> rvb] = sv;
+        }
+      }
+    }
+  } else {
+    co = new u16(s);
+    for (i2 = 0;i2 < s; ++i2) {
+      if (cd[i2]) {
+        co[i2] = rev[le[cd[i2] - 1]++] >> 15 - cd[i2];
+      }
+    }
+  }
+  return co;
+};
+var flt = new u8(288);
+for (i = 0;i < 144; ++i)
+  flt[i] = 8;
+var i;
+for (i = 144;i < 256; ++i)
+  flt[i] = 9;
+var i;
+for (i = 256;i < 280; ++i)
+  flt[i] = 7;
+var i;
+for (i = 280;i < 288; ++i)
+  flt[i] = 8;
+var i;
+var fdt = new u8(32);
+for (i = 0;i < 32; ++i)
+  fdt[i] = 5;
+var i;
+var flm = /* @__PURE__ */ hMap(flt, 9, 0);
+var fdm = /* @__PURE__ */ hMap(fdt, 5, 0);
+var shft = function(p) {
+  return (p + 7) / 8 | 0;
+};
+var slc = function(v, s, e) {
+  if (s == null || s < 0)
+    s = 0;
+  if (e == null || e > v.length)
+    e = v.length;
+  return new u8(v.subarray(s, e));
+};
+var ec = [
+  "unexpected EOF",
+  "invalid block type",
+  "invalid length/literal",
+  "invalid distance",
+  "stream finished",
+  "no stream handler",
+  ,
+  "no callback",
+  "invalid UTF-8 data",
+  "extra field too long",
+  "date not in range 1980-2099",
+  "filename too long",
+  "stream finishing",
+  "invalid zip data"
+];
+var err = function(ind, msg, nt) {
+  var e = new Error(msg || ec[ind]);
+  e.code = ind;
+  if (Error.captureStackTrace)
+    Error.captureStackTrace(e, err);
+  if (!nt)
+    throw e;
+  return e;
+};
+var wbits = function(d, p, v) {
+  v <<= p & 7;
+  var o = p / 8 | 0;
+  d[o] |= v;
+  d[o + 1] |= v >> 8;
+};
+var wbits16 = function(d, p, v) {
+  v <<= p & 7;
+  var o = p / 8 | 0;
+  d[o] |= v;
+  d[o + 1] |= v >> 8;
+  d[o + 2] |= v >> 16;
+};
+var hTree = function(d, mb) {
+  var t = [];
+  for (var i2 = 0;i2 < d.length; ++i2) {
+    if (d[i2])
+      t.push({ s: i2, f: d[i2] });
+  }
+  var s = t.length;
+  var t2 = t.slice();
+  if (!s)
+    return { t: et, l: 0 };
+  if (s == 1) {
+    var v = new u8(t[0].s + 1);
+    v[t[0].s] = 1;
+    return { t: v, l: 1 };
+  }
+  t.sort(function(a, b) {
+    return a.f - b.f;
+  });
+  t.push({ s: -1, f: 25001 });
+  var l = t[0], r = t[1], i0 = 0, i1 = 1, i22 = 2;
+  t[0] = { s: -1, f: l.f + r.f, l, r };
+  while (i1 != s - 1) {
+    l = t[t[i0].f < t[i22].f ? i0++ : i22++];
+    r = t[i0 != i1 && t[i0].f < t[i22].f ? i0++ : i22++];
+    t[i1++] = { s: -1, f: l.f + r.f, l, r };
+  }
+  var maxSym = t2[0].s;
+  for (var i2 = 1;i2 < s; ++i2) {
+    if (t2[i2].s > maxSym)
+      maxSym = t2[i2].s;
+  }
+  var tr = new u16(maxSym + 1);
+  var mbt = ln(t[i1 - 1], tr, 0);
+  if (mbt > mb) {
+    var i2 = 0, dt = 0;
+    var lft = mbt - mb, cst = 1 << lft;
+    t2.sort(function(a, b) {
+      return tr[b.s] - tr[a.s] || a.f - b.f;
+    });
+    for (;i2 < s; ++i2) {
+      var i2_1 = t2[i2].s;
+      if (tr[i2_1] > mb) {
+        dt += cst - (1 << mbt - tr[i2_1]);
+        tr[i2_1] = mb;
+      } else
+        break;
+    }
+    dt >>= lft;
+    while (dt > 0) {
+      var i2_2 = t2[i2].s;
+      if (tr[i2_2] < mb)
+        dt -= 1 << mb - tr[i2_2]++ - 1;
+      else
+        ++i2;
+    }
+    for (;i2 >= 0 && dt; --i2) {
+      var i2_3 = t2[i2].s;
+      if (tr[i2_3] == mb) {
+        --tr[i2_3];
+        ++dt;
+      }
+    }
+    mbt = mb;
+  }
+  return { t: new u8(tr), l: mbt };
+};
+var ln = function(n, l, d) {
+  return n.s == -1 ? Math.max(ln(n.l, l, d + 1), ln(n.r, l, d + 1)) : l[n.s] = d;
+};
+var lc = function(c) {
+  var s = c.length;
+  while (s && !c[--s])
+    ;
+  var cl = new u16(++s);
+  var cli = 0, cln = c[0], cls = 1;
+  var w = function(v) {
+    cl[cli++] = v;
+  };
+  for (var i2 = 1;i2 <= s; ++i2) {
+    if (c[i2] == cln && i2 != s)
+      ++cls;
+    else {
+      if (!cln && cls > 2) {
+        for (;cls > 138; cls -= 138)
+          w(32754);
+        if (cls > 2) {
+          w(cls > 10 ? cls - 11 << 5 | 28690 : cls - 3 << 5 | 12305);
+          cls = 0;
+        }
+      } else if (cls > 3) {
+        w(cln), --cls;
+        for (;cls > 6; cls -= 6)
+          w(8304);
+        if (cls > 2)
+          w(cls - 3 << 5 | 8208), cls = 0;
+      }
+      while (cls--)
+        w(cln);
+      cls = 1;
+      cln = c[i2];
+    }
+  }
+  return { c: cl.subarray(0, cli), n: s };
+};
+var clen = function(cf, cl) {
+  var l = 0;
+  for (var i2 = 0;i2 < cl.length; ++i2)
+    l += cf[i2] * cl[i2];
+  return l;
+};
+var wfblk = function(out, pos, dat) {
+  var s = dat.length;
+  var o = shft(pos + 2);
+  out[o] = s & 255;
+  out[o + 1] = s >> 8;
+  out[o + 2] = out[o] ^ 255;
+  out[o + 3] = out[o + 1] ^ 255;
+  for (var i2 = 0;i2 < s; ++i2)
+    out[o + i2 + 4] = dat[i2];
+  return (o + 4 + s) * 8;
+};
+var wblk = function(dat, out, final, syms, lf, df, eb, li, bs, bl, p) {
+  wbits(out, p++, final);
+  ++lf[256];
+  var _a2 = hTree(lf, 15), dlt = _a2.t, mlb = _a2.l;
+  var _b2 = hTree(df, 15), ddt = _b2.t, mdb = _b2.l;
+  var _c = lc(dlt), lclt = _c.c, nlc = _c.n;
+  var _d = lc(ddt), lcdt = _d.c, ndc = _d.n;
+  var lcfreq = new u16(19);
+  for (var i2 = 0;i2 < lclt.length; ++i2)
+    ++lcfreq[lclt[i2] & 31];
+  for (var i2 = 0;i2 < lcdt.length; ++i2)
+    ++lcfreq[lcdt[i2] & 31];
+  var _e = hTree(lcfreq, 7), lct = _e.t, mlcb = _e.l;
+  var nlcc = 19;
+  for (;nlcc > 4 && !lct[clim[nlcc - 1]]; --nlcc)
+    ;
+  var flen = bl + 5 << 3;
+  var ftlen = clen(lf, flt) + clen(df, fdt) + eb;
+  var dtlen = clen(lf, dlt) + clen(df, ddt) + eb + 14 + 3 * nlcc + clen(lcfreq, lct) + 2 * lcfreq[16] + 3 * lcfreq[17] + 7 * lcfreq[18];
+  if (bs >= 0 && flen <= ftlen && flen <= dtlen)
+    return wfblk(out, p, dat.subarray(bs, bs + bl));
+  var lm, ll, dm, dl;
+  wbits(out, p, 1 + (dtlen < ftlen)), p += 2;
+  if (dtlen < ftlen) {
+    lm = hMap(dlt, mlb, 0), ll = dlt, dm = hMap(ddt, mdb, 0), dl = ddt;
+    var llm = hMap(lct, mlcb, 0);
+    wbits(out, p, nlc - 257);
+    wbits(out, p + 5, ndc - 1);
+    wbits(out, p + 10, nlcc - 4);
+    p += 14;
+    for (var i2 = 0;i2 < nlcc; ++i2)
+      wbits(out, p + 3 * i2, lct[clim[i2]]);
+    p += 3 * nlcc;
+    var lcts = [lclt, lcdt];
+    for (var it = 0;it < 2; ++it) {
+      var clct = lcts[it];
+      for (var i2 = 0;i2 < clct.length; ++i2) {
+        var len2 = clct[i2] & 31;
+        wbits(out, p, llm[len2]), p += lct[len2];
+        if (len2 > 15)
+          wbits(out, p, clct[i2] >> 5 & 127), p += clct[i2] >> 12;
+      }
+    }
+  } else {
+    lm = flm, ll = flt, dm = fdm, dl = fdt;
+  }
+  for (var i2 = 0;i2 < li; ++i2) {
+    var sym = syms[i2];
+    if (sym > 255) {
+      var len2 = sym >> 18 & 31;
+      wbits16(out, p, lm[len2 + 257]), p += ll[len2 + 257];
+      if (len2 > 7)
+        wbits(out, p, sym >> 23 & 31), p += fleb[len2];
+      var dst = sym & 31;
+      wbits16(out, p, dm[dst]), p += dl[dst];
+      if (dst > 3)
+        wbits16(out, p, sym >> 5 & 8191), p += fdeb[dst];
+    } else {
+      wbits16(out, p, lm[sym]), p += ll[sym];
+    }
+  }
+  wbits16(out, p, lm[256]);
+  return p + ll[256];
+};
+var deo = /* @__PURE__ */ new i32([65540, 131080, 131088, 131104, 262176, 1048704, 1048832, 2114560, 2117632]);
+var et = /* @__PURE__ */ new u8(0);
+var dflt = function(dat, lvl, plvl, pre, post, st) {
+  var s = st.z || dat.length;
+  var o = new u8(pre + s + 5 * (1 + Math.ceil(s / 7000)) + post);
+  var w = o.subarray(pre, o.length - post);
+  var lst = st.l;
+  var pos = (st.r || 0) & 7;
+  if (lvl) {
+    if (pos)
+      w[0] = st.r >> 3;
+    var opt = deo[lvl - 1];
+    var n = opt >> 13, c = opt & 8191;
+    var msk_1 = (1 << plvl) - 1;
+    var prev = st.p || new u16(32768), head = st.h || new u16(msk_1 + 1);
+    var bs1_1 = Math.ceil(plvl / 3), bs2_1 = 2 * bs1_1;
+    var hsh = function(i3) {
+      return (dat[i3] ^ dat[i3 + 1] << bs1_1 ^ dat[i3 + 2] << bs2_1) & msk_1;
+    };
+    var syms = new i32(25000);
+    var lf = new u16(288), df = new u16(32);
+    var lc_1 = 0, eb = 0, i2 = st.i || 0, li = 0, wi = st.w || 0, bs = 0;
+    for (;i2 + 2 < s; ++i2) {
+      var hv = hsh(i2);
+      var imod = i2 & 32767, pimod = head[hv];
+      prev[imod] = pimod;
+      head[hv] = imod;
+      if (wi <= i2) {
+        var rem = s - i2;
+        if ((lc_1 > 7000 || li > 24576) && (rem > 423 || !lst)) {
+          pos = wblk(dat, w, 0, syms, lf, df, eb, li, bs, i2 - bs, pos);
+          li = lc_1 = eb = 0, bs = i2;
+          for (var j = 0;j < 286; ++j)
+            lf[j] = 0;
+          for (var j = 0;j < 30; ++j)
+            df[j] = 0;
+        }
+        var l = 2, d = 0, ch_1 = c, dif = imod - pimod & 32767;
+        if (rem > 2 && hv == hsh(i2 - dif)) {
+          var maxn = Math.min(n, rem) - 1;
+          var maxd = Math.min(32767, i2);
+          var ml = Math.min(258, rem);
+          while (dif <= maxd && --ch_1 && imod != pimod) {
+            if (dat[i2 + l] == dat[i2 + l - dif]) {
+              var nl = 0;
+              for (;nl < ml && dat[i2 + nl] == dat[i2 + nl - dif]; ++nl)
+                ;
+              if (nl > l) {
+                l = nl, d = dif;
+                if (nl > maxn)
+                  break;
+                var mmd = Math.min(dif, nl - 2);
+                var md = 0;
+                for (var j = 0;j < mmd; ++j) {
+                  var ti = i2 - dif + j & 32767;
+                  var pti = prev[ti];
+                  var cd = ti - pti & 32767;
+                  if (cd > md)
+                    md = cd, pimod = ti;
+                }
+              }
+            }
+            imod = pimod, pimod = prev[imod];
+            dif += imod - pimod & 32767;
+          }
+        }
+        if (d) {
+          syms[li++] = 268435456 | revfl[l] << 18 | revfd[d];
+          var lin = revfl[l] & 31, din = revfd[d] & 31;
+          eb += fleb[lin] + fdeb[din];
+          ++lf[257 + lin];
+          ++df[din];
+          wi = i2 + l;
+          ++lc_1;
+        } else {
+          syms[li++] = dat[i2];
+          ++lf[dat[i2]];
+        }
+      }
+    }
+    for (i2 = Math.max(i2, wi);i2 < s; ++i2) {
+      syms[li++] = dat[i2];
+      ++lf[dat[i2]];
+    }
+    pos = wblk(dat, w, lst, syms, lf, df, eb, li, bs, i2 - bs, pos);
+    if (!lst) {
+      st.r = pos & 7 | w[pos / 8 | 0] << 3;
+      pos -= 7;
+      st.h = head, st.p = prev, st.i = i2, st.w = wi;
+    }
+  } else {
+    for (var i2 = st.w || 0;i2 < s + lst; i2 += 65535) {
+      var e = i2 + 65535;
+      if (e >= s) {
+        w[pos / 8 | 0] = lst;
+        e = s;
+      }
+      pos = wfblk(w, pos + 1, dat.subarray(i2, e));
+    }
+    st.i = s;
+  }
+  return slc(o, 0, pre + shft(pos) + post);
+};
+var crct = /* @__PURE__ */ function() {
+  var t = new Int32Array(256);
+  for (var i2 = 0;i2 < 256; ++i2) {
+    var c = i2, k = 9;
+    while (--k)
+      c = (c & 1 && -306674912) ^ c >>> 1;
+    t[i2] = c;
+  }
+  return t;
+}();
+var crc = function() {
+  var c = -1;
+  return {
+    p: function(d) {
+      var cr = c;
+      for (var i2 = 0;i2 < d.length; ++i2)
+        cr = crct[cr & 255 ^ d[i2]] ^ cr >>> 8;
+      c = cr;
+    },
+    d: function() {
+      return ~c;
+    }
+  };
+};
+var dopt = function(dat, opt, pre, post, st) {
+  if (!st) {
+    st = { l: 1 };
+    if (opt.dictionary) {
+      var dict = opt.dictionary.subarray(-32768);
+      var newDat = new u8(dict.length + dat.length);
+      newDat.set(dict);
+      newDat.set(dat, dict.length);
+      dat = newDat;
+      st.w = dict.length;
+    }
+  }
+  return dflt(dat, opt.level == null ? 6 : opt.level, opt.mem == null ? st.l ? Math.ceil(Math.max(8, Math.min(13, Math.log(dat.length))) * 1.5) : 20 : 12 + opt.mem, pre, post, st);
+};
+var mrg = function(a, b) {
+  var o = {};
+  for (var k in a)
+    o[k] = a[k];
+  for (var k in b)
+    o[k] = b[k];
+  return o;
+};
+var wbytes = function(d, b, v) {
+  for (;v; ++b)
+    d[b] = v, v >>>= 8;
+};
+var Deflate = /* @__PURE__ */ function() {
+  function Deflate2(opts, cb) {
+    if (typeof opts == "function")
+      cb = opts, opts = {};
+    this.ondata = cb;
+    this.o = opts || {};
+    this.s = { l: 0, i: 32768, w: 32768, z: 32768 };
+    this.b = new u8(98304);
+    if (this.o.dictionary) {
+      var dict = this.o.dictionary.subarray(-32768);
+      this.b.set(dict, 32768 - dict.length);
+      this.s.i = 32768 - dict.length;
+    }
+  }
+  Deflate2.prototype.p = function(c, f) {
+    this.ondata(dopt(c, this.o, 0, 0, this.s), f);
+  };
+  Deflate2.prototype.push = function(chunk, final) {
+    if (!this.ondata)
+      err(5);
+    if (this.s.l)
+      err(4);
+    var endLen = chunk.length + this.s.z;
+    if (endLen > this.b.length) {
+      if (endLen > 2 * this.b.length - 32768) {
+        var newBuf = new u8(endLen & -32768);
+        newBuf.set(this.b.subarray(0, this.s.z));
+        this.b = newBuf;
+      }
+      var split = this.b.length - this.s.z;
+      this.b.set(chunk.subarray(0, split), this.s.z);
+      this.s.z = this.b.length;
+      this.p(this.b, false);
+      this.b.set(this.b.subarray(-32768));
+      this.b.set(chunk.subarray(split), 32768);
+      this.s.z = chunk.length - split + 32768;
+      this.s.i = 32766, this.s.w = 32768;
+    } else {
+      this.b.set(chunk, this.s.z);
+      this.s.z += chunk.length;
+    }
+    this.s.l = final & 1;
+    if (this.s.z > this.s.w + 8191 || final) {
+      this.p(this.b, final || false);
+      this.s.w = this.s.i, this.s.i -= 2;
+    }
+  };
+  Deflate2.prototype.flush = function() {
+    if (!this.ondata)
+      err(5);
+    if (this.s.l)
+      err(4);
+    this.p(this.b, false);
+    this.s.w = this.s.i, this.s.i -= 2;
+  };
+  return Deflate2;
+}();
+var te = typeof TextEncoder != "undefined" && /* @__PURE__ */ new TextEncoder;
+var td = typeof TextDecoder != "undefined" && /* @__PURE__ */ new TextDecoder;
+var tds = 0;
+try {
+  td.decode(et, { stream: true });
+  tds = 1;
+} catch (e) {}
+function strToU8(str, latin1) {
+  if (latin1) {
+    var ar_1 = new u8(str.length);
+    for (var i2 = 0;i2 < str.length; ++i2)
+      ar_1[i2] = str.charCodeAt(i2);
+    return ar_1;
+  }
+  if (te)
+    return te.encode(str);
+  var l = str.length;
+  var ar = new u8(str.length + (str.length >> 1));
+  var ai = 0;
+  var w = function(v) {
+    ar[ai++] = v;
+  };
+  for (var i2 = 0;i2 < l; ++i2) {
+    if (ai + 5 > ar.length) {
+      var n = new u8(ai + 8 + (l - i2 << 1));
+      n.set(ar);
+      ar = n;
+    }
+    var c = str.charCodeAt(i2);
+    if (c < 128 || latin1)
+      w(c);
+    else if (c < 2048)
+      w(192 | c >> 6), w(128 | c & 63);
+    else if (c > 55295 && c < 57344)
+      c = 65536 + (c & 1023 << 10) | str.charCodeAt(++i2) & 1023, w(240 | c >> 18), w(128 | c >> 12 & 63), w(128 | c >> 6 & 63), w(128 | c & 63);
+    else
+      w(224 | c >> 12), w(128 | c >> 6 & 63), w(128 | c & 63);
+  }
+  return slc(ar, 0, ai);
+}
+var dbf = function(l) {
+  return l == 1 ? 3 : l < 6 ? 2 : l == 9 ? 1 : 0;
+};
+var exfl = function(ex) {
+  var le = 0;
+  if (ex) {
+    for (var k in ex) {
+      var l = ex[k].length;
+      if (l > 65535)
+        err(9);
+      le += l + 4;
+    }
+  }
+  return le;
+};
+var wzh = function(d, b, f, fn, u, c, ce, co) {
+  var fl2 = fn.length, ex = f.extra, col = co && co.length;
+  var exl = exfl(ex);
+  wbytes(d, b, ce != null ? 33639248 : 67324752), b += 4;
+  if (ce != null)
+    d[b++] = 20, d[b++] = f.os;
+  d[b] = 20, b += 2;
+  d[b++] = f.flag << 1 | (c < 0 && 8), d[b++] = u && 8;
+  d[b++] = f.compression & 255, d[b++] = f.compression >> 8;
+  var dt = new Date(f.mtime == null ? Date.now() : f.mtime), y = dt.getFullYear() - 1980;
+  if (y < 0 || y > 119)
+    err(10);
+  wbytes(d, b, y << 25 | dt.getMonth() + 1 << 21 | dt.getDate() << 16 | dt.getHours() << 11 | dt.getMinutes() << 5 | dt.getSeconds() >> 1), b += 4;
+  if (c != -1) {
+    wbytes(d, b, f.crc);
+    wbytes(d, b + 4, c < 0 ? -c - 2 : c);
+    wbytes(d, b + 8, f.size);
+  }
+  wbytes(d, b + 12, fl2);
+  wbytes(d, b + 14, exl), b += 16;
+  if (ce != null) {
+    wbytes(d, b, col);
+    wbytes(d, b + 6, f.attrs);
+    wbytes(d, b + 10, ce), b += 14;
+  }
+  d.set(fn, b);
+  b += fl2;
+  if (exl) {
+    for (var k in ex) {
+      var exf = ex[k], l = exf.length;
+      wbytes(d, b, +k);
+      wbytes(d, b + 2, l);
+      d.set(exf, b + 4), b += 4 + l;
+    }
+  }
+  if (col)
+    d.set(co, b), b += col;
+  return b;
+};
+var wzf = function(o, b, c, d, e) {
+  wbytes(o, b, 101010256);
+  wbytes(o, b + 8, c);
+  wbytes(o, b + 10, c);
+  wbytes(o, b + 12, d);
+  wbytes(o, b + 16, e);
+};
+var ZipPassThrough = /* @__PURE__ */ function() {
+  function ZipPassThrough2(filename) {
+    this.filename = filename;
+    this.c = crc();
+    this.size = 0;
+    this.compression = 0;
+  }
+  ZipPassThrough2.prototype.process = function(chunk, final) {
+    this.ondata(null, chunk, final);
+  };
+  ZipPassThrough2.prototype.push = function(chunk, final) {
+    if (!this.ondata)
+      err(5);
+    this.c.p(chunk);
+    this.size += chunk.length;
+    if (final)
+      this.crc = this.c.d();
+    this.process(chunk, final || false);
+  };
+  return ZipPassThrough2;
+}();
+var ZipDeflate = /* @__PURE__ */ function() {
+  function ZipDeflate2(filename, opts) {
+    var _this = this;
+    if (!opts)
+      opts = {};
+    ZipPassThrough.call(this, filename);
+    this.d = new Deflate(opts, function(dat, final) {
+      _this.ondata(null, dat, final);
+    });
+    this.compression = 8;
+    this.flag = dbf(opts.level);
+  }
+  ZipDeflate2.prototype.process = function(chunk, final) {
+    try {
+      this.d.push(chunk, final);
+    } catch (e) {
+      this.ondata(e, null, final);
+    }
+  };
+  ZipDeflate2.prototype.push = function(chunk, final) {
+    ZipPassThrough.prototype.push.call(this, chunk, final);
+  };
+  return ZipDeflate2;
+}();
+var Zip = /* @__PURE__ */ function() {
+  function Zip2(cb) {
+    this.ondata = cb;
+    this.u = [];
+    this.d = 1;
+  }
+  Zip2.prototype.add = function(file) {
+    var _this = this;
+    if (!this.ondata)
+      err(5);
+    if (this.d & 2)
+      this.ondata(err(4 + (this.d & 1) * 8, 0, 1), null, false);
+    else {
+      var f = strToU8(file.filename), fl_1 = f.length;
+      var com = file.comment, o = com && strToU8(com);
+      var u = fl_1 != file.filename.length || o && com.length != o.length;
+      var hl_1 = fl_1 + exfl(file.extra) + 30;
+      if (fl_1 > 65535)
+        this.ondata(err(11, 0, 1), null, false);
+      var header = new u8(hl_1);
+      wzh(header, 0, file, f, u, -1);
+      var chks_1 = [header];
+      var pAll_1 = function() {
+        for (var _i = 0, chks_2 = chks_1;_i < chks_2.length; _i++) {
+          var chk = chks_2[_i];
+          _this.ondata(null, chk, false);
+        }
+        chks_1 = [];
+      };
+      var tr_1 = this.d;
+      this.d = 0;
+      var ind_1 = this.u.length;
+      var uf_1 = mrg(file, {
+        f,
+        u,
+        o,
+        t: function() {
+          if (file.terminate)
+            file.terminate();
+        },
+        r: function() {
+          pAll_1();
+          if (tr_1) {
+            var nxt = _this.u[ind_1 + 1];
+            if (nxt)
+              nxt.r();
+            else
+              _this.d = 1;
+          }
+          tr_1 = 1;
+        }
+      });
+      var cl_1 = 0;
+      file.ondata = function(err2, dat, final) {
+        if (err2) {
+          _this.ondata(err2, dat, final);
+          _this.terminate();
+        } else {
+          cl_1 += dat.length;
+          chks_1.push(dat);
+          if (final) {
+            var dd = new u8(16);
+            wbytes(dd, 0, 134695760);
+            wbytes(dd, 4, file.crc);
+            wbytes(dd, 8, cl_1);
+            wbytes(dd, 12, file.size);
+            chks_1.push(dd);
+            uf_1.c = cl_1, uf_1.b = hl_1 + cl_1 + 16, uf_1.crc = file.crc, uf_1.size = file.size;
+            if (tr_1)
+              uf_1.r();
+            tr_1 = 1;
+          } else if (tr_1)
+            pAll_1();
+        }
+      };
+      this.u.push(uf_1);
+    }
+  };
+  Zip2.prototype.end = function() {
+    var _this = this;
+    if (this.d & 2) {
+      this.ondata(err(4 + (this.d & 1) * 8, 0, 1), null, true);
+      return;
+    }
+    if (this.d)
+      this.e();
+    else
+      this.u.push({
+        r: function() {
+          if (!(_this.d & 1))
+            return;
+          _this.u.splice(-1, 1);
+          _this.e();
+        },
+        t: function() {}
+      });
+    this.d = 3;
+  };
+  Zip2.prototype.e = function() {
+    var bt = 0, l = 0, tl = 0;
+    for (var _i = 0, _a2 = this.u;_i < _a2.length; _i++) {
+      var f = _a2[_i];
+      tl += 46 + f.f.length + exfl(f.extra) + (f.o ? f.o.length : 0);
+    }
+    var out = new u8(tl + 22);
+    for (var _b2 = 0, _c = this.u;_b2 < _c.length; _b2++) {
+      var f = _c[_b2];
+      wzh(out, bt, f, f.f, f.u, -f.c - 2, l, f.o);
+      bt += 46 + f.f.length + exfl(f.extra) + (f.o ? f.o.length : 0), l += f.b;
+    }
+    wzf(out, bt, this.u.length, tl, l);
+    this.ondata(null, out, true);
+    this.d = 2;
+  };
+  Zip2.prototype.terminate = function() {
+    for (var _i = 0, _a2 = this.u;_i < _a2.length; _i++) {
+      var f = _a2[_i];
+      f.t();
+    }
+    this.d = 2;
+  };
+  return Zip2;
+}();
+
+// src/core/rpack/rpack-map-data.ts
+var RPACK_MAP_BYTES = new Uint8Array([196, 13, 30, 11, 189, 43, 63, 85, 252, 69, 110, 245, 102, 83, 79, 26, 224, 187, 48, 148, 134, 186, 107, 191, 65, 80, 111, 155, 239, 222, 183, 16, 97, 23, 32, 223, 50, 137, 168, 157, 109, 171, 201, 144, 0, 12, 93, 175, 210, 193, 86, 229, 22, 100, 145, 130, 101, 116, 151, 202, 35, 214, 82, 209, 255, 180, 160, 232, 47, 138, 88, 56, 90, 96, 25, 150, 73, 219, 215, 200, 59, 62, 67, 75, 165, 99, 71, 170, 106, 41, 146, 244, 21, 207, 98, 52, 120, 211, 29, 60, 226, 5, 142, 42, 87, 14, 27, 205, 76, 45, 242, 64, 44, 37, 121, 72, 15, 178, 122, 181, 167, 108, 55, 230, 156, 123, 84, 126, 254, 135, 220, 154, 2, 228, 51, 162, 235, 177, 46, 3, 221, 153, 166, 176, 231, 213, 136, 24, 131, 124, 246, 190, 225, 92, 159, 195, 33, 70, 31, 8, 78, 208, 118, 18, 95, 238, 253, 143, 68, 234, 163, 94, 139, 40, 9, 53, 158, 105, 204, 10, 199, 133, 7, 173, 74, 243, 119, 233, 103, 212, 218, 132, 128, 147, 182, 77, 115, 250, 39, 38, 127, 4, 198, 251, 241, 114, 57, 81, 194, 54, 169, 104, 172, 248, 237, 197, 185, 203, 206, 117, 164, 61, 129, 217, 66, 112, 28, 149, 17, 188, 216, 140, 152, 249, 89, 161, 19, 247, 20, 125, 179, 236, 113, 192, 227, 141, 240, 1, 174, 91, 49, 6, 36, 34, 58, 184, 44, 247, 132, 139, 201, 101, 251, 182, 159, 174, 179, 3, 45, 1, 105, 116, 31, 228, 163, 236, 238, 92, 52, 33, 147, 74, 15, 106, 226, 98, 2, 158, 34, 156, 253, 60, 252, 113, 199, 198, 173, 89, 103, 5, 112, 109, 138, 68, 18, 250, 36, 134, 95, 175, 209, 122, 71, 206, 254, 80, 99, 221, 81, 6, 111, 24, 224, 82, 168, 9, 157, 86, 115, 76, 184, 83, 108, 195, 160, 14, 25, 207, 62, 13, 126, 7, 50, 104, 70, 234, 72, 249, 153, 46, 171, 164, 73, 32, 94, 85, 53, 56, 12, 188, 211, 177, 88, 22, 121, 40, 10, 26, 225, 242, 205, 196, 57, 219, 162, 186, 96, 114, 118, 125, 149, 239, 127, 200, 192, 222, 55, 148, 191, 181, 20, 129, 146, 37, 69, 172, 231, 245, 102, 167, 43, 54, 90, 193, 19, 227, 75, 58, 232, 141, 131, 27, 124, 39, 176, 154, 66, 235, 135, 170, 220, 84, 142, 120, 38, 210, 87, 41, 212, 183, 248, 47, 143, 137, 117, 240, 65, 119, 194, 30, 255, 216, 21, 17, 229, 4, 151, 23, 243, 49, 208, 155, 0, 215, 202, 180, 79, 42, 59, 217, 178, 107, 218, 93, 161, 63, 48, 97, 189, 145, 61, 78, 230, 223, 190, 77, 130, 140, 29, 35, 16, 152, 100, 244, 133, 51, 123, 144, 67, 187, 169, 136, 241, 214, 165, 28, 246, 204, 110, 185, 91, 11, 150, 237, 213, 233, 197, 203, 8, 166, 128, 64]);
+
+// src/core/risum/codec.ts
+var DEFAULT_MAX_PAYLOAD_BYTES = 1 * 1024 * 1024 * 1024;
+var DEFAULT_MAX_ASSET_BYTES = 256 * 1024 * 1024;
+
+// src/core/export/asset-paths.ts
+var TYPE_DIRS = new Set([
+  "emotion",
+  "background",
+  "user_icon",
+  "icon"
+]);
+var RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+class ZipNameSanitizer {
+  #taken = new Set;
+  sanitize(filename) {
+    let sanitized = filename.replace(/[<>:"\\|?*\x00-\x1F]/g, "_");
+    sanitized = sanitized.replace(/[. ]+$/, "");
+    if (RESERVED_NAMES.test(sanitized))
+      sanitized = "_" + sanitized;
+    if (!sanitized || sanitized === "." || sanitized === "..")
+      sanitized = "file";
+    const split = sanitized.split(".");
+    const baseName = split.slice(0, -1).join(".");
+    const extension = split.length > 1 ? "." + split[split.length - 1] : "";
+    let counter = 1;
+    let unique = baseName + extension;
+    while (this.#taken.has(unique)) {
+      unique = `${baseName}_${counter}${extension}`;
+      counter++;
+    }
+    this.#taken.add(unique);
+    return unique;
+  }
+}
+
+// src/core/export/module-archive.ts
+function latin1ToBytes(text) {
+  const out = new Uint8Array(text.length);
+  for (let i2 = 0;i2 < text.length; i2++)
+    out[i2] = text.charCodeAt(i2) & 255;
+  return out;
+}
+
+// src/realm/import-formats/png-chunks.ts
+var PNG_SIGNATURE = [
+  137,
+  80,
+  78,
+  71,
+  13,
+  10,
+  26,
+  10
+];
+function isPngBytes(bytes) {
+  if (bytes.length < PNG_SIGNATURE.length)
+    return false;
+  for (let i2 = 0;i2 < PNG_SIGNATURE.length; i2++) {
+    if (bytes[i2] !== PNG_SIGNATURE[i2])
+      return false;
+  }
+  return true;
+}
+function readU32BE(bytes, pos) {
+  return (bytes[pos] ?? 0) * 16777216 + ((bytes[pos + 1] ?? 0) << 16) + ((bytes[pos + 2] ?? 0) << 8) + (bytes[pos + 3] ?? 0) >>> 0;
+}
+function decodeText(bytes) {
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+function readPngChunks(bytes) {
+  if (!isPngBytes(bytes)) {
+    throw new Error("not a PNG file");
+  }
+  const out = [];
+  let pos = 8;
+  while (pos + 8 <= bytes.length) {
+    const len2 = readU32BE(bytes, pos);
+    const typeBytes = bytes.subarray(pos + 4, pos + 8);
+    const type = decodeText(typeBytes);
+    const dataStart = pos + 8;
+    const dataEnd = dataStart + len2;
+    if (dataEnd + 4 > bytes.length)
+      break;
+    const data = bytes.subarray(dataStart, dataEnd);
+    if (type === "tEXt") {
+      let nullIdx = -1;
+      for (let i2 = 0;i2 < data.length && i2 < 79; i2++) {
+        if (data[i2] === 0) {
+          nullIdx = i2;
+          break;
+        }
+      }
+      if (nullIdx >= 0) {
+        const key2 = decodeText(data.subarray(0, nullIdx));
+        const value = data.subarray(nullIdx + 1);
+        out.push({ type, key: key2, value, raw: data });
+      } else {
+        out.push({ type, raw: data });
+      }
+    } else if (type === "zTXt") {
+      let nullIdx = -1;
+      for (let i2 = 0;i2 < data.length && i2 < 79; i2++) {
+        if (data[i2] === 0) {
+          nullIdx = i2;
+          break;
+        }
+      }
+      if (nullIdx >= 0) {
+        const key2 = decodeText(data.subarray(0, nullIdx));
+        out.push({ type, key: key2, raw: data });
+      } else {
+        out.push({ type, raw: data });
+      }
+    } else {
+      out.push({ type, raw: data });
+    }
+    pos = dataEnd + 4;
+    if (type === "IEND")
+      break;
+  }
+  return out;
+}
+function extractPngTextChunks(bytes) {
+  const chunks = readPngChunks(bytes);
+  const out = [];
+  for (const c of chunks) {
+    if (c.type !== "tEXt")
+      continue;
+    if (!c.key || !c.value)
+      continue;
+    out.push({ key: c.key, text: decodeText(c.value) });
+  }
+  return out;
+}
+
+// src/export/archive-writer.ts
+var PINNED_MTIME = new Date(2000, 0, 1);
+function getImageType(a) {
+  if (a.length < 12)
+    return "Unknown";
+  if (a[0] === 255 && a[1] === 216 && a[a.length - 2] === 255 && a[a.length - 1] === 217)
+    return "JPEG";
+  if (a[0] === 137 && a[1] === 80 && a[2] === 78 && a[3] === 71 && a[4] === 13 && a[5] === 10 && a[6] === 26 && a[7] === 10)
+    return "PNG";
+  if (a[0] === 71 && a[1] === 73 && a[2] === 70 && a[3] === 56 && (a[4] === 55 || a[4] === 57) && a[5] === 97)
+    return "GIF";
+  if (a[0] === 66 && a[1] === 77)
+    return "BMP";
+  if (a[4] === 102 && a[5] === 116 && a[6] === 121 && a[7] === 112 && a[8] === 97 && a[9] === 118 && a[10] === 105 && a[11] === 102)
+    return "AVIF";
+  if (a[0] === 82 && a[1] === 73 && a[2] === 70 && a[3] === 70 && a[8] === 87 && a[9] === 69 && a[10] === 66 && a[11] === 80)
+    return "WEBP";
+  return "Unknown";
+}
+async function fetchImageBytes(imageId) {
+  const resp = await fetch(`/api/v1/images/${encodeURIComponent(imageId)}`, {
+    credentials: "include"
+  });
+  if (!resp.ok)
+    throw new Error(`HTTP ${resp.status}`);
+  return new Uint8Array(await resp.arrayBuffer());
+}
+function buildXMeta(bytes) {
+  const type = getImageType(bytes);
+  if (type === "PNG") {
+    let chunks = {};
+    try {
+      chunks = Object.fromEntries(extractPngTextChunks(bytes).map((c) => [c.key, c.text]));
+    } catch {
+      chunks = {};
+    }
+    if (Object.keys(chunks).length > 0)
+      return JSON.stringify(chunks, null, 4);
+  }
+  return JSON.stringify({ type });
+}
+
+class SequentialZip {
+  #zip;
+  #chunks = [];
+  #ended = false;
+  #error = null;
+  constructor() {
+    this.#zip = new Zip((err2, data, final) => {
+      if (err2)
+        this.#error = err2;
+      if (data)
+        this.#chunks.push(data);
+      if (final)
+        this.#ended = true;
+    });
+  }
+  add(path, data, level) {
+    if (this.#error)
+      throw this.#error;
+    const file = new ZipDeflate(path, { level });
+    file.mtime = PINNED_MTIME;
+    this.#zip.add(file);
+    file.push(data, true);
+    if (this.#error)
+      throw this.#error;
+  }
+  finish() {
+    this.#zip.end();
+    if (this.#error)
+      throw this.#error;
+    if (!this.#ended)
+      throw new Error("zip stream did not finalize");
+    const parts = this.#chunks.map((c) => c.slice().buffer);
+    return new Blob(parts, { type: "application/zip" });
+  }
+}
+async function buildArchive(plan, log8, onProgress) {
+  const zip = new SequentialZip;
+  const encoder = new TextEncoder;
+  const skippedAssets = [];
+  const total = plan.entries.length;
+  let done = 0;
+  for (const entry of plan.entries) {
+    if (entry.kind === "text") {
+      zip.add(entry.path, encoder.encode(entry.text), entry.level);
+    } else if (entry.kind === "binary") {
+      zip.add(entry.path, latin1ToBytes(entry.latin1), entry.level);
+    } else {
+      let bytes;
+      try {
+        bytes = await fetchImageBytes(entry.imageId);
+      } catch (err2) {
+        skippedAssets.push(entry.path);
+        log8.warn(`export: asset fetch failed path=${entry.path} image=${entry.imageId}: ` + (err2 instanceof Error ? err2.message : String(err2)));
+        done += 1;
+        onProgress?.(done, total);
+        continue;
+      }
+      zip.add(entry.metaPath, encoder.encode(buildXMeta(bytes)), 6);
+      zip.add(entry.path, bytes, entry.level);
+    }
+    done += 1;
+    onProgress?.(done, total);
+  }
+  return { blob: zip.finish(), fileName: plan.fileName, skippedAssets };
+}
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 // src/frontend.ts
 var HANDSHAKE_RETRY_MS = 3000;
 var flog3 = {
@@ -47066,10 +49252,19 @@ function setup(ctx) {
   if (hasReadiness)
     readiness.deferReady();
   const displayRegistered = Boolean(ctx.display);
-  if (ctx.display) {
-    cleanups.push(ctx.display.registerResolver(createDisplayResolver((chatId, vars) => {
+  const display = ctx.display;
+  if (display) {
+    cleanups.push(display.registerResolver(createDisplayResolver((chatId, vars) => {
       applyVarDelta(chatId, "local", vars);
       ctx.sendToBackend({ type: "display_writeback", chatId, vars });
+    }, (effect) => {
+      if (effect.kind === "set-expression") {
+        display.setExpression(effect);
+        return;
+      }
+      ctx.chats.updateMessage(effect.chatId, effect.messageId, { content: effect.content }).catch((err2) => {
+        flog3.warn(`display action message update failed chat=${effect.chatId} ` + `message=${effect.messageId}: ${String(err2)}`);
+      });
     })));
   }
   const sendDisplayAuthority = (chatId) => {
@@ -47145,8 +49340,8 @@ function setup(ctx) {
         } else {
           flog3.warn(`[macro-tap] ← regex-scripts/apply HTTP ${resp2.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
         }
-      } catch (err) {
-        flog3.warn("[macro-tap] regex-scripts/apply clone/parse failed:", err);
+      } catch (err2) {
+        flog3.warn("[macro-tap] regex-scripts/apply clone/parse failed:", err2);
       }
       return resp2;
     }
@@ -47195,8 +49390,8 @@ function setup(ctx) {
       } else {
         flog3.warn(`[macro-tap] ← resolve-batch HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
       }
-    } catch (err) {
-      flog3.warn("[macro-tap] clone/parse failed:", err);
+    } catch (err2) {
+      flog3.warn("[macro-tap] clone/parse failed:", err2);
     }
     return resp;
   };
@@ -47287,8 +49482,8 @@ function setup(ctx) {
     });
     cleanups.push(() => sidebar?.destroy());
     flog3.info("frontend setup: unified sidebar registered");
-  } catch (err) {
-    flog3.error("createSidebar failed:", err);
+  } catch (err2) {
+    flog3.error("createSidebar failed:", err2);
     return () => {
       for (const fn of cleanups) {
         try {
@@ -47309,8 +49504,8 @@ function setup(ctx) {
   try {
     auxDebug = createAuxDebugPanel(flog3);
     cleanups.push(() => auxDebug?.destroy());
-  } catch (err) {
-    flog3.error("createAuxDebugPanel failed:", err);
+  } catch (err2) {
+    flog3.error("createAuxDebugPanel failed:", err2);
   }
   const alertModal = setupAlertModal({ ctx, sendToBackend, log: flog3 });
   cleanups.push(() => alertModal.destroy());
@@ -47337,8 +49532,8 @@ function setup(ctx) {
     });
     cleanups.push(() => realm?.destroy());
     flog3.info("frontend setup: realm modal registered");
-  } catch (err) {
-    flog3.error("setupRealmModal failed:", err);
+  } catch (err2) {
+    flog3.error("setupRealmModal failed:", err2);
   }
   const translateToggle = setupTranslateToggle({
     mountTarget: sidebar.headerRoot,
@@ -47435,8 +49630,8 @@ function setup(ctx) {
         delete window.__riCompat;
       } catch {}
     });
-  } catch (err) {
-    flog3.warn(`__riCompat install failed: ${err.message}`);
+  } catch (err2) {
+    flog3.warn(`__riCompat install failed: ${err2.message}`);
   }
   let lastSentW = -1;
   let lastSentH = -1;
@@ -47488,10 +49683,28 @@ function setup(ctx) {
           includeChatData: logStore.getState().includeChatData
         });
         downloadBundle(bundle);
-      } catch (err) {
-        flog3.error("log_export_pushed: bundle/download failed", err);
+      } catch (err2) {
+        flog3.error("log_export_pushed: bundle/download failed", err2);
       }
       sendToBackend({ type: "log_set_state", enabled: false, includeChatData: false });
+    }
+    if (msg.type === "export_archive") {
+      const plan = msg.plan;
+      (async () => {
+        try {
+          const result = await buildArchive(plan, flog3);
+          downloadBlob(result.blob, result.fileName);
+          const skipped = result.skippedAssets.length;
+          flog3.info(`export_archive: wrote ${result.fileName} entries=${plan.entries.length}` + (skipped > 0 ? ` skipped=${skipped}` : ""));
+          if (skipped > 0) {
+            window.alert(`Exported ${result.fileName}, but ${skipped} asset(s) could not be read ` + `and were left out. The archive is incomplete.`);
+          }
+        } catch (err2) {
+          flog3.error("export_archive: archive build failed", err2);
+          window.alert(`Export failed: ${err2 instanceof Error ? err2.message : String(err2)}`);
+        }
+      })();
+      return;
     }
     if (msg.type === "display_snapshot") {
       if (getDisplayResolutionMode() !== "off") {
@@ -47558,8 +49771,8 @@ function setup(ctx) {
     if (msg.type === "render_bg_html" || msg.type === "clear_bg_html") {
       try {
         bgRenderer.handleMessage(msg);
-      } catch (err) {
-        flog3.error("bg-html dispatch failed:", err);
+      } catch (err2) {
+        flog3.error("bg-html dispatch failed:", err2);
       }
       return;
     }
@@ -47599,20 +49812,20 @@ function setup(ctx) {
       realm?.handleBackendMessage(msg);
       try {
         importOverlay.handleBackendMessage(msg);
-      } catch (err) {
-        flog3.warn("importOverlay realm dispatch threw:", err);
+      } catch (err2) {
+        flog3.warn("importOverlay realm dispatch threw:", err2);
       }
       return;
     }
     try {
       importOverlay.handleBackendMessage(msg);
-    } catch (err) {
-      flog3.warn("importOverlay dispatch threw:", err);
+    } catch (err2) {
+      flog3.warn("importOverlay dispatch threw:", err2);
     }
     try {
       translateToggle.handleBackendMessage(msg);
-    } catch (err) {
-      flog3.warn("translateToggle dispatch threw:", err);
+    } catch (err2) {
+      flog3.warn("translateToggle dispatch threw:", err2);
     }
     sidebar?.handleBackendMessage(msg);
   });
