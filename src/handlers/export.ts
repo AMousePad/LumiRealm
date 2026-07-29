@@ -6,7 +6,7 @@ import {
 } from '../core/export/character-archive.js';
 import type { LiveLoreEntry } from '../core/export/lore-back-projection.js';
 import type { LiveRegexRow } from '../core/export/regex-back-projection.js';
-import type { AssetIndexEntry, LumirealmCharacterData } from '../payload/types.js';
+import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ModuleEnvelope } from '../state/modules-store.js';
 import type { Handler } from './types.js';
 
@@ -37,12 +37,6 @@ export interface ExportHandlerDeps {
   readonly errMsg: (e: unknown) => string;
 }
 
-function firstImageId(entry: AssetIndexEntry | undefined): { imageId: string; ext?: string } | null {
-  const id = entry?.imageIds?.[0];
-  if (typeof id !== 'string' || id.length === 0) return null;
-  return entry?.ext !== undefined ? { imageId: id, ext: entry.ext } : { imageId: id };
-}
-
 export function createExportHandlers(deps: ExportHandlerDeps): {
   readonly export_module: Handler<'export_module'>;
   readonly export_character: Handler<'export_character'>;
@@ -67,13 +61,7 @@ export function createExportHandlers(deps: ExportHandlerDeps): {
           moduleId: env.id,
           filename: env.filename,
           extensionVersion: deps.extensionVersion,
-          resolveAsset: (name) => {
-            const ref = env.asset_index[name];
-            if (!ref || typeof ref.imageId !== 'string' || ref.imageId.length === 0) return null;
-            return ref.ext !== undefined
-              ? { imageId: ref.imageId, ext: ref.ext }
-              : { imageId: ref.imageId };
-          },
+          assetIndex: env.asset_index,
           iconImageId: icon,
           ...(env.translator_schema_version !== undefined
             ? { translatorSchemaVersion: env.translator_schema_version }
@@ -132,8 +120,8 @@ export function createExportHandlers(deps: ExportHandlerDeps): {
           character,
           worldBookEntries,
           liveRegex,
-          resolveAsset: (name) => firstImageId(data.asset_index[name]),
-          resolveEmotion: (name) => firstImageId(data.emotion_index[name]),
+          assetIndex: data.asset_index,
+          emotionIndex: data.emotion_index,
           avatarImageId: character.image_id ?? null,
           extensionVersion: deps.extensionVersion,
         });

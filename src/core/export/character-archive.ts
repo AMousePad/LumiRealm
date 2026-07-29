@@ -46,6 +46,44 @@ export interface ResolvedAsset {
   readonly ext?: string;
 }
 
+export interface AssetIndexLike {
+  readonly imageIds: readonly string[];
+  readonly ext?: string;
+}
+
+/** Declared order first (stable for untouched cards), then names the index
+ *  gained afterwards. Deleted assets drop out because they are no longer in the
+ *  index; renames surface as index-only names and append. */
+function orderedAssetNames(
+  declared: readonly { readonly name: string; readonly ext?: string }[],
+  index: Readonly<Record<string, AssetIndexLike>>,
+): { name: string; ext?: string }[] {
+  const out: { name: string; ext?: string }[] = [];
+  const seen = new Set<string>();
+  for (const d of declared) {
+    if (!d || typeof d.name !== "string" || seen.has(d.name)) continue;
+    if (!index[d.name]) continue;
+    seen.add(d.name);
+    out.push(d.ext !== undefined ? { name: d.name, ext: d.ext } : { name: d.name });
+  }
+  for (const name of Object.keys(index)) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push({ name });
+  }
+  return out;
+}
+
+function resolveFromIndex(
+  index: Readonly<Record<string, AssetIndexLike>>,
+  name: string,
+): ResolvedAsset | null {
+  const entry = index[name];
+  const id = entry?.imageIds?.[0];
+  if (typeof id !== "string" || id.length === 0) return null;
+  return entry?.ext !== undefined ? { imageId: id, ext: entry.ext } : { imageId: id };
+}
+
 export interface BuildCharacterArchiveInput {
   readonly characterId: string;
   /** LumirealmCharacterData. Typed loosely so this module stays payload-agnostic. */
@@ -53,8 +91,10 @@ export interface BuildCharacterArchiveInput {
   readonly character: LiveCharacterFields;
   readonly worldBookEntries: readonly LiveLoreEntry[];
   readonly liveRegex: readonly LiveRegexRow[];
-  readonly resolveAsset: (name: string) => ResolvedAsset | null;
-  readonly resolveEmotion: (name: string) => ResolvedAsset | null;
+  /** Live index, maintained by add/rename/delete. Authoritative over
+   *  `payload.additional_assets`, which is only written at import time. */
+  readonly assetIndex: Readonly<Record<string, AssetIndexLike>>;
+  readonly emotionIndex: Readonly<Record<string, AssetIndexLike>>;
   readonly avatarImageId: string | null;
   readonly extensionVersion: string;
   readonly now?: () => number;
@@ -201,15 +241,15 @@ export function buildCharacterArchivePlan(input: BuildCharacterArchiveInput): Ar
     return declaredExt.length > 0 ? { name, path, ext: declaredExt } : { name, path };
   };
 
-  for (const asset of input.data.payload.additional_assets) {
-    const resolved = input.resolveAsset(asset.name);
+  for (const asset of orderedAssetNames(input.data.payload.additional_assets, input.assetIndex)) {
+    const resolved = resolveFromIndex(input.assetIndex, asset.name);
     if (!resolved) { missingAssets.push(asset.name); continue; }
     sidecarAssets.push(
       pushAsset(asset.name, asset.ext ?? resolved.ext ?? "", "x-risu-asset", resolved.imageId),
     );
   }
-  for (const emo of input.data.payload.emotion_images) {
-    const resolved = input.resolveEmotion(emo.name);
+  for (const emo of orderedAssetNames(input.data.payload.emotion_images, input.emotionIndex)) {
+    const resolved = resolveFromIndex(input.emotionIndex, emo.name);
     if (!resolved) { missingAssets.push(emo.name); continue; }
     sidecarEmotions.push(
       pushAsset(emo.name, emo.ext ?? resolved.ext ?? "png", "emotion", resolved.imageId),

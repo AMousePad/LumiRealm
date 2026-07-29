@@ -31,8 +31,9 @@ export interface BuildModuleArchiveInput {
   readonly moduleId: string;
   readonly filename: string;
   readonly extensionVersion: string;
-  /** Resolves a module asset name to its Lumi image id, or null if unknown. */
-  readonly resolveAsset: (name: string) => ResolvedModuleAsset | null;
+  /** Live index, maintained by add/rename/delete. Authoritative over
+   *  `module.assets`, which is only written at import time. */
+  readonly assetIndex: Readonly<Record<string, ResolvedModuleAsset>>;
   readonly iconImageId: string | null;
   readonly translatorSchemaVersion?: number;
   readonly translations?: unknown;
@@ -150,22 +151,34 @@ export function buildModuleArchivePlan(input: BuildModuleArchiveInput): ArchiveP
   const rawAssets: readonly (readonly [string, string, string])[] = Array.isArray(module.assets)
     ? (module.assets as unknown as readonly (readonly [string, string, string])[])
     : [];
+  // Declared order first, then names the index gained afterwards. Deleted
+  // assets drop out (no longer indexed); renames surface as index-only names.
+  const ordered: { name: string; ext: string }[] = [];
+  const seen = new Set<string>();
   for (const triple of rawAssets) {
     const name = typeof triple[0] === "string" ? triple[0] : "";
-    if (name.length === 0) continue;
-    const resolved = input.resolveAsset(name);
-    if (!resolved) {
-      missingAssets.push(name);
+    if (name.length === 0 || seen.has(name) || !input.assetIndex[name]) continue;
+    seen.add(name);
+    const declared = typeof triple[2] === "string" ? triple[2] : "";
+    ordered.push({ name, ext: declared.length > 0 ? declared : (input.assetIndex[name]?.ext ?? "") });
+  }
+  for (const name of Object.keys(input.assetIndex)) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    ordered.push({ name, ext: input.assetIndex[name]?.ext ?? "" });
+  }
+
+  for (const a of ordered) {
+    const resolved = input.assetIndex[a.name];
+    if (!resolved || typeof resolved.imageId !== "string" || resolved.imageId.length === 0) {
+      missingAssets.push(a.name);
       continue;
     }
-    const declaredExt = typeof triple[2] === "string" && triple[2].length > 0
-      ? triple[2]
-      : (resolved.ext ?? "");
-    // Positional with module.assets. The icon is deliberately NOT in this list:
-    // it round-trips through `sidecar.module.icon`, and listing it twice would
-    // restore a phantom asset entry.
+    // Positional with the exported module.assets. The icon is deliberately NOT
+    // in this list: it round-trips through `sidecar.module.icon`, and listing it
+    // twice would restore a phantom asset entry.
     sidecarAssets.push(
-      pushAsset(name, declaredExt, "x-risu-asset", resolved.imageId, declaredExt || "unknown"),
+      pushAsset(a.name, a.ext, "x-risu-asset", resolved.imageId, a.ext || "unknown"),
     );
   }
 
@@ -174,9 +187,9 @@ export function buildModuleArchivePlan(input: BuildModuleArchiveInput): ArchiveP
     icon = pushAsset("main", "png", "icon", input.iconImageId, "png");
   }
 
-  const blankedAssets = rawAssets.map(
-    (t) => [t[0] ?? "", "", t[2] ?? ""] as [string, string, string],
-  );
+  // Derived from the reconciled list, not the stale declaration, so the
+  // exported module body agrees with the assets actually in the archive.
+  const blankedAssets = ordered.map((a) => [a.name, "", a.ext] as [string, string, string]);
   // Risu's charx writer only stores {name,description,id,trigger,regex,lorebook}
   // here and its importer reads only trigger/regex/lorebook. Carrying the rest
   // is inert for Risu and lets our reader recover cjs/namespace/mcp without the
