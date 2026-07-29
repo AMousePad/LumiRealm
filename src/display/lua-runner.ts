@@ -2,7 +2,11 @@ import type { SpindleDisplayContext } from 'lumiverse-spindle-types';
 import type { DispatchData, HostMessage } from '../interpreter/host.js';
 import { runListenEditChain } from '../interpreter/listen-edit.js';
 import { runAtActionsForPhase } from '../interpreter/at-actions-runtime.js';
-import { makeSnapshotHostApi, buildPreloaded, type DisplayVarWriteback } from './host-shim.js';
+import {
+  makeSnapshotHostApi,
+  buildPreloaded,
+  type DisplayVarWriteback,
+} from './host-shim.js';
 import type { DisplaySnapshot } from './snapshot.js';
 import { makeDispatcherScriptNS, registerManualTriggers } from '../interpreter/dispatcher.js';
 import { setWasmoonExecutor } from '../interpreter/runtime.js';
@@ -11,10 +15,10 @@ import { executeWasmoon } from '../interpreter/lua-wasmoon.js';
 setWasmoonExecutor(executeWasmoon);
 
 function risuChatIndex(context: SpindleDisplayContext, snap: DisplaySnapshot): number {
+  if (typeof context.messageIndex === 'number') return context.messageIndex - 1;
   const dyn = context.dynamicMacros;
   const chatIndexStr = dyn?.chat_index;
   if (typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)) return parseInt(chatIndexStr, 10) - 1;
-  if (typeof context.messageIndex === 'number') return context.messageIndex - 1;
   return snap.chat.lastMessageId - 1;
 }
 

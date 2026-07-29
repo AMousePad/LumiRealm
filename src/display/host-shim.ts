@@ -1,3 +1,4 @@
+import type { SpindleDisplayContext } from 'lumiverse-spindle-types';
 import type { HostApi, HostMessage, HostCharacter, HostPersona, HostDomHandle } from '../interpreter/host.js';
 import type { TriggerRuntimePreloaded } from '../interpreter/host.js';
 import type { LorebookCache } from '../interpreter/runtime/lorebook.js';
@@ -5,6 +6,45 @@ import type { DisplaySnapshot } from './snapshot.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
 const log = makeSafeLogger('display-shim');
+
+/**
+ * Risu renders against its live in-memory chat object. The host can render an
+ * edited or streaming message before the next backend snapshot arrives, so
+ * make the current bubble authoritative for its exact getFullChat() row.
+ */
+export function withCurrentDisplayMessage(
+  snap: DisplaySnapshot,
+  context: SpindleDisplayContext,
+  content: string,
+): DisplaySnapshot {
+  const idIndex = context.messageId
+    ? snap.messagesHost.findIndex((message) => message.id === context.messageId)
+    : -1;
+  const contextIndex = context.messageIndex;
+  const index = idIndex >= 0
+    ? idIndex
+    : (typeof contextIndex === 'number' && Number.isInteger(contextIndex)
+      ? contextIndex
+      : -1);
+  if (index < 0 || index > snap.messagesHost.length) return snap;
+
+  const messagesHost = [...snap.messagesHost];
+  const current = messagesHost[index];
+  const next: HostMessage = {
+    id: context.messageId ?? current?.id ?? '',
+    role: context.role ?? current?.role ?? (context.isUser ? 'user' : 'assistant'),
+    content,
+  };
+  if (
+    current?.id === next.id &&
+    current.role === next.role &&
+    current.content === next.content
+  ) return snap;
+
+  if (current) messagesHost[index] = next;
+  else messagesHost.push(next);
+  return { ...snap, messagesHost };
+}
 
 export function buildPreloaded(snap: DisplaySnapshot): TriggerRuntimePreloaded {
   const varsCache: Record<string, string> = {};

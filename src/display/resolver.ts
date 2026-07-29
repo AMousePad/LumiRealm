@@ -20,6 +20,7 @@ import {
 import { type FeRegexScript } from './regex-apply.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
+import { withCurrentDisplayMessage } from './host-shim.js';
 const log = makeSafeLogger('display-resolver');
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
@@ -49,17 +50,17 @@ function buildInput(
   context: SpindleDisplayContext,
 ): RunPipelineInput {
   const dyn = context.dynamicMacros;
-  // The host's dynamicMacros.chat_index is its chunked-render-window position,
-  // which drifts below our full-history lastmessageid on long chats. Reconstruct
-  // the absolute index from our own count + depth so chat_index/lastmessageid
-  // gates (Risu cbs.ts indexes both off chat.message[]) hold at any length.
   const lastIdx = snap.chat.messages.length - 1;
   const chatIndexStr = dyn?.chat_index;
-  const idxOverride = typeof context.depth === 'number' && context.depth >= 0
-    ? lastIdx - context.depth
+  // Lumi's message index includes the greeting at zero. Risu's chat.message[]
+  // does not, so its Chat.svelte index is one less.
+  const idxOverride = typeof context.messageIndex === 'number'
+    ? context.messageIndex - 1
     : (typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)
       ? parseInt(chatIndexStr, 10) - 1
-      : undefined);
+      : (typeof context.depth === 'number' && context.depth >= 0
+        ? lastIdx - context.depth
+        : undefined));
   const role = context.role ?? dyn?.role;
   return {
     template: content,
@@ -231,21 +232,24 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
+        const liveSnap = (snap.luaTriggers.length > 0 || snap.atActions.length > 0)
+          ? withCurrentDisplayMessage(snap, args.context, args.content)
+          : snap;
         let body = args.content;
-        if (snap.luaTriggers.length > 0) {
-          body = runPipeline(buildInput(snap, body, args.context), { recorder });
+        if (liveSnap.luaTriggers.length > 0) {
+          body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
           body = await runEditDisplayChain(
-            snap,
+            liveSnap,
             body,
             args.context,
-            (t) => Promise.resolve(runPipeline(buildInput(snap, t, args.context), { recorder })),
+            (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })),
             (vars) => writeback?.(chatId, vars),
           );
         }
-        if (snap.atActions.length > 0) {
-          body = await runEditDisplayAtActions(snap, body, args.context);
+        if (liveSnap.atActions.length > 0) {
+          body = await runEditDisplayAtActions(liveSnap, body, args.context);
         }
-        feContent = runPipeline(buildInput(snap, body, args.context), { recorder });
+        feContent = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
       } catch (err) {
         log.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;
