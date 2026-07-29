@@ -186,8 +186,6 @@ function runApply(
   const scripts = args.scripts as readonly FeRegexScript[];
 
   const coreScripts: RegexCoreScript[] = scripts.map((script) => {
-    const preFind = args.resolvedFindPatterns?.[script.id];
-    const preReplace = args.resolvedReplacements?.[script.id];
     return {
       find_regex: script.find_regex,
       replace_string: script.replace_string,
@@ -199,8 +197,6 @@ function runApply(
       max_depth: script.max_depth,
       trim_strings: script.trim_strings,
       ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
-      ...(preFind !== undefined ? { preResolvedFind: preFind } : {}),
-      ...(preReplace !== undefined ? { preResolvedReplace: preReplace } : {}),
     };
   });
 
