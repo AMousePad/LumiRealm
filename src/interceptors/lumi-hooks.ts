@@ -62,6 +62,7 @@ import {
 } from '../adapters/spindle-extras.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 import type { InjectAtPlan } from '../payload/lorebook-decorator-runtime.js';
+import { buildRisuWorldInfoChatPlacements } from '../payload/risu-world-info-depth-placement.js';
 import {
   buildBackendPipelineInput,
   listLivePromptRegexScripts,
@@ -1049,6 +1050,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       const activationOverrides = active && cardDisablesRecursiveWorldInfo(active)
         ? { disableRecursion: true as const }
         : undefined;
+      const runtimePlacements = active
+        ? buildRisuWorldInfoChatPlacements(active, ctx.entries)
+        : new Map();
       log.info(
         `[decorators] worldInfoInterceptor ENTER chat=${ctx.chatId} entries=${ctx.entries.length}`,
       );
@@ -1200,6 +1204,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         outcome.forced.length === 0 &&
         outcome.mutated.length === 0 &&
         selectionMutations.size === 0 &&
+        runtimePlacements.size === 0 &&
         activationOverrides === undefined
       ) return;
       const result: {
@@ -1209,6 +1214,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           id: string;
           content?: string;
           selectionContent?: string;
+          placement?: import('lumiverse-spindle-types').WorldInfoInterceptorPlacementDTO;
         }[];
         activationOverrides?: {
           disableRecursion?: true;
@@ -1216,11 +1222,16 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       } = {};
       if (outcome.disabled.length > 0) result.disabled = outcome.disabled;
       if (outcome.forced.length > 0) result.forced = outcome.forced;
-      if (outcome.mutated.length > 0 || selectionMutations.size > 0) {
+      if (
+        outcome.mutated.length > 0 ||
+        selectionMutations.size > 0 ||
+        runtimePlacements.size > 0
+      ) {
         const mutations = new Map<string, {
           id: string;
           content?: string;
           selectionContent?: string;
+          placement?: import('lumiverse-spindle-types').WorldInfoInterceptorPlacementDTO;
         }>();
         for (const mutation of outcome.mutated) {
           mutations.set(mutation.entryId, {
@@ -1233,6 +1244,13 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             ...mutations.get(id),
             id,
             selectionContent,
+          });
+        }
+        for (const [id, placement] of runtimePlacements) {
+          mutations.set(id, {
+            ...mutations.get(id),
+            id,
+            placement,
           });
         }
         result.mutated = [...mutations.values()];

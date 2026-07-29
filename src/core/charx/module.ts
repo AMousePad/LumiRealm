@@ -73,7 +73,7 @@ function resolveEmbeddedAsset(
   return null;
 }
 
-function convertCharacterBook(raw: unknown): unknown[] {
+export function convertCharacterBook(raw: unknown): unknown[] {
   const charbook = record(raw);
   const entries = charbook ? array(charbook["entries"]) : [];
   const lorebook: unknown[] = [];
