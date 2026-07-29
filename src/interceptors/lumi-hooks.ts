@@ -654,7 +654,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         }
 
         // Write-time origins hold raw post-unbake (body macros resolve at the render origin), and we run editoutput @@-actions and the doc-boundary normalize so DOMPurify keeps leading style blocks.
-        const isUserMessage = ctx.extra?.['is_user'] === true;
+        const isUserMessage = ctx.isUser;
         const isGreeting = ctx.extra?.['greeting'] === true;
         const atActions = coerceAtActions(active.card.risuPayload.at_actions);
         let working = ctx.content;
