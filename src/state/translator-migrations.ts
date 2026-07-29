@@ -537,7 +537,7 @@ async function applyV13FixEscapedPerMessageGate(
   };
 }
 
-async function applyV14ExcludeGreetingPerEntry(
+async function applyV15ExcludeGreetingPerEntry(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
@@ -596,7 +596,7 @@ async function applyV14ExcludeGreetingPerEntry(
       } catch (err) {
         failed += 1;
         deps.log.warn(
-          `migrate(${args.characterId}) v14: update entry=${entry.id} failed: ` +
+          `migrate(${args.characterId}) v15: update entry=${entry.id} failed: ` +
             (err instanceof Error ? err.message : String(err)),
         );
       }
@@ -685,12 +685,15 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
     touches: ['regex_scripts'],
     apply: applyV13FixEscapedPerMessageGate,
   },
+  // v14 was persisted by the rolled-back prompt-wide greeting migration.
+  // Keep it burned so installations that ran that build execute this corrected
+  // per-entry migration instead of treating it as already complete.
   {
-    version: 14,
+    version: 15,
     description:
       'Mark each projected Risu lorebook entry to exclude the character greeting during activation.',
     touches: ['world_book_entries'],
-    apply: applyV14ExcludeGreetingPerEntry,
+    apply: applyV15ExcludeGreetingPerEntry,
   },
 ];
 

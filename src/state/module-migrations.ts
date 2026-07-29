@@ -242,7 +242,7 @@ async function applyV8FixEscapedPerMessageGate(
   };
 }
 
-async function applyV9ExcludeGreetingPerEntry(
+async function applyV10ExcludeGreetingPerEntry(
   args: ModuleMigrationStepArgs,
   deps: ModuleMigrationDeps,
 ): Promise<ModuleMigrationStepResult> {
@@ -300,7 +300,7 @@ async function applyV9ExcludeGreetingPerEntry(
     } catch (err) {
       failed += 1;
       deps.log.warn(
-        `migrate-module(${args.env.id}) v9: update entry=${entry.id} failed: ` +
+        `migrate-module(${args.env.id}) v10: update entry=${entry.id} failed: ` +
           (err instanceof Error ? err.message : String(err)),
       );
     }
@@ -347,12 +347,14 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
     touches: ['regex_scripts_attached_chars'],
     apply: applyV8FixEscapedPerMessageGate,
   },
+  // v9 was persisted by the rolled-back prompt-wide greeting migration.
+  // Keep it burned so modules touched by that build run the corrected step.
   {
-    version: 9,
+    version: 10,
     description:
       'Mark each projected Risu module lorebook entry to exclude the character greeting during activation.',
     touches: ['world_book_entries'],
-    apply: applyV9ExcludeGreetingPerEntry,
+    apply: applyV10ExcludeGreetingPerEntry,
   },
 ];
 
