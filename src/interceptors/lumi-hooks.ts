@@ -7,7 +7,11 @@ import { runPipeline } from '../interpreter/evaluator/pipeline.js';
 import type { VarReadRecorder } from '../interpreter/evaluator/context.js';
 import { stripSetvarSpans, hasSetvarFamily } from '../interpreter/evaluator/strip-setvar.js';
 import { runListenEditChain } from '../interpreter/listen-edit.js';
-import { runAtActionsForPhase, coerceAtActions } from '../interpreter/at-actions-runtime.js';
+import {
+  runAtActionsForPhase,
+  coerceAtActions,
+  isRowlessAtAction,
+} from '../interpreter/at-actions-runtime.js';
 import { puaEncodeFeMacros, puaDecodeFeMacros } from '../util/pua-roundtrip.js';
 import { panelTrace } from '../util/perf.js';
 import { perfEnabled, perfRecord } from '../util/perf.js';
@@ -489,7 +493,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           const hasLuaTrigger = triggers.some(
             (t) => t.effect?.[0]?.type === 'triggerlua',
           );
-          const renderAtActions = coerceAtActions(active.card.risuPayload.at_actions);
+          const renderAtActions = coerceAtActions(
+            active.card.risuPayload.at_actions,
+          ).filter(isRowlessAtAction);
           const rawIdx = ctx.extra?.['messageIndex'];
           const messageIndex = typeof rawIdx === 'number' ? rawIdx : 0;
           const risuChatIdx = Math.max(-1, messageIndex - 1);
@@ -674,7 +680,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         // Write-time origins hold raw post-unbake (body macros resolve at the render origin), and we run editoutput @@-actions and the doc-boundary normalize so DOMPurify keeps leading style blocks.
         const isUserMessage = ctx.isUser;
         const isGreeting = ctx.extra?.['greeting'] === true;
-        const atActions = coerceAtActions(active.card.risuPayload.at_actions);
+        const atActions = coerceAtActions(
+          active.card.risuPayload.at_actions,
+        ).filter(isRowlessAtAction);
         let working = ctx.content;
         if (atActions.length > 0 && !isUserMessage) {
           try {

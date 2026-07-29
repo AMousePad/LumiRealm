@@ -11,7 +11,11 @@ import {
 import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import { makeRisuTriggerRuntime, withDispatchContext } from '../interpreter/runtime.js';
 import { runListenEditChain } from '../interpreter/listen-edit.js';
-import { runAtActionsForPhase, coerceAtActions } from '../interpreter/at-actions-runtime.js';
+import {
+  runAtActionsForPhase,
+  coerceAtActions,
+  isRowlessAtAction,
+} from '../interpreter/at-actions-runtime.js';
 import { buildDispatchSeams } from './dispatch-seams.js';
 import { rememberOurWrite } from './recent-writes.js';
 import { invalidateRenderMcpForChat } from './render-mcp-cache.js';
@@ -155,7 +159,9 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       const hasLuaTrigger = triggers.some(
         (t) => t.effect?.[0]?.type === 'triggerlua',
       );
-      const atActions = coerceAtActions(active.card.risuPayload.at_actions);
+      const atActions = coerceAtActions(
+        active.card.risuPayload.at_actions,
+      ).filter(isRowlessAtAction);
       const hasOutputAtActions = atActions.some(
         (a) => a.phase === 'editoutput' || a.phase === 'edittrans',
       );

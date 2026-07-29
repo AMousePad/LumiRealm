@@ -76,6 +76,49 @@ export interface LiveAtActionScript {
   readonly hasExplicitOrder?: boolean;
 }
 
+export function isRowlessAtAction(action: RuntimeAtAtAction): boolean {
+  return (action.sourceOrigin ?? 'character') === 'character';
+}
+
+export function actionFromLiveScript(
+  live: LiveAtActionScript & {
+    readonly flagActions?: readonly AtAtFlagAction[];
+    readonly sourceIndex?: number;
+    readonly sourceRowIndex?: number;
+    readonly sourceOrigin?: string;
+    readonly liveScriptId?: string;
+  },
+): RuntimeAtAtAction | null {
+  if (!live.phase) return null;
+  const directAction = inferDirectAction(live.out);
+  const flagActions = live.flagActions ?? [];
+  const action = directAction ?? primaryFlagAction(flagActions);
+  if (!action) return null;
+  return {
+    action,
+    ...(directAction ? { directAction } : {}),
+    ...(flagActions.length > 0 ? { flagActions } : {}),
+    findRegex: live.findRegex,
+    flag: live.flag,
+    out: live.out,
+    phase: live.phase,
+    order: live.order ?? 0,
+    ...(live.hasExplicitOrder === true ? { hasExplicitOrder: true } : {}),
+    ...(live.sourceIndex !== undefined
+      ? { sourceIndex: live.sourceIndex }
+      : {}),
+    ...(live.sourceRowIndex !== undefined
+      ? { sourceRowIndex: live.sourceRowIndex }
+      : {}),
+    ...(live.sourceOrigin !== undefined
+      ? { sourceOrigin: live.sourceOrigin }
+      : {}),
+    ...(live.liveScriptId !== undefined
+      ? { liveScriptId: live.liveScriptId }
+      : {}),
+  };
+}
+
 export interface RuntimeAtActionDependencies {
   readonly messages: boolean;
   readonly effects: boolean;

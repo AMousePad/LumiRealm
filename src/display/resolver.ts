@@ -8,7 +8,14 @@ import type {
   SpindleDisplayContext,
 } from 'lumiverse-spindle-types';
 import { runPipeline, type RunPipelineInput } from '../interpreter/evaluator/pipeline.js';
-import type { VarReadRecorder } from '../interpreter/evaluator/context.js';
+import {
+  MSG_DEP_KEY,
+  type VarReadRecorder,
+} from '../interpreter/evaluator/context.js';
+import {
+  getRuntimeAtActionDependencies,
+  isRowlessAtAction,
+} from '../interpreter/at-actions-runtime.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import {
   getDisplaySnapshot,
@@ -21,7 +28,10 @@ import { type FeRegexScript } from './regex-apply.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
-import { withCurrentDisplayMessage } from './host-shim.js';
+import {
+  withCurrentDisplayMessage,
+} from './host-shim.js';
+import { buildModuleDisplayPlan } from './module-action-plan.js';
 const log = makeSafeLogger('display-resolver');
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
@@ -176,43 +186,97 @@ async function fetchBackendApply(args: SpindleDisplayScriptsArgs): Promise<strin
   }
 }
 
-function runApply(
+const warnedActionBindings = new Set<string>();
+
+function warnActionBinding(scriptId: string, reason: string): void {
+  const key = `${scriptId}\u0000${reason}`;
+  if (warnedActionBindings.has(key)) return;
+  if (warnedActionBindings.size >= 256) warnedActionBindings.clear();
+  warnedActionBindings.add(key);
+  log.warn(`applyScripts: skipped module row=${scriptId}: ${reason}`);
+}
+
+function scriptApplies(
+  script: FeRegexScript,
+  context: SpindleDisplayContext,
+): boolean {
+  if (script.disabled === true) return false;
+  const placement = context.isUser ? 'user_input' : 'ai_output';
+  if (!script.placement.includes(placement)) return false;
+  if (script.min_depth !== null && context.depth < script.min_depth) return false;
+  if (script.max_depth !== null && context.depth > script.max_depth) return false;
+  return true;
+}
+
+function toCoreScript(script: FeRegexScript): RegexCoreScript {
+  return {
+    find_regex: script.find_regex,
+    replace_string: script.replace_string,
+    flags: script.flags,
+    substitute_macros: script.substitute_macros,
+    placement: script.placement,
+    target: 'display',
+    min_depth: script.min_depth,
+    max_depth: script.max_depth,
+    trim_strings: script.trim_strings,
+    ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
+  };
+}
+
+async function runApply(
   snap: DisplaySnapshot,
   args: SpindleDisplayScriptsArgs,
   recorder: VarReadRecorder,
-): string {
+): Promise<string> {
   const ctx = args.context;
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
   const scripts = args.scripts as readonly FeRegexScript[];
+  const plan = buildModuleDisplayPlan(scripts, snap.atActions);
+  let content = args.content;
 
-  const coreScripts: RegexCoreScript[] = scripts.map((script) => {
-    return {
-      find_regex: script.find_regex,
-      replace_string: script.replace_string,
-      flags: script.flags,
-      substitute_macros: script.substitute_macros,
-      placement: script.placement,
-      target: 'display',
-      min_depth: script.min_depth,
-      max_depth: script.max_depth,
-      trim_strings: script.trim_strings,
-      ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
-    };
-  });
-
-  return applyRegexScriptsCore(args.content, coreScripts, {
-    placement,
-    depth: ctx.depth,
-    evalTemplate: (text) => {
-      try {
-        return evalTemplate(snap, text, ctx, recorder);
-      } catch (err) {
-        recorder.volatile = true;
-        throw err;
-      }
-    },
-    reResolveAfterRule: true,
-  });
+  for (let index = 0; index < plan.length; index++) {
+    const step = plan[index]!;
+    if (step.kind === 'skip') {
+      warnActionBinding(step.script.id, step.reason);
+      continue;
+    }
+    if (step.kind === 'action') {
+      if (!scriptApplies(step.script, ctx)) continue;
+      const dependencies = getRuntimeAtActionDependencies(step.action);
+      if (dependencies.messages) recorder.touched.add(MSG_DEP_KEY);
+      if (dependencies.effects) recorder.volatile = true;
+      content = await runEditDisplayAtActions(
+        snap,
+        content,
+        ctx,
+        [step.action],
+        {
+          resolveTemplate: (text) =>
+            evalTemplate(snap, text, ctx, recorder),
+        },
+      );
+      continue;
+    }
+    const coreScripts = [toCoreScript(step.script)];
+    while (plan[index + 1]?.kind === 'script') {
+      const next = plan[++index]!;
+      if (next.kind === 'script') coreScripts.push(toCoreScript(next.script));
+    }
+    content = applyRegexScriptsCore(content, coreScripts, {
+      placement,
+      depth: ctx.depth,
+      evalTemplate: (text) => {
+        try {
+          return evalTemplate(snap, text, ctx, recorder);
+        } catch (err) {
+          recorder.volatile = true;
+          throw err;
+        }
+      },
+      reResolveAfterRule: true,
+    });
+  }
+  return content;
 }
 
 export function createDisplayResolver(writeback?: DisplayWritebackSink): SpindleDisplayResolver {
@@ -229,7 +293,8 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
-        const liveSnap = (snap.luaTriggers.length > 0 || snap.atActions.length > 0)
+        const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
+        const liveSnap = (snap.luaTriggers.length > 0 || rowlessAtActions.length > 0)
           ? withCurrentDisplayMessage(snap, args.context, args.content)
           : snap;
         let body = args.content;
@@ -246,8 +311,22 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
         body = displayTriggerResult.content;
         if (displayTriggerResult.ran) recorder.volatile = true;
         body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
-        if (liveSnap.atActions.length > 0) {
-          body = await runEditDisplayAtActions(liveSnap, body, args.context);
+        if (rowlessAtActions.length > 0) {
+          for (const action of rowlessAtActions) {
+            const dependencies = getRuntimeAtActionDependencies(action);
+            if (dependencies.messages) recorder.touched.add(MSG_DEP_KEY);
+            if (dependencies.effects) recorder.volatile = true;
+          }
+          body = await runEditDisplayAtActions(
+            liveSnap,
+            body,
+            args.context,
+            rowlessAtActions,
+            {
+              resolveTemplate: (text) =>
+                evalTemplate(liveSnap, text, args.context, recorder),
+            },
+          );
         }
         feContent = body;
       } catch (err) {
@@ -332,7 +411,7 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
-        feContent = runApply(snap, args, recorder);
+        feContent = await runApply(snap, args, recorder);
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;

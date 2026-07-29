@@ -12,6 +12,7 @@ export interface FeRegexScript {
   readonly min_depth: number | null;
   readonly max_depth: number | null;
   readonly disabled?: boolean;
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface FeRegexMatch {

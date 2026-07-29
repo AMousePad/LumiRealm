@@ -1,7 +1,10 @@
 import type { SpindleDisplayContext } from 'lumiverse-spindle-types';
 import type { DispatchData, HostMessage } from '../interpreter/host.js';
 import { runListenEditChain } from '../interpreter/listen-edit.js';
-import { runAtActionsForPhase } from '../interpreter/at-actions-runtime.js';
+import {
+  runAtActionsForPhase,
+  type RuntimeAtAtAction,
+} from '../interpreter/at-actions-runtime.js';
 import {
   makeSnapshotHostApi,
   buildPreloaded,
@@ -62,13 +65,20 @@ export async function runEditDisplayAtActions(
   snap: DisplaySnapshot,
   content: string,
   context: SpindleDisplayContext,
+  actions: readonly RuntimeAtAtAction[] = snap.atActions,
+  options: {
+    readonly resolveTemplate?: (text: string) => string | Promise<string>;
+  } = {},
 ): Promise<string> {
-  if (snap.atActions.length === 0) return content;
+  if (actions.length === 0) return content;
   const api = makeSnapshotHostApi(snap);
   const role = (context.role ?? undefined) as HostMessage['role'] | undefined;
-  return runAtActionsForPhase(snap.atActions, 'editdisplay', content, {
+  return runAtActionsForPhase(actions, 'editdisplay', content, {
     api,
     chatIndex: risuChatIndex(context, snap),
     ...(role ? { role } : {}),
+    ...(options.resolveTemplate
+      ? { resolveTemplate: options.resolveTemplate }
+      : {}),
   });
 }
