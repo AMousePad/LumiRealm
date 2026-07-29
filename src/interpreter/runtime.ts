@@ -13,7 +13,11 @@ import { makeVarsApi } from './runtime/vars.js';
 import { makeArraysDictsApi } from './runtime/arrays-dicts.js';
 import { makeChatApi } from './runtime/chat.js';
 import { makeCharacterNoteApi } from './runtime/character-note.js';
-import { makeLorebookApi, type LorebookCache } from './runtime/lorebook.js';
+import {
+  makeLorebookApi,
+  sortLorebookEntriesBySourceOrder,
+  type LorebookCache,
+} from './runtime/lorebook.js';
 import { makeDisplayStateApi } from './runtime/display-state.js';
 import { runLLM as _runLLM, parseLuaPromptArg } from './runtime/llm.js';
 import {
@@ -388,11 +392,12 @@ export async function makeRisuTriggerRuntime(
               const res = await api.worldInfo.entries.list(bid, { limit: 1000 });
               if (res && Array.isArray(res.data)) {
                 _entryCount += res.data.length;
-                for (const e of res.data) lorebook.entries.push({ ...e, worldBookId: e.worldBookId || bid });
+                lorebook.entries.push(...sortLorebookEntriesBySourceOrder(
+                  res.data.map((e) => ({ ...e, worldBookId: e.worldBookId || bid })),
+                ));
               }
             } catch { /* skip */ }
           }
-          lorebook.entries.sort((a, b) => Number(b.orderValue || 0) - Number(a.orderValue || 0));
           _tLore = Date.now() - _tLoreStart;
         }
       }

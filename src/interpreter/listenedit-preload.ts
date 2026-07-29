@@ -10,7 +10,10 @@
 // reused across the chain.
 
 import type { HostApi, HostMessage, TriggerRuntimePreloaded } from './host.js';
-import type { LorebookCache } from './runtime/lorebook.js';
+import {
+  sortLorebookEntriesBySourceOrder,
+  type LorebookCache,
+} from './runtime/lorebook.js';
 import { loadGlobalVars, loadVars } from './runtime/chat-state.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
@@ -119,11 +122,13 @@ export async function preloadForListenEditChain(
       );
       for (const r of lists) {
         if (r.status !== 'fulfilled' || !r.value.res || !Array.isArray(r.value.res.data)) continue;
-        for (const e of r.value.res.data) {
-          entries.push({ ...e, worldBookId: e.worldBookId || r.value.bid });
-        }
+        entries.push(...sortLorebookEntriesBySourceOrder(
+          r.value.res.data.map((e) => ({
+            ...e,
+            worldBookId: e.worldBookId || r.value.bid,
+          })),
+        ));
       }
-      entries.sort((a, b) => Number(b.orderValue || 0) - Number(a.orderValue || 0));
       lorebook = { entries, primaryBookId: bookIds[0] ?? null };
       log.debug(`lorebook fetched chat=${chatId ?? '<none>'} books=${bookIds.length} entries=${entries.length} elapsed=${Date.now() - tLore}ms`);
     } else {
