@@ -280,6 +280,14 @@ function log(value)
   logMain(json.encode(value))
 end
 
+function getLoreBooks(id, search)
+  return json.decode(getLoreBooksMain(id, search))
+end
+
+function loadLoreBooks(id)
+  return json.decode(loadLoreBooksMain(id):await())
+end
+
 -- Risu scriptings.ts.
 function getCharacterImage(id)
   return getCharacterImageMain(id):await()
