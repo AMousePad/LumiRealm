@@ -1034,8 +1034,6 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       })();
       const { runWorldInfoInterceptor } = await import('../payload/lorebook-decorator-runtime.js');
       const verboseFn = verbose ? (m: string) => log.info(`[decorators] ${m}`) : undefined;
-      // Risu's shipped loreDepth default. Lumi exposes neither per-entry scan_depth nor the chat-level default in the interceptor view.
-      const RISU_DEFAULT_LORE_DEPTH = 4;
       // Pre-pass diagnostics: count entries that look like decorator carriers so we always emit a single line when any are present.
       let stashedDecCount = 0;
       let inlineDecCount = 0;
@@ -1068,7 +1066,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           })),
           chatTurn: ctx.chatTurn,
           chatMetadata: ctx.chatMetadata,
-          defaultScanDepth: RISU_DEFAULT_LORE_DEPTH,
+          defaultScanDepth: ctx.activationSettings.globalScanDepth,
         },
         verboseFn,
       );
