@@ -13,6 +13,15 @@ import type { EvaluatorCtx } from "./types.js";
 import type { AssetIndexEntry } from "../../payload/types.js";
 import { normalizeRoleToLumi } from "../../util/role-coerce.js";
 
+import manifest from "../../../spindle.json" with { type: "json" };
+
+// Impersonated, not detected. Cards version-gate on {{metadata::major}}. Inlined
+// at build time, so editing the manifest needs a rebuild to take effect.
+export const RISU_APP_VERSION = manifest.lumirealm.risu_app_version;
+// Lumi exposes no UI-locale setting. Constant rather than navigator.language so
+// the backend macro pass and the frontend display pass can't disagree.
+export const RISU_LANGUAGE = manifest.lumirealm.risu_language;
+
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI | undefined;
 
 const spindleGlobal: import("lumiverse-spindle-types").SpindleAPI | undefined =
@@ -399,8 +408,8 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     lorebook,
     jailbreakToggle: false,
     maxContext: Number(input.system?.maxContext ?? 0),
-    language: "",
-    appVersion: "",
+    language: RISU_LANGUAGE,
+    appVersion: RISU_APP_VERSION,
     // Risu cbs.ts,1375. Backend populates from screen-dims-cache when available.
     screenWidth: Number(input.screenWidth ?? 0),
     screenHeight: Number(input.screenHeight ?? 0),

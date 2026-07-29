@@ -19,11 +19,13 @@ import { executeWasmoon } from '../interpreter/lua-wasmoon.js';
 setWasmoonExecutor(executeWasmoon);
 
 function risuChatIndex(context: SpindleDisplayContext, snap: DisplaySnapshot): number {
-  if (typeof context.messageIndex === 'number') return context.messageIndex - 1;
+  if (typeof context.messageIndex === 'number') return Math.max(-1, context.messageIndex - 1);
   const dyn = context.dynamicMacros;
   const chatIndexStr = dyn?.chat_index;
-  if (typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)) return parseInt(chatIndexStr, 10) - 1;
-  return snap.chat.lastMessageId - 1;
+  if (typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)) {
+    return Math.max(-1, parseInt(chatIndexStr, 10) - 1);
+  }
+  return Math.max(-1, snap.chat.lastMessageId - 1);
 }
 
 export async function runEditDisplayChain(

@@ -20,7 +20,7 @@ export async function searchRealm(arg: RealmSearchArg): Promise<RealmSearchResul
   const search = (arg.search ?? '') + ' __shared';
   const stringArg =
     `search==${search}&&page==${arg.page}&&nsfw==${arg.nsfw}&&sort==${arg.sort}&&web==${CLIENT_TAG}`;
-  const url = `${REALM_HUB_API_URL}/realm/${encodeURIComponent(stringArg)}`;
+  const url = `${REALM_HUB_API_URL}/realm/${encodeURIComponent(stringArg)}?cache=30`;
   const res = await fetch(url, {
     headers: {
       'x-risuai-info': `${APP_VER};lumirealm`,

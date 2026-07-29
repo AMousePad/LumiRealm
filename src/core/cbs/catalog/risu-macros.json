@@ -2094,7 +2094,7 @@
     "lumiverseCollision": null,
     "risuFile": "src/ts/cbs.ts",
     "risuLine": 1863,
-    "summary": "Host metadata. Supported: imateapot, mobile/local/node, risutype, modelname/modelshortname/modelinternalid. Other keys return 'Error: X is not a valid metadata key.'.",
+    "summary": "Host metadata. Supported: imateapot, mobile/local/node, risutype, modelname/modelshortname/modelinternalid, version, majorversion/majorver/major, maxcontext, language/locale/lang, browserlanguage/browserlocale/browserlang. Unsupported (still error): modelformat, modelprovider, modeltokenizer.",
     "notes": ""
   },
   {
