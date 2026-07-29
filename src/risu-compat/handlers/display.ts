@@ -65,8 +65,9 @@ for (const [name, desc] of DOC_ONLY) {
   register(name, () => "", desc);
 }
 
-// bkspc/erase rewind Risu's output buffer; no equivalent here, shim to '', known deviation.
+// The scanner owns the output-buffer rewind; these leaf handlers are the
+// registry fallback for direct handler calls.
 register("bkspc", () => "",
-  "Risu's buffer-rewind (removes last word). No buffer access in risu-compat → shim '', known deviation.");
+  "Removes the last word from the parser output buffer.");
 register("erase", () => "",
-  "Risu's buffer-rewind (removes last sentence). Shim '', known deviation.");
+  "Removes the last sentence from the parser output buffer.");
