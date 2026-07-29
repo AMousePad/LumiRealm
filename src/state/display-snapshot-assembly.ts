@@ -5,11 +5,12 @@ import type { StoredRisuCard } from '../payload/types.js';
 import type { CompiledTriggerEntry } from '../interpreter/dispatcher.js';
 import type { DisplaySnapshot, DisplayLuaTrigger } from '../display/snapshot.js';
 import type { HostMessage, HostWorldInfoEntry } from '../interpreter/host.js';
+import type { Message } from '../core/cbs/index.js';
 import { coerceAtActions } from '../interpreter/at-actions-runtime.js';
 import { getActiveLorebook } from './lorebook-cache.js';
-import { getCachedMessages } from '../interpreter/messages-cache.js';
 import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { getActiveCharacterImage, getActivePersonaImage } from '../interpreter/image-cache.js';
+import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 
 export interface DisplaySnapshotAssemblyDeps {
   readonly modulesByNamespaceFromCard: (
@@ -49,14 +50,58 @@ function dtoToHostEntry(r: Record<string, unknown>): HostWorldInfoEntry {
 async function fetchHostMessages(chatId: string): Promise<HostMessage[]> {
   try {
     const msgs = await spindle.chat.getMessages(chatId);
-    return msgs.map((m) => ({
-      id: m.id,
-      content: typeof m.content === 'string' ? m.content : '',
-      role: m.role,
-    }));
+    return msgs.map((m) => {
+      const raw = m as unknown as {
+        created_at?: unknown;
+        send_date?: unknown;
+        name?: unknown;
+      };
+      const sendDate = typeof raw.send_date === 'number' ? raw.send_date : null;
+      const createdAt = typeof raw.created_at === 'number' ? raw.created_at : null;
+      return {
+        id: m.id,
+        content: typeof m.content === 'string' ? m.content : '',
+        role: m.role,
+        createdAt: sendDate ?? createdAt ?? 0,
+        ...(typeof raw.name === 'string' && raw.name.length > 0
+          ? { speaker: raw.name }
+          : {}),
+      };
+    });
   } catch {
     return [];
   }
+}
+
+export function buildDisplayChatState(
+  messagesHost: readonly HostMessage[],
+): DisplaySnapshot['chat'] {
+  const view = buildRisuChatView({ messages: messagesHost });
+  const messages: Message[] = view.messages.map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: m.content,
+    createdAt: m.createdAt ?? 0,
+    ...(m.speaker ? { speaker: m.speaker } : {}),
+  }));
+  const risuLen = messages.length;
+  let lastUser = '';
+  let lastChar = '';
+  for (let i = risuLen - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (!lastUser && m.role === 'user') lastUser = m.content;
+    if (!lastChar && m.role === 'assistant') lastChar = m.content;
+    if (lastUser && lastChar) break;
+  }
+  return {
+    // Evaluator context accepts Lumi's greeting-included frame and shifts it
+    // once. Preserve that frame while sourcing every field from this one view.
+    messageCount: risuLen + 1,
+    lastMessage: risuLen > 0 ? messages[risuLen - 1]!.content : '',
+    lastUserMessage: lastUser,
+    lastCharMessage: lastChar,
+    lastMessageId: risuLen,
+    messages,
+  };
 }
 
 async function fetchHostLorebook(
@@ -137,16 +182,7 @@ export async function assembleDisplaySnapshot(
     fetchChatAuthorsNote(chatId, userId),
   ]);
 
-  const messages = getCachedMessages(chatId) ?? [];
-  const risuLen = messages.length;
-  let lastUser = '';
-  let lastChar = '';
-  for (let i = risuLen - 1; i >= 0; i--) {
-    const m = messages[i]!;
-    if (!lastUser && m.role === 'user') lastUser = m.content;
-    if (!lastChar && m.role === 'assistant') lastChar = m.content;
-    if (lastUser && lastChar) break;
-  }
+  const chatState = buildDisplayChatState(messagesHost);
 
   const triggers = active.card.risuPayload.triggers as ReadonlyArray<{ effect?: ReadonlyArray<{ type?: string }> }>;
   const luaScripts = active.card.risuPayload.lua_scripts;
@@ -187,14 +223,7 @@ export async function assembleDisplaySnapshot(
       image: getActiveCharacterImage(chatId) ?? '',
       imageId: ch.image_id ?? null,
     },
-    chat: {
-      messageCount: risuLen + 1,
-      lastMessage: risuLen > 0 ? messages[risuLen - 1]!.content : '',
-      lastUserMessage: lastUser,
-      lastCharMessage: lastChar,
-      lastMessageId: risuLen,
-      messages,
-    },
+    chat: chatState,
     vars: { local: { ...vars.local }, global: { ...vars.global }, chat: { ...vars.chat } },
     scriptstateDefaults: active.card.risuPayload.scriptstate_defaults,
     screenWidth: dims?.width ?? 0,

@@ -6,6 +6,8 @@ export interface HostMessage {
   readonly id: string;
   readonly content: string;
   readonly role: 'user' | 'assistant' | 'system' | string;
+  readonly createdAt?: number;
+  readonly speaker?: string;
 }
 
 export interface HostCharacter {
