@@ -54,6 +54,7 @@ export interface LumiWorldBookEntry {
   group_weight: number;
   probability: number;
   scan_depth: number | null;
+  exclude_greeting: boolean;
   case_sensitive: boolean;
   match_whole_words: boolean;
   automation_id: string | null;

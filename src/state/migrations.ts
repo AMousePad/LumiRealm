@@ -274,18 +274,30 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
         }
       },
       listWorldBookEntries: async (wbId, uid) => {
-        const out: { id: string; extensions: Record<string, unknown> | null }[] = [];
+        const out: {
+          id: string;
+          exclude_greeting: boolean;
+          extensions: Record<string, unknown> | null;
+        }[] = [];
         let offset = 0;
         while (true) {
           const page = await spindle.world_books.entries.list(wbId, { limit: 200, offset, userId: uid });
           for (const e of page.data) {
-            const ee = e as { id?: unknown; extensions?: unknown };
+            const ee = e as {
+              id?: unknown;
+              exclude_greeting?: unknown;
+              extensions?: unknown;
+            };
             const id = typeof ee.id === 'string' ? ee.id : null;
             if (id === null) continue;
             const ext = ee.extensions && typeof ee.extensions === 'object' && !Array.isArray(ee.extensions)
               ? ee.extensions as Record<string, unknown>
               : null;
-            out.push({ id, extensions: ext });
+            out.push({
+              id,
+              exclude_greeting: ee.exclude_greeting === true,
+              extensions: ext,
+            });
           }
           if (page.data.length < 200) break;
           offset += 200;
@@ -294,6 +306,9 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       },
       updateWorldBookEntryExtensions: async (entryId, extensions, uid) => {
         await spindle.world_books.entries.update(entryId, { extensions } as never, uid);
+      },
+      updateWorldBookEntryActivation: async (entryId, input, uid) => {
+        await spindle.world_books.entries.update(entryId, input, uid);
       },
       applyCharacterRegexReplaceStringTransform: async (charId, uid, transform) => {
         return applyRegexReplaceStringTransform(
@@ -394,6 +409,42 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
           log,
           errMsg,
         );
+      },
+      listWorldBookEntries: async (worldBookId) => {
+        const out: {
+          id: string;
+          exclude_greeting: boolean;
+          extensions: Record<string, unknown> | null;
+        }[] = [];
+        let offset = 0;
+        while (true) {
+          const page = await spindle.world_books.entries.list(
+            worldBookId,
+            { limit: 200, offset, userId },
+          );
+          for (const entry of page.data) {
+            const entryRecord = entry as unknown as {
+              exclude_greeting?: unknown;
+            };
+            const extensions =
+              entry.extensions &&
+              typeof entry.extensions === 'object' &&
+              !Array.isArray(entry.extensions)
+                ? entry.extensions as Record<string, unknown>
+                : null;
+            out.push({
+              id: entry.id,
+              exclude_greeting: entryRecord.exclude_greeting === true,
+              extensions,
+            });
+          }
+          if (page.data.length < 200) break;
+          offset += page.data.length;
+        }
+        return out;
+      },
+      updateWorldBookEntryActivation: async (entryId, input) => {
+        await spindle.world_books.entries.update(entryId, input, userId);
       },
       refreshArtifactsForAttached: async (mid) => {
         const charIds = await charactersAttachedTo(mid, userId);

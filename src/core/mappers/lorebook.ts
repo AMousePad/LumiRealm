@@ -192,6 +192,9 @@ export function mapLoreBookEntryWithStats(
 
     probability: applied.patch.probability ?? probability,
     scan_depth: applied.patch.scan_depth ?? null,
+    // Risu's chat array does not contain the first-message greeting. Mark the
+    // projected entry so Lumiverse scans the equivalent message set.
+    exclude_greeting: true,
 
     case_sensitive: caseSensitive,
     match_whole_words: applied.patch.match_whole_words ?? false,

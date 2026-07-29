@@ -16,7 +16,7 @@ function cryptoUuidLocal(): string {
   return `mod-rx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function projectModuleLorebookForCreate(
+export function projectModuleLorebookForCreate(
   rawLorebook: readonly unknown[],
   moduleId: string,
   worldBookId: string,

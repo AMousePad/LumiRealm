@@ -229,7 +229,7 @@ function buildScanWindow(
   const out: string[] = [];
   for (let i = start; i < messages.length; i++) {
     const m = messages[i];
-    if (!m) continue;
+    if (!m || m.is_greeting === true) continue;
     out.push(m.content);
   }
   return out;

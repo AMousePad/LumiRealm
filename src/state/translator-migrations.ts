@@ -13,9 +13,14 @@ import {
   type StoredRegexScript,
 } from '../payload/types.js';
 import { buildAssetIndexes } from '../payload/import.js';
+import {
+  LEGACY_ENTRY_HASH_FIELDS_V1,
+  computeEntrySourceHashWithFields,
+} from '../core/mappers/lorebook-hash.js';
 
 export interface LiveWorldBookEntry {
   readonly id: string;
+  readonly exclude_greeting: boolean;
   readonly extensions: Readonly<Record<string, unknown>> | null;
 }
 
@@ -44,6 +49,14 @@ export interface MigrationDeps {
   updateWorldBookEntryExtensions: (
     entryId: string,
     extensions: Readonly<Record<string, unknown>>,
+    userId: string,
+  ) => Promise<void>;
+  updateWorldBookEntryActivation: (
+    entryId: string,
+    input: {
+      readonly exclude_greeting: boolean;
+      readonly extensions: Readonly<Record<string, unknown>>;
+    },
     userId: string,
   ) => Promise<void>;
   // Walks Lumi's regex_scripts for character scope, applies transform per row's
@@ -524,6 +537,85 @@ async function applyV13FixEscapedPerMessageGate(
   };
 }
 
+async function applyV14ExcludeGreetingPerEntry(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const targetBySourceHash = new Map<string, string>();
+  for (const entry of args.newBundle.worldBookEntries) {
+    const record = entry as unknown as Record<string, unknown>;
+    const extensions = entry.extensions as Record<string, unknown>;
+    const currentHash = extensions['_risu_source_hash'];
+    if (typeof currentHash !== 'string') continue;
+    const legacyHash = computeEntrySourceHashWithFields(
+      record,
+      LEGACY_ENTRY_HASH_FIELDS_V1,
+    );
+    targetBySourceHash.set(legacyHash, currentHash);
+    targetBySourceHash.set(currentHash, currentHash);
+  }
+  if (targetBySourceHash.size === 0) {
+    return {
+      nextEnvelope: args.envelope,
+      notes: ['no source-hashed entries in new bundle'],
+    };
+  }
+
+  const worldBookIds = await deps.getCharacterWorldBookIds(
+    args.characterId,
+    args.userId,
+  );
+  let scanned = 0;
+  let matched = 0;
+  let updated = 0;
+  let failed = 0;
+  for (const worldBookId of worldBookIds) {
+    const entries = await deps.listWorldBookEntries(worldBookId, args.userId);
+    scanned += entries.length;
+    for (const entry of entries) {
+      const extensions = (entry.extensions ?? {}) as Record<string, unknown>;
+      const storedHash = extensions['_risu_source_hash'];
+      if (typeof storedHash !== 'string') continue;
+      const currentHash = targetBySourceHash.get(storedHash);
+      if (!currentHash) continue;
+      matched += 1;
+      if (entry.exclude_greeting && storedHash === currentHash) continue;
+      try {
+        await deps.updateWorldBookEntryActivation(
+          entry.id,
+          {
+            exclude_greeting: true,
+            extensions: {
+              ...extensions,
+              _risu_source_hash: currentHash,
+            },
+          },
+          args.userId,
+        );
+        updated += 1;
+      } catch (err) {
+        failed += 1;
+        deps.log.warn(
+          `migrate(${args.characterId}) v14: update entry=${entry.id} failed: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
+  }
+  if (failed > 0) {
+    throw new Error(`failed to update ${failed}/${matched} matched lorebook entries`);
+  }
+  return {
+    nextEnvelope: args.envelope,
+    notes: [
+      `wbs=${worldBookIds.length}`,
+      `scanned=${scanned}`,
+      `matched=${matched}`,
+      `updated=${updated}`,
+    ],
+  };
+}
+
 export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
   {
     version: 5,
@@ -592,6 +684,13 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
       "Re-route 'escaped' regex rows whose replace_string has a per-message {{chat_index}} gate to 'after' (escaped pre-resolves chat-wide so the gate renders flakily). In-place per row, preserves user disable + edits.",
     touches: ['regex_scripts'],
     apply: applyV13FixEscapedPerMessageGate,
+  },
+  {
+    version: 14,
+    description:
+      'Mark each projected Risu lorebook entry to exclude the character greeting during activation.',
+    touches: ['world_book_entries'],
+    apply: applyV14ExcludeGreetingPerEntry,
   },
 ];
 

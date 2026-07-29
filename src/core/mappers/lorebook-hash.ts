@@ -1,7 +1,7 @@
 // Source-hash stamping for world_book entries. Lets migration paths detect
 // whether a stored entry was edited by the user since we projected it.
 
-export const ENTRY_HASH_FIELDS: readonly string[] = [
+export const LEGACY_ENTRY_HASH_FIELDS_V1: readonly string[] = [
   'key', 'keysecondary', 'content', 'comment',
   'position', 'depth', 'role', 'order_value',
   'selective', 'constant', 'disabled',
@@ -11,6 +11,11 @@ export const ENTRY_HASH_FIELDS: readonly string[] = [
   'prevent_recursion', 'exclude_recursion', 'delay_until_recursion',
   'priority', 'sticky', 'cooldown', 'delay',
   'selective_logic', 'use_probability',
+];
+
+export const ENTRY_HASH_FIELDS: readonly string[] = [
+  ...LEGACY_ENTRY_HASH_FIELDS_V1,
+  'exclude_greeting',
 ];
 
 function fnv1aHash8(str: string): string {
@@ -42,9 +47,12 @@ const SYSTEM_MANAGED_EXTENSION_KEYS: readonly string[] = [
 
 // Excludes id/uid/world_book_id (auto-generated), timestamps/vector_*
 // (Lumi-managed), and the system-managed extension keys above.
-export function computeEntrySourceHash(entry: Record<string, unknown>): string {
+export function computeEntrySourceHashWithFields(
+  entry: Record<string, unknown>,
+  hashFields: readonly string[],
+): string {
   const fields: Record<string, unknown> = {};
-  for (const k of ENTRY_HASH_FIELDS) fields[k] = entry[k];
+  for (const k of hashFields) fields[k] = entry[k];
   const ext = entry['extensions'];
   if (ext && typeof ext === 'object' && !Array.isArray(ext)) {
     const cleaned: Record<string, unknown> = { ...(ext as Record<string, unknown>) };
@@ -54,6 +62,10 @@ export function computeEntrySourceHash(entry: Record<string, unknown>): string {
     fields['extensions'] = {};
   }
   return fnv1aHash8(stableStringify(fields));
+}
+
+export function computeEntrySourceHash(entry: Record<string, unknown>): string {
+  return computeEntrySourceHashWithFields(entry, ENTRY_HASH_FIELDS);
 }
 
 // Missing hash is treated as "not edited" so migrations against pre-stamping

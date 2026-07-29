@@ -4,6 +4,17 @@
 import type { ModuleEnvelope } from './modules-store.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
+import { projectModuleLorebookForCreate } from './world-book-ops.js';
+import {
+  LEGACY_ENTRY_HASH_FIELDS_V1,
+  computeEntrySourceHashWithFields,
+} from '../core/mappers/lorebook-hash.js';
+
+export interface LiveModuleWorldBookEntry {
+  readonly id: string;
+  readonly exclude_greeting: boolean;
+  readonly extensions: Readonly<Record<string, unknown>> | null;
+}
 
 export interface ModuleMigrationDeps {
   // syncWorldBook re-runs lorebook projection and rewrites the world_book in place.
@@ -22,6 +33,16 @@ export interface ModuleMigrationDeps {
     moduleId: string,
     patch: (row: Readonly<Record<string, unknown>>) => Record<string, unknown> | null,
   ) => Promise<{ scanned: number; updated: number; failed: number } | null>;
+  listWorldBookEntries: (
+    worldBookId: string,
+  ) => Promise<readonly LiveModuleWorldBookEntry[]>;
+  updateWorldBookEntryActivation: (
+    entryId: string,
+    input: {
+      readonly exclude_greeting: boolean;
+      readonly extensions: Readonly<Record<string, unknown>>;
+    },
+  ) => Promise<void>;
   writeEnvelope: (env: ModuleEnvelope) => Promise<void>;
   log: {
     info: (s: string) => void;
@@ -221,6 +242,82 @@ async function applyV8FixEscapedPerMessageGate(
   };
 }
 
+async function applyV9ExcludeGreetingPerEntry(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  const worldBookId = args.env.installed_world_book_id;
+  const module = args.env.module as { lorebook?: readonly unknown[] };
+  const lorebook = Array.isArray(module.lorebook) ? module.lorebook : [];
+  if (!worldBookId || lorebook.length === 0) {
+    return {
+      nextEnv: args.env,
+      notes: [worldBookId ? 'module has no lorebook entries' : 'module has no installed world book'],
+    };
+  }
+
+  const projected = projectModuleLorebookForCreate(
+    lorebook,
+    args.env.id,
+    worldBookId,
+  );
+  const targetBySourceHash = new Map<string, string>();
+  for (const entry of projected) {
+    const extensions = entry['extensions'];
+    if (!extensions || typeof extensions !== 'object' || Array.isArray(extensions)) continue;
+    const currentHash = (extensions as Record<string, unknown>)['_risu_source_hash'];
+    if (typeof currentHash !== 'string') continue;
+    const legacyHash = computeEntrySourceHashWithFields(
+      entry,
+      LEGACY_ENTRY_HASH_FIELDS_V1,
+    );
+    targetBySourceHash.set(legacyHash, currentHash);
+    targetBySourceHash.set(currentHash, currentHash);
+  }
+
+  const entries = await deps.listWorldBookEntries(worldBookId);
+  let matched = 0;
+  let updated = 0;
+  let failed = 0;
+  for (const entry of entries) {
+    const extensions = (entry.extensions ?? {}) as Record<string, unknown>;
+    if (extensions['_risu_module_id'] !== args.env.id) continue;
+    const storedHash = extensions['_risu_source_hash'];
+    if (typeof storedHash !== 'string') continue;
+    const currentHash = targetBySourceHash.get(storedHash);
+    if (!currentHash) continue;
+    matched += 1;
+    if (entry.exclude_greeting && storedHash === currentHash) continue;
+    try {
+      await deps.updateWorldBookEntryActivation(entry.id, {
+        exclude_greeting: true,
+        extensions: {
+          ...extensions,
+          _risu_source_hash: currentHash,
+        },
+      });
+      updated += 1;
+    } catch (err) {
+      failed += 1;
+      deps.log.warn(
+        `migrate-module(${args.env.id}) v9: update entry=${entry.id} failed: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  }
+  if (failed > 0) {
+    throw new Error(`failed to update ${failed}/${matched} matched lorebook entries`);
+  }
+  return {
+    nextEnv: args.env,
+    notes: [
+      `scanned=${entries.length}`,
+      `matched=${matched}`,
+      `updated=${updated}`,
+    ],
+  };
+}
+
 export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
   {
     version: 5,
@@ -249,6 +346,13 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
       "Re-route module 'escaped' regex rows whose replace_string has a per-message {{chat_index}} gate to 'after'. In-place per row, preserves user disable + edits.",
     touches: ['regex_scripts_attached_chars'],
     apply: applyV8FixEscapedPerMessageGate,
+  },
+  {
+    version: 9,
+    description:
+      'Mark each projected Risu module lorebook entry to exclude the character greeting during activation.',
+    touches: ['world_book_entries'],
+    apply: applyV9ExcludeGreetingPerEntry,
   },
 ];
 
