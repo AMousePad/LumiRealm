@@ -36,6 +36,7 @@ const _logMake            = makeSafeLogger('runtime.makeRisuTriggerRuntime');
 const _logTriggercode     = makeSafeLogger('runtime.triggercode');
 const _logRunLua          = makeSafeLogger('runtime.runLua');
 const _logSetChat         = makeSafeLogger('runtime.setChat');
+const _logSetFullChat     = makeSafeLogger('runtime.setFullChat');
 const _logAddChat         = makeSafeLogger('runtime.addChat');
 const _logLLMMain         = makeSafeLogger('runtime.LLMMain');
 const _logAxLLMMain       = makeSafeLogger('runtime.axLLMMain');
@@ -404,12 +405,145 @@ export async function makeRisuTriggerRuntime(
       `binding=${binding} characterId=${characterId ?? '<none>'}`,
   );
 
-  // addChat persists immediately via sendMessage (Risu defers to trigger end),
-  // so track the pending real id per cache entry for removeChat to delete the
-  // row it created. flush() drains these so add+remove settles before the
-  // post-dispatch refresh (Risu nets show-then-clear idioms to no-op).
+  // Lumi stores chat messages as individual rows, while Risu mutates one
+  // in-memory array and commits its final state. Serialize every row mutation
+  // and track IDs assigned to new rows so later edits/deletes cannot race them.
   const pendingSendIds = new WeakMap<HostMessage, Promise<string>>();
-  const pendingChatOps: Promise<unknown>[] = [];
+  let chatMutationTail: Promise<void> = Promise.resolve();
+
+  function enqueueChatMutation(label: string, operation: () => Promise<void>): Promise<void> {
+    const next = chatMutationTail.then(operation);
+    chatMutationTail = next.catch((err) => {
+      _logSetFullChat.warn(
+        `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+    return chatMutationTail;
+  }
+
+  function trackPendingSend(entry: HostMessage, completion: Promise<void>): void {
+    pendingSendIds.set(entry, completion.then(() => entry.id));
+  }
+
+  function inheritPendingSend(previous: HostMessage, next: HostMessage): void {
+    const pendingId = pendingSendIds.get(previous);
+    if (!pendingId) return;
+    pendingSendIds.set(next, pendingId);
+    void pendingId.then((id) => {
+      if (id) (next as { id: string }).id = id;
+    });
+  }
+
+  async function resolveHostMessageId(entry: HostMessage): Promise<string> {
+    return pendingSendIds.get(entry) ?? entry.id;
+  }
+
+  async function persistChatSend(entry: HostMessage): Promise<void> {
+    try {
+      const result = await api.chat.sendMessage(entry.content, { role: entry.role });
+      const id = result && typeof result.id === 'string' ? result.id : '';
+      if (id) (entry as { id: string }).id = id;
+    } catch (err) {
+      _logSetFullChat.warn(`send threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function persistChatDelete(entry: HostMessage): Promise<void> {
+    try {
+      const id = await resolveHostMessageId(entry);
+      if (id) await api.chat.deleteMessage(id);
+    } catch (err) {
+      _logSetFullChat.warn(
+        `delete msgId=${entry.id} threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  async function persistChatEdit(previous: HostMessage, next: HostMessage): Promise<void> {
+    try {
+      const id = await resolveHostMessageId(previous);
+      if (!id) return;
+      if (rememberOurWrite && portalChatId) {
+        try { rememberOurWrite(portalChatId, id, next.content); } catch { /* */ }
+      }
+      await api.chat.editMessage(id, next.content);
+    } catch (err) {
+      _logSetFullChat.warn(
+        `edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  function reconcileFullChat(value: unknown): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(toStr(value));
+    } catch (err) {
+      _logSetFullChat.warn(
+        `invalid JSON ignored: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+    if (!Array.isArray(parsed)) {
+      _logSetFullChat.warn('non-array payload ignored');
+      return;
+    }
+
+    const previous = [...messagesCache];
+    const desired = parsed.map((raw) => {
+      const item = raw && typeof raw === 'object'
+        ? raw as { role?: unknown; data?: unknown }
+        : {};
+      return {
+        role: risuRoleToLumi(toStr(item.role)),
+        content: toStr(item.data),
+      };
+    });
+    const overlap = Math.min(previous.length, desired.length);
+    const roleChange = previous.findIndex(
+      (entry, index) => index < overlap && entry.role !== desired[index]!.role,
+    );
+    const stablePrefixLength = roleChange >= 0 ? roleChange : overlap;
+    const edits: Array<{ previous: HostMessage; next: HostMessage }> = [];
+    const deletes = previous.slice(roleChange >= 0 ? roleChange : overlap);
+    const sends: HostMessage[] = [];
+    const next: HostMessage[] = [];
+
+    for (let i = 0; i < stablePrefixLength; i++) {
+      const oldEntry = previous[i]!;
+      const wanted = desired[i]!;
+      if (oldEntry.content === wanted.content) {
+        next.push(oldEntry);
+        continue;
+      }
+      const replacement: HostMessage = { ...oldEntry, content: wanted.content };
+      inheritPendingSend(oldEntry, replacement);
+      edits.push({ previous: oldEntry, next: replacement });
+      next.push(replacement);
+    }
+
+    const desiredTailStart = roleChange >= 0 ? roleChange : overlap;
+    for (let i = desiredTailStart; i < desired.length; i++) {
+      const wanted = desired[i]!;
+      const added: HostMessage = { id: '', role: wanted.role, content: wanted.content };
+      sends.push(added);
+      next.push(added);
+    }
+    messagesCache.splice(0, messagesCache.length, ...next);
+
+    if (edits.length > 0 || deletes.length > 0 || sends.length > 0) {
+      const completion = enqueueChatMutation('setFullChat', async () => {
+        for (const edit of edits) await persistChatEdit(edit.previous, edit.next);
+        for (const entry of deletes) await persistChatDelete(entry);
+        for (const entry of sends) await persistChatSend(entry);
+      });
+      for (const entry of sends) trackPendingSend(entry, completion);
+    }
+    _logSetFullChat.info(
+      `reconciled old=${previous.length} new=${next.length} edits=${edits.length} ` +
+        `deletes=${deletes.length} sends=${sends.length} chatId=${portalChatId ?? '<none>'}`,
+    );
+  }
 
   // `dirty` boxed so flush() observes setVar writes across the closure boundary.
   const dirty: { value: boolean } = { value: false };
@@ -713,37 +847,17 @@ export async function makeRisuTriggerRuntime(
         const newEntry = { ...oldEntry, content: raw };
         messagesCache[real] = newEntry;
 
-        // Without rememberOurWrite, Lua-emitted content (no {{ markers) would flip userEdited=true.
-        if (rememberOurWrite && portalChatId) {
-          try { rememberOurWrite(portalChatId, msgId, raw); }
-          catch { /* */ }
-        }
-
         _logSetChat.info(
           `index=${index} (real=${real}) msgId=${msgId} ` +
-            `len=${raw.length} chatId=${portalChatId ?? '<none>'} ` +
-            `rememberOurWrite=${rememberOurWrite && portalChatId ? 'called' : 'skipped'}`,
+            `len=${raw.length} chatId=${portalChatId ?? '<none>'}`,
         );
 
         // Editing an addChat'd message before its sendMessage resolved: id is
         // still ''. Carry the pending mapping to the replacement object (so a
         // later removeChat can still delete the row) and apply the edit once
         // the real id lands instead of dropping it on editMessage('').
-        const pend = pendingSendIds.get(oldEntry);
-        if (pend) {
-          pendingSendIds.set(newEntry, pend);
-          const ed = pend.then((rid) => {
-            if (!rid) return;
-            if (rememberOurWrite && portalChatId) {
-              try { rememberOurWrite(portalChatId, rid, raw); } catch { /* */ }
-            }
-            return api.chat.editMessage?.(rid, raw);
-          }).catch(() => { /* */ });
-          pendingChatOps.push(ed);
-          return;
-        }
-
-        try { api.chat.editMessage?.(msgId, raw); } catch { /* */ }
+        inheritPendingSend(oldEntry, newEntry);
+        enqueueChatMutation('setChat', () => persistChatEdit(oldEntry, newEntry));
       },
       setChatRole: (_id: unknown, index: unknown, value: unknown) => {
         const n = Number(index);
@@ -760,18 +874,7 @@ export async function makeRisuTriggerRuntime(
         const start = n < 0 ? Math.max(len + n, 0) : Math.min(n, len);
         if (start >= len) return;
         const m = messagesCache[start];
-        if (m) {
-          const pend = pendingSendIds.get(m);
-          if (pend) {
-            const del = pend.then((rid) => { if (rid) return api.chat.deleteMessage?.(rid); }).catch(() => { /* */ });
-            pendingChatOps.push(del);
-          } else if (m.id) {
-            try {
-              const del = api.chat.deleteMessage?.(m.id);
-              if (del && typeof (del as Promise<unknown>).then === 'function') pendingChatOps.push(del as Promise<unknown>);
-            } catch { /* */ }
-          }
-        }
+        if (m) enqueueChatMutation('removeChat', () => persistChatDelete(m));
         messagesCache.splice(start, 1);
       },
       addChat: (_id: unknown, role: unknown, value: unknown) => {
@@ -782,38 +885,17 @@ export async function makeRisuTriggerRuntime(
         _logAddChat.info(
           `role=${toStr(role)} len=${raw.length} chatId=${portalChatId ?? '<none>'}`,
         );
-        try {
-          const send = api.chat.sendMessage?.(raw, { role: lumiRole });
-          if (send && typeof (send as Promise<{ id: string }>).then === 'function') {
-            const idP = (send as Promise<{ id: string }>)
-              .then((r) => {
-                const realId = (r && typeof r.id === 'string') ? r.id : '';
-                if (realId) (entry as { id: string }).id = realId;
-                return realId;
-              })
-              .catch(() => '');
-            pendingSendIds.set(entry, idP);
-            pendingChatOps.push(idP);
-          }
-        } catch { /* */ }
+        trackPendingSend(
+          entry,
+          enqueueChatMutation('addChat', () => persistChatSend(entry)),
+        );
       },
       insertChat: (_id: unknown, index: unknown, role: unknown, value: unknown) => {
         messagesCache.splice(Number(index), 0, { id: String(Date.now()), role: risuRoleToLumi(toStr(role)), content: toStr(value) });
       },
       getChatLength: (_id: unknown) => messagesCache.length,
       getFullChatMain: (_id: unknown) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
-      setFullChatMain: (_id: unknown, value: unknown) => {
-        try {
-          const arr = JSON.parse(toStr(value));
-          if (Array.isArray(arr)) {
-            messagesCache.length = 0;
-            for (let i = 0; i < arr.length; i++) {
-              const entry = arr[i] as { role?: unknown; data?: unknown };
-              messagesCache.push({ id: String(i + 1), role: risuRoleToLumi(toStr(entry.role)), content: toStr(entry.data) });
-            }
-          }
-        } catch { /* */ }
-      },
+      setFullChatMain: (_id: unknown, value: unknown) => { reconcileFullChat(value); },
       sleep: (_id: unknown, ms: unknown) => new Promise<void>((r) => setTimeout(r, Math.max(0, Number(ms) || 0))),
       // Risu parity: user-facing `cbs` is sync. The lua-bridge prelude wraps `cbsMain():await()` so cards calling `cbs("...")` get a string.
       cbsMain: async (value: unknown): Promise<string> => {
@@ -1113,11 +1195,7 @@ export async function makeRisuTriggerRuntime(
       }
     }
     dirty.value = false;
-    if (pendingChatOps.length > 0) {
-      const ops = pendingChatOps.splice(0);
-      flog(`draining ${ops.length} pending chat op(s)`);
-      await Promise.allSettled(ops);
-    }
+    await chatMutationTail;
     flog(`DONE`);
   }
 
