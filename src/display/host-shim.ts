@@ -55,6 +55,7 @@ export function buildPreloaded(snap: DisplaySnapshot): TriggerRuntimePreloaded {
   };
   return {
     varsCache,
+    globalVars: { ...snap.vars.global },
     scriptstateDefaults: snap.scriptstateDefaults,
     messagesRaw: snap.messagesHost,
     lorebook,

@@ -83,7 +83,7 @@ export {
 } from './runtime/dispatch-context.js';
 export type { AuxDebugCaptureEvent } from './runtime/dispatch-context.js';
 
-import { loadVars, saveVars } from './runtime/chat-state.js';
+import { loadGlobalVars, loadVars, saveVars } from './runtime/chat-state.js';
 import { inheritedVarsAls, withInheritedVarsCache } from './runtime/als.js';
 
 export { compareValues } from './runtime/compare.js';
@@ -297,10 +297,13 @@ export async function makeRisuTriggerRuntime(
   // PRELOAD FAST-PATH: when caller passes `opts.preloaded`, we skip the
   // matching IPC fetch and reuse the provided snapshot. Used by
   // `runListenEditChain` to share one snapshot across all triggers in the
-  // same chain (Mortal Realm: 48 outbound IPCs → 3, drops the Spindle
-  // worker IPC channel pressure that caused 4.5s stalls per stuck call).
+  // same chain, dropping repeated Spindle worker IPC channel pressure that
+  // caused 4.5s stalls per stuck call.
   const preloaded = opts.preloaded;
   const _factoryStart = Date.now();
+  const globalVarsPromise = preloaded?.globalVars
+    ? Promise.resolve({ ...preloaded.globalVars })
+    : loadGlobalVars(api);
   let varsCache: Record<string, string>;
   let isInheritedVarsCache = false;
   let _tVars = 0;
@@ -322,6 +325,7 @@ export async function makeRisuTriggerRuntime(
     varsCache = await loadVars(api);
     _tVars = Date.now() - _t0;
   }
+  const globalVarsCache = await globalVarsPromise;
   let messagesCache: HostMessage[] = [];
   // Risu's `char.firstMessage` (greeting), excluded from messagesCache to
   // match `chat.message[]`. getFirstMessage / getCharacterLastMessage use it.
@@ -775,7 +779,7 @@ export async function makeRisuTriggerRuntime(
     return {
       getChatVar: (_id: unknown, key: unknown) => getVar(toStr(key)),
       setChatVar: (_id: unknown, key: unknown, value: unknown) => setVar(toStr(key), toStr(value)),
-      getGlobalVar: (_id: unknown, key: unknown) => getVar(toStr(key)),
+      getGlobalVar: (_id: unknown, key: unknown) => globalVarsCache[toStr(key)] ?? 'null',
       stopChat: (_id: unknown) => { stopSending = true; },
       // Risu parity: fire-and-forget. Returning the Promise would force Lua to await or leak an unhandledRejection on modal-infra throw.
       alertError: (_id: unknown, value: unknown) => {
