@@ -64,6 +64,22 @@ function cbs(value)
   return cbsMain(value):await()
 end
 
+function getDescription(id)
+  return getDescriptionMain(id):await()
+end
+
+function setDescription(id, value)
+  return setDescriptionMain(id, value):await()
+end
+
+function getPersonaDescription(id)
+  return getPersonaDescriptionMain(id):await()
+end
+
+function getAuthorsNote(id)
+  return getAuthorsNoteMain(id):await()
+end
+
 local editRequestFuncs = {}
 local editDisplayFuncs = {}
 local editInputFuncs = {}

@@ -968,13 +968,22 @@ export async function makeRisuTriggerRuntime(
       },
       getName: (_id: unknown) => toStr((data as { characterName?: unknown }).characterName || ''),
       setName: (_id: unknown, _name: unknown) => { /* */ },
-      getDescription: (_id: unknown) => getVar('__risu_char_desc__') || '',
-      setDescription: (_id: unknown, desc: unknown) => setVar('__risu_char_desc__', toStr(desc)),
+      getDescriptionMain: (_id: unknown) => _charNote.getCharacterDesc(),
+      setDescriptionMain: (_id: unknown, desc: unknown) => _charNote.setCharacterDesc(desc),
       getCharacterFirstMessage: (_id: unknown) => getVar('__risu_first_msg__') || '',
       setCharacterFirstMessage: (_id: unknown, v: unknown) => setVar('__risu_first_msg__', toStr(v)),
       getPersonaName: (_id: unknown) => toStr((data as { userName?: unknown }).userName || 'user'),
-      getPersonaDescription: (_id: unknown) => getVar('__risu_persona_desc__') || '',
-      getAuthorsNote: (_id: unknown) => getVar('__risu_author_note__') || '',
+      getPersonaDescriptionMain: async (_id: unknown) => {
+        const description = await _charNote.getPersonaDesc();
+        const resolver = capturedResolveTemplate;
+        if (!resolver) return description;
+        try {
+          return await resolver(description);
+        } catch {
+          return description;
+        }
+      },
+      getAuthorsNoteMain: (_id: unknown) => _charNote.getAuthorNote(),
       getBackgroundEmbedding: (_id: unknown) => '',
       setBackgroundEmbedding: (_id: unknown, _data: unknown) => { /* */ },
       // Risu scriptings.ts getCharacterLastMessage falls back to char.firstMessage
