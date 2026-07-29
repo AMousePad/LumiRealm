@@ -940,6 +940,7 @@ const readonlyResolver = createReadonlyResolver({
   errMsg,
 });
 const resolveReadonly = readonlyResolver.resolve;
+const resolveReadonlyMany = readonlyResolver.resolveMany;
 
 // Page size 200 matches Lumi's server-side clamp. Module-installed rows live
 // at character scope too, so we exclude them by metadata._risu.module_id.
@@ -1084,6 +1085,7 @@ createLumiInterceptors({
   getCachedSettingsSync,
   modulesByNamespaceFromCard,
   resolveReadonly,
+  resolveReadonlyMany,
   runMessageVarPass: (chatId, characterId, uid) => messageVarPass.run(chatId, characterId, uid),
   runBinding,
   log,

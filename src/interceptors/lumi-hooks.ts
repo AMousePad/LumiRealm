@@ -89,6 +89,13 @@ export interface CreateLumiInterceptorsDeps {
     userId: string | undefined,
     opts?: { cbsContext?: boolean; rmVar?: boolean },
   ) => Promise<string>;
+  readonly resolveReadonlyMany: (
+    templates: readonly string[],
+    chatId: string,
+    characterId: string,
+    userId: string | undefined,
+    opts?: { cbsContext?: boolean; rmVar?: boolean },
+  ) => Promise<readonly string[]>;
   readonly runMessageVarPass: (chatId: string, characterId: string, userId: string) => Promise<void>;
   readonly runBinding: (
     active: ActiveCard,
@@ -988,13 +995,16 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
     }
     log.info(`[decorators] registerWorldInfoInterceptor wired at boot`);
     registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
-      const hasRisuStampedEntries = ctx.entries.some((e) => {
+      const hasDecoratorEntries = ctx.entries.some((e) => {
         const stash = e.extensions?.['_risu_decorators'];
         return Array.isArray(stash) && stash.length > 0;
       });
+      const selectionEntries = ctx.entries.filter(
+        (e) => typeof e.extensions?.['_risu_source_hash'] === 'string',
+      );
       const active = activeCardByChat.get(ctx.chatId)
         ?? (ctx.userId ? await deps.ensureActiveCardForChat(ctx.chatId, null, ctx.userId) : null);
-      if (!hasRisuStampedEntries && !active) {
+      if (!hasDecoratorEntries && selectionEntries.length === 0 && !active) {
         log.trace(`[decorators] worldInfoInterceptor skip chat=${ctx.chatId}: not a Risu chat, no stamped entries`);
         return;
       }
@@ -1050,6 +1060,30 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         },
         verboseFn,
       );
+      const outcomeContentById = new Map(
+        outcome.mutated.map((mutation) => [mutation.entryId, mutation.content]),
+      );
+      const selectionMutations = new Map<string, string>();
+      if (active && ctx.userId && selectionEntries.length > 0) {
+        const sourceContents = selectionEntries.map(
+          (entry) => outcomeContentById.get(entry.id) ?? entry.content,
+        );
+        const resolvedContents = await deps.resolveReadonlyMany(
+          sourceContents,
+          ctx.chatId,
+          active.card.character_id,
+          ctx.userId,
+          { cbsContext: true },
+        );
+        for (let i = 0; i < selectionEntries.length; i += 1) {
+          const entry = selectionEntries[i]!;
+          const sourceContent = sourceContents[i]!;
+          const resolvedContent = resolvedContents[i];
+          if (resolvedContent !== undefined && resolvedContent !== sourceContent) {
+            selectionMutations.set(entry.id, resolvedContent);
+          }
+        }
+      }
       if (stashedDecCount + inlineDecCount > 0 || outcome.positionPt.length > 0 || outcome.injectAt.length > 0) {
         const ptNames = outcome.positionPt.map((p) => `${p.name}(${p.content.length})`).join(',');
         const injAtLocs = outcome.injectAt.map((p) => `${p.loc}/${p.operation}`).join(',');
@@ -1129,20 +1163,43 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         outcome.disabled.length === 0 &&
         outcome.forced.length === 0 &&
         outcome.mutated.length === 0 &&
+        selectionMutations.size === 0 &&
         activationOverrides === undefined
       ) return;
       const result: {
         disabled?: readonly string[];
         forced?: readonly string[];
-        mutated?: readonly { id: string; content: string }[];
+        mutated?: readonly {
+          id: string;
+          content?: string;
+          selectionContent?: string;
+        }[];
         activationOverrides?: {
           disableRecursion?: true;
         };
       } = {};
       if (outcome.disabled.length > 0) result.disabled = outcome.disabled;
       if (outcome.forced.length > 0) result.forced = outcome.forced;
-      if (outcome.mutated.length > 0) {
-        result.mutated = outcome.mutated.map((m) => ({ id: m.entryId, content: m.content }));
+      if (outcome.mutated.length > 0 || selectionMutations.size > 0) {
+        const mutations = new Map<string, {
+          id: string;
+          content?: string;
+          selectionContent?: string;
+        }>();
+        for (const mutation of outcome.mutated) {
+          mutations.set(mutation.entryId, {
+            id: mutation.entryId,
+            content: mutation.content,
+          });
+        }
+        for (const [id, selectionContent] of selectionMutations) {
+          mutations.set(id, {
+            ...mutations.get(id),
+            id,
+            selectionContent,
+          });
+        }
+        result.mutated = [...mutations.values()];
       }
       if (activationOverrides) result.activationOverrides = activationOverrides;
       return result;

@@ -41,6 +41,13 @@ export interface ReadonlyResolver {
     userId: string | undefined,
     opts?: { cbsContext?: boolean; rmVar?: boolean },
   ) => Promise<string>;
+  readonly resolveMany: (
+    templates: readonly string[],
+    chatId: string,
+    characterId: string,
+    userId: string | undefined,
+    opts?: { cbsContext?: boolean; rmVar?: boolean },
+  ) => Promise<readonly string[]>;
   readonly resolveInWorker: (
     template: string,
     chatId: string,
@@ -181,6 +188,52 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     });
   }
 
+  async function resolveMany(
+    templates: readonly string[],
+    chatId: string,
+    characterId: string,
+    userId: string | undefined,
+    opts?: { cbsContext?: boolean; rmVar?: boolean },
+  ): Promise<readonly string[]> {
+    if (templates.length === 0) return [];
+    if (userId === undefined) {
+      log.warn(`resolveReadonlyMany: userId not captured chat=${chatId}, returning templates verbatim`);
+      return [...templates];
+    }
+
+    const t0 = Date.now();
+    try {
+      const messages = await fetchMessages(chatId);
+      const ctxInput = await buildCtxInput(
+        chatId,
+        characterId,
+        userId,
+        messages,
+        opts?.cbsContext === true,
+      );
+      const resolved = templates.map((template) =>
+        runPipeline({
+          ...ctxInput,
+          template,
+          phase: 'display',
+          ...(opts?.rmVar === true ? { rmVar: true } : {}),
+          wrapIslands: false,
+        }),
+      );
+      log.debug(
+        `resolveReadonlyMany: DONE chat=${chatId} entries=${templates.length} ` +
+          `elapsed=${Date.now() - t0}ms`,
+      );
+      return resolved;
+    } catch (err) {
+      log.error(
+        `resolveReadonlyMany: worker-eval threw chat=${chatId}: ${(err as Error).message}. ` +
+          `Returning templates verbatim (no Lumi-native fallback).`,
+      );
+      return [...templates];
+    }
+  }
+
   async function stripMessageSetvars(
     chatId: string,
     characterId: string,
@@ -247,5 +300,5 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     }
   }
 
-  return { resolve, resolveInWorker, fetchMessages, stripMessageSetvars };
+  return { resolve, resolveMany, resolveInWorker, fetchMessages, stripMessageSetvars };
 }
