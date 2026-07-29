@@ -529,33 +529,33 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
     const e = op as Any;
     rt.setVar(e.outputVar, JSON.stringify(rt.dictValues(rt.resolve(e.var, e.varType))));
   },
-  v2GetCharacterDesc: (op, { rt }) => {
+  v2GetCharacterDesc: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getCharacterDesc() as unknown as string);
+    rt.setVar(e.outputVar, await rt.getCharacterDesc());
   },
   v2SetCharacterDesc: async (op, { rt }) => {
     const e = op as Any;
     await rt.setCharacterDesc(rt.resolve(e.value, e.valueType));
   },
-  v2GetPersonaDesc: (op, { rt }) => {
+  v2GetPersonaDesc: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getPersonaDesc() as unknown as string);
+    rt.setVar(e.outputVar, await rt.getPersonaDesc());
   },
   v2SetPersonaDesc: async (op, { rt }) => {
     const e = op as Any;
     await rt.setPersonaDesc(rt.resolve(e.value, e.valueType));
   },
-  v2GetReplaceGlobalNote: (op, { rt }) => {
+  v2GetReplaceGlobalNote: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getReplaceGlobalNote() as unknown as string);
+    rt.setVar(e.outputVar, await rt.getReplaceGlobalNote());
   },
   v2SetReplaceGlobalNote: async (op, { rt }) => {
     const e = op as Any;
     await rt.setReplaceGlobalNote(rt.resolve(e.value, e.valueType));
   },
-  v2GetAuthorNote: (op, { rt }) => {
+  v2GetAuthorNote: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getAuthorNote() as unknown as string);
+    rt.setVar(e.outputVar, await rt.getAuthorNote());
   },
   v2SetAuthorNote: async (op, { rt }) => {
     const e = op as Any;
