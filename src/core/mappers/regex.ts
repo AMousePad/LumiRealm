@@ -48,6 +48,11 @@ function closeSentinel(hash: string): string {
 // Risu scripts.ts
 const ALLOWED_FLAG_LETTERS = "dgimsuvy";
 
+/** Set on scripts our exporter emitted with the live, already-rewritten replace
+ *  string. Survives a Risu round trip because Risu stores customscript objects
+ *  wholesale. */
+export const TRANSFORMED_FLAG = "lumirealm_transformed";
+
 export interface AtAtAction {
   readonly index: number;
   readonly action: "emo" | "inject" | "move_top" | "move_bottom" | "repeat_back";
@@ -183,7 +188,11 @@ export function mapRegex(
 
     let baseReplace = (action === "inject") ? "" : strippedOut;
     if (baseReplace.endsWith(">") && !hasNoEndNl) baseReplace += "\n";
-    if (effectivePhase.target === "display" && !action) {
+    // Rows our exporter emitted already carry the display rewrites. Re-applying
+    // them double-wraps on every export/import cycle, so the transform is made
+    // idempotent by skipping content that has already been through it.
+    const preTransformed = (s as unknown as Record<string, unknown>)[TRANSFORMED_FLAG] === true;
+    if (!preTransformed && effectivePhase.target === "display" && !action) {
       baseReplace = wrapIslandMergeIfNeeded(baseReplace);
     }
     // Risu parity: rewrite YouTube `embed/` iframes to a click-through
@@ -191,7 +200,7 @@ export function mapRegex(
     // every iframe tag anyway (and CSP `frame-src 'self' blob:` blocks
     // YouTube even if it didn't), so this is the most useful surface we can
     // ship without Lumi-side changes.
-    if (effectivePhase.target === "display") {
+    if (!preTransformed && effectivePhase.target === "display") {
       baseReplace = applyIframePolicy(baseReplace).html;
     }
     // Force Lumi's `extractHtmlIslands` to fire on class-only panel HTML:
@@ -202,11 +211,11 @@ export function mapRegex(
     // Wrapping with `<div ... style="display:contents">` adds the
     // `style=` Lumi looks for without affecting layout. See island-merge.ts
     // wrapForIslandTriggerIfNeeded for the full chain.
-    if (effectivePhase.target === "display" && !action) {
+    if (!preTransformed && effectivePhase.target === "display" && !action) {
       baseReplace = wrapForIslandTriggerIfNeeded(baseReplace);
     }
     baseReplace = normalizeReplaceStringForSanitizer(baseReplace);
-    if (effectivePhase.target === "display" && baseReplace.length > 0) {
+    if (!preTransformed && effectivePhase.target === "display" && baseReplace.length > 0) {
       baseReplace = unprefixHtmlClasses(baseReplace);
       baseReplace = unprefixCssInStyleBlocks(baseReplace);
       baseReplace = normalizeIncompleteHtmlEntities(baseReplace);

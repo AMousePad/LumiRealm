@@ -10,7 +10,8 @@
 // `lumirealm.json` carries the live rows verbatim, so our own reimport is
 // lossless regardless of what card.json can express.
 
-import { mapRegex } from "../mappers/regex.js";
+import { mapRegex, TRANSFORMED_FLAG } from "../mappers/regex.js";
+import { SvgIndexer, extractAndReplaceSvgs } from "../svg-rasterize.js";
 import type { CustomScript } from "../schemas/customscript.js";
 
 export interface LiveRegexRow {
@@ -108,12 +109,25 @@ export function reconcileRegexScripts(
   characterId: string,
   uuid: () => string,
 ): RegexReconcileResult {
-  const projected = mapRegex(sourceScripts, {
+  const raw = mapRegex(sourceScripts, {
     characterId,
     uuid,
     now: () => 0,
     origin: "module",
   });
+  // The importer runs the SVG pass AFTER mapRegex, so comparing against bare
+  // mapRegex output marks every SVG-bearing rule as edited. Replay it here in
+  // the same order so the indexer assigns the same markers.
+  const svgIndexer = new SvgIndexer();
+  const projected = {
+    ...raw,
+    rows: raw.rows.map((row) => {
+      const rs = row.replace_string;
+      if (!rs || rs.indexOf("<svg") < 0) return row;
+      const r = extractAndReplaceSvgs(rs, svgIndexer);
+      return r.rewritten === rs ? row : { ...row, replace_string: r.rewritten };
+    }),
+  };
 
   const projectedByIndex = new Map<number, LiveRegexRow[]>();
   for (const row of projected.rows) {
@@ -192,6 +206,8 @@ export function reconcileRegexScripts(
       // `@@action`, so re-synthesising it would change the separator.
       const prefix = /^@@[a-z_]+\s*/i.exec(String(source.out ?? ""))?.[0];
       next["out"] = prefix ? `${prefix}${liveRepl}` : liveRepl;
+      // Marks the value as post-transform so reimport does not rewrite it again.
+      next[TRANSFORMED_FLAG] = true;
     }
     if (flagsChanged) next["flag"] = String(primaryLive.flags ?? "");
     if (nameChanged) next["comment"] = String(primaryLive.name ?? "");
