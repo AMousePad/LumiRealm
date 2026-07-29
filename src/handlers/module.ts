@@ -47,6 +47,11 @@ export interface ModuleHandlerDeps {
   readonly refreshAttachedModule: (characterId: string, env: ModuleEnvelope, userId: string) => Promise<void>;
   readonly pushModules: (userId: string) => Promise<void>;
   readonly setGlobalModules: (moduleIds: readonly string[], userId: string) => Promise<void>;
+  readonly recordGlobalModuleArtifacts: (
+    moduleId: string,
+    artifacts: { regexScriptIds?: readonly string[]; worldBookId?: string | null },
+    userId: string,
+  ) => Promise<void>;
   readonly pushAttachedForCharacter: (characterId: string, userId: string) => Promise<void>;
   readonly charactersApi: () => SpindleCharactersApi;
   readonly updateLumirealm: (
@@ -267,6 +272,19 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       await deps.pushModules(ctx.userId);
     },
     module_artifacts_installed: async (msg, ctx) => {
+      // Global installs have no character to stash against; their ids go in the
+      // module index so teardown can delete exactly what was created.
+      if (msg.characterId === null) {
+        await deps.recordGlobalModuleArtifacts(
+          msg.moduleId,
+          { regexScriptIds: msg.regexScriptIds },
+          ctx.userId,
+        );
+        deps.log.info(
+          `module_artifacts_installed: global module=${msg.moduleId} regex=${msg.regexScriptIds.length}`,
+        );
+        return;
+      }
       // FE finished its cookie-auth POSTs. Stash resulting resource ids on
       // the character's user_overrides for clean detach later.
       await deps.updateLumirealm(deps.charactersApi(), msg.characterId, ctx.userId, (cur) => {

@@ -70,7 +70,9 @@ export function projectModuleLorebookEntries(
 export function projectModuleRegexEntries(
   moduleId: string,
   moduleName: string,
-  characterId: string,
+  // `null` projects global scope: one row set that fires on every character,
+  // instead of N per-character copies.
+  characterId: string | null,
   raw: readonly unknown[] | undefined,
   idGen: () => string,
 ): readonly PendingRegexScriptMsg[] {
@@ -93,7 +95,7 @@ export function projectModuleRegexEntries(
         replace_string: '',
         flags: 'g',
         placement: ['ai_output'],
-        scope: 'character',
+        scope: characterId === null ? 'global' : 'character',
         scope_id: characterId,
         target: 'display',
         min_depth: null,
@@ -142,7 +144,7 @@ export function projectModuleRegexEntries(
       replace_string: replaceString,
       flags,
       placement,
-      scope: 'character',
+      scope: characterId === null ? 'global' : 'character',
       scope_id: characterId,
       target,
       min_depth: null,

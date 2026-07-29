@@ -78,6 +78,15 @@ export interface WorldBookOps {
     env: ModuleEnvelope,
     userId: string | undefined,
   ) => Promise<void>;
+  readonly dispatchGlobalModuleArtifactInstall: (
+    env: ModuleEnvelope,
+    userId: string | undefined,
+  ) => Promise<{ worldBookId: string | null }>;
+  readonly dispatchGlobalModuleArtifactUninstall: (
+    moduleId: string,
+    artifacts: { regexScriptIds: readonly string[]; worldBookId: string | null },
+    userId: string | undefined,
+  ) => Promise<void>;
 }
 
 export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
@@ -279,6 +288,90 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
     }, userId);
   }
 
+  // Global counterpart: one regex row set at global scope instead of N
+  // per-character copies, and the module's world book joins the user's global
+  // list rather than being linked to each character.
+  async function dispatchGlobalModuleArtifactInstall(
+    env: ModuleEnvelope,
+    userId: string | undefined,
+  ): Promise<{ worldBookId: string | null }> {
+    const m = env.module as { name?: unknown; regex?: readonly unknown[] };
+    const moduleName = typeof m.name === 'string' && m.name.length > 0 ? m.name : env.id;
+
+    let addedWorldBookId: string | null = null;
+    const wbId = env.installed_world_book_id ?? null;
+    if (wbId) {
+      try {
+        const current = await spindle.world_books.getGlobal(userId);
+        if (!current.includes(wbId)) {
+          await spindle.world_books.setGlobal([...current, wbId], userId);
+          // Only recorded when WE added it, so teardown can't strip a book the
+          // user had already marked global.
+          addedWorldBookId = wbId;
+        }
+        log.info(
+          `dispatchGlobalModuleArtifactInstall: module=${env.id} worldBook=${wbId} ` +
+            `${addedWorldBookId ? 'added to' : 'already in'} global list`,
+        );
+      } catch (err) {
+        log.warn(`dispatchGlobalModuleArtifactInstall: setGlobal failed module=${env.id}: ${errMsg(err)}`);
+      }
+    }
+
+    const regexScripts = projectModuleRegexEntries(
+      env.id, moduleName, null, m.regex, () => cryptoUuidLocal(),
+    );
+    if (regexScripts.length > 0) {
+      log.info(
+        `dispatchGlobalModuleArtifactInstall: module=${env.id} regexScripts=${regexScripts.length} (global scope)`,
+      );
+      send({
+        type: 'install_module_artifacts',
+        characterId: null,
+        moduleId: env.id,
+        worldBookName: `Module: ${moduleName}`,
+        lorebookEntries: [],
+        regexScripts,
+      }, userId);
+    }
+    return { worldBookId: addedWorldBookId };
+  }
+
+  async function dispatchGlobalModuleArtifactUninstall(
+    moduleId: string,
+    artifacts: { regexScriptIds: readonly string[]; worldBookId: string | null },
+    userId: string | undefined,
+  ): Promise<void> {
+    if (artifacts.worldBookId) {
+      try {
+        const current = await spindle.world_books.getGlobal(userId);
+        if (current.includes(artifacts.worldBookId)) {
+          await spindle.world_books.setGlobal(
+            current.filter((id) => id !== artifacts.worldBookId),
+            userId,
+          );
+        }
+      } catch (err) {
+        log.warn(`dispatchGlobalModuleArtifactUninstall: setGlobal failed module=${moduleId}: ${errMsg(err)}`);
+      }
+    }
+    log.info(
+      `dispatchGlobalModuleArtifactUninstall: module=${moduleId} ` +
+        `regex=${artifacts.regexScriptIds.length} worldBook=${artifacts.worldBookId ?? 'none'}`,
+    );
+    if (artifacts.regexScriptIds.length > 0) {
+      send({
+        type: 'uninstall_module_artifacts',
+        characterId: null,
+        moduleId,
+        // Book removal is handled above via setGlobal; the shared book itself
+        // stays alive for any character that attached the module normally.
+        worldBookId: null,
+        regexScriptIds: artifacts.regexScriptIds,
+      }, userId);
+    }
+  }
+
   return {
     archiveWorldBookIfEdited,
     archiveModuleWorldBookBeforeMigration,
@@ -287,5 +380,7 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
     addWorldBookToCharacter,
     removeWorldBookFromCharacter,
     dispatchModuleArtifactInstall,
+    dispatchGlobalModuleArtifactInstall,
+    dispatchGlobalModuleArtifactUninstall,
   };
 }

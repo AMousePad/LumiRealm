@@ -107,6 +107,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
   let modules: readonly ModuleSummary[] | null = null;
   let globalModuleIds: readonly string[] = [];
+  let globalSelectHandle: SearchableSelectHandle | null = null;
   let cards: readonly CardSummary[] = [];
   const attachedByCharacter = new Map<string, readonly AttachedModuleSummary[]>();
   let activeTus: tus.Upload | null = null;
@@ -299,7 +300,14 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
   // Chips + an add dropdown. Mirrors the per-character attach control rather
   // than introducing a second idiom for "pick a module".
+  // Its own handle, NOT attachSelectHandles: that array is owned by
+  // renderCharacterList, which destroys every entry on each pass and would kill
+  // this dropdown before the user could open it.
   function renderGlobalBox(): void {
+    if (globalSelectHandle) {
+      globalSelectHandle.destroy();
+      globalSelectHandle = null;
+    }
     globalBox.replaceChildren();
     if (modules === null) return;
 
@@ -381,7 +389,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       }),
       onChange(selected) { addBtn.disabled = selected === null; },
     });
-    attachSelectHandles.push(ss);
+    globalSelectHandle = ss;
     addWrap.appendChild(ss.root);
     addBtn.addEventListener('click', () => {
       const id = ss.getValue();
@@ -1107,6 +1115,8 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   function destroy(): void {
     log.info('modules-panel: destroy');
     destroyAttachSelects();
+    try { globalSelectHandle?.destroy(); } catch { void 0; }
+    globalSelectHandle = null;
     try { regexTargetSelect.destroy(); } catch { void 0; }
     if (charHeaderHandle) {
       try { charHeaderHandle.destroy(); } catch { void 0; }

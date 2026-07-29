@@ -145,7 +145,33 @@ export function sniffImageMime(bytes: Uint8Array): { ext: string; mime: string }
   if (b[0] === 0xff && (b[1] === 0xfb || b[1] === 0xf3 || b[1] === 0xf2)) {
     return { ext: 'mp3', mime: 'audio/mpeg' };
   }
+  // ADTS AAC shares the 0xFF sync word with MP3, distinguished by the layer
+  // bits, so it has to be tested alongside rather than after a loose 0xFF match.
+  if (b[0] === 0xff && (b[1] === 0xf1 || b[1] === 0xf9)) {
+    return { ext: 'aac', mime: 'audio/aac' };
+  }
+  if (b[0] === 0x46 && b[1] === 0x4c && b[2] === 0x56 && b[3] === 0x01) {
+    return { ext: 'flv', mime: 'video/x-flv' };
+  }
+  if (b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x01 && b[3] === 0x00) {
+    return { ext: 'ico', mime: 'image/x-icon' };
+  }
+  // MPEG program stream pack header.
+  if (b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x01 && b[3] === 0xba) {
+    return { ext: 'mpeg', mime: 'video/mpeg' };
+  }
+  // MPEG-TS has no magic, only a 0x47 sync byte every 188. Two in a row is the
+  // conventional test; one alone matches far too much.
+  if (b.byteLength > 188 && b[0] === 0x47 && b[188] === 0x47) {
+    return { ext: 'ts', mime: 'video/mp2t' };
+  }
+  // Ogg is a container: the codec id sits after the 27-byte page header plus
+  // its segment table. Without this an .ogv is served as audio/ogg and never
+  // renders as video.
   if (b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) {
+    const head = latin1(b, 0, Math.min(b.byteLength, 64));
+    if (head.includes('theora')) return { ext: 'ogv', mime: 'video/ogg' };
+    if (head.includes('OpusHead')) return { ext: 'opus', mime: 'audio/opus' };
     return { ext: 'ogg', mime: 'audio/ogg' };
   }
   // `ftyp` marks every ISOBMFF file, not just mp4: AVIF, HEIC, MOV and M4A all
@@ -174,11 +200,23 @@ export function sniffImageMime(bytes: Uint8Array): { ext: string; mime: string }
   // EBML covers both WebM and Matroska; the DocType string in the header is the
   // only cheap discriminator, and mislabelling .mkv as webm makes it unplayable.
   if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) {
-    const head = String.fromCharCode(...b.subarray(4, Math.min(b.byteLength, 64)));
+    const head = latin1(b, 4, Math.min(b.byteLength, 4096));
     if (head.includes('matroska')) return { ext: 'mkv', mime: 'video/x-matroska' };
+    // Codec ids live in the Tracks element. Audio-only WebM served as video/webm
+    // still plays, but the type is wrong and downstream size/preview logic reads it.
+    const hasVideo = head.includes('V_');
+    if (!hasVideo && /A_(OPUS|VORBIS)/.test(head)) {
+      return { ext: 'weba', mime: 'audio/webm' };
+    }
     return { ext: 'webm', mime: 'video/webm' };
   }
   return null;
+}
+
+function latin1(b: Uint8Array, from: number, to: number): string {
+  let out = '';
+  for (let i = from; i < to; i++) out += String.fromCharCode(b[i]!);
+  return out;
 }
 
 function pickAvatar(

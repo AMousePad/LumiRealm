@@ -102,6 +102,13 @@ export interface ModuleIndex {
   readonly entries: readonly ModuleIndexEntry[];
   /** Applied to every character, on top of that character's attached ids. */
   readonly global_module_ids?: readonly string[];
+  /** Regex rows a global install created, per module. Teardown deletes exactly
+   *  these, so rows the user made themselves are never touched. */
+  readonly global_module_regex_script_ids?: Readonly<Record<string, readonly string[]>>;
+  /** World books a global install added to `world_books.setGlobal`, per module.
+   *  Tracked separately because the book may also have been added by the user,
+   *  and we must only remove what we added. */
+  readonly global_module_world_books?: Readonly<Record<string, string>>;
 }
 
 // Globals first so a character's own attachments resolve later and win on
@@ -302,7 +309,7 @@ export async function writeGlobalModuleIds(
   storage: UserStorageLike,
   userId: string | undefined,
   ids: readonly string[],
-): Promise<readonly string[]> {
+): Promise<{ applied: readonly string[]; added: readonly string[]; removed: readonly string[] }> {
   const index = await readIndex(storage, userId);
   const known = new Set(index.entries.map((e) => e.id));
   const seen = new Set<string>();
@@ -312,8 +319,50 @@ export async function writeGlobalModuleIds(
     seen.add(id);
     next.push(id);
   }
+  const prev = index.global_module_ids ?? [];
+  const prevSet = new Set(prev);
   await writeIndex(storage, userId, { ...index, global_module_ids: next });
-  return next;
+  return {
+    applied: next,
+    added: next.filter((id) => !prevSet.has(id)),
+    removed: prev.filter((id) => !seen.has(id)),
+  };
+}
+
+export async function readGlobalModuleArtifacts(
+  storage: UserStorageLike,
+  userId: string | undefined,
+  moduleId: string,
+): Promise<{ regexScriptIds: readonly string[]; worldBookId: string | null }> {
+  const index = await readIndex(storage, userId);
+  return {
+    regexScriptIds: index.global_module_regex_script_ids?.[moduleId] ?? [],
+    worldBookId: index.global_module_world_books?.[moduleId] ?? null,
+  };
+}
+
+export async function writeGlobalModuleArtifacts(
+  storage: UserStorageLike,
+  userId: string | undefined,
+  moduleId: string,
+  artifacts: { regexScriptIds?: readonly string[]; worldBookId?: string | null },
+): Promise<void> {
+  const index = await readIndex(storage, userId);
+  const regexMap: Record<string, readonly string[]> = { ...(index.global_module_regex_script_ids ?? {}) };
+  const wbMap: Record<string, string> = { ...(index.global_module_world_books ?? {}) };
+  if (artifacts.regexScriptIds !== undefined) {
+    if (artifacts.regexScriptIds.length === 0) delete regexMap[moduleId];
+    else regexMap[moduleId] = [...artifacts.regexScriptIds];
+  }
+  if (artifacts.worldBookId !== undefined) {
+    if (artifacts.worldBookId === null) delete wbMap[moduleId];
+    else wbMap[moduleId] = artifacts.worldBookId;
+  }
+  await writeIndex(storage, userId, {
+    ...index,
+    global_module_regex_script_ids: regexMap,
+    global_module_world_books: wbMap,
+  });
 }
 
 /** Read the cached index. For a full rebuild use `rebuildIndex`. */

@@ -387,7 +387,10 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     let worldBookId: string | null = null;
     const regexScriptIds: string[] = [];
 
-    if (msg.lorebookEntries.length > 0) {
+    // Global installs carry no lorebook entries (the module's world book is
+    // attached through world_books.setGlobal on the backend), so this block is
+    // character-only and its character fetches stay safe.
+    if (msg.lorebookEntries.length > 0 && msg.characterId !== null) {
       try {
         const createResp = await fetch('/api/v1/world-books', {
           method: 'POST',
@@ -464,8 +467,11 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
         });
         if (resp.ok) {
           try {
+            const listQuery = msg.characterId === null
+              ? 'scope=global'
+              : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
             const listResp = await fetch(
-              `/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=2000`,
+              `/api/v1/regex-scripts?${listQuery}&limit=2000`,
               { credentials: 'include' },
             );
             if (listResp.ok) {
@@ -532,7 +538,9 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
         `worldBookId=${msg.worldBookId ?? 'null'} regex=${msg.regexScriptIds.length}`,
     );
     let ok = true;
-    if (msg.worldBookId) {
+    // Global scope has no character row to unlink from; the backend drops the
+    // book from world_books.setGlobal before sending this.
+    if (msg.worldBookId && msg.characterId !== null) {
       try {
         const charResp = await fetch(
           `/api/v1/characters/${encodeURIComponent(msg.characterId)}`,
@@ -573,8 +581,11 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     // install/refresh races. Falls back to stashed IDs if listing fails.
     const idsToDelete = new Set<string>(msg.regexScriptIds);
     try {
+      const uninstallQuery = msg.characterId === null
+        ? 'scope=global'
+        : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
       const listResp = await fetch(
-        `/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=2000`,
+        `/api/v1/regex-scripts?${uninstallQuery}&limit=2000`,
         { credentials: 'include' },
       );
       if (listResp.ok) {

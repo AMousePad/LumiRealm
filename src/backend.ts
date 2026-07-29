@@ -192,6 +192,8 @@ import {
   writeEnvelope as writeModuleEnvelope,
   readGlobalModuleIds,
   writeGlobalModuleIds,
+  readGlobalModuleArtifacts,
+  writeGlobalModuleArtifacts,
 } from './state/modules-store.js';
 import { registerLumiagentPhoneline } from './lumiagent-phoneline.js';
 
@@ -1768,13 +1770,42 @@ const repairHandlers = createRepairHandlers({
 const moduleHandlers = createModuleHandlers({
   worldBookIdsByCharacter,
   setGlobalModules: async (moduleIds, userId) => {
-    const stored = await writeGlobalModuleIds(moduleStorage(), userId, moduleIds);
-    setGlobalModuleIdsCache(userId, stored);
+    const { applied, added, removed } = await writeGlobalModuleIds(moduleStorage(), userId, moduleIds);
+    setGlobalModuleIdsCache(userId, applied);
+
+    // Teardown first: if a module is removed and re-added in one edit, the
+    // stale rows must go before the new ones are recorded against it.
+    for (const moduleId of removed) {
+      const artifacts = await readGlobalModuleArtifacts(moduleStorage(), userId, moduleId);
+      await worldBookOps.dispatchGlobalModuleArtifactUninstall(moduleId, artifacts, userId);
+      await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, {
+        regexScriptIds: [],
+        worldBookId: null,
+      });
+    }
+    for (const moduleId of added) {
+      const env = await readModuleEnvelope(moduleStorage(), userId, moduleId);
+      if (!env) {
+        log.warn(`set_global_modules: module ${moduleId} has no envelope, artifacts not installed`);
+        continue;
+      }
+      const { worldBookId } = await worldBookOps.dispatchGlobalModuleArtifactInstall(env, userId);
+      // Regex ids arrive later on module_artifacts_installed; the world book is
+      // known now and must be recorded even when the module ships no regex.
+      await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, { worldBookId });
+    }
+
     // Runtime cards were built with the old list, so every one is stale. Reuses
     // the per-character eviction rather than adding a second invalidation path.
     const chars = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
     for (const c of chars) invalidateActiveForCharacter(c.character.id, userId);
-    log.info(`set_global_modules: user=${userId} count=${stored.length} invalidated=${chars.length}`);
+    log.info(
+      `set_global_modules: user=${userId} count=${applied.length} ` +
+        `added=${added.length} removed=${removed.length} invalidated=${chars.length}`,
+    );
+  },
+  recordGlobalModuleArtifacts: async (moduleId, artifacts, userId) => {
+    await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, artifacts);
   },
   processModuleUpload,
   getUpload,
@@ -1786,7 +1817,20 @@ const moduleHandlers = createModuleHandlers({
     return file?.imageIds ?? [];
   },
   clearModuleImageJournal: (uid, moduleId) => clearModuleImageJournal(journalStorage(), uid, moduleId),
-  deleteModuleFromStore: (uid, moduleId) => deleteModuleFromStore(moduleStorage(), uid, moduleId),
+  deleteModuleFromStore: async (uid, moduleId) => {
+    // Global artifacts are keyed off the module, not any character, so the
+    // per-character detach sweep never sees them. Tear them down here or the
+    // global regex rows and world-book entry outlive the module.
+    const artifacts = await readGlobalModuleArtifacts(moduleStorage(), uid, moduleId);
+    if (artifacts.regexScriptIds.length > 0 || artifacts.worldBookId) {
+      await worldBookOps.dispatchGlobalModuleArtifactUninstall(moduleId, artifacts, uid);
+      await writeGlobalModuleArtifacts(moduleStorage(), uid, moduleId, {
+        regexScriptIds: [],
+        worldBookId: null,
+      });
+    }
+    await deleteModuleFromStore(moduleStorage(), uid, moduleId);
+  },
   deleteSharedWorldBook: (wbId, uid) => spindle.world_books.delete(wbId, uid).then(() => undefined),
   buildOrphanDetectDeps,
   deleteImageIds,

@@ -339,7 +339,8 @@ export type FrontendToBackend =
   // carries new resource ids so backend can stash them on user_overrides for clean detach.
   | {
       type: 'module_artifacts_installed';
-      characterId: string;
+      /** `null` = global scope. */
+      characterId: string | null;
       moduleId: string;
       /** `null` when the module had zero lorebook entries (no book created). */
       worldBookId: string | null;
@@ -348,7 +349,8 @@ export type FrontendToBackend =
     }
   | {
       type: 'module_artifacts_uninstalled';
-      characterId: string;
+      /** `null` = global scope. */
+      characterId: string | null;
       moduleId: string;
       /** True when every targeted artifact was deleted (or already absent; 404 counts as success). */
       ok: boolean;
@@ -632,7 +634,8 @@ export type BackendToFrontend =
   // `lorebookEntries` mirrors `/api/v1/world-books/:id/entries/import` schema.
   | {
       type: 'install_module_artifacts';
-      characterId: string;
+      /** `null` = global scope: install once for every character. */
+      characterId: string | null;
       moduleId: string;
       /** FE only creates a world_book when `lorebookEntries.length > 0`. */
       worldBookName: string;
@@ -641,7 +644,8 @@ export type BackendToFrontend =
     }
   | {
       type: 'uninstall_module_artifacts';
-      characterId: string;
+      /** `null` = global scope. */
+      characterId: string | null;
       moduleId: string;
       worldBookId: string | null;
       regexScriptIds: readonly string[];
