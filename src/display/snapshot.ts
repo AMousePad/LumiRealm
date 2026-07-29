@@ -24,6 +24,7 @@ export interface DisplaySnapshotCharacter {
   readonly firstMessage: string;
   readonly alternateGreetings: readonly string[];
   readonly selectedAlternateGreetingIndex: number;
+  readonly selectedGreeting?: string;
   readonly additionalAssets: Readonly<Record<string, AssetIndexEntry>>;
   readonly emotionImages: Readonly<Record<string, AssetIndexEntry>>;
   readonly image: string;

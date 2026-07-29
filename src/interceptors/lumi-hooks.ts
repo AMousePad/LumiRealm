@@ -40,6 +40,7 @@ import {
   setDecoratorBuffers,
   clearDecoratorBuffers as clearDecoratorBuffer,
 } from '../interpreter/decorator-buffers.js';
+import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import { userIdAls } from '../interpreter/runtime/als.js';
 import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import { makeDispatcherScriptNS } from '../interpreter/dispatcher.js';
@@ -255,6 +256,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         creatorNotes?: string;
         persona?: string;
         firstMessage?: string;
+        alternateGreetings?: readonly string[];
       };
       const envChat = ctx.env.chat as {
         id?: string;
@@ -263,6 +265,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         lastUserMessage?: string;
         lastCharMessage?: string;
         lastMessageId?: number;
+        greetingIndex?: number;
       };
       const envSystem = ctx.env.system as {
         model?: string;
@@ -313,6 +316,11 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             postHistoryInstructions: charCard.postHistoryInstructions ?? '',
             creatorNotes: charCard.creatorNotes ?? '',
             firstMessage: charCard.firstMessage ?? '',
+            alternateGreetings: charCard.alternateGreetings ?? [],
+            selectedAlternateGreetingIndex: toRisuFirstMessageIndex(
+              envChat.greetingIndex,
+            ),
+            selectedGreeting: charCard.firstMessage ?? '',
             ...(assetIndexes?.assets ? { additionalAssets: assetIndexes.assets } : {}),
             ...(assetIndexes?.emotions ? { emotionImages: assetIndexes.emotions } : {}),
             ...(charImage ? { image: charImage } : {}),

@@ -14,6 +14,7 @@ import { getCachedMessages } from '../interpreter/messages-cache.js';
 import { getRegexScriptsApi } from '../adapters/spindle-extras.js';
 import type { LlmMessage } from '../adapters/spindle-extras.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
+import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 
 export const PROMPT_REGEX_PHASE: PipelinePhase = 'commit';
 
@@ -38,10 +39,22 @@ async function fetchMessages(
   chatId: string,
   log: PromptRegexApplyDeps['log'],
   errMsg: PromptRegexApplyDeps['errMsg'],
-): Promise<readonly { id: string; role: 'system' | 'user' | 'assistant'; content: string }[]> {
+): Promise<readonly {
+  id: string;
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  greetingIndex?: number;
+}[]> {
   try {
     const msgs = await spindle.chat.getMessages(chatId);
-    return msgs.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+    return msgs.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      ...(typeof m.extra?.greeting_index === 'number'
+        ? { greetingIndex: m.extra.greeting_index }
+        : {}),
+    }));
   } catch (err) {
     log.error(`prompt-regex fetchMessages chat=${chatId} failed: ${errMsg(err)}`);
     return [];
@@ -73,6 +86,7 @@ export async function buildBackendPipelineInput(
       global?: Record<string, string>;
     };
     chat_variables?: Record<string, string>;
+    activeGreetingIndex?: number;
   };
   const mv = metadata.macro_variables ?? {};
   const chatVars = metadata.chat_variables;
@@ -86,6 +100,10 @@ export async function buildBackendPipelineInput(
   const screenDims = getScreenDims(userId);
   const cachedMessages = getCachedMessages(chatId);
   const activeLore = getActiveLorebook(chatId);
+  const selectedGreeting =
+    messages.length > 0 && messages[0]!.role !== 'user'
+      ? messages[0]!.content
+      : undefined;
 
   const charImageUrl = imageUrlFromId(
     (character as { image_id?: unknown } | null | undefined)?.image_id as string | null | undefined,
@@ -118,6 +136,10 @@ export async function buildBackendPipelineInput(
       creatorNotes: character?.creator_notes ?? '',
       firstMessage: character?.first_mes ?? '',
       alternateGreetings: character?.alternate_greetings ?? [],
+      selectedAlternateGreetingIndex: toRisuFirstMessageIndex(
+        metadata.activeGreetingIndex ?? messages[0]?.greetingIndex,
+      ),
+      ...(selectedGreeting !== undefined ? { selectedGreeting } : {}),
       ...(assetIndexes ? { additionalAssets: assetIndexes.assets } : {}),
       ...(assetIndexes ? { emotionImages: assetIndexes.emotions } : {}),
       ...(charImageUrl ? { image: charImageUrl } : {}),

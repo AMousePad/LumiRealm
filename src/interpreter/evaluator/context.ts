@@ -115,6 +115,7 @@ export interface BuildEvaluatorCtxInput {
     readonly firstMessage?: string;
     readonly alternateGreetings?: readonly string[];
     readonly selectedAlternateGreetingIndex?: number;
+    readonly selectedGreeting?: string;
     readonly additionalAssets?: Readonly<Record<string, AssetIndexEntry>>;
     readonly emotionImages?: Readonly<Record<string, AssetIndexEntry>>;
     // Risu parser.svelte.ts
@@ -349,6 +350,9 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     firstMessage: card.firstMessage ?? "",
     alternateGreetings: card.alternateGreetings ?? [],
     selectedAlternateGreetingIndex: card.selectedAlternateGreetingIndex ?? -1,
+    ...(card.selectedGreeting !== undefined
+      ? { selectedGreeting: card.selectedGreeting }
+      : {}),
     type: "character" as const,
     additionalAssets: indexToCharacterAssets(card.additionalAssets),
     emotionImages: indexToCharacterAssets(card.emotionImages),

@@ -8,6 +8,7 @@ export interface HostMessage {
   readonly role: 'user' | 'assistant' | 'system' | string;
   readonly createdAt?: number;
   readonly speaker?: string;
+  readonly greetingIndex?: number;
 }
 
 export interface HostCharacter {

@@ -11,6 +11,8 @@ import { getActiveLorebook } from './lorebook-cache.js';
 import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { getActiveCharacterImage, getActivePersonaImage } from '../interpreter/image-cache.js';
 import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
+import type { RisuChatView } from '../interpreter/risu-chat-view.js';
+import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import type { TriggerScript } from '../core/schemas/triggerscript.js';
 
 export interface DisplaySnapshotAssemblyDeps {
@@ -31,6 +33,7 @@ interface LumiCharacterRaw {
   post_history_instructions?: string;
   creator_notes?: string;
   first_mes?: string;
+  alternate_greetings?: readonly string[];
   world_book_ids?: readonly string[];
   image_id?: string | null;
 }
@@ -67,6 +70,9 @@ async function fetchHostMessages(chatId: string): Promise<HostMessage[]> {
         ...(typeof raw.name === 'string' && raw.name.length > 0
           ? { speaker: raw.name }
           : {}),
+        ...(typeof m.extra?.greeting_index === 'number'
+          ? { greetingIndex: m.extra.greeting_index }
+          : {}),
       };
     });
   } catch {
@@ -74,10 +80,7 @@ async function fetchHostMessages(chatId: string): Promise<HostMessage[]> {
   }
 }
 
-export function buildDisplayChatState(
-  messagesHost: readonly HostMessage[],
-): DisplaySnapshot['chat'] {
-  const view = buildRisuChatView({ messages: messagesHost });
+function buildDisplayChatStateFromView(view: RisuChatView): DisplaySnapshot['chat'] {
   const messages: Message[] = view.messages.map((m) => ({
     role: m.role === 'user' ? 'user' : 'assistant',
     content: m.content,
@@ -103,6 +106,12 @@ export function buildDisplayChatState(
     lastMessageId: risuLen,
     messages,
   };
+}
+
+export function buildDisplayChatState(
+  messagesHost: readonly HostMessage[],
+): DisplaySnapshot['chat'] {
+  return buildDisplayChatStateFromView(buildRisuChatView({ messages: messagesHost }));
 }
 
 async function fetchHostLorebook(
@@ -141,23 +150,43 @@ interface LumiPersonaRaw {
   image_id?: string | null;
 }
 
-async function fetchChatAuthorsNote(
+async function fetchChatRuntimeState(
   chatId: string,
   userId: string,
-): Promise<import('../display/snapshot.js').DisplayChatAuthorsNote | null> {
+): Promise<{
+  readonly authorsNote: import('../display/snapshot.js').DisplayChatAuthorsNote | null;
+  readonly selectedAlternateGreetingIndex?: number;
+}> {
   try {
     const chat = await spindle.chats.get(chatId, userId) as { metadata?: Record<string, unknown> } | null;
-    const an = chat?.metadata?.authors_note;
-    if (!an || typeof an !== 'object') return null;
+    const metadata = chat?.metadata;
+    const an = metadata?.authors_note;
+    const selectedAlternateGreetingIndex =
+      typeof metadata?.activeGreetingIndex === 'number'
+        ? toRisuFirstMessageIndex(metadata.activeGreetingIndex)
+        : undefined;
+    if (!an || typeof an !== 'object') {
+      return {
+        authorsNote: null,
+        ...(selectedAlternateGreetingIndex !== undefined
+          ? { selectedAlternateGreetingIndex }
+          : {}),
+      };
+    }
     const o = an as { content?: unknown; depth?: unknown; role?: unknown; position?: unknown };
     return {
-      content: typeof o.content === 'string' ? o.content : '',
-      ...(typeof o.depth === 'number' ? { depth: o.depth } : {}),
-      ...(typeof o.role === 'string' ? { role: o.role } : {}),
-      ...(typeof o.position === 'number' ? { position: o.position } : {}),
+      authorsNote: {
+        content: typeof o.content === 'string' ? o.content : '',
+        ...(typeof o.depth === 'number' ? { depth: o.depth } : {}),
+        ...(typeof o.role === 'string' ? { role: o.role } : {}),
+        ...(typeof o.position === 'number' ? { position: o.position } : {}),
+      },
+      ...(selectedAlternateGreetingIndex !== undefined
+        ? { selectedAlternateGreetingIndex }
+        : {}),
     };
   } catch {
-    return null;
+    return { authorsNote: null };
   }
 }
 
@@ -177,13 +206,14 @@ export async function assembleDisplaySnapshot(
   const persona = personaRaw ?? {};
 
   const bookIds = Array.isArray(ch.world_book_ids) ? ch.world_book_ids : [];
-  const [messagesHost, lorebookHost, chatAuthorsNote] = await Promise.all([
+  const [messagesHost, lorebookHost, chatRuntimeState] = await Promise.all([
     fetchHostMessages(chatId),
     fetchHostLorebook(bookIds, userId),
-    fetchChatAuthorsNote(chatId, userId),
+    fetchChatRuntimeState(chatId, userId),
   ]);
 
-  const chatState = buildDisplayChatState(messagesHost);
+  const chatView = buildRisuChatView({ messages: messagesHost });
+  const chatState = buildDisplayChatStateFromView(chatView);
 
   const triggers = active.card.risuPayload.triggers as readonly TriggerScript[];
   const luaScripts = active.card.risuPayload.lua_scripts;
@@ -204,7 +234,7 @@ export async function assembleDisplaySnapshot(
     personaText: persona.description ?? '',
     personaImage: getActivePersonaImage(userId) ?? '',
     personaImageId: persona.image_id ?? null,
-    chatAuthorsNote,
+    chatAuthorsNote: chatRuntimeState.authorsNote,
     character: {
       description: ch.description ?? '',
       personality: ch.personality ?? '',
@@ -217,8 +247,13 @@ export async function assembleDisplaySnapshot(
       globalNote: '',
       authorsNote: '',
       firstMessage: ch.first_mes ?? '',
-      alternateGreetings: [],
-      selectedAlternateGreetingIndex: -1,
+      alternateGreetings: ch.alternate_greetings ?? [],
+      selectedAlternateGreetingIndex:
+        chatRuntimeState.selectedAlternateGreetingIndex
+        ?? toRisuFirstMessageIndex(chatView.greetingIndex),
+      ...(chatView.greeting !== undefined
+        ? { selectedGreeting: chatView.greeting }
+        : {}),
       additionalAssets: active.card.asset_index,
       emotionImages: active.card.emotion_index,
       image: getActiveCharacterImage(chatId) ?? '',

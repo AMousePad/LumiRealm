@@ -11,6 +11,7 @@ import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { imageUrlFromId } from '../interpreter/image-cache.js';
 import { getDecoratorBuffers as readDecoratorBuffers } from '../interpreter/decorator-buffers.js';
 import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
+import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import type { Message } from '../core/cbs/index.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 
@@ -20,6 +21,7 @@ export interface ChatMessage {
   readonly content: string;
   readonly createdAt: number;
   readonly speaker?: string;
+  readonly greetingIndex?: number;
 }
 
 export interface ReadonlyResolverDeps {
@@ -85,6 +87,9 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         content: m.content,
         createdAt: m.send_date ?? m.created_at ?? 0,
         ...(m.name ? { speaker: m.name } : {}),
+        ...(typeof m.extra?.greeting_index === 'number'
+          ? { greetingIndex: m.extra.greeting_index }
+          : {}),
       }));
     } catch (err) {
       log.error(`fetchChatMessages chat=${chatId} failed: ${errMsg(err)}`);
@@ -113,6 +118,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         chat?: Record<string, string>;
       };
       chat_variables?: Record<string, string>;
+      activeGreetingIndex?: number;
     };
     const mv = metadata.macro_variables ?? {};
     const chatVars = metadata.chat_variables;
@@ -162,6 +168,12 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         creatorNotes: character?.creator_notes ?? '',
         firstMessage: character?.first_mes ?? '',
         alternateGreetings: character?.alternate_greetings ?? [],
+        selectedAlternateGreetingIndex: toRisuFirstMessageIndex(
+          metadata.activeGreetingIndex ?? view.greetingIndex,
+        ),
+        ...(view.greeting !== undefined
+          ? { selectedGreeting: view.greeting }
+          : {}),
         ...(assetIndexes ? { additionalAssets: assetIndexes.assets } : {}),
         ...(assetIndexes ? { emotionImages: assetIndexes.emotions } : {}),
         ...(charImageUrl ? { image: charImageUrl } : {}),

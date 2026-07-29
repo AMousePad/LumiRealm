@@ -8,6 +8,7 @@ export interface RisuChatView {
   // Content of the stripped leading greeting, Risu's `char.firstMessage`
   // fallback for getCharacterLastMessage / getFirstMessage.
   readonly greeting?: string;
+  readonly greetingIndex?: number;
 }
 
 export interface BuildRisuChatViewInput {
@@ -37,11 +38,20 @@ export function buildRisuChatView(input: BuildRisuChatViewInput): RisuChatView {
   // meta.index stays Risu-frame, shifting card `meta.index - getChatLength()`
   // position math by one. Same leading-non-user drop the backend cache uses.
   let greeting: string | undefined;
+  let greetingIndex: number | undefined;
   if (messages.length > 0 && messages[0]!.role !== 'user') {
     greeting = messages[0]!.content;
+    greetingIndex = messages[0]!.greetingIndex;
     messages.shift();
     adjustments.push('stripped:1-leading-greeting');
   }
 
-  return greeting !== undefined ? { messages, adjustments, greeting } : { messages, adjustments };
+  return greeting !== undefined
+    ? {
+        messages,
+        adjustments,
+        greeting,
+        ...(greetingIndex !== undefined ? { greetingIndex } : {}),
+      }
+    : { messages, adjustments };
 }
