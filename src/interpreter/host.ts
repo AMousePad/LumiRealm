@@ -147,6 +147,7 @@ export interface HostApi {
 export interface TriggerRuntimePreloaded {
   /** Output of `loadVars(api)` — `$`-prefixed internal key shape. */
   readonly varsCache?: Record<string, string>;
+  readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   /** Output of `api.chat.getMessages()` — pre-Risu-frame-shift. Same shape
    *  the runtime would receive from Spindle directly. */
   readonly messagesRaw?: readonly HostMessage[];
@@ -156,6 +157,7 @@ export interface TriggerRuntimePreloaded {
 
 export interface TriggerRuntimeOpts {
   readonly displayMode?: boolean;
+  readonly displayData?: string;
   readonly lowLevelAccess?: boolean;
   readonly characterId?: string | null;
   readonly binding?: string;

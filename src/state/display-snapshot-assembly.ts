@@ -11,6 +11,7 @@ import { getActiveLorebook } from './lorebook-cache.js';
 import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { getActiveCharacterImage, getActivePersonaImage } from '../interpreter/image-cache.js';
 import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
+import type { TriggerScript } from '../core/schemas/triggerscript.js';
 
 export interface DisplaySnapshotAssemblyDeps {
   readonly modulesByNamespaceFromCard: (
@@ -184,7 +185,7 @@ export async function assembleDisplaySnapshot(
 
   const chatState = buildDisplayChatState(messagesHost);
 
-  const triggers = active.card.risuPayload.triggers as ReadonlyArray<{ effect?: ReadonlyArray<{ type?: string }> }>;
+  const triggers = active.card.risuPayload.triggers as readonly TriggerScript[];
   const luaScripts = active.card.risuPayload.lua_scripts;
   const hasEditDisplayLua = triggers.some((t) => t.effect?.[0]?.type === 'triggerlua');
   const hasEditAtActions = (active.card.risuPayload.at_actions as ReadonlyArray<unknown>).length > 0;

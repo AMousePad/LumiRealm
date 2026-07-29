@@ -548,7 +548,17 @@ export async function makeRisuTriggerRuntime(
   // `dirty` boxed so flush() observes setVar writes across the closure boundary.
   const dirty: { value: boolean } = { value: false };
   const localScopes = new Map<number, Map<string, string>>();
-  const _vars = makeVarsApi({ varsCache, localScopes, dirty, characterId });
+  const tempVars = displayMode ? {} : undefined;
+  const _vars = makeVarsApi({
+    varsCache,
+    localScopes,
+    dirty,
+    characterId,
+    ...(preloaded?.scriptstateDefaults !== undefined
+      ? { scriptstateDefaults: preloaded.scriptstateDefaults }
+      : {}),
+    ...(tempVars !== undefined ? { tempVars } : {}),
+  });
   const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal } = _vars;
 
   let stopSending = false;
@@ -1162,7 +1172,7 @@ export async function makeRisuTriggerRuntime(
     deleteLorebookByIndex, setLorebookActivation, setLorebookAlwaysActive,
   } = _lore;
 
-  const _displayState = makeDisplayStateApi();
+  const _displayState = makeDisplayStateApi(opts.displayData);
   const {
     getDisplayState, setDisplayState,
     getRequestState, setRequestState,

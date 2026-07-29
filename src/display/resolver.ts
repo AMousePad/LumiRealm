@@ -20,6 +20,7 @@ import {
 import { type FeRegexScript } from './regex-apply.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
+import { runDisplayTriggerChain } from './trigger-runner.js';
 import { withCurrentDisplayMessage } from './host-shim.js';
 const log = makeSafeLogger('display-resolver');
 
@@ -246,6 +247,9 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
             (vars) => writeback?.(chatId, vars),
           );
         }
+        const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
+        body = displayTriggerResult.content;
+        if (displayTriggerResult.ran) recorder.volatile = true;
         if (liveSnap.atActions.length > 0) {
           body = await runEditDisplayAtActions(liveSnap, body, args.context);
         }

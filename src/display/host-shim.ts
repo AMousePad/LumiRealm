@@ -53,7 +53,12 @@ export function buildPreloaded(snap: DisplaySnapshot): TriggerRuntimePreloaded {
     entries: [...snap.lorebookHost],
     primaryBookId: (snap.lorebookHost[0]?.worldBookId as string | undefined) ?? null,
   };
-  return { varsCache, messagesRaw: snap.messagesHost, lorebook };
+  return {
+    varsCache,
+    scriptstateDefaults: snap.scriptstateDefaults,
+    messagesRaw: snap.messagesHost,
+    lorebook,
+  };
 }
 
 export type DisplayVarWriteback = (vars: Record<string, string>) => void;

@@ -12,8 +12,8 @@ export interface DisplayStateApi {
   getRequestStateLength(): number;
 }
 
-export function makeDisplayStateApi(): DisplayStateApi {
-  const displayState: { text: string } = { text: '' };
+export function makeDisplayStateApi(initialDisplayState: unknown = ''): DisplayStateApi {
+  const displayState: { text: string } = { text: toStr(initialDisplayState) };
   const requestState: { role: string; content: string }[] = [];
 
   return {
