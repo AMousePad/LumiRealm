@@ -514,6 +514,16 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
     const actions = document.createElement('div');
     actions.className = 'lrm-module-actions';
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'lrm-btn';
+    exportBtn.textContent = 'Export';
+    exportBtn.title = `Download "${displayName}" as a .lumirealm.module archive.`;
+    exportBtn.addEventListener('click', () => {
+      log.info(`modules-panel: export_module id=${m.id}`);
+      sendToBackend({ type: 'export_module', moduleId: m.id });
+    });
+    actions.appendChild(exportBtn);
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'lrm-btn lrm-btn-danger';

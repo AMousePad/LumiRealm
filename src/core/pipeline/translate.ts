@@ -63,6 +63,7 @@ export function translateFromStoredSource(
     cardJsonText: null,
     moduleBytes: null,
     moduleEnvelope,
+    sidecar: null,
     assets: new Map<string, Uint8Array>(),
     xMeta: new Map<string, unknown>(),
     oversizedEntries: [],

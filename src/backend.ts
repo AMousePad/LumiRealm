@@ -112,6 +112,7 @@ import { createImportTextHandlers } from './handlers/import-text.js';
 import { createAssetsHandlers } from './handlers/assets.js';
 import { createViewerHandlers } from './handlers/viewer.js';
 import { createModuleHandlers } from './handlers/module.js';
+import { createExportHandlers } from './handlers/export.js';
 import {
   createImportHandlers,
   type PendingImportCompletion,
@@ -1806,6 +1807,13 @@ const moduleHandlers = createModuleHandlers({
   errMsg,
 });
 
+const exportHandlers = createExportHandlers({
+  readModuleEnvelope: (uid, moduleId) => readModuleEnvelope(moduleStorage(), uid, moduleId),
+  extensionVersion: EXTENSION_VERSION,
+  log,
+  errMsg,
+});
+
 // Typed exhaustive registry: any new FrontendToBackend variant without a
 // handler entry here trips a compile-time error.
 const handlerRegistry: HandlerRegistry = {
@@ -1818,6 +1826,7 @@ const handlerRegistry: HandlerRegistry = {
   ...connectionsHandlers,
   ...togglesHandlers,
   ...moduleHandlers,
+  ...exportHandlers,
   ...assetsHandlers,
   ...viewerHandlers,
   ...lorebookHandlers,

@@ -1,5 +1,10 @@
 import { TranslationError } from "../errors.js";
 import { decodeRisum, type RisumEnvelope } from "../risum/codec.js";
+import {
+  LUMIREALM_SIDECAR_ENTRY,
+  isLumirealmSidecar,
+  type LumirealmArchiveSidecar,
+} from "../export/archive-types.js";
 import { stripPolyglot, isZipArchive, findJpegZipBoundary } from "./polyglot.js";
 import { readZip } from "./zip.js";
 
@@ -8,6 +13,8 @@ export interface CharxBundle {
   readonly cardJsonText: string | null;
   readonly moduleBytes: Uint8Array | null;
   readonly moduleEnvelope: RisumEnvelope | null;
+  /** Present only for archives we wrote. Authoritative over card.json when set. */
+  readonly sidecar: LumirealmArchiveSidecar | null;
   readonly assets: ReadonlyMap<string, Uint8Array>;
   readonly xMeta: ReadonlyMap<string, unknown>;
   readonly oversizedEntries: readonly { path: string; bytes: number }[];
@@ -70,6 +77,11 @@ export function isModuleRisumPath(path: string): boolean {
   return path === "module.risum";
 }
 
+/** Is this our sidecar entry? Risu and pre-sidecar LumiRealm both skip it. */
+export function isLumirealmSidecarPath(path: string): boolean {
+  return path === LUMIREALM_SIDECAR_ENTRY;
+}
+
 /**
  * Parse a `.charx` bundle. Handles both pure-ZIP and JPEG+ZIP polyglot forms.
  */
@@ -111,6 +123,7 @@ export function readCharx(bytes: Uint8Array, opts: ReadCharxOptions = {}): Charx
   let card: unknown | null = null;
   let cardJsonText: string | null = null;
   let moduleBytes: Uint8Array | null = null;
+  let sidecar: LumirealmArchiveSidecar | null = null;
   const assets = new Map<string, Uint8Array>();
   const xMeta = new Map<string, unknown>();
   const oversizedEntries: { path: string; bytes: number }[] = zipOversized.map(
@@ -147,6 +160,27 @@ export function readCharx(bytes: Uint8Array, opts: ReadCharxOptions = {}): Charx
     if (isModuleRisumPath(path)) {
       moduleBytes = data;
       totalBytes += data.byteLength;
+      continue;
+    }
+
+    if (isLumirealmSidecarPath(path)) {
+      totalBytes += data.byteLength;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(data));
+      } catch (cause) {
+        issues.push({ path, message: `lumirealm sidecar parse failed: ${String(cause)}` });
+        continue;
+      }
+      if (!isLumirealmSidecar(parsed)) {
+        const version = (parsed as { schema_version?: unknown })?.schema_version;
+        issues.push({
+          path,
+          message: `lumirealm sidecar is not a supported shape (schema_version=${String(version)})`,
+        });
+        continue;
+      }
+      sidecar = parsed;
       continue;
     }
 
@@ -200,6 +234,7 @@ export function readCharx(bytes: Uint8Array, opts: ReadCharxOptions = {}): Charx
     cardJsonText,
     moduleBytes,
     moduleEnvelope,
+    sidecar,
     assets,
     xMeta,
     oversizedEntries,
