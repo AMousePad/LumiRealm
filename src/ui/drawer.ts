@@ -2,6 +2,7 @@ import * as tus from 'tus-js-client';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend, CardSummary, ImportProgress } from '../types/messages.js';
 import { errMsg } from '../util/coerce.js';
+import { recoverModuleRegexScriptIds } from '../state/module-artifact-project.js';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
@@ -478,32 +479,21 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
               const listBody = (await listResp.json()) as {
                 data?: Array<{
                   id: string;
-                  script_id?: string;
-                  metadata?: { _risu?: { module_id?: string } };
+                  metadata?: Record<string, unknown>;
                 }>;
               };
-              const moduleRows = (listBody.data ?? []).filter(
-                (row) => row.metadata?._risu?.module_id === msg.moduleId,
+              const recovered = recoverModuleRegexScriptIds(
+                msg.moduleId,
+                msg.regexScripts,
+                listBody.data ?? [],
               );
-              const rowsByScriptId = new Map<string, string[]>();
-              for (const row of moduleRows) {
-                if (typeof row.script_id !== 'string') continue;
-                const ids = rowsByScriptId.get(row.script_id) ?? [];
-                ids.push(row.id);
-                rowsByScriptId.set(row.script_id, ids);
-              }
-              const ordered = msg.regexScripts.map(
-                (script) => rowsByScriptId.get(script.script_id) ?? [],
-              );
-              if (ordered.every((ids) => ids.length === 1)) {
-                for (const ids of ordered) regexScriptIds.push(ids[0]!);
-              } else {
+              regexScriptIds.push(...recovered.ids);
+              if (!recovered.exact) {
                 // Keep every row reachable for detach. Runtime binding checks
                 // the row's source identity and fails closed if this fallback
                 // cannot prove a one-to-one match.
-                regexScriptIds.push(...moduleRows.map((row) => row.id));
                 log.warn(
-                  `drawer.installModuleArtifacts: could not pair every imported row by script_id ` +
+                  `drawer.installModuleArtifacts: could not pair every imported row by source identity ` +
                     `for module=${msg.moduleId}; stored cleanup ids only`,
                 );
               }

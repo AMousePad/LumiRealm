@@ -1500,6 +1500,8 @@ const migrationsRunner = createMigrationsRunner({
   writeModuleEnvelope: async (userId, env) => { await writeModuleEnvelope(moduleStorage(), userId, env); },
   dispatchModuleArtifactInstall: (charId, env, userId) => dispatchModuleArtifactInstall(charId, env, userId),
   writeLumirealm: (charId, data, userId) => writeLumirealm(charactersApi(), charId, data, userId),
+  updateLumirealm: (charId, userId, mutator) =>
+    updateLumirealm(charactersApi(), charId, userId, mutator),
   invalidateActiveForCharacter,
   toastFor,
   archiveModuleWorldBookBeforeMigration: (env, userId) => archiveModuleWorldBookBeforeMigration(env, userId),

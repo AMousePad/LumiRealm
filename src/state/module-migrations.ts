@@ -23,6 +23,9 @@ export interface ModuleMigrationDeps {
   // refreshArtifactsForAttached: detach + reattach for every attached character,
   // so the new projection (regex names, flags, etc.) replaces the old rows.
   refreshArtifactsForAttached?: (moduleId: string) => Promise<number>;
+  repairRegexBindingsForAttached: (
+    moduleId: string,
+  ) => Promise<{ repaired: number; refreshed: number }>;
   // In-place patches per row, scoped to rows whose metadata._risu.module_id
   // matches. Returns null when host lacks regex_scripts.update.
   applyModuleRegexReplaceStringTransform?: (
@@ -110,6 +113,20 @@ async function applyV5RefreshAttachedRegex(
     notes.push('refreshArtifactsForAttached dep missing, skipping refresh');
   }
   return { nextEnv: args.env, notes };
+}
+
+async function applyV11RepairAttachedRegexIdentity(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  const result = await deps.repairRegexBindingsForAttached(args.env.id);
+  return {
+    nextEnv: args.env,
+    notes: [
+      `repaired ${result.repaired} attached char(s) in place`,
+      `refreshed ${result.refreshed} incomplete attachment(s)`,
+    ],
+  };
 }
 
 async function applyV6StripStylePrefixInPlace(
@@ -355,6 +372,13 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
       'Mark each projected Risu module lorebook entry to exclude the character greeting during activation.',
     touches: ['world_book_entries'],
     apply: applyV10ExcludeGreetingPerEntry,
+  },
+  {
+    version: 11,
+    description:
+      'Repair attached module regex action bindings using module source-row order.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV11RepairAttachedRegexIdentity,
   },
 ];
 

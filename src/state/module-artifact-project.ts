@@ -8,6 +8,82 @@ import type {
 import { unprefixHtmlClasses, normalizeIncompleteHtmlEntities, unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { normaliseRisuFlag, pickSubstituteMacroMode } from '../core/mappers/regex.js';
 
+interface ModuleRegexIdentityRow {
+  readonly id?: unknown;
+  readonly metadata?: unknown;
+}
+
+export interface ModuleRegexScriptIdRecovery {
+  readonly ids: readonly string[];
+  readonly exact: boolean;
+}
+
+function readRisuMetadata(
+  row: ModuleRegexIdentityRow,
+): Record<string, unknown> | null {
+  if (!row.metadata || typeof row.metadata !== 'object') return null;
+  const risu = (row.metadata as Record<string, unknown>)['_risu'];
+  return risu && typeof risu === 'object'
+    ? risu as Record<string, unknown>
+    : null;
+}
+
+function readModuleRegexSourceRow(
+  row: ModuleRegexIdentityRow,
+  moduleId: string,
+): number | null {
+  const metadata = readRisuMetadata(row);
+  const sourceRowIndex = metadata?.['source_row_index'];
+  return metadata?.['module_id'] === moduleId
+      && typeof sourceRowIndex === 'number'
+      && Number.isInteger(sourceRowIndex)
+    ? sourceRowIndex
+    : null;
+}
+
+/**
+ * Restores host row ids to module source order after import. Host list order
+ * may differ from source order because Risu order flags change sort_order.
+ */
+export function recoverModuleRegexScriptIds(
+  moduleId: string,
+  projectedRows: readonly ModuleRegexIdentityRow[],
+  liveRows: readonly ModuleRegexIdentityRow[],
+): ModuleRegexScriptIdRecovery {
+  const moduleRows = liveRows.filter(
+    (row) => readRisuMetadata(row)?.['module_id'] === moduleId,
+  );
+  const cleanupIds = moduleRows
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const idsBySourceRow = new Map<number, string[]>();
+  for (const row of moduleRows) {
+    if (typeof row.id !== 'string' || row.id.length === 0) continue;
+    const sourceRow = readModuleRegexSourceRow(row, moduleId);
+    if (sourceRow === null) continue;
+    const ids = idsBySourceRow.get(sourceRow) ?? [];
+    ids.push(row.id);
+    idsBySourceRow.set(sourceRow, ids);
+  }
+
+  const ordered: string[] = [];
+  for (const projected of projectedRows) {
+    const sourceRow = readModuleRegexSourceRow(projected, moduleId);
+    if (sourceRow === null) return { ids: cleanupIds, exact: false };
+    const ids = idsBySourceRow.get(sourceRow);
+    if (ids?.length !== 1) return { ids: cleanupIds, exact: false };
+    ordered.push(ids[0]!);
+  }
+  if (new Set(ordered).size !== ordered.length) {
+    return { ids: cleanupIds, exact: false };
+  }
+  const boundIds = new Set(ordered);
+  return {
+    ids: [...ordered, ...cleanupIds.filter((id) => !boundIds.has(id))],
+    exact: true,
+  };
+}
+
 export function projectModuleLorebookEntries(
   moduleId: string,
   raw: readonly unknown[] | undefined,

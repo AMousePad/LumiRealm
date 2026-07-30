@@ -14,6 +14,11 @@ import {
 } from './module-migrations.js';
 import { markLegacyReimportWarned } from './legacy-reimport-warnings.js';
 import { getRegexScriptsApi } from '../adapters/spindle-extras.js';
+import {
+  projectModuleRegexEntries,
+  recoverModuleRegexScriptIds,
+} from './module-artifact-project.js';
+import { mergeUserOverrides } from './lumirealm-character.js';
 
 export interface MigrationsFactoryDeps {
   readonly extensionVersion: string;
@@ -32,6 +37,11 @@ export interface MigrationsFactoryDeps {
     data: LumirealmCharacterData,
     userId: string,
   ) => Promise<unknown>;
+  readonly updateLumirealm: (
+    characterId: string,
+    userId: string,
+    mutator: (current: LumirealmCharacterData) => LumirealmCharacterData,
+  ) => Promise<LumirealmCharacterData | null>;
   readonly invalidateActiveForCharacter: (characterId: string, userId: string | undefined) => void;
   readonly toastFor: (
     userId: string | undefined,
@@ -460,6 +470,79 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
           }
         }
         return count;
+      },
+      repairRegexBindingsForAttached: async (mid) => {
+        const charIds = await charactersAttachedTo(mid, userId);
+        const regexApi = getRegexScriptsApi();
+        const module = env.module as {
+          name?: unknown;
+          regex?: readonly unknown[];
+        };
+        const moduleName =
+          typeof module.name === 'string' && module.name.length > 0
+            ? module.name
+            : env.id;
+        const projected = projectModuleRegexEntries(
+          mid,
+          moduleName,
+          null,
+          module.regex,
+          () => '',
+        );
+        let repaired = 0;
+        let refreshed = 0;
+
+        for (const charId of charIds) {
+          let recovery: ReturnType<typeof recoverModuleRegexScriptIds> | null = null;
+          if (regexApi?.list) {
+            const liveRows: Record<string, unknown>[] = [];
+            let offset = 0;
+            while (true) {
+              const page = await regexApi.list({
+                userId,
+                scope: 'character',
+                scopeId: charId,
+                limit: 200,
+                offset,
+              });
+              liveRows.push(
+                ...page.data.filter(
+                  (row): row is Record<string, unknown> =>
+                    !!row && typeof row === 'object',
+                ),
+              );
+              offset += page.data.length;
+              if (page.data.length < 200 || offset >= page.total) break;
+            }
+            recovery = recoverModuleRegexScriptIds(mid, projected, liveRows);
+          }
+
+          if (recovery?.exact) {
+            const recoveredIds = recovery.ids;
+            const updated = await deps.updateLumirealm(charId, userId, (current) => {
+              const idsByModule = {
+                ...(current.user_overrides.attached_module_regex_script_ids ?? {}),
+              };
+              if (recoveredIds.length > 0) idsByModule[mid] = recoveredIds;
+              else delete idsByModule[mid];
+              return {
+                ...current,
+                user_overrides: mergeUserOverrides(current.user_overrides, {
+                  attached_module_regex_script_ids:
+                    Object.keys(idsByModule).length > 0 ? idsByModule : null,
+                }),
+              };
+            });
+            if (updated) {
+              repaired++;
+              continue;
+            }
+          }
+
+          await deps.refreshAttachedModule(charId, env, userId);
+          refreshed++;
+        }
+        return { repaired, refreshed };
       },
       writeEnvelope: async (next) => {
         await writeModuleEnvelope(userId, next);

@@ -36897,6 +36897,52 @@ var Upload = /* @__PURE__ */ function(_BaseUpload) {
 }(upload_default);
 var isSupported = typeof XMLHttpRequest === "function" && typeof Blob === "function" && typeof Blob.prototype.slice === "function";
 
+// src/state/module-artifact-project.ts
+function readRisuMetadata2(row) {
+  if (!row.metadata || typeof row.metadata !== "object")
+    return null;
+  const risu = row.metadata["_risu"];
+  return risu && typeof risu === "object" ? risu : null;
+}
+function readModuleRegexSourceRow(row, moduleId) {
+  const metadata = readRisuMetadata2(row);
+  const sourceRowIndex = metadata?.["source_row_index"];
+  return metadata?.["module_id"] === moduleId && typeof sourceRowIndex === "number" && Number.isInteger(sourceRowIndex) ? sourceRowIndex : null;
+}
+function recoverModuleRegexScriptIds(moduleId, projectedRows, liveRows) {
+  const moduleRows = liveRows.filter((row) => readRisuMetadata2(row)?.["module_id"] === moduleId);
+  const cleanupIds = moduleRows.map((row) => row.id).filter((id) => typeof id === "string" && id.length > 0);
+  const idsBySourceRow = new Map;
+  for (const row of moduleRows) {
+    if (typeof row.id !== "string" || row.id.length === 0)
+      continue;
+    const sourceRow = readModuleRegexSourceRow(row, moduleId);
+    if (sourceRow === null)
+      continue;
+    const ids = idsBySourceRow.get(sourceRow) ?? [];
+    ids.push(row.id);
+    idsBySourceRow.set(sourceRow, ids);
+  }
+  const ordered = [];
+  for (const projected of projectedRows) {
+    const sourceRow = readModuleRegexSourceRow(projected, moduleId);
+    if (sourceRow === null)
+      return { ids: cleanupIds, exact: false };
+    const ids = idsBySourceRow.get(sourceRow);
+    if (ids?.length !== 1)
+      return { ids: cleanupIds, exact: false };
+    ordered.push(ids[0]);
+  }
+  if (new Set(ordered).size !== ordered.length) {
+    return { ids: cleanupIds, exact: false };
+  }
+  const boundIds = new Set(ordered);
+  return {
+    ids: [...ordered, ...cleanupIds.filter((id) => !boundIds.has(id))],
+    exact: true
+  };
+}
+
 // src/ui/drawer.ts
 var ACCEPT_EXTENSIONS = [".charx", ".png", ".json", ".jpg", ".jpeg"];
 var UPLOAD_ENDPOINT = "/api/v1/spindle-uploads";
@@ -37237,22 +37283,10 @@ function mountCardsPanel(opts) {
             const listResp = await fetch(`/api/v1/regex-scripts?${listQuery}&limit=2000`, { credentials: "include" });
             if (listResp.ok) {
               const listBody = await listResp.json();
-              const moduleRows = (listBody.data ?? []).filter((row) => row.metadata?._risu?.module_id === msg.moduleId);
-              const rowsByScriptId = new Map;
-              for (const row of moduleRows) {
-                if (typeof row.script_id !== "string")
-                  continue;
-                const ids = rowsByScriptId.get(row.script_id) ?? [];
-                ids.push(row.id);
-                rowsByScriptId.set(row.script_id, ids);
-              }
-              const ordered = msg.regexScripts.map((script) => rowsByScriptId.get(script.script_id) ?? []);
-              if (ordered.every((ids) => ids.length === 1)) {
-                for (const ids of ordered)
-                  regexScriptIds.push(ids[0]);
-              } else {
-                regexScriptIds.push(...moduleRows.map((row) => row.id));
-                log8.warn(`drawer.installModuleArtifacts: could not pair every imported row by script_id ` + `for module=${msg.moduleId}; stored cleanup ids only`);
+              const recovered = recoverModuleRegexScriptIds(msg.moduleId, msg.regexScripts, listBody.data ?? []);
+              regexScriptIds.push(...recovered.ids);
+              if (!recovered.exact) {
+                log8.warn(`drawer.installModuleArtifacts: could not pair every imported row by source identity ` + `for module=${msg.moduleId}; stored cleanup ids only`);
               }
             }
           } catch (err) {

@@ -25455,6 +25455,50 @@ function stampEnvelope(envelope, extensionVersion, version) {
 }
 
 // src/state/module-artifact-project.ts
+function readRisuMetadata(row) {
+  if (!row.metadata || typeof row.metadata !== "object")
+    return null;
+  const risu = row.metadata["_risu"];
+  return risu && typeof risu === "object" ? risu : null;
+}
+function readModuleRegexSourceRow(row, moduleId) {
+  const metadata = readRisuMetadata(row);
+  const sourceRowIndex = metadata?.["source_row_index"];
+  return metadata?.["module_id"] === moduleId && typeof sourceRowIndex === "number" && Number.isInteger(sourceRowIndex) ? sourceRowIndex : null;
+}
+function recoverModuleRegexScriptIds(moduleId, projectedRows, liveRows) {
+  const moduleRows = liveRows.filter((row) => readRisuMetadata(row)?.["module_id"] === moduleId);
+  const cleanupIds = moduleRows.map((row) => row.id).filter((id) => typeof id === "string" && id.length > 0);
+  const idsBySourceRow = new Map;
+  for (const row of moduleRows) {
+    if (typeof row.id !== "string" || row.id.length === 0)
+      continue;
+    const sourceRow = readModuleRegexSourceRow(row, moduleId);
+    if (sourceRow === null)
+      continue;
+    const ids = idsBySourceRow.get(sourceRow) ?? [];
+    ids.push(row.id);
+    idsBySourceRow.set(sourceRow, ids);
+  }
+  const ordered = [];
+  for (const projected of projectedRows) {
+    const sourceRow = readModuleRegexSourceRow(projected, moduleId);
+    if (sourceRow === null)
+      return { ids: cleanupIds, exact: false };
+    const ids = idsBySourceRow.get(sourceRow);
+    if (ids?.length !== 1)
+      return { ids: cleanupIds, exact: false };
+    ordered.push(ids[0]);
+  }
+  if (new Set(ordered).size !== ordered.length) {
+    return { ids: cleanupIds, exact: false };
+  }
+  const boundIds = new Set(ordered);
+  return {
+    ids: [...ordered, ...cleanupIds.filter((id) => !boundIds.has(id))],
+    exact: true
+  };
+}
 function projectModuleRegexEntries(moduleId, moduleName, characterId, raw, idGen) {
   if (!Array.isArray(raw))
     return [];
@@ -25845,6 +25889,16 @@ async function applyV5RefreshAttachedRegex(args, deps) {
   }
   return { nextEnv: args.env, notes };
 }
+async function applyV11RepairAttachedRegexIdentity(args, deps) {
+  const result = await deps.repairRegexBindingsForAttached(args.env.id);
+  return {
+    nextEnv: args.env,
+    notes: [
+      `repaired ${result.repaired} attached char(s) in place`,
+      `refreshed ${result.refreshed} incomplete attachment(s)`
+    ]
+  };
+}
 async function applyV6StripStylePrefixInPlace(args, deps) {
   if (!deps.applyModuleRegexReplaceStringTransform) {
     deps.log.warn(`migrate-module(${args.env.id}) v6: regex_scripts.update unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`);
@@ -26042,6 +26096,12 @@ var MODULE_MIGRATIONS = [
     description: "Mark each projected Risu module lorebook entry to exclude the character greeting during activation.",
     touches: ["world_book_entries"],
     apply: applyV10ExcludeGreetingPerEntry
+  },
+  {
+    version: 11,
+    description: "Repair attached module regex action bindings using module source-row order.",
+    touches: ["regex_scripts_attached_chars"],
+    apply: applyV11RepairAttachedRegexIdentity
   }
 ];
 var CURRENT_MODULE_SCHEMA_VERSION = MODULE_MIGRATIONS.length > 0 ? Math.max(...MODULE_MIGRATIONS.map((m) => m.version)) : 4;
@@ -40639,6 +40699,61 @@ function createMigrationsRunner(deps) {
         }
         return count;
       },
+      repairRegexBindingsForAttached: async (mid) => {
+        const charIds = await charactersAttachedTo(mid, userId);
+        const regexApi = getRegexScriptsApi();
+        const module = env.module;
+        const moduleName = typeof module.name === "string" && module.name.length > 0 ? module.name : env.id;
+        const projected = projectModuleRegexEntries(mid, moduleName, null, module.regex, () => "");
+        let repaired = 0;
+        let refreshed = 0;
+        for (const charId of charIds) {
+          let recovery = null;
+          if (regexApi?.list) {
+            const liveRows = [];
+            let offset = 0;
+            while (true) {
+              const page = await regexApi.list({
+                userId,
+                scope: "character",
+                scopeId: charId,
+                limit: 200,
+                offset
+              });
+              liveRows.push(...page.data.filter((row) => !!row && typeof row === "object"));
+              offset += page.data.length;
+              if (page.data.length < 200 || offset >= page.total)
+                break;
+            }
+            recovery = recoverModuleRegexScriptIds(mid, projected, liveRows);
+          }
+          if (recovery?.exact) {
+            const recoveredIds = recovery.ids;
+            const updated = await deps.updateLumirealm(charId, userId, (current) => {
+              const idsByModule = {
+                ...current.user_overrides.attached_module_regex_script_ids ?? {}
+              };
+              if (recoveredIds.length > 0)
+                idsByModule[mid] = recoveredIds;
+              else
+                delete idsByModule[mid];
+              return {
+                ...current,
+                user_overrides: mergeUserOverrides(current.user_overrides, {
+                  attached_module_regex_script_ids: Object.keys(idsByModule).length > 0 ? idsByModule : null
+                })
+              };
+            });
+            if (updated) {
+              repaired++;
+              continue;
+            }
+          }
+          await deps.refreshAttachedModule(charId, env, userId);
+          refreshed++;
+        }
+        return { repaired, refreshed };
+      },
       writeEnvelope: async (next) => {
         await writeModuleEnvelope(userId, next);
       },
@@ -45857,6 +45972,7 @@ var migrationsRunner = createMigrationsRunner({
   },
   dispatchModuleArtifactInstall: (charId, env, userId) => dispatchModuleArtifactInstall(charId, env, userId),
   writeLumirealm: (charId, data, userId) => writeLumirealm(charactersApi(), charId, data, userId),
+  updateLumirealm: (charId, userId, mutator) => updateLumirealm(charactersApi(), charId, userId, mutator),
   invalidateActiveForCharacter,
   toastFor,
   archiveModuleWorldBookBeforeMigration: (env, userId) => archiveModuleWorldBookBeforeMigration(env, userId),
