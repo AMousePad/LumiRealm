@@ -21006,6 +21006,7 @@ function closeSentinel(hash) {
   return `${SENTINEL_CLOSE}${hash}${SENTINEL_CLOSE}`;
 }
 var ALLOWED_FLAG_LETTERS = "dgimsuvy";
+var TRANSFORMED_FLAG = "lumirealm_transformed";
 function mapRegex(scripts, opts) {
   const now = (opts.now ?? nowMs)();
   const uuid = opts.uuid ?? newUuid;
@@ -21096,17 +21097,18 @@ function mapRegex(scripts, opts) {
     if (baseReplace.endsWith(">") && !hasNoEndNl)
       baseReplace += `
 `;
-    if (effectivePhase.target === "display" && !action) {
+    const preTransformed = s[TRANSFORMED_FLAG] === true;
+    if (!preTransformed && effectivePhase.target === "display" && !action) {
       baseReplace = wrapIslandMergeIfNeeded(baseReplace);
     }
-    if (effectivePhase.target === "display") {
+    if (!preTransformed && effectivePhase.target === "display") {
       baseReplace = applyIframePolicy(baseReplace).html;
     }
-    if (effectivePhase.target === "display" && !action) {
+    if (!preTransformed && effectivePhase.target === "display" && !action) {
       baseReplace = wrapForIslandTriggerIfNeeded(baseReplace);
     }
     baseReplace = normalizeReplaceStringForSanitizer(baseReplace);
-    if (effectivePhase.target === "display" && baseReplace.length > 0) {
+    if (!preTransformed && effectivePhase.target === "display" && baseReplace.length > 0) {
       baseReplace = unprefixHtmlClasses(baseReplace);
       baseReplace = unprefixCssInStyleBlocks(baseReplace);
       baseReplace = normalizeIncompleteHtmlEntities(baseReplace);
@@ -31365,7 +31367,7 @@ var spindle_default = {
   ],
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.1.0",
+  minimum_lumiverse_version: "1.1.2",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"
@@ -34862,6 +34864,11 @@ function reconcileLoreEntries(sourceEntries, liveEntries, uuid) {
 }
 
 // src/core/export/regex-back-projection.ts
+init_svg_rasterize();
+var SENTINEL_RE = /[\uE9D0\uE9D1][0-9a-z]{0,8}[\uE9D0\uE9D1]/g;
+function desentinel(s) {
+  return s.replace(SENTINEL_RE, "");
+}
 function risuMeta(row) {
   const m = row.metadata;
   if (!m || typeof m !== "object" || Array.isArray(m))
@@ -34895,12 +34902,23 @@ function toCustomScript(row) {
   };
 }
 function reconcileRegexScripts(sourceScripts, liveRows, characterId, uuid) {
-  const projected = mapRegex(sourceScripts, {
+  const raw = mapRegex(sourceScripts, {
     characterId,
     uuid,
     now: () => 0,
     origin: "module"
   });
+  const svgIndexer = new SvgIndexer;
+  const projected = {
+    ...raw,
+    rows: raw.rows.map((row) => {
+      const rs = row.replace_string;
+      if (!rs || rs.indexOf("<svg") < 0)
+        return row;
+      const r = extractAndReplaceSvgs(rs, svgIndexer);
+      return r.rewritten === rs ? row : { ...row, replace_string: r.rewritten };
+    })
+  };
   const projectedByIndex = new Map;
   for (const row of projected.rows) {
     const idx = regexSourceIndex(row);
@@ -34946,8 +34964,12 @@ function reconcileRegexScripts(sourceScripts, liveRows, characterId, uuid) {
       out.push(source);
       continue;
     }
-    const findChanged = String(primaryLive.find_regex ?? "") !== String(primaryProjected.find_regex ?? "");
-    const replaceChanged = String(primaryLive.replace_string ?? "") !== String(primaryProjected.replace_string ?? "");
+    const liveFind = desentinel(String(primaryLive.find_regex ?? ""));
+    const liveRepl = desentinel(String(primaryLive.replace_string ?? ""));
+    const projFind = desentinel(String(primaryProjected.find_regex ?? ""));
+    const projRepl = desentinel(String(primaryProjected.replace_string ?? ""));
+    const findChanged = liveFind !== projFind;
+    const replaceChanged = liveRepl !== projRepl;
     const flagsChanged = String(primaryLive.flags ?? "") !== String(primaryProjected.flags ?? "");
     const nameChanged = String(primaryLive.name ?? "") !== String(primaryProjected.name ?? "");
     const disabledChanged = primaryLive.disabled === true && primaryProjected.disabled !== true;
@@ -34959,9 +34981,12 @@ function reconcileRegexScripts(sourceScripts, liveRows, characterId, uuid) {
     edited += 1;
     const next = { ...source };
     if (findChanged)
-      next["in"] = String(primaryLive.find_regex ?? "");
-    if (replaceChanged)
-      next["out"] = String(primaryLive.replace_string ?? "");
+      next["in"] = liveFind;
+    if (replaceChanged) {
+      const prefix = /^@@[a-z_]+\s*/i.exec(String(source.out ?? ""))?.[0];
+      next["out"] = prefix ? `${prefix}${liveRepl}` : liveRepl;
+      next[TRANSFORMED_FLAG] = true;
+    }
     if (flagsChanged)
       next["flag"] = String(primaryLive.flags ?? "");
     if (nameChanged)
@@ -35088,6 +35113,10 @@ function buildCharacterArchivePlan(input) {
   const now = (input.now ?? Date.now)();
   const uuid = input.uuid ?? (() => "00000000-0000-4000-8000-000000000000");
   const char = input.character;
+  const sourceData = record(record(input.data.source?.card)?.["data"]);
+  const sourceBook = record(sourceData?.["character_book"]);
+  const liveExt = record(input.character.extensions);
+  const pick = (k) => liveExt?.[k] ?? sourceData?.[k];
   const divergences = [];
   const sourceLore = resolveSourceLore(input);
   const lore = reconcileLoreEntries(sourceLore, input.worldBookEntries, uuid);
@@ -35111,6 +35140,7 @@ function buildCharacterArchivePlan(input) {
   const cardAssets = [];
   const sidecarAssets = [];
   const sidecarEmotions = [];
+  const sidecarCcAssets = [];
   let assetIndex = 0;
   const pushAsset = (name, declaredExt, type, imageId) => {
     assetIndex += 1;
@@ -35121,6 +35151,28 @@ function buildCharacterArchivePlan(input) {
     cardAssets.push({ type, uri: `embeded://${path}`, name, ext: declaredExt || "png" });
     return declaredExt.length > 0 ? { name, path, ext: declaredExt } : { name, path };
   };
+  const pathToImageId = input.data.source?.path_to_image_id ?? {};
+  for (const raw of Array.isArray(sourceData?.["assets"]) ? sourceData["assets"] : []) {
+    const a = record(raw);
+    if (!a)
+      continue;
+    const type = typeof a["type"] === "string" ? a["type"] : "";
+    const name = typeof a["name"] === "string" ? a["name"] : "";
+    if (type === "emotion" || type === "x-risu-asset")
+      continue;
+    if (type === "icon" && name === "main")
+      continue;
+    const uri = typeof a["uri"] === "string" ? a["uri"] : "";
+    const path = uri.startsWith("embeded://") ? uri.slice("embeded://".length) : uri;
+    const imageId = pathToImageId[path];
+    if (!imageId) {
+      if (name)
+        missingAssets.push(name);
+      continue;
+    }
+    const ext2 = typeof a["ext"] === "string" ? a["ext"] : "";
+    sidecarCcAssets.push(pushAsset(name || "asset", ext2, type || "other", imageId));
+  }
   for (const asset of orderedAssetNames(input.data.payload.additional_assets, input.assetIndex)) {
     const resolved = resolveFromIndex(input.assetIndex, asset.name);
     if (!resolved) {
@@ -35152,7 +35204,6 @@ function buildCharacterArchivePlan(input) {
   delete risuaiInner["triggerscript"];
   delete risuaiInner["customScripts"];
   risuai["risuai"] = risuaiInner;
-  const sourceData = record(record(input.data.source?.card)?.["data"]);
   const card = {
     spec: "chara_card_v3",
     spec_version: "3.0",
@@ -35168,17 +35219,20 @@ function buildCharacterArchivePlan(input) {
       post_history_instructions: char.post_history_instructions ?? "",
       alternate_greetings: [...char.alternate_greetings ?? []],
       character_book: {
-        extensions: record(sourceData?.["character_book"])?.["extensions"] ?? {},
+        ...sourceBook?.["scan_depth"] !== undefined ? { scan_depth: sourceBook["scan_depth"] } : {},
+        ...sourceBook?.["token_budget"] !== undefined ? { token_budget: sourceBook["token_budget"] } : {},
+        ...sourceBook?.["recursive_scanning"] !== undefined ? { recursive_scanning: sourceBook["recursive_scanning"] } : {},
+        extensions: sourceBook?.["extensions"] ?? {},
         entries: lore.entries.map(loreToCharacterBookEntry2)
       },
       tags: [...char.tags ?? []],
       creator: char.creator ?? "",
-      character_version: String(sourceData?.["character_version"] ?? ""),
+      character_version: String(pick("character_version") ?? ""),
       extensions: risuai,
-      group_only_greetings: sourceData?.["group_only_greetings"] ?? [],
-      nickname: sourceData?.["nickname"] ?? "",
-      source: sourceData?.["source"] ?? [],
-      creation_date: sourceData?.["creation_date"] ?? 0,
+      group_only_greetings: pick("group_only_greetings") ?? [],
+      nickname: pick("nickname") ?? "",
+      source: liveExt?.["ccv3_source"] ?? sourceData?.["source"] ?? [],
+      creation_date: liveExt?.["ccv3_creation_date"] ?? sourceData?.["creation_date"] ?? 0,
       modification_date: Math.floor(now / 1000),
       assets: cardAssets
     }
@@ -35215,6 +35269,7 @@ function buildCharacterArchivePlan(input) {
       regex_scripts: input.liveRegex,
       assets: sidecarAssets,
       emotions: sidecarEmotions,
+      cc_assets: sidecarCcAssets,
       ...avatar ? { avatar } : {},
       divergences
     }
@@ -41534,7 +41589,7 @@ function createActiveCardLoader(deps) {
       log8.warn(`ensureActiveCardForChat: lorebook fetch failed char=${characterId}: ${errMsg2(err)}`);
       setActiveLorebook2(chatId, characterId, []);
     }
-    backfillImageJournalIfMissing(characterId, fetched.character.image_id ?? null, card, userId);
+    backfillImageJournalIfMissing(characterId, fetched.character.image_id ?? null, { asset_index: fetched.data.asset_index, emotion_index: fetched.data.emotion_index }, userId);
     setActiveAssetIndexes2(chatId, {
       assets: card.asset_index,
       emotions: card.emotion_index
