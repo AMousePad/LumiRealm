@@ -31443,7 +31443,7 @@ function clearActiveModulesByNamespace(chatId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.8.1",
+  version: "0.8.2",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",

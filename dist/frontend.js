@@ -22373,7 +22373,7 @@ var require_url_parse = __commonJS((exports, module) => {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.8.1",
+  version: "0.8.2",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -26091,10 +26091,26 @@ async function runListenEditChain(triggers, mode2, value, meta, api, data, scrip
 
 // src/display/host-shim.ts
 var log4 = makeSafeLogger("display-shim");
+function leadingGreetingOffset(snap) {
+  return snap.messagesHost.length > 0 && snap.messagesHost[0].role !== "user" ? 1 : 0;
+}
+function resolveRisuDisplayMessageIndex(snap, context2) {
+  if (context2.messageId) {
+    const hostIndex = snap.messagesHost.findIndex((message) => message.id === context2.messageId);
+    if (hostIndex >= 0) {
+      return Math.max(-1, hostIndex - leadingGreetingOffset(snap));
+    }
+  }
+  if (Number.isInteger(context2.depth) && context2.depth >= 0) {
+    return Math.max(-1, snap.chat.messages.length - 1 - context2.depth);
+  }
+  return Math.max(-1, snap.chat.messages.length - 1);
+}
 function withCurrentDisplayMessage(snap, context2, content) {
   const idIndex = context2.messageId ? snap.messagesHost.findIndex((message) => message.id === context2.messageId) : -1;
   const contextIndex = context2.messageIndex;
-  const index = idIndex >= 0 ? idIndex : typeof contextIndex === "number" && Number.isInteger(contextIndex) ? contextIndex : -1;
+  const canAppend = idIndex < 0 && !!context2.messageId && context2.depth === 0 && (contextIndex === undefined || Number.isInteger(contextIndex) && contextIndex >= 0 && contextIndex <= snap.messagesHost.length);
+  const index = idIndex >= 0 ? idIndex : canAppend ? snap.messagesHost.length : -1;
   if (index < 0 || index > snap.messagesHost.length)
     return snap;
   const messagesHost = [...snap.messagesHost];
@@ -29740,14 +29756,7 @@ async function executeWasmoon(code, globals, opts) {
 // src/display/lua-runner.ts
 setWasmoonExecutor(executeWasmoon);
 function risuChatIndex(context2, snap) {
-  if (typeof context2.messageIndex === "number")
-    return Math.max(-1, context2.messageIndex - 1);
-  const dyn = context2.dynamicMacros;
-  const chatIndexStr = dyn?.chat_index;
-  if (typeof chatIndexStr === "string" && /^-?\d+$/.test(chatIndexStr)) {
-    return Math.max(-1, parseInt(chatIndexStr, 10) - 1);
-  }
-  return Math.max(-1, snap.chat.lastMessageId - 1);
+  return resolveRisuDisplayMessageIndex(snap, context2);
 }
 async function runEditDisplayChain(snap, content, context2, resolveTemplate, onVarWrite, onEffect) {
   if (snap.luaTriggers.length === 0)
@@ -30053,11 +30062,7 @@ async function getSnapshotOrWait(chatId) {
   return;
 }
 function buildInput(snap, content, context2) {
-  const dyn = context2.dynamicMacros;
-  const lastIdx = snap.chat.messages.length - 1;
-  const chatIndexStr = dyn?.chat_index;
-  const idxOverride = typeof context2.messageIndex === "number" ? context2.messageIndex - 1 : typeof chatIndexStr === "string" && /^-?\d+$/.test(chatIndexStr) ? parseInt(chatIndexStr, 10) - 1 : typeof context2.depth === "number" && context2.depth >= 0 ? lastIdx - context2.depth : undefined;
-  const role = context2.role ?? dyn?.role;
+  const role = context2.role ?? context2.dynamicMacros?.role;
   return {
     template: content,
     phase: "display",
@@ -30077,7 +30082,7 @@ function buildInput(snap, content, context2) {
     legacyMediaFindings: snap.legacyMediaFindings,
     modulesByNamespace: snap.modulesByNamespace,
     lorebook: snap.lorebook,
-    ...idxOverride !== undefined ? { currentMessageIndexOverride: idxOverride } : {},
+    currentMessageIndexOverride: resolveRisuDisplayMessageIndex(snap, context2),
     ...role ? { currentMessageRoleOverride: role } : {}
   };
 }
