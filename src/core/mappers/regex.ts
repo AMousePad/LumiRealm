@@ -84,6 +84,35 @@ export interface MapRegexResult {
   readonly issues: readonly { path: string; message: string }[];
 }
 
+// Keep every Risu display-regex source on one Lumiverse renderer adaptation.
+export function normalizeDisplayReplaceString(
+  replaceString: string,
+  options: {
+    readonly action?: boolean;
+    readonly preTransformed?: boolean;
+  } = {},
+): string {
+  const action = options.action === true;
+  const preTransformed = options.preTransformed === true;
+  let normalized = replaceString;
+  if (!preTransformed && !action) {
+    normalized = wrapIslandMergeIfNeeded(normalized);
+  }
+  if (!preTransformed) {
+    normalized = applyIframePolicy(normalized).html;
+  }
+  if (!preTransformed && !action) {
+    normalized = wrapForIslandTriggerIfNeeded(normalized);
+  }
+  normalized = normalizeReplaceStringForSanitizer(normalized);
+  if (!preTransformed && normalized.length > 0) {
+    normalized = unprefixHtmlClasses(normalized);
+    normalized = unprefixCssInStyleBlocks(normalized);
+    normalized = normalizeIncompleteHtmlEntities(normalized);
+  }
+  return normalized;
+}
+
 export function mapRegex(
   scripts: readonly CustomScript[],
   opts: MapRegexOptions,
@@ -192,34 +221,12 @@ export function mapRegex(
     // them double-wraps on every export/import cycle, so the transform is made
     // idempotent by skipping content that has already been through it.
     const preTransformed = (s as unknown as Record<string, unknown>)[TRANSFORMED_FLAG] === true;
-    if (!preTransformed && effectivePhase.target === "display" && !action) {
-      baseReplace = wrapIslandMergeIfNeeded(baseReplace);
-    }
-    // Risu parity: rewrite YouTube `embed/` iframes to a click-through
-    // thumbnail anchor; strip all other iframes. Lumi's sanitizer would strip
-    // every iframe tag anyway (and CSP `frame-src 'self' blob:` blocks
-    // YouTube even if it didn't), so this is the most useful surface we can
-    // ship without Lumi-side changes.
-    if (!preTransformed && effectivePhase.target === "display") {
-      baseReplace = applyIframePolicy(baseReplace).html;
-    }
-    // Force Lumi's `extractHtmlIslands` to fire on class-only panel HTML:
-    // its heuristic short-circuits when neither `<style>` nor `style="..."`
-    // are present, so a panel that styles itself purely via classes
-    // (CSS lives in the card's bg-html) falls through to the markdown
-    // processor , which then renders indented panel HTML as a code block.
-    // Wrapping with `<div ... style="display:contents">` adds the
-    // `style=` Lumi looks for without affecting layout. See island-merge.ts
-    // wrapForIslandTriggerIfNeeded for the full chain.
-    if (!preTransformed && effectivePhase.target === "display" && !action) {
-      baseReplace = wrapForIslandTriggerIfNeeded(baseReplace);
-    }
-    baseReplace = normalizeReplaceStringForSanitizer(baseReplace);
-    if (!preTransformed && effectivePhase.target === "display" && baseReplace.length > 0) {
-      baseReplace = unprefixHtmlClasses(baseReplace);
-      baseReplace = unprefixCssInStyleBlocks(baseReplace);
-      baseReplace = normalizeIncompleteHtmlEntities(baseReplace);
-    }
+    baseReplace = effectivePhase.target === "display"
+      ? normalizeDisplayReplaceString(baseReplace, {
+          action: action !== null,
+          preTransformed,
+        })
+      : normalizeReplaceStringForSanitizer(baseReplace);
 
     const baseSubstitute: LumiRegexMacroMode = pickSubstituteMacroMode(
       baseReplace,
@@ -499,7 +506,7 @@ function nonEmpty(s: string | undefined | null, fallback: string): string {
   return fallback;
 }
 
-function detectAtAction(out: string): AtAtAction["action"] | null {
+export function detectAtAction(out: string): AtAtAction["action"] | null {
   for (const prefix of AT_ACTION_PREFIXES) {
     if (out.startsWith(prefix)) {
       return prefix.slice(2) as AtAtAction["action"];

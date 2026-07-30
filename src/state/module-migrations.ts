@@ -5,6 +5,7 @@ import type { ModuleEnvelope } from './modules-store.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
 import { projectModuleLorebookForCreate } from './world-book-ops.js';
+import { normalizeModuleDisplayReplaceString } from './module-artifact-project.js';
 import {
   LEGACY_ENTRY_HASH_FIELDS_V1,
   computeEntrySourceHashWithFields,
@@ -335,6 +336,41 @@ async function applyV10ExcludeGreetingPerEntry(
   };
 }
 
+async function applyV12NormalizeDisplayRows(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  if (!deps.applyModuleRegexRowPatch) {
+    deps.log.warn(
+      `migrate-module(${args.env.id}) v12: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`,
+    );
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
+    if (row['target'] !== 'display') return null;
+    const replaceString = row['replace_string'];
+    if (typeof replaceString !== 'string') return null;
+    const normalized = normalizeModuleDisplayReplaceString(replaceString);
+    return normalized === replaceString
+      ? null
+      : { replace_string: normalized };
+  });
+  if (result === null) {
+    deps.log.warn(
+      `migrate-module(${args.env.id}) v12: row-patch returned null, falling back to wholesale refresh`,
+    );
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  return {
+    nextEnv: args.env,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`,
+    ],
+  };
+}
+
 export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
   {
     version: 5,
@@ -379,6 +415,13 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
       'Repair attached module regex action bindings using module source-row order.',
     touches: ['regex_scripts_attached_chars'],
     apply: applyV11RepairAttachedRegexIdentity,
+  },
+  {
+    version: 12,
+    description:
+      'Apply the character display-row normalization path to module display rows.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV12NormalizeDisplayRows,
   },
 ];
 

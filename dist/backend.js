@@ -21007,6 +21007,27 @@ function closeSentinel(hash) {
 }
 var ALLOWED_FLAG_LETTERS = "dgimsuvy";
 var TRANSFORMED_FLAG = "lumirealm_transformed";
+function normalizeDisplayReplaceString(replaceString, options = {}) {
+  const action = options.action === true;
+  const preTransformed = options.preTransformed === true;
+  let normalized = replaceString;
+  if (!preTransformed && !action) {
+    normalized = wrapIslandMergeIfNeeded(normalized);
+  }
+  if (!preTransformed) {
+    normalized = applyIframePolicy(normalized).html;
+  }
+  if (!preTransformed && !action) {
+    normalized = wrapForIslandTriggerIfNeeded(normalized);
+  }
+  normalized = normalizeReplaceStringForSanitizer(normalized);
+  if (!preTransformed && normalized.length > 0) {
+    normalized = unprefixHtmlClasses(normalized);
+    normalized = unprefixCssInStyleBlocks(normalized);
+    normalized = normalizeIncompleteHtmlEntities(normalized);
+  }
+  return normalized;
+}
 function mapRegex(scripts, opts) {
   const now = (opts.now ?? nowMs)();
   const uuid = opts.uuid ?? newUuid;
@@ -21098,21 +21119,10 @@ function mapRegex(scripts, opts) {
       baseReplace += `
 `;
     const preTransformed = s[TRANSFORMED_FLAG] === true;
-    if (!preTransformed && effectivePhase.target === "display" && !action) {
-      baseReplace = wrapIslandMergeIfNeeded(baseReplace);
-    }
-    if (!preTransformed && effectivePhase.target === "display") {
-      baseReplace = applyIframePolicy(baseReplace).html;
-    }
-    if (!preTransformed && effectivePhase.target === "display" && !action) {
-      baseReplace = wrapForIslandTriggerIfNeeded(baseReplace);
-    }
-    baseReplace = normalizeReplaceStringForSanitizer(baseReplace);
-    if (!preTransformed && effectivePhase.target === "display" && baseReplace.length > 0) {
-      baseReplace = unprefixHtmlClasses(baseReplace);
-      baseReplace = unprefixCssInStyleBlocks(baseReplace);
-      baseReplace = normalizeIncompleteHtmlEntities(baseReplace);
-    }
+    baseReplace = effectivePhase.target === "display" ? normalizeDisplayReplaceString(baseReplace, {
+      action: action !== null,
+      preTransformed
+    }) : normalizeReplaceStringForSanitizer(baseReplace);
     const baseSubstitute = pickSubstituteMacroMode(baseReplace, findHasCbs);
     const baseName = nonEmpty(s.comment, `risu_${effectivePhase.target}_${i}`);
     const baseDescription = s.comment ?? "";
@@ -25455,6 +25465,19 @@ function stampEnvelope(envelope, extensionVersion, version) {
 }
 
 // src/state/module-artifact-project.ts
+function normalizeModuleDisplayReplaceString(replaceString, preTransformed = false) {
+  const action = detectAtAction(replaceString);
+  if (action === null) {
+    return normalizeDisplayReplaceString(replaceString, { preTransformed });
+  }
+  if (action !== "move_top" && action !== "move_bottom") {
+    return replaceString;
+  }
+  const prefix = `@@${action}`;
+  const tail = replaceString.slice(prefix.length);
+  const separator = tail.match(/^\s+/)?.[0] ?? "";
+  return prefix + separator + normalizeDisplayReplaceString(tail.slice(separator.length), { action: true, preTransformed });
+}
 function readRisuMetadata(row) {
   if (!row.metadata || typeof row.metadata !== "object")
     return null;
@@ -25549,9 +25572,7 @@ function projectModuleRegexEntries(moduleId, moduleName, characterId, raw, idGen
     const ruleType = typeof eo["type"] === "string" ? eo["type"] : "editdisplay";
     const { placement, target, disabled } = riskCustomScriptTypeToLumi(ruleType);
     if (target === "display" && replaceString.length > 0) {
-      replaceString = unprefixHtmlClasses(replaceString);
-      replaceString = unprefixCssInStyleBlocks(replaceString);
-      replaceString = normalizeIncompleteHtmlEntities(replaceString);
+      replaceString = normalizeModuleDisplayReplaceString(replaceString, eo[TRANSFORMED_FLAG] === true);
     }
     const ableFlagRaw = eo["ableFlag"];
     const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null ? true : !!ableFlagRaw;
@@ -26066,6 +26087,33 @@ async function applyV10ExcludeGreetingPerEntry(args, deps) {
     ]
   };
 }
+async function applyV12NormalizeDisplayRows(args, deps) {
+  if (!deps.applyModuleRegexRowPatch) {
+    deps.log.warn(`migrate-module(${args.env.id}) v12: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`);
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
+    if (row["target"] !== "display")
+      return null;
+    const replaceString = row["replace_string"];
+    if (typeof replaceString !== "string")
+      return null;
+    const normalized = normalizeModuleDisplayReplaceString(replaceString);
+    return normalized === replaceString ? null : { replace_string: normalized };
+  });
+  if (result === null) {
+    deps.log.warn(`migrate-module(${args.env.id}) v12: row-patch returned null, falling back to wholesale refresh`);
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  return {
+    nextEnv: args.env,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`
+    ]
+  };
+}
 var MODULE_MIGRATIONS = [
   {
     version: 5,
@@ -26102,6 +26150,12 @@ var MODULE_MIGRATIONS = [
     description: "Repair attached module regex action bindings using module source-row order.",
     touches: ["regex_scripts_attached_chars"],
     apply: applyV11RepairAttachedRegexIdentity
+  },
+  {
+    version: 12,
+    description: "Apply the character display-row normalization path to module display rows.",
+    touches: ["regex_scripts_attached_chars"],
+    apply: applyV12NormalizeDisplayRows
   }
 ];
 var CURRENT_MODULE_SCHEMA_VERSION = MODULE_MIGRATIONS.length > 0 ? Math.max(...MODULE_MIGRATIONS.map((m) => m.version)) : 4;
@@ -31389,7 +31443,7 @@ function clearActiveModulesByNamespace(chatId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.8.0",
+  version: "0.8.1",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",

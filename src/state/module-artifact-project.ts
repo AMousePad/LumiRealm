@@ -5,8 +5,13 @@ import type {
   ModuleLorebookEntry,
   PendingRegexScriptMsg,
 } from '../types/messages.js';
-import { unprefixHtmlClasses, normalizeIncompleteHtmlEntities, unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
-import { normaliseRisuFlag, pickSubstituteMacroMode } from '../core/mappers/regex.js';
+import {
+  TRANSFORMED_FLAG,
+  detectAtAction,
+  normaliseRisuFlag,
+  normalizeDisplayReplaceString,
+  pickSubstituteMacroMode,
+} from '../core/mappers/regex.js';
 
 interface ModuleRegexIdentityRow {
   readonly id?: unknown;
@@ -16,6 +21,26 @@ interface ModuleRegexIdentityRow {
 export interface ModuleRegexScriptIdRecovery {
   readonly ids: readonly string[];
   readonly exact: boolean;
+}
+
+export function normalizeModuleDisplayReplaceString(
+  replaceString: string,
+  preTransformed = false,
+): string {
+  const action = detectAtAction(replaceString);
+  if (action === null) {
+    return normalizeDisplayReplaceString(replaceString, { preTransformed });
+  }
+  if (action !== 'move_top' && action !== 'move_bottom') {
+    return replaceString;
+  }
+  const prefix = `@@${action}`;
+  const tail = replaceString.slice(prefix.length);
+  const separator = tail.match(/^\s+/)?.[0] ?? '';
+  return prefix + separator + normalizeDisplayReplaceString(
+    tail.slice(separator.length),
+    { action: true, preTransformed },
+  );
 }
 
 function readRisuMetadata(
@@ -198,9 +223,10 @@ export function projectModuleRegexEntries(
     const ruleType = typeof eo['type'] === 'string' ? eo['type'] : 'editdisplay';
     const { placement, target, disabled } = riskCustomScriptTypeToLumi(ruleType);
     if (target === 'display' && replaceString.length > 0) {
-      replaceString = unprefixHtmlClasses(replaceString);
-      replaceString = unprefixCssInStyleBlocks(replaceString);
-      replaceString = normalizeIncompleteHtmlEntities(replaceString);
+      replaceString = normalizeModuleDisplayReplaceString(
+        replaceString,
+        eo[TRANSFORMED_FLAG] === true,
+      );
     }
     const ableFlagRaw = eo['ableFlag'];
     const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null
