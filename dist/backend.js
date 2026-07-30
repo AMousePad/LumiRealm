@@ -20989,24 +20989,32 @@ var AT_ACTION_PREFIXES = [
   "@@move_bottom",
   "@@repeat_back"
 ];
-var SENTINEL_OPEN = "\uE9D0";
-var SENTINEL_CLOSE = "\uE9D1";
-function ruleHash(scriptId) {
-  let h = 2166136261 >>> 0;
-  for (let i = 0;i < scriptId.length; i++) {
-    h ^= scriptId.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return h.toString(36).padStart(7, "0").slice(0, 6);
-}
-function openSentinel(hash) {
-  return `${SENTINEL_OPEN}${hash}${SENTINEL_OPEN}`;
-}
-function closeSentinel(hash) {
-  return `${SENTINEL_CLOSE}${hash}${SENTINEL_CLOSE}`;
-}
 var ALLOWED_FLAG_LETTERS = "dgimsuvy";
 var TRANSFORMED_FLAG = "lumirealm_transformed";
+function getRegexMatchActions(directAction, flagActions) {
+  const actions = [];
+  if (directAction === "move_top" || flagActions.includes("move_top")) {
+    actions.push("move_top");
+  }
+  if (directAction === "move_bottom" || flagActions.includes("move_bottom")) {
+    actions.push("move_bottom");
+  }
+  if (directAction === "repeat_back" || flagActions.includes("repeat_back")) {
+    actions.push("repeat_back");
+  }
+  return actions;
+}
+function needsAtActionRuntime(directAction, flagActions) {
+  return directAction === "emo" || directAction === "inject" || flagActions.includes("inject");
+}
+function normalizeMatchActionDisplayReplaceString(replaceString, matchActions, directAction, preTransformed = false) {
+  const moves = matchActions.includes("move_top") || matchActions.includes("move_bottom");
+  const normalized = directAction === "move_top" ? replaceString.replace("@@move_top ", "") : directAction === "move_bottom" ? replaceString.replace("@@move_bottom ", "") : replaceString;
+  return normalizeDisplayReplaceString(normalized, {
+    action: moves,
+    preTransformed
+  });
+}
 function normalizeDisplayReplaceString(replaceString, options = {}) {
   const action = options.action === true;
   const preTransformed = options.preTransformed === true;
@@ -21094,15 +21102,10 @@ function mapRegex(scripts, opts) {
     const outNormalised = s.out.replaceAll("$n", `
 `);
     const action = detectAtAction(outNormalised);
-    let strippedOut = outNormalised;
-    if (action) {
-      const prefix = `@@${action}`;
-      strippedOut = outNormalised.slice(prefix.length).replace(/^\s+/, "");
-    }
-    if (action === "emo" || action === "repeat_back") {
+    if (needsAtActionRuntime(action, normalised.actions)) {
       skipped.push({
         index: i,
-        action,
+        action: action === "emo" ? "emo" : "inject",
         script: s,
         flag: normalised.flag,
         phase: s.type,
@@ -21111,19 +21114,26 @@ function mapRegex(scripts, opts) {
       });
       continue;
     }
+    const matchActions = getRegexMatchActions(action, normalised.actions);
+    const movesMatch = matchActions.includes("move_top") || matchActions.includes("move_bottom");
     const findPattern = String(s.in ?? "");
     const findHasCbs = findPattern.indexOf("{{") >= 0;
-    const baseFlags = findHasCbs ? normalised.flag.replace(/u/g, "") : normalised.flag;
-    let baseReplace = action === "inject" ? "" : strippedOut;
+    const resolveFindCbs = normalised.actions.includes("cbs");
+    let baseFlags = findHasCbs && resolveFindCbs ? normalised.flag.replace(/u/g, "") : normalised.flag;
+    if (movesMatch) {
+      baseFlags = baseFlags.replace(/g/g, "");
+    }
+    if (baseFlags.length === 0)
+      baseFlags = "u";
+    let baseReplace = outNormalised;
     if (baseReplace.endsWith(">") && !hasNoEndNl)
       baseReplace += `
 `;
+    const repeatPosition = matchActions.includes("repeat_back") ? baseReplace.split(" ", 2)[1] : undefined;
     const preTransformed = s[TRANSFORMED_FLAG] === true;
-    baseReplace = effectivePhase.target === "display" ? normalizeDisplayReplaceString(baseReplace, {
-      action: action !== null,
-      preTransformed
-    }) : normalizeReplaceStringForSanitizer(baseReplace);
-    const baseSubstitute = pickSubstituteMacroMode(baseReplace, findHasCbs);
+    baseReplace = effectivePhase.target === "display" ? normalizeMatchActionDisplayReplaceString(baseReplace, matchActions, action, preTransformed) : normalizeReplaceStringForSanitizer(action === "move_top" ? baseReplace.replace("@@move_top ", "") : action === "move_bottom" ? baseReplace.replace("@@move_bottom ", "") : baseReplace);
+    const baseSubstitute = movesMatch ? "none" : pickSubstituteMacroMode(baseReplace, false);
+    const substituteMacros = resolveFindCbs && baseSubstitute === "none" ? "find" : baseSubstitute;
     const baseName = nonEmpty(s.comment, `risu_${effectivePhase.target}_${i}`);
     const baseDescription = s.comment ?? "";
     const baseMetadata = {
@@ -21133,8 +21143,12 @@ function mapRegex(scripts, opts) {
         order_index: i,
         has_meta: normalised.actions.length > 0,
         ...normalised.order !== undefined ? { order_flag: normalised.order } : {},
-        ...action ? { at_action: action } : {}
-      }
+        ...action ? { at_action: action } : {},
+        ...normalised.actions.length > 0 ? { flag_actions: normalised.actions } : {}
+      },
+      ...matchActions.length > 0 ? { match_actions: matchActions } : {},
+      ...repeatPosition !== undefined ? { repeat_position: repeatPosition } : {},
+      ...matchActions.includes("repeat_back") ? { repeat_raw_match: true } : {}
     };
     const buildRow = (overrides) => ({
       id: overrides.id,
@@ -21152,7 +21166,7 @@ function mapRegex(scripts, opts) {
       max_depth: overrides.maxDepth !== undefined ? overrides.maxDepth : effectivePhase.maxDepth ?? null,
       trim_strings: [],
       run_on_edit: false,
-      substitute_macros: overrides.substituteMacros ?? baseSubstitute,
+      substitute_macros: overrides.substituteMacros ?? substituteMacros,
       disabled: effectivePhase.disabled,
       sort_order: overrides.sortOrder,
       description: baseDescription,
@@ -21162,86 +21176,12 @@ function mapRegex(scripts, opts) {
       created_at: now,
       updated_at: now
     });
-    if (!action) {
-      rows.push(buildRow({
-        id: uuid(),
-        script_id: uuid(),
-        find: findPattern,
-        replace: baseReplace,
-        sortOrder: baseSortOrder
-      }));
-      continue;
-    }
-    const wrapId = uuid();
-    const hash = ruleHash(wrapId);
-    const open = openSentinel(hash);
-    const close = closeSentinel(hash);
-    if (action === "inject") {
-      if (effectivePhase.target === "response") {
-        rows.push(buildRow({
-          id: wrapId,
-          script_id: uuid(),
-          find: findPattern,
-          replace: `${open}$&${close}`,
-          sortOrder: baseSortOrder
-        }));
-        rows.push(buildRow({
-          id: uuid(),
-          script_id: uuid(),
-          name: `${baseName}__display_strip`,
-          find: `${open}[\\s\\S]*?${close}`,
-          replace: "",
-          flags: "g",
-          placement: ["ai_output", "user_input"],
-          target: "display",
-          maxDepth: null,
-          sortOrder: baseSortOrder + 1,
-          substituteMacros: "none"
-        }));
-        rows.push(buildRow({
-          id: uuid(),
-          script_id: uuid(),
-          name: `${baseName}__prompt_strip`,
-          find: `${open}|${close}`,
-          replace: "",
-          flags: "g",
-          placement: ["ai_output", "user_input", "world_info"],
-          target: "prompt",
-          maxDepth: null,
-          sortOrder: baseSortOrder + 2,
-          substituteMacros: "none"
-        }));
-      } else {
-        rows.push(buildRow({
-          id: wrapId,
-          script_id: uuid(),
-          find: findPattern,
-          replace: "",
-          sortOrder: baseSortOrder
-        }));
-      }
-      continue;
-    }
-    const moveWrapFlags = baseFlags.replace(/g/g, "") || "u";
-    rows.push(buildRow({
-      id: wrapId,
-      script_id: uuid(),
-      find: findPattern,
-      replace: `${open}${baseReplace}${close}`,
-      flags: moveWrapFlags,
-      sortOrder: baseSortOrder
-    }));
     rows.push(buildRow({
       id: uuid(),
       script_id: uuid(),
-      name: `${baseName}__${action}_apply`,
-      find: `^([\\s\\S]*?)${open}([\\s\\S]*?)${close}([\\s\\S]*)$`,
-      replace: action === "move_top" ? `$2
-$1$3` : `$1$3
-$2`,
-      flags: "u",
-      sortOrder: baseSortOrder + 1,
-      substituteMacros: "none"
+      find: findPattern,
+      replace: baseReplace,
+      sortOrder: baseSortOrder
     }));
   }
   return { rows, skipped, issues };
@@ -21310,8 +21250,8 @@ function normaliseRisuFlag(rawFlag, ableFlag) {
   return { flag, actions, ...order !== undefined ? { order } : {} };
 }
 var PER_MESSAGE_MACRO_RE = /\{\{\s*chat[_-]?index\b/i;
-function pickSubstituteMacroMode(replaceString, findHasCbs) {
-  if (replaceString.indexOf("{{") < 0 && !findHasCbs)
+function pickSubstituteMacroMode(replaceString, _findHasCbs) {
+  if (replaceString.indexOf("{{") < 0)
     return "none";
   if (/\$(?:\d+|&|`|'|<[^>]+>)/.test(replaceString))
     return "after";
@@ -21342,7 +21282,7 @@ function nonEmpty(s, fallback) {
 }
 function detectAtAction(out) {
   for (const prefix of AT_ACTION_PREFIXES) {
-    if (out.startsWith(prefix)) {
+    if (out.startsWith(prefix) && (prefix !== "@@emo" || out.startsWith("@@emo "))) {
       return prefix.slice(2);
     }
   }
@@ -25021,8 +24961,27 @@ async function applyV7ReinstallRegex(args, deps) {
     return m?._risu?.source_type === "divider";
   }).length;
   return {
-    nextEnvelope: args.envelope,
+    nextEnvelope: {
+      ...args.envelope,
+      regex_scripts: stored
+    },
     notes: [`reinstalled ${stored.length} regex_script(s), dividers=${dividerCount}`]
+  };
+}
+async function applyV16RefreshRegexRuntime(args, deps) {
+  const refreshed = await applyV7ReinstallRegex(args, deps);
+  return {
+    nextEnvelope: {
+      ...refreshed.nextEnvelope,
+      payload: {
+        ...refreshed.nextEnvelope.payload,
+        at_actions: args.newBundle.risuPayload.at_actions
+      }
+    },
+    notes: [
+      ...refreshed.notes,
+      `runtime_actions=${args.newBundle.risuPayload.at_actions.length}`
+    ]
   };
 }
 async function applyV6BackfillArrayIndex(args, deps) {
@@ -25317,6 +25276,28 @@ async function applyV15ExcludeGreetingPerEntry(args, deps) {
     ]
   };
 }
+async function applyV17UseFindMacroMode(args, deps) {
+  if (!deps.applyCharacterRegexRowPatch) {
+    return applyV7ReinstallRegex(args, deps);
+  }
+  const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
+    if (row["substitute_macros"] !== "none")
+      return null;
+    const metadata = row["metadata"];
+    const actions = metadata?._risu?.flag_actions;
+    return Array.isArray(actions) && actions.includes("cbs") ? { substitute_macros: "find" } : null;
+  });
+  if (result === null)
+    return applyV7ReinstallRegex(args, deps);
+  return {
+    nextEnvelope: args.envelope,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`
+    ]
+  };
+}
 var CHARACTER_MIGRATIONS = [
   {
     version: 5,
@@ -25382,6 +25363,24 @@ var CHARACTER_MIGRATIONS = [
     description: "Mark each projected Risu lorebook entry to exclude the character greeting during activation.",
     touches: ["world_book_entries"],
     apply: applyV15ExcludeGreetingPerEntry
+  },
+  {
+    version: 16,
+    description: "Reinstall character regex rows with native move, repeat-back, and find-pattern macro actions.",
+    touches: ["regex_scripts", "payload.at_actions"],
+    apply: applyV16RefreshRegexRuntime
+  },
+  {
+    version: 17,
+    description: "Store find-only macro parsing in the native regex macro mode.",
+    touches: ["regex_scripts"],
+    apply: applyV17UseFindMacroMode
+  },
+  {
+    version: 18,
+    description: "Refresh character repeat-back rows to preserve raw-match compatibility.",
+    touches: ["regex_scripts", "payload.at_actions"],
+    apply: applyV16RefreshRegexRuntime
   }
 ];
 var CURRENT_CHARACTER_SCHEMA_VERSION = CHARACTER_MIGRATIONS.length > 0 ? Math.max(...CHARACTER_MIGRATIONS.map((m) => m.version)) : 1;
@@ -25571,19 +25570,39 @@ function projectModuleRegexEntries(moduleId, moduleName, characterId, raw, idGen
     }
     const ruleType = typeof eo["type"] === "string" ? eo["type"] : "editdisplay";
     const { placement, target, disabled } = riskCustomScriptTypeToLumi(ruleType);
-    if (target === "display" && replaceString.length > 0) {
-      replaceString = normalizeModuleDisplayReplaceString(replaceString, eo[TRANSFORMED_FLAG] === true);
-    }
     const ableFlagRaw = eo["ableFlag"];
     const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null ? true : !!ableFlagRaw;
     const rawFlag = typeof eo["flag"] === "string" ? eo["flag"] : undefined;
     const normalisedFlag = normaliseRisuFlag(rawFlag, ableFlag);
+    const directAction = detectAtAction(replaceString);
+    const matchActions = getRegexMatchActions(directAction, normalisedFlag.actions);
+    const movesMatch = matchActions.includes("move_top") || matchActions.includes("move_bottom");
+    replaceString = replaceString.replaceAll("$n", `
+`);
+    if (replaceString.endsWith(">") && !normalisedFlag.actions.includes("no_end_nl")) {
+      replaceString += `
+`;
+    }
+    const repeatPosition = matchActions.includes("repeat_back") ? replaceString.split(" ", 2)[1] : undefined;
+    if (target === "display" && replaceString.length > 0) {
+      replaceString = normalizeMatchActionDisplayReplaceString(replaceString, matchActions, directAction, eo[TRANSFORMED_FLAG] === true);
+    } else if (directAction === "move_top") {
+      replaceString = replaceString.replace("@@move_top ", "");
+    } else if (directAction === "move_bottom") {
+      replaceString = replaceString.replace("@@move_bottom ", "");
+    }
     let flags = normalisedFlag.flag;
     const findHasCbs = findRegex.indexOf("{{") >= 0;
-    if (findHasCbs)
+    const resolveFindCbs = normalisedFlag.actions.includes("cbs");
+    if (findHasCbs && resolveFindCbs)
       flags = flags.replace(/u/g, "");
+    if (movesMatch) {
+      flags = flags.replace(/g/g, "");
+    }
     if (flags.length === 0)
-      flags = "g";
+      flags = "u";
+    const baseSubstitute = movesMatch ? "none" : pickSubstituteMacroMode(replaceString, false);
+    const substituteMacros = resolveFindCbs && baseSubstitute === "none" ? "find" : baseSubstitute;
     const ruleNameRaw = comment.length > 0 ? comment : `rule_${sortBase + 1}`;
     out.push({
       name: ruleNameRaw,
@@ -25599,12 +25618,15 @@ function projectModuleRegexEntries(moduleId, moduleName, characterId, raw, idGen
       max_depth: target === "prompt" && ruleType === "editinput" ? 0 : null,
       trim_strings: [],
       run_on_edit: false,
-      substitute_macros: pickSubstituteMacroMode(replaceString, findHasCbs),
+      substitute_macros: substituteMacros,
       disabled,
       sort_order: 1000 + sortBase - (normalisedFlag.order ?? 0) * 1e5,
       description: `From .risum module: ${moduleName}`,
       folder: `Module: ${moduleName}`,
       metadata: {
+        ...matchActions.length > 0 ? { match_actions: matchActions } : {},
+        ...repeatPosition !== undefined ? { repeat_position: repeatPosition } : {},
+        ...matchActions.includes("repeat_back") ? { repeat_raw_match: true } : {},
         _risu: {
           module_id: moduleId,
           source_type: ruleType,
@@ -25612,7 +25634,8 @@ function projectModuleRegexEntries(moduleId, moduleName, characterId, raw, idGen
           source_index: sourceIndex,
           source_row_index: sortBase,
           ...normalisedFlag.order !== undefined ? { order_flag: normalisedFlag.order } : {},
-          ...normalisedFlag.actions.length > 0 ? { flag_actions: normalisedFlag.actions } : {}
+          ...normalisedFlag.actions.length > 0 ? { flag_actions: normalisedFlag.actions } : {},
+          ...directAction ? { at_action: directAction } : {}
         }
       }
     });
@@ -26114,6 +26137,28 @@ async function applyV12NormalizeDisplayRows(args, deps) {
     ]
   };
 }
+async function applyV14UseFindMacroMode(args, deps) {
+  if (!deps.applyModuleRegexRowPatch) {
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
+    if (row["substitute_macros"] !== "none")
+      return null;
+    const metadata = row["metadata"];
+    const actions = metadata?._risu?.flag_actions;
+    return Array.isArray(actions) && actions.includes("cbs") ? { substitute_macros: "find" } : null;
+  });
+  if (result === null)
+    return applyV5RefreshAttachedRegex(args, deps);
+  return {
+    nextEnv: args.env,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`
+    ]
+  };
+}
 var MODULE_MIGRATIONS = [
   {
     version: 5,
@@ -26156,6 +26201,24 @@ var MODULE_MIGRATIONS = [
     description: "Apply the character display-row normalization path to module display rows.",
     touches: ["regex_scripts_attached_chars"],
     apply: applyV12NormalizeDisplayRows
+  },
+  {
+    version: 13,
+    description: "Refresh attached regex rows with native move, repeat-back, and find-pattern macro actions.",
+    touches: ["regex_scripts_attached_chars"],
+    apply: applyV5RefreshAttachedRegex
+  },
+  {
+    version: 14,
+    description: "Store find-only macro parsing in the native regex macro mode.",
+    touches: ["regex_scripts_attached_chars"],
+    apply: applyV14UseFindMacroMode
+  },
+  {
+    version: 15,
+    description: "Refresh attached repeat-back rows to preserve raw-match compatibility.",
+    touches: ["regex_scripts_attached_chars"],
+    apply: applyV5RefreshAttachedRegex
   }
 ];
 var CURRENT_MODULE_SCHEMA_VERSION = MODULE_MIGRATIONS.length > 0 ? Math.max(...MODULE_MIGRATIONS.map((m) => m.version)) : 4;
@@ -31443,7 +31506,7 @@ function clearActiveModulesByNamespace(chatId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.8.2",
+  version: "0.8.3",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -38481,17 +38544,23 @@ function rowToPromptScript(r) {
   if (typeof row.find_regex !== "string")
     return null;
   const mode = row.substitute_macros;
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : undefined;
+  const rawMatchActions = metadata?.["match_actions"];
+  const matchActions = Array.isArray(rawMatchActions) ? rawMatchActions.filter((action) => action === "move_top" || action === "move_bottom" || action === "repeat_back") : [];
   return {
     find_regex: row.find_regex,
     replace_string: typeof row.replace_string === "string" ? row.replace_string : "",
     flags: typeof row.flags === "string" ? row.flags : "g",
-    substitute_macros: mode === "escaped" || mode === "after" || mode === "raw" ? mode : "none",
+    substitute_macros: mode === "find" || mode === "escaped" || mode === "after" || mode === "raw" ? mode : "none",
     placement: Array.isArray(row.placement) ? row.placement : [],
     target: "prompt",
     min_depth: typeof row.min_depth === "number" ? row.min_depth : null,
     max_depth: typeof row.max_depth === "number" ? row.max_depth : null,
     trim_strings: Array.isArray(row.trim_strings) ? row.trim_strings : [],
-    disabled: false
+    disabled: false,
+    ...matchActions.length > 0 ? { matchActions } : {},
+    ...typeof metadata?.["repeat_position"] === "string" ? { repeatPosition: metadata["repeat_position"] } : {},
+    ...metadata?.["repeat_raw_match"] === true ? { repeatRawMatch: true } : {}
   };
 }
 async function listPromptRegexScope(regexApi, userId, scope, scopeId) {
@@ -43766,7 +43835,7 @@ function createModulePushes(deps) {
       const namespace = typeof m.namespace === "string" && m.namespace.length > 0 ? m.namespace : null;
       const attachmentHandles = attachedIds.filter((handle) => handle === env.id || handle === namespace);
       const triggers2 = Array.isArray(m.trigger) ? m.trigger : [];
-      const atActions = coerceAtActionsFromScripts(Array.isArray(m.regex) ? m.regex : [], `module:${env.id}`);
+      const atActions = coerceAtActionsFromScripts(Array.isArray(m.regex) ? m.regex : [], `module:${env.id}`).filter((action) => action.directAction === "emo" || action.directAction === "inject" || action.flagActions?.includes("inject") === true);
       const lua_scripts = triggers2.map((t) => {
         const tEff = t.effect ?? [];
         const parts = [];

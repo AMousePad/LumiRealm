@@ -22373,7 +22373,7 @@ var require_url_parse = __commonJS((exports, module) => {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.8.2",
+  version: "0.8.3",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -23391,7 +23391,13 @@ function hasCbsSyntax(s) {
   return s.includes("{{") || s.includes("{#") || LEGACY_NAME_TAG_RE.test(s);
 }
 function applyRegexScriptsCore(content, scripts, opts) {
-  const { placement, depth, evalTemplate, reResolveAfterRule } = opts;
+  const {
+    placement,
+    depth,
+    evalTemplate,
+    reResolveAfterRule,
+    previousContent
+  } = opts;
   let result = content;
   for (const script of scripts) {
     if (script.disabled === true)
@@ -23411,10 +23417,17 @@ function applyRegexScriptsCore(content, scripts, opts) {
     } else if (script.substitute_macros !== "none") {
       findRegex = evalTemplate(findRegex);
     }
-    const regex = compileRegex(findRegex, script.flags);
+    const movesMatch = script.matchActions?.includes("move_top") === true || script.matchActions?.includes("move_bottom") === true;
+    const effectiveFlags = movesMatch ? script.flags.replace(/g/g, "") || "u" : script.flags;
+    const regex = compileRegex(findRegex, effectiveFlags);
     if (!regex)
       continue;
     try {
+      const behaviorResult = applyMatchActions(result, regex, script, previousContent, evalTemplate);
+      if (behaviorResult.handled) {
+        result = applyTrimStrings(behaviorResult.content, script.trim_strings);
+        continue;
+      }
       if (script.substitute_macros === "raw") {
         const matches = collectMatches(result, regex);
         if (matches.length > 0) {
@@ -23431,7 +23444,7 @@ function applyRegexScriptsCore(content, scripts, opts) {
         let replaceString = script.replace_string;
         if (script.preResolvedReplace !== undefined) {
           replaceString = script.substitute_macros === "escaped" ? script.preResolvedReplace.replace(/\$/g, "$$$$") : script.preResolvedReplace;
-        } else if (script.substitute_macros !== "none") {
+        } else if (script.substitute_macros !== "none" && script.substitute_macros !== "find") {
           const resolved = evalTemplate(replaceString);
           replaceString = script.substitute_macros === "escaped" ? resolved.replace(/\$/g, "$$$$") : resolved;
         }
@@ -23446,6 +23459,67 @@ function applyRegexScriptsCore(content, scripts, opts) {
     }
   }
   return result;
+}
+function applyMatchActions(content, regex, script, previousContent, evalTemplate) {
+  const actions = script.matchActions;
+  if (!actions || actions.length === 0) {
+    return { handled: false, content };
+  }
+  const movesTop = actions.includes("move_top");
+  const movesBottom = actions.includes("move_bottom");
+  const match = regex.exec(content);
+  regex.lastIndex = 0;
+  if (!match) {
+    if (!actions.includes("repeat_back") || previousContent === undefined) {
+      return { handled: true, content };
+    }
+    const priorMatch = regex.exec(previousContent);
+    regex.lastIndex = 0;
+    if (!priorMatch)
+      return { handled: true, content };
+    const position = script.repeatPosition ?? script.replace_string.split(" ", 2)[1];
+    const groups = Array.from(priorMatch).slice(1);
+    let piece = priorMatch[0];
+    if (script.repeatRawMatch !== true) {
+      if (script.substitute_macros === "raw" || script.substitute_macros === "after") {
+        piece = substituteRegexCaptures(script.replace_string, priorMatch[0], groups, priorMatch.index, previousContent, priorMatch.groups);
+        piece = evalTemplate(piece);
+      } else {
+        let replacement = script.replace_string;
+        if (script.preResolvedReplace !== undefined) {
+          replacement = script.substitute_macros === "escaped" ? script.preResolvedReplace.replace(/\$/g, "$$$$") : script.preResolvedReplace;
+        } else if (script.substitute_macros !== "none" && script.substitute_macros !== "find") {
+          const resolved = evalTemplate(replacement);
+          replacement = script.substitute_macros === "escaped" ? resolved.replace(/\$/g, "$$$$") : resolved;
+        }
+        piece = substituteRegexCaptures(replacement, priorMatch[0], groups, priorMatch.index, previousContent, priorMatch.groups);
+      }
+    }
+    if (!position)
+      return { handled: true, content: content + piece };
+    if (position === "start")
+      return { handled: true, content: piece + content };
+    if (position === "end")
+      return { handled: true, content: content + piece };
+    if (position === "start_nl")
+      return { handled: true, content: `${piece}
+${content}` };
+    if (position === "end_nl")
+      return { handled: true, content: `${content}
+${piece}` };
+    return { handled: true, content };
+  }
+  if (movesTop || movesBottom) {
+    const replacement = substituteRegexCaptures(script.replace_string, match[0], Array.from(match).slice(1), match.index, content, match.groups);
+    const remainder = content.replace(regex, "");
+    return {
+      handled: true,
+      content: movesTop ? `${replacement}
+${remainder}` : `${remainder}
+${replacement}`
+    };
+  }
+  return { handled: false, content };
 }
 
 // src/interpreter/risu-chat-view.ts
@@ -26105,6 +26179,15 @@ function resolveRisuDisplayMessageIndex(snap, context2) {
     return Math.max(-1, snap.chat.messages.length - 1 - context2.depth);
   }
   return Math.max(-1, snap.chat.messages.length - 1);
+}
+function resolveHostDisplayMessageIndex(snap, context2) {
+  if (context2.messageId) {
+    const hostIndex = snap.messagesHost.findIndex((message) => message.id === context2.messageId);
+    if (hostIndex >= 0)
+      return hostIndex;
+  }
+  const index = resolveRisuDisplayMessageIndex(snap, context2) + leadingGreetingOffset(snap);
+  return index >= 0 && index < snap.messagesHost.length ? index : -1;
 }
 function withCurrentDisplayMessage(snap, context2, content) {
   const idIndex = context2.messageId ? snap.messagesHost.findIndex((message) => message.id === context2.messageId) : -1;
@@ -29971,12 +30054,15 @@ function buildModuleDisplayPlan(scripts, actions) {
       });
       return action2 ? { kind: "action", script, action: action2 } : { kind: "script", script };
     }
-    if (idMatches.length > 0 || identity.hasFlagActions) {
+    if (idMatches.length > 0 || identity.requiresRuntimeAction) {
       return {
         kind: "skip",
         script,
         reason: "module action metadata has no matching runtime source"
       };
+    }
+    if (!identity.requiresRuntimeAction) {
+      return { kind: "script", script };
     }
     const action = actionFromLiveScript({
       findRegex: script.find_regex,
@@ -30022,7 +30108,7 @@ function readModuleIdentity(metadata) {
     sourceIndex,
     sourceRowIndex,
     ...typeof order === "number" && Number.isFinite(order) ? { order } : {},
-    hasFlagActions: Array.isArray(metadata["flag_actions"]) && metadata["flag_actions"].length > 0
+    requiresRuntimeAction: metadata["at_action"] === "emo" || metadata["at_action"] === "inject" || Array.isArray(metadata["flag_actions"]) && metadata["flag_actions"].includes("inject")
   };
 }
 function sourceKey(origin, sourceRowIndex) {
@@ -30183,6 +30269,7 @@ function scriptApplies(script, context2) {
   return true;
 }
 function toCoreScript(script) {
+  const matchActions = readRegexMatchActions(script.metadata);
   return {
     find_regex: script.find_regex,
     replace_string: script.replace_string,
@@ -30193,7 +30280,34 @@ function toCoreScript(script) {
     min_depth: script.min_depth,
     max_depth: script.max_depth,
     trim_strings: script.trim_strings,
-    ...script.disabled !== undefined ? { disabled: script.disabled } : {}
+    ...script.disabled !== undefined ? { disabled: script.disabled } : {},
+    ...matchActions.length > 0 ? { matchActions } : {},
+    ...typeof script.metadata?.["repeat_position"] === "string" ? { repeatPosition: script.metadata["repeat_position"] } : {},
+    ...script.metadata?.["repeat_raw_match"] === true ? { repeatRawMatch: true } : {}
+  };
+}
+function readRegexMatchActions(metadata) {
+  const raw = metadata?.["match_actions"];
+  if (!Array.isArray(raw))
+    return [];
+  return raw.filter((action) => action === "move_top" || action === "move_bottom" || action === "repeat_back");
+}
+function displayBehaviorContext(snap, context2) {
+  const currentIndex = resolveHostDisplayMessageIndex(snap, context2);
+  if (typeof currentIndex !== "number" || !Number.isInteger(currentIndex) || currentIndex <= 0)
+    return {};
+  const role = context2.role ?? snap.messagesHost[currentIndex]?.role ?? (context2.isUser ? "user" : "assistant");
+  for (let index = currentIndex - 1;index >= 1; index--) {
+    const message = snap.messagesHost[index];
+    if (message?.role === role) {
+      return {
+        previousContent: message.content
+      };
+    }
+  }
+  const greeting = snap.messagesHost[0]?.content;
+  return {
+    ...greeting !== undefined ? { previousContent: greeting } : {}
   };
 }
 async function runApply(snap, args, recorder, onEffect) {
@@ -30201,6 +30315,10 @@ async function runApply(snap, args, recorder, onEffect) {
   const placement = ctx.isUser ? "user_input" : "ai_output";
   const scripts = args.scripts;
   const plan = buildModuleDisplayPlan(scripts, snap.atActions);
+  const hasRepeatBack = plan.some((step) => step.kind === "script" && readRegexMatchActions(step.script.metadata).includes("repeat_back"));
+  const behaviorContext = hasRepeatBack ? displayBehaviorContext(snap, ctx) : {};
+  if (hasRepeatBack)
+    recorder.touched.add(MSG_DEP_KEY);
   let content = args.content;
   for (let index = 0;index < plan.length; index++) {
     const step = plan[index];
@@ -30231,6 +30349,7 @@ async function runApply(snap, args, recorder, onEffect) {
     content = applyRegexScriptsCore(content, coreScripts, {
       placement,
       depth: ctx.depth,
+      ...behaviorContext,
       evalTemplate: (text) => {
         try {
           return evalTemplate(snap, text, ctx, recorder);
