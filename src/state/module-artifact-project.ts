@@ -267,6 +267,13 @@ export function projectModuleRegexEntries(
       flags = flags.replace(/g/g, '');
     }
     if (flags.length === 0) flags = 'u';
+    const baseSubstitute = movesMatch
+      ? 'none'
+      : pickSubstituteMacroMode(replaceString, false);
+    const substituteMacros =
+      resolveFindCbs && baseSubstitute === 'none'
+        ? 'find'
+        : baseSubstitute;
     const ruleNameRaw = comment.length > 0 ? comment : `rule_${sortBase + 1}`;
     out.push({
       name: ruleNameRaw,
@@ -282,9 +289,7 @@ export function projectModuleRegexEntries(
       max_depth: target === 'prompt' && ruleType === 'editinput' ? 0 : null,
       trim_strings: [],
       run_on_edit: false,
-      substitute_macros: movesMatch
-        ? 'none'
-        : pickSubstituteMacroMode(replaceString, false),
+      substitute_macros: substituteMacros,
       disabled,
       // Risu sorts <order N> descending, Lumi reads sort_order ASC: negate.
       sort_order: 1000 + sortBase - (normalisedFlag.order ?? 0) * 100000,
@@ -293,7 +298,6 @@ export function projectModuleRegexEntries(
       metadata: {
         ...(matchActions.length > 0 ? { match_actions: matchActions } : {}),
         ...(repeatPosition !== undefined ? { repeat_position: repeatPosition } : {}),
-        ...(resolveFindCbs ? { resolve_find_macros: true } : {}),
         _risu: {
           module_id: moduleId,
           source_type: ruleType,

@@ -211,9 +211,6 @@ function toCoreScript(script: FeRegexScript): RegexCoreScript {
     max_depth: script.max_depth,
     trim_strings: script.trim_strings,
     ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
-    ...(script.metadata?.['resolve_find_macros'] === true
-      ? { resolveFindMacros: true }
-      : {}),
     ...(matchActions.length > 0 ? { matchActions } : {}),
     ...(typeof script.metadata?.['repeat_position'] === 'string'
       ? { repeatPosition: script.metadata['repeat_position'] }

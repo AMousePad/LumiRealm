@@ -1,4 +1,4 @@
-export type FeRegexMode = 'none' | 'raw' | 'after' | 'escaped';
+export type FeRegexMode = 'none' | 'find' | 'raw' | 'after' | 'escaped';
 
 export interface FeRegexScript {
   readonly id: string;

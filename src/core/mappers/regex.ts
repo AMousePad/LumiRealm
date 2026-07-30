@@ -270,6 +270,10 @@ export function mapRegex(
     const baseSubstitute: LumiRegexMacroMode = movesMatch
       ? "none"
       : pickSubstituteMacroMode(baseReplace, false);
+    const substituteMacros: LumiRegexMacroMode =
+      resolveFindCbs && baseSubstitute === "none"
+        ? "find"
+        : baseSubstitute;
     const baseName = nonEmpty(s.comment, `risu_${effectivePhase.target}_${i}`);
     const baseDescription = s.comment ?? "";
     const baseMetadata: Record<string, unknown> = {
@@ -284,7 +288,6 @@ export function mapRegex(
       },
       ...(matchActions.length > 0 ? { match_actions: matchActions } : {}),
       ...(repeatPosition !== undefined ? { repeat_position: repeatPosition } : {}),
-      ...(resolveFindCbs ? { resolve_find_macros: true } : {}),
     };
 
     const buildRow = (overrides: {
@@ -315,7 +318,7 @@ export function mapRegex(
       max_depth: overrides.maxDepth !== undefined ? overrides.maxDepth : (effectivePhase.maxDepth ?? null),
       trim_strings: [],
       run_on_edit: false,
-      substitute_macros: overrides.substituteMacros ?? baseSubstitute,
+      substitute_macros: overrides.substituteMacros ?? substituteMacros,
       disabled: effectivePhase.disabled,
       sort_order: overrides.sortOrder,
       description: baseDescription,

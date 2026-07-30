@@ -10,7 +10,7 @@ export interface RegexCoreScript {
   readonly find_regex: string;
   readonly replace_string: string;
   readonly flags: string;
-  readonly substitute_macros: 'none' | 'escaped' | 'after' | 'raw';
+  readonly substitute_macros: 'none' | 'find' | 'escaped' | 'after' | 'raw';
   readonly placement: readonly string[];
   readonly target: string;
   readonly min_depth: number | null;
@@ -19,7 +19,6 @@ export interface RegexCoreScript {
   readonly disabled?: boolean;
   readonly preResolvedFind?: string;
   readonly preResolvedReplace?: string;
-  readonly resolveFindMacros?: boolean;
   readonly matchActions?: readonly (
     | 'move_top'
     | 'move_bottom'
@@ -72,10 +71,7 @@ export function applyRegexScriptsCore(
     let findRegex = script.find_regex;
     if (script.preResolvedFind !== undefined) {
       findRegex = script.preResolvedFind;
-    } else if (
-      script.substitute_macros !== 'none'
-      || script.resolveFindMacros === true
-    ) {
+    } else if (script.substitute_macros !== 'none') {
       findRegex = evalTemplate(findRegex);
     }
 
@@ -119,7 +115,10 @@ export function applyRegexScriptsCore(
           replaceString = script.substitute_macros === 'escaped'
             ? script.preResolvedReplace.replace(/\$/g, '$$$$')
             : script.preResolvedReplace;
-        } else if (script.substitute_macros !== 'none') {
+        } else if (
+          script.substitute_macros !== 'none'
+          && script.substitute_macros !== 'find'
+        ) {
           const resolved = evalTemplate(replaceString);
           replaceString = script.substitute_macros === 'escaped'
             ? resolved.replace(/\$/g, '$$$$')

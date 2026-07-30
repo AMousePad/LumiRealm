@@ -351,16 +351,16 @@ function rowToPromptScript(r: unknown): RegexCoreScript | null {
     find_regex: row.find_regex,
     replace_string: typeof row.replace_string === 'string' ? row.replace_string : '',
     flags: typeof row.flags === 'string' ? row.flags : 'g',
-    substitute_macros: mode === 'escaped' || mode === 'after' || mode === 'raw' ? mode : 'none',
+    substitute_macros:
+      mode === 'find' || mode === 'escaped' || mode === 'after' || mode === 'raw'
+        ? mode
+        : 'none',
     placement: Array.isArray(row.placement) ? (row.placement as string[]) : [],
     target: 'prompt',
     min_depth: typeof row.min_depth === 'number' ? row.min_depth : null,
     max_depth: typeof row.max_depth === 'number' ? row.max_depth : null,
     trim_strings: Array.isArray(row.trim_strings) ? (row.trim_strings as string[]) : [],
     disabled: false,
-    ...(metadata?.['resolve_find_macros'] === true
-      ? { resolveFindMacros: true }
-      : {}),
     ...(matchActions.length > 0 ? { matchActions } : {}),
     ...(typeof metadata?.['repeat_position'] === 'string'
       ? { repeatPosition: metadata['repeat_position'] }

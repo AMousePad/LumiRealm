@@ -105,7 +105,7 @@ export interface PendingRegexScriptMsg {
   readonly max_depth: number | null;
   readonly trim_strings: readonly string[];
   readonly run_on_edit: boolean;
-  readonly substitute_macros: 'none' | 'raw' | 'escaped' | 'after';
+  readonly substitute_macros: 'none' | 'find' | 'raw' | 'escaped' | 'after';
   readonly disabled: boolean;
   readonly sort_order: number;
   readonly description: string;
