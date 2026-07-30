@@ -1056,10 +1056,17 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       try { charHeaderHandle.handleBackendMessage(msg); } catch (err) { log.warn('characters header handler threw:', err); }
     }
     switch (msg.type) {
-      case 'cards_updated':
+      case 'cards_updated': {
         cards = msg.cards;
+        // Attachment records live on the character and die with it, so a card
+        // that is gone must stop contributing to module attachment counts.
+        const liveIds = new Set(msg.cards.map((c) => c.character_id));
+        for (const charId of [...attachedByCharacter.keys()]) {
+          if (!liveIds.has(charId)) attachedByCharacter.delete(charId);
+        }
         render();
         break;
+      }
       case 'modules_pushed':
         modules = msg.modules;
         globalModuleIds = msg.global_module_ids ?? [];
@@ -1067,6 +1074,9 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
           setModuleScopeLang(m.id, dominantScriptLang([m.name, m.description]));
         }
         if (msg.attached_by_character) {
+          // Full snapshot, not a delta: merging would strand entries for
+          // characters that no longer have the module (or no longer exist).
+          attachedByCharacter.clear();
           for (const [charId, list] of Object.entries(msg.attached_by_character)) {
             attachedByCharacter.set(charId, list);
           }

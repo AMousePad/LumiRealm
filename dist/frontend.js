@@ -41672,10 +41672,16 @@ filename: ${m.filename}`;
       }
     }
     switch (msg.type) {
-      case "cards_updated":
+      case "cards_updated": {
         cards = msg.cards;
+        const liveIds = new Set(msg.cards.map((c) => c.character_id));
+        for (const charId of [...attachedByCharacter.keys()]) {
+          if (!liveIds.has(charId))
+            attachedByCharacter.delete(charId);
+        }
         render();
         break;
+      }
       case "modules_pushed":
         modules = msg.modules;
         globalModuleIds = msg.global_module_ids ?? [];
@@ -41683,6 +41689,7 @@ filename: ${m.filename}`;
           setModuleScopeLang(m.id, dominantScriptLang([m.name, m.description]));
         }
         if (msg.attached_by_character) {
+          attachedByCharacter.clear();
           for (const [charId, list] of Object.entries(msg.attached_by_character)) {
             attachedByCharacter.set(charId, list);
           }
