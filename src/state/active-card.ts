@@ -334,7 +334,15 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
       log.warn(`ensureActiveCardForChat: lorebook fetch failed char=${characterId}: ${errMsg(err)}`);
       setActiveLorebook(chatId, characterId, []);
     }
-    void backfillImageJournalIfMissing(characterId, fetched.character.image_id ?? null, card, userId);
+    // The character's OWN indexes, not `card`: the synthetic card folds attached
+    // modules' asset_index in, which would journal module-owned image ids against
+    // this character and make them deletion candidates when it is removed.
+    void backfillImageJournalIfMissing(
+      characterId,
+      fetched.character.image_id ?? null,
+      { asset_index: fetched.data.asset_index, emotion_index: fetched.data.emotion_index },
+      userId,
+    );
     setActiveAssetIndexes(chatId, {
       assets: card.asset_index,
       emotions: card.emotion_index,
