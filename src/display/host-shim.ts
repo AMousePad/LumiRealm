@@ -7,6 +7,56 @@ import { makeSafeLogger } from '../util/safe-log.js';
 
 const log = makeSafeLogger('display-shim');
 
+function leadingGreetingOffset(snap: DisplaySnapshot): 0 | 1 {
+  return snap.messagesHost.length > 0 && snap.messagesHost[0]!.role !== 'user'
+    ? 1
+    : 0;
+}
+
+/**
+ * Risu indexes the full chat history without the greeting. Lumiverse's
+ * messageIndex is relative to the currently loaded page, so display code must
+ * resolve against the full snapshot and the message's depth instead.
+ */
+export function resolveRisuDisplayMessageIndex(
+  snap: DisplaySnapshot,
+  context: SpindleDisplayContext,
+): number {
+  if (context.messageId) {
+    const hostIndex = snap.messagesHost.findIndex(
+      (message) => message.id === context.messageId,
+    );
+    if (hostIndex >= 0) {
+      return Math.max(-1, hostIndex - leadingGreetingOffset(snap));
+    }
+  }
+
+  if (
+    Number.isInteger(context.depth)
+    && context.depth >= 0
+  ) {
+    return Math.max(-1, snap.chat.messages.length - 1 - context.depth);
+  }
+
+  return Math.max(-1, snap.chat.messages.length - 1);
+}
+
+export function resolveHostDisplayMessageIndex(
+  snap: DisplaySnapshot,
+  context: SpindleDisplayContext,
+): number {
+  if (context.messageId) {
+    const hostIndex = snap.messagesHost.findIndex(
+      (message) => message.id === context.messageId,
+    );
+    if (hostIndex >= 0) return hostIndex;
+  }
+
+  const index = resolveRisuDisplayMessageIndex(snap, context)
+    + leadingGreetingOffset(snap);
+  return index >= 0 && index < snap.messagesHost.length ? index : -1;
+}
+
 /**
  * Risu renders against its live in-memory chat object. The host can render an
  * edited or streaming message before the next backend snapshot arrives, so
@@ -21,10 +71,22 @@ export function withCurrentDisplayMessage(
     ? snap.messagesHost.findIndex((message) => message.id === context.messageId)
     : -1;
   const contextIndex = context.messageIndex;
+  const canAppend =
+    idIndex < 0
+    && !!context.messageId
+    && context.depth === 0
+    && (
+      contextIndex === undefined
+      || (
+        Number.isInteger(contextIndex)
+        && contextIndex >= 0
+        && contextIndex <= snap.messagesHost.length
+      )
+    );
   const index = idIndex >= 0
     ? idIndex
-    : (typeof contextIndex === 'number' && Number.isInteger(contextIndex)
-      ? contextIndex
+    : (canAppend
+      ? snap.messagesHost.length
       : -1);
   if (index < 0 || index > snap.messagesHost.length) return snap;
 

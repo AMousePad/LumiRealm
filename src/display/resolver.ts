@@ -30,6 +30,7 @@ import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
 import {
   withCurrentDisplayMessage,
+  resolveRisuDisplayMessageIndex,
   type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import { buildModuleDisplayPlan } from './module-action-plan.js';
@@ -61,19 +62,7 @@ function buildInput(
   content: string,
   context: SpindleDisplayContext,
 ): RunPipelineInput {
-  const dyn = context.dynamicMacros;
-  const lastIdx = snap.chat.messages.length - 1;
-  const chatIndexStr = dyn?.chat_index;
-  // Lumi's message index includes the greeting at zero. Risu's chat.message[]
-  // does not, so its Chat.svelte index is one less.
-  const idxOverride = typeof context.messageIndex === 'number'
-    ? context.messageIndex - 1
-    : (typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)
-      ? parseInt(chatIndexStr, 10) - 1
-      : (typeof context.depth === 'number' && context.depth >= 0
-        ? lastIdx - context.depth
-        : undefined));
-  const role = context.role ?? dyn?.role;
+  const role = context.role ?? context.dynamicMacros?.role;
   return {
     template: content,
     phase: 'display',
@@ -94,7 +83,7 @@ function buildInput(
     legacyMediaFindings: snap.legacyMediaFindings,
     modulesByNamespace: snap.modulesByNamespace,
     lorebook: snap.lorebook,
-    ...(idxOverride !== undefined ? { currentMessageIndexOverride: idxOverride } : {}),
+    currentMessageIndexOverride: resolveRisuDisplayMessageIndex(snap, context),
     ...(role ? { currentMessageRoleOverride: role } : {}),
   };
 }
