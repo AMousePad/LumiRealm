@@ -117,6 +117,7 @@ export interface CharacterMigrationStep {
     | 'payload.background_html'
     | 'payload.triggers'
     | 'payload.lua_scripts'
+    | 'payload.at_actions'
     | 'attached_modules'
   )[];
   readonly apply: (
@@ -227,8 +228,31 @@ async function applyV7ReinstallRegex(
     return m?._risu?.source_type === 'divider';
   }).length;
   return {
-    nextEnvelope: args.envelope,
+    nextEnvelope: {
+      ...args.envelope,
+      regex_scripts: stored,
+    },
     notes: [`reinstalled ${stored.length} regex_script(s), dividers=${dividerCount}`],
+  };
+}
+
+async function applyV16RefreshRegexRuntime(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const refreshed = await applyV7ReinstallRegex(args, deps);
+  return {
+    nextEnvelope: {
+      ...refreshed.nextEnvelope,
+      payload: {
+        ...refreshed.nextEnvelope.payload,
+        at_actions: args.newBundle.risuPayload!.at_actions,
+      },
+    },
+    notes: [
+      ...refreshed.notes,
+      `runtime_actions=${args.newBundle.risuPayload!.at_actions.length}`,
+    ],
   };
 }
 
@@ -616,6 +640,38 @@ async function applyV15ExcludeGreetingPerEntry(
   };
 }
 
+async function applyV17UseFindMacroMode(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  if (!deps.applyCharacterRegexRowPatch) {
+    return applyV7ReinstallRegex(args, deps);
+  }
+  const result = await deps.applyCharacterRegexRowPatch(
+    args.characterId,
+    args.userId,
+    (row) => {
+      if (row['substitute_macros'] !== 'none') return null;
+      const metadata = row['metadata'] as {
+        _risu?: { flag_actions?: unknown };
+      } | undefined;
+      const actions = metadata?._risu?.flag_actions;
+      return Array.isArray(actions) && actions.includes('cbs')
+        ? { substitute_macros: 'find' }
+        : null;
+    },
+  );
+  if (result === null) return applyV7ReinstallRegex(args, deps);
+  return {
+    nextEnvelope: args.envelope,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`,
+    ],
+  };
+}
+
 export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
   {
     version: 5,
@@ -694,6 +750,27 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
       'Mark each projected Risu lorebook entry to exclude the character greeting during activation.',
     touches: ['world_book_entries'],
     apply: applyV15ExcludeGreetingPerEntry,
+  },
+  {
+    version: 16,
+    description:
+      'Reinstall character regex rows with native move, repeat-back, and find-pattern macro actions.',
+    touches: ['regex_scripts', 'payload.at_actions'],
+    apply: applyV16RefreshRegexRuntime,
+  },
+  {
+    version: 17,
+    description:
+      'Store find-only macro parsing in the native regex macro mode.',
+    touches: ['regex_scripts'],
+    apply: applyV17UseFindMacroMode,
+  },
+  {
+    version: 18,
+    description:
+      'Refresh character repeat-back rows to preserve raw-match compatibility.',
+    touches: ['regex_scripts', 'payload.at_actions'],
+    apply: applyV16RefreshRegexRuntime,
   },
 ];
 

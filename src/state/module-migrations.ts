@@ -371,6 +371,34 @@ async function applyV12NormalizeDisplayRows(
   };
 }
 
+async function applyV14UseFindMacroMode(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  if (!deps.applyModuleRegexRowPatch) {
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
+    if (row['substitute_macros'] !== 'none') return null;
+    const metadata = row['metadata'] as {
+      _risu?: { flag_actions?: unknown };
+    } | undefined;
+    const actions = metadata?._risu?.flag_actions;
+    return Array.isArray(actions) && actions.includes('cbs')
+      ? { substitute_macros: 'find' }
+      : null;
+  });
+  if (result === null) return applyV5RefreshAttachedRegex(args, deps);
+  return {
+    nextEnv: args.env,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`,
+    ],
+  };
+}
+
 export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
   {
     version: 5,
@@ -422,6 +450,27 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
       'Apply the character display-row normalization path to module display rows.',
     touches: ['regex_scripts_attached_chars'],
     apply: applyV12NormalizeDisplayRows,
+  },
+  {
+    version: 13,
+    description:
+      'Refresh attached regex rows with native move, repeat-back, and find-pattern macro actions.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV5RefreshAttachedRegex,
+  },
+  {
+    version: 14,
+    description:
+      'Store find-only macro parsing in the native regex macro mode.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV14UseFindMacroMode,
+  },
+  {
+    version: 15,
+    description:
+      'Refresh attached repeat-back rows to preserve raw-match compatibility.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV5RefreshAttachedRegex,
   },
 ];
 
