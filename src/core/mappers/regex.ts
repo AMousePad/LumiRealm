@@ -288,6 +288,7 @@ export function mapRegex(
       },
       ...(matchActions.length > 0 ? { match_actions: matchActions } : {}),
       ...(repeatPosition !== undefined ? { repeat_position: repeatPosition } : {}),
+      ...(matchActions.includes("repeat_back") ? { repeat_raw_match: true } : {}),
     };
 
     const buildRow = (overrides: {

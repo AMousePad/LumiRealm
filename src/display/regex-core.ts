@@ -25,6 +25,7 @@ export interface RegexCoreScript {
     | 'repeat_back'
   )[];
   readonly repeatPosition?: string;
+  readonly repeatRawMatch?: boolean;
 }
 
 export interface ApplyRegexCoreOptions {
@@ -89,6 +90,7 @@ export function applyRegexScriptsCore(
         regex,
         script,
         previousContent,
+        evalTemplate,
       );
       if (behaviorResult.handled) {
         result = applyTrimStrings(behaviorResult.content, script.trim_strings);
@@ -151,6 +153,7 @@ function applyMatchActions(
   regex: RegExp,
   script: RegexCoreScript,
   previousContent: string | undefined,
+  evalTemplate: (text: string) => string,
 ): { readonly handled: boolean; readonly content: string } {
   const actions = script.matchActions;
   if (!actions || actions.length === 0) {
@@ -174,7 +177,44 @@ function applyMatchActions(
     if (!priorMatch) return { handled: true, content };
     const position = script.repeatPosition
       ?? script.replace_string.split(' ', 2)[1];
-    const piece = priorMatch[0];
+    const groups = Array.from(priorMatch).slice(1);
+    let piece = priorMatch[0];
+    if (script.repeatRawMatch !== true) {
+      if (script.substitute_macros === 'raw' || script.substitute_macros === 'after') {
+        piece = substituteRegexCaptures(
+          script.replace_string,
+          priorMatch[0],
+          groups,
+          priorMatch.index,
+          previousContent,
+          priorMatch.groups,
+        );
+        piece = evalTemplate(piece);
+      } else {
+        let replacement = script.replace_string;
+        if (script.preResolvedReplace !== undefined) {
+          replacement = script.substitute_macros === 'escaped'
+            ? script.preResolvedReplace.replace(/\$/g, '$$$$')
+            : script.preResolvedReplace;
+        } else if (
+          script.substitute_macros !== 'none'
+          && script.substitute_macros !== 'find'
+        ) {
+          const resolved = evalTemplate(replacement);
+          replacement = script.substitute_macros === 'escaped'
+            ? resolved.replace(/\$/g, '$$$$')
+            : resolved;
+        }
+        piece = substituteRegexCaptures(
+          replacement,
+          priorMatch[0],
+          groups,
+          priorMatch.index,
+          previousContent,
+          priorMatch.groups,
+        );
+      }
+    }
     if (!position) return { handled: true, content: content + piece };
     if (position === 'start') return { handled: true, content: piece + content };
     if (position === 'end') return { handled: true, content: content + piece };

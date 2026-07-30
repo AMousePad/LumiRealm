@@ -199,6 +199,11 @@ export async function applyPromptRegexToArray(
   const hasRepeatBack = scripts.some(
     (script) => script.matchActions?.includes('repeat_back') === true,
   );
+  const originalContent = hasRepeatBack
+    ? messages.map((message) =>
+        typeof message.content === 'string' ? message.content : undefined,
+      )
+    : [];
   const historyPositionByIndex = hasRepeatBack
     ? new Map<number, number>()
     : null;
@@ -257,17 +262,13 @@ export async function applyPromptRegexToArray(
         pos >= 1;
         pos--
       ) {
-        const previous = messages[historyIndices[pos]!]!;
+        const previousIndex = historyIndices[pos]!;
+        const previous = messages[previousIndex]!;
         if (previous.role === msg.role) {
-          return typeof previous.content === 'string'
-            ? previous.content
-            : undefined;
+          return originalContent[previousIndex];
         }
       }
-      const greeting = messages[historyIndices[0]!];
-      return typeof greeting?.content === 'string'
-        ? greeting.content
-        : undefined;
+      return originalContent[historyIndices[0]!];
     })();
 
     if (typeof msg.content === 'string') {
@@ -364,6 +365,9 @@ function rowToPromptScript(r: unknown): RegexCoreScript | null {
     ...(matchActions.length > 0 ? { matchActions } : {}),
     ...(typeof metadata?.['repeat_position'] === 'string'
       ? { repeatPosition: metadata['repeat_position'] }
+      : {}),
+    ...(metadata?.['repeat_raw_match'] === true
+      ? { repeatRawMatch: true }
       : {}),
   };
 }

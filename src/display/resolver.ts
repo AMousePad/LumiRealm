@@ -30,6 +30,7 @@ import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
 import {
   withCurrentDisplayMessage,
+  resolveHostDisplayMessageIndex,
   resolveRisuDisplayMessageIndex,
   type DisplayRuntimeEffectSink,
 } from './host-shim.js';
@@ -215,6 +216,9 @@ function toCoreScript(script: FeRegexScript): RegexCoreScript {
     ...(typeof script.metadata?.['repeat_position'] === 'string'
       ? { repeatPosition: script.metadata['repeat_position'] }
       : {}),
+    ...(script.metadata?.['repeat_raw_match'] === true
+      ? { repeatRawMatch: true }
+      : {}),
   };
 }
 
@@ -237,9 +241,7 @@ function displayBehaviorContext(
 ): {
   readonly previousContent?: string;
 } {
-  const currentIndex = context.messageId
-    ? snap.messagesHost.findIndex((message) => message.id === context.messageId)
-    : context.messageIndex;
+  const currentIndex = resolveHostDisplayMessageIndex(snap, context);
   if (
     typeof currentIndex !== 'number'
     || !Number.isInteger(currentIndex)
