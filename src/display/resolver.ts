@@ -199,6 +199,7 @@ function scriptApplies(
 }
 
 function toCoreScript(script: FeRegexScript): RegexCoreScript {
+  const matchActions = readRegexMatchActions(script.metadata);
   return {
     find_regex: script.find_regex,
     replace_string: script.replace_string,
@@ -210,6 +211,57 @@ function toCoreScript(script: FeRegexScript): RegexCoreScript {
     max_depth: script.max_depth,
     trim_strings: script.trim_strings,
     ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
+    ...(script.metadata?.['resolve_find_macros'] === true
+      ? { resolveFindMacros: true }
+      : {}),
+    ...(matchActions.length > 0 ? { matchActions } : {}),
+    ...(typeof script.metadata?.['repeat_position'] === 'string'
+      ? { repeatPosition: script.metadata['repeat_position'] }
+      : {}),
+  };
+}
+
+function readRegexMatchActions(
+  metadata: Readonly<Record<string, unknown>> | undefined,
+): NonNullable<RegexCoreScript['matchActions']> {
+  const raw = metadata?.['match_actions'];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (action): action is 'move_top' | 'move_bottom' | 'repeat_back' =>
+      action === 'move_top'
+      || action === 'move_bottom'
+      || action === 'repeat_back',
+  );
+}
+
+function displayBehaviorContext(
+  snap: DisplaySnapshot,
+  context: SpindleDisplayContext,
+): {
+  readonly previousContent?: string;
+} {
+  const currentIndex = context.messageId
+    ? snap.messagesHost.findIndex((message) => message.id === context.messageId)
+    : context.messageIndex;
+  if (
+    typeof currentIndex !== 'number'
+    || !Number.isInteger(currentIndex)
+    || currentIndex <= 0
+  ) return {};
+  const role = context.role
+    ?? snap.messagesHost[currentIndex]?.role
+    ?? (context.isUser ? 'user' : 'assistant');
+  for (let index = currentIndex - 1; index >= 1; index--) {
+    const message = snap.messagesHost[index];
+    if (message?.role === role) {
+      return {
+        previousContent: message.content,
+      };
+    }
+  }
+  const greeting = snap.messagesHost[0]?.content;
+  return {
+    ...(greeting !== undefined ? { previousContent: greeting } : {}),
   };
 }
 
@@ -223,6 +275,15 @@ async function runApply(
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
   const scripts = args.scripts as readonly FeRegexScript[];
   const plan = buildModuleDisplayPlan(scripts, snap.atActions);
+  const hasRepeatBack = plan.some(
+    (step) =>
+      step.kind === 'script'
+      && readRegexMatchActions(step.script.metadata).includes('repeat_back'),
+  );
+  const behaviorContext = hasRepeatBack
+    ? displayBehaviorContext(snap, ctx)
+    : {};
+  if (hasRepeatBack) recorder.touched.add(MSG_DEP_KEY);
   let content = args.content;
 
   for (let index = 0; index < plan.length; index++) {
@@ -257,6 +318,7 @@ async function runApply(
     content = applyRegexScriptsCore(content, coreScripts, {
       placement,
       depth: ctx.depth,
+      ...behaviorContext,
       evalTemplate: (text) => {
         try {
           return evalTemplate(snap, text, ctx, recorder);

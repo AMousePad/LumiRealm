@@ -12,7 +12,7 @@ interface ModuleScriptIdentity {
   readonly sourceIndex: number;
   readonly sourceRowIndex: number;
   readonly order?: number;
-  readonly hasFlagActions: boolean;
+  readonly requiresRuntimeAction: boolean;
 }
 
 export type ModuleDisplayStep =
@@ -122,7 +122,7 @@ export function buildModuleDisplayPlan(
         : { kind: 'script', script };
     }
 
-    if (idMatches.length > 0 || identity.hasFlagActions) {
+    if (idMatches.length > 0 || identity.requiresRuntimeAction) {
       return {
         kind: 'skip',
         script,
@@ -130,6 +130,9 @@ export function buildModuleDisplayPlan(
       };
     }
 
+    if (!identity.requiresRuntimeAction) {
+      return { kind: 'script', script };
+    }
     const action = actionFromLiveScript({
       findRegex: script.find_regex,
       flag: script.flags,
@@ -203,9 +206,13 @@ function readModuleIdentity(
     ...(typeof order === 'number' && Number.isFinite(order)
       ? { order }
       : {}),
-    hasFlagActions:
-      Array.isArray(metadata['flag_actions'])
-      && metadata['flag_actions'].length > 0,
+    requiresRuntimeAction:
+      metadata['at_action'] === 'emo'
+      || metadata['at_action'] === 'inject'
+      || (
+        Array.isArray(metadata['flag_actions'])
+        && metadata['flag_actions'].includes('inject')
+      ),
   };
 }
 

@@ -355,6 +355,11 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
       const atActions = coerceAtActionsFromScripts(
         Array.isArray(m.regex) ? m.regex : [],
         `module:${env.id}`,
+      ).filter(
+        (action) =>
+          action.directAction === 'emo'
+          || action.directAction === 'inject'
+          || action.flagActions?.includes('inject') === true,
       );
       const lua_scripts = triggers.map((t) => {
         const tEff = (t as { effect?: readonly unknown[] }).effect ?? [];

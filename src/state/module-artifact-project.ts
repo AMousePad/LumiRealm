@@ -8,8 +8,10 @@ import type {
 import {
   TRANSFORMED_FLAG,
   detectAtAction,
+  getRegexMatchActions,
   normaliseRisuFlag,
   normalizeDisplayReplaceString,
+  normalizeMatchActionDisplayReplaceString,
   pickSubstituteMacroMode,
 } from '../core/mappers/regex.js';
 
@@ -222,22 +224,49 @@ export function projectModuleRegexEntries(
     }
     const ruleType = typeof eo['type'] === 'string' ? eo['type'] : 'editdisplay';
     const { placement, target, disabled } = riskCustomScriptTypeToLumi(ruleType);
-    if (target === 'display' && replaceString.length > 0) {
-      replaceString = normalizeModuleDisplayReplaceString(
-        replaceString,
-        eo[TRANSFORMED_FLAG] === true,
-      );
-    }
     const ableFlagRaw = eo['ableFlag'];
     const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null
       ? true
       : !!ableFlagRaw;
     const rawFlag = typeof eo['flag'] === 'string' ? eo['flag'] : undefined;
     const normalisedFlag = normaliseRisuFlag(rawFlag, ableFlag);
+    const directAction = detectAtAction(replaceString);
+    const matchActions = getRegexMatchActions(
+      directAction,
+      normalisedFlag.actions,
+    );
+    const movesMatch = matchActions.includes('move_top')
+      || matchActions.includes('move_bottom');
+    replaceString = replaceString.replaceAll('$n', '\n');
+    if (
+      replaceString.endsWith('>')
+      && !normalisedFlag.actions.includes('no_end_nl')
+    ) {
+      replaceString += '\n';
+    }
+    const repeatPosition = matchActions.includes('repeat_back')
+      ? replaceString.split(' ', 2)[1]
+      : undefined;
+    if (target === 'display' && replaceString.length > 0) {
+      replaceString = normalizeMatchActionDisplayReplaceString(
+        replaceString,
+        matchActions,
+        directAction,
+        eo[TRANSFORMED_FLAG] === true,
+      );
+    } else if (directAction === 'move_top') {
+      replaceString = replaceString.replace('@@move_top ', '');
+    } else if (directAction === 'move_bottom') {
+      replaceString = replaceString.replace('@@move_bottom ', '');
+    }
     let flags = normalisedFlag.flag;
     const findHasCbs = findRegex.indexOf('{{') >= 0;
-    if (findHasCbs) flags = flags.replace(/u/g, '');
-    if (flags.length === 0) flags = 'g';
+    const resolveFindCbs = normalisedFlag.actions.includes('cbs');
+    if (findHasCbs && resolveFindCbs) flags = flags.replace(/u/g, '');
+    if (movesMatch) {
+      flags = flags.replace(/g/g, '');
+    }
+    if (flags.length === 0) flags = 'u';
     const ruleNameRaw = comment.length > 0 ? comment : `rule_${sortBase + 1}`;
     out.push({
       name: ruleNameRaw,
@@ -253,13 +282,18 @@ export function projectModuleRegexEntries(
       max_depth: target === 'prompt' && ruleType === 'editinput' ? 0 : null,
       trim_strings: [],
       run_on_edit: false,
-      substitute_macros: pickSubstituteMacroMode(replaceString, findHasCbs),
+      substitute_macros: movesMatch
+        ? 'none'
+        : pickSubstituteMacroMode(replaceString, false),
       disabled,
       // Risu sorts <order N> descending, Lumi reads sort_order ASC: negate.
       sort_order: 1000 + sortBase - (normalisedFlag.order ?? 0) * 100000,
       description: `From .risum module: ${moduleName}`,
       folder: `Module: ${moduleName}`,
       metadata: {
+        ...(matchActions.length > 0 ? { match_actions: matchActions } : {}),
+        ...(repeatPosition !== undefined ? { repeat_position: repeatPosition } : {}),
+        ...(resolveFindCbs ? { resolve_find_macros: true } : {}),
         _risu: {
           module_id: moduleId,
           source_type: ruleType,
@@ -270,6 +304,7 @@ export function projectModuleRegexEntries(
           ...(normalisedFlag.actions.length > 0
             ? { flag_actions: normalisedFlag.actions }
             : {}),
+          ...(directAction ? { at_action: directAction } : {}),
         },
       },
     });
