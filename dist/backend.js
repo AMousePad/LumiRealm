@@ -38681,8 +38681,9 @@ function createLumiInterceptors(deps) {
       const hasMarker = /\u2605[A-Z_]+\u2605|###[A-Z_]+###/.test(ctx.template);
       const chatEnv = ctx.env.chat;
       const sourceHint = ctx.sourceHint;
+      const characterPromptSource = sourceHint?.startsWith("prompt_source:character.") === true;
       log8.trace(`macroInterceptor.enter #${callId} chat=${chatId ?? "<none>"} active_present=${activeBefore} ` + `commit=${ctx.commit} phase=${ctx.phase} sourceHint=${sourceHint ?? "<none>"} userId=${ctx.userId ?? "<none>"} ` + `tmpl_len=${ctx.template.length} has_marker=${hasMarker} ` + `lumi_messageCount=${chatEnv?.messageCount ?? "?"} lumi_lastMessageId=${chatEnv?.lastMessageId ?? "?"} ` + `tmpl_head=${JSON.stringify(templateHead)}`);
-      if (!ctx.template.includes("{{")) {
+      if (!characterPromptSource && !ctx.template.includes("{{")) {
         log8.trace(`macroInterceptor.exit #${callId} path=no_cbs elapsed=${Date.now() - t0}ms`);
         return;
       }
