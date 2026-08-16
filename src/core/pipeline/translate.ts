@@ -14,8 +14,6 @@ import type { LoreBook } from "../schemas/lorebook.js";
 import type { LumiCharacter, LumiRegexScript, LumiWorldBook, LumiWorldBookEntry } from "../lumiverse/types.js";
 import type { LumiBundle, ScriptPackEntry, TranslationManifest, UntranslatedSummary } from "./types.js";
 import { TranslationError } from "../errors.js";
-import { CatalogIndex } from "../cbs/catalog/loader.js";
-import { rewriteText } from "../cbs/rewrite/text.js";
 import { buildRisuPayload } from "./risu-payload.js";
 import { prepareBackgroundHtmlForRuntime } from "../mappers/background-html.js";
 import {
@@ -38,9 +36,6 @@ export interface TranslateCharxOptions {
   readonly uuid?: () => string;
   readonly includeAssets?: boolean;
   readonly mode?: TranslateMode;
-  /** DEPRECATED — use `mode` instead. */
-  readonly rewriteCbs?: boolean;
-  readonly catalog?: CatalogIndex;
   readonly emitRegex?: boolean;
   readonly emitTriggers?: boolean;
   readonly emitBgHtml?: boolean;
@@ -68,6 +63,7 @@ export function translateFromStoredSource(
     cardJsonText: null,
     moduleBytes: null,
     moduleEnvelope,
+    sidecar: null,
     assets: new Map<string, Uint8Array>(),
     xMeta: new Map<string, unknown>(),
     oversizedEntries: [],
@@ -119,6 +115,26 @@ function expandInlineDataUriAssets(
   return synthesized;
 }
 
+/** The exact lore list the importer fed to `mapLoreBook`. Export re-derives its
+ *  baseline through this so the two directions cannot drift on the
+ *  module-lore-wins rule. */
+export function resolveSourceLoreEntries(
+  card: unknown,
+  module: unknown | null,
+): readonly LoreBook[] {
+  const moduleLore = module && typeof module === "object"
+    ? (module as { lorebook?: unknown }).lorebook
+    : null;
+  if (Array.isArray(moduleLore) && moduleLore.length > 0) {
+    return moduleLore as readonly LoreBook[];
+  }
+  const data = (card as { data?: unknown } | null)?.data;
+  const book = data && typeof data === "object"
+    ? (data as { character_book?: unknown }).character_book
+    : undefined;
+  return extractCharacterBookEntries(book, []);
+}
+
 export function translateFromCharxBundle(
   bundle: ReturnType<typeof readCharx>,
   opts: TranslateCharxOptions = {},
@@ -133,24 +149,12 @@ export function translateFromCharxBundle(
     bundle.assets as Map<string, Uint8Array>,
   );
 
-  const mode: TranslateMode =
-    opts.mode !== undefined
-      ? opts.mode
-      : opts.rewriteCbs === false
-        ? "diagnostic"
-        : opts.catalog
-          ? "full"
-          : "diagnostic";
+  const mode: TranslateMode = opts.mode ?? "diagnostic";
 
   const wantFull = mode === "full" || mode === "diagnostic";
   const wantRegex = opts.emitRegex ?? wantFull;
   const wantTriggers = opts.emitTriggers ?? wantFull;
   const wantBgHtml = opts.emitBgHtml ?? wantFull;
-
-  const wantRewriteCbs =
-    opts.rewriteCbs !== undefined
-      ? opts.rewriteCbs
-      : mode === "full" && Boolean(opts.catalog);
 
   for (const iss of bundle.issues) issues.push(iss);
 
@@ -261,18 +265,7 @@ export function translateFromCharxBundle(
     void mapLoreBook; // re-export referenced from elsewhere; keep import live
   }
 
-  let rewriteNote: string | null = null;
-  let finalCharacter = charMap.character;
-  if (wantRewriteCbs) {
-    if (!opts.catalog) {
-      throw new TranslationError(
-        "pipeline/missing_catalog",
-        "rewriteCbs / mode=full requires a CatalogIndex via opts.catalog",
-      );
-    }
-    finalCharacter = applyCbsRewrite(charMap.character, opts.catalog);
-    rewriteNote = "character text fields rewritten via LumiRealm CBS rename + block lowering";
-  }
+  const finalCharacter = charMap.character;
 
   const charRegexScripts = filterValidCustomScripts(
     charMap.extracted.customScripts,
@@ -282,13 +275,11 @@ export function translateFromCharxBundle(
   const charRegexOut = wantRegex
     ? mapRegex(charRegexScripts, {
         characterId: charMap.character.id, now, uuid, origin: "character",
-        ...(opts.catalog ? { catalog: opts.catalog } : {}),
       })
     : { rows: [] as LumiRegexScript[], skipped: [] as AtAtAction[], issues: [] as { path: string; message: string }[] };
   const moduleRegexOut = wantRegex
     ? mapRegex(moduleRegexScripts, {
         characterId: charMap.character.id, now, uuid, origin: "module",
-        ...(opts.catalog ? { catalog: opts.catalog } : {}),
       })
     : { rows: [] as LumiRegexScript[], skipped: [] as AtAtAction[], issues: [] as { path: string; message: string }[] };
   const regexScriptsRaw: readonly LumiRegexScript[] = [...charRegexOut.rows, ...moduleRegexOut.rows];
@@ -341,7 +332,6 @@ export function translateFromCharxBundle(
     ? buildBackgroundHtmlScript(charMap.extracted.backgroundHTML ?? null, {
         characterId: charMap.character.id,
         characterName: charMap.character.name,
-        ...(opts.catalog ? { catalog: opts.catalog } : {}),
       })
     : { file: null as ScriptPackEntry | null, issues: [] as { path: string; message: string }[] };
   for (const iss of bgHtml.issues) issues.push(iss);
@@ -516,13 +506,6 @@ export function translateFromCharxBundle(
     requires,
   };
 
-  if (rewriteNote) {
-    const ext = finalCharacter.extensions["_lumirealm"] as Record<string, unknown> | undefined;
-    if (ext && Array.isArray(ext["translation_notes"])) {
-      (ext["translation_notes"] as unknown[]).push(rewriteNote);
-    }
-  }
-
   const preferredAvatar = pickPreferredAvatar(bundle.card, bundle.assets);
 
   return {
@@ -625,22 +608,7 @@ function inferMimeFromExt(ext: string, uri: string): string {
   }
 }
 
-function applyCbsRewrite(c: LumiCharacter, catalog: CatalogIndex): LumiCharacter {
-  return {
-    ...c,
-    description: rewriteText(c.description, catalog),
-    personality: rewriteText(c.personality, catalog),
-    scenario: rewriteText(c.scenario, catalog),
-    first_mes: rewriteText(c.first_mes, catalog),
-    mes_example: rewriteText(c.mes_example, catalog),
-    creator_notes: rewriteText(c.creator_notes, catalog),
-    system_prompt: rewriteText(c.system_prompt, catalog),
-    post_history_instructions: rewriteText(c.post_history_instructions, catalog),
-    alternate_greetings: c.alternate_greetings.map((s) => rewriteText(s, catalog)),
-  };
-}
-
-function extractCharacterBookEntries(
+export function extractCharacterBookEntries(
   raw: unknown,
   issues: { path: string; message: string }[],
 ): LoreBook[] {

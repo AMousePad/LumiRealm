@@ -6,11 +6,16 @@ export interface HostMessage {
   readonly id: string;
   readonly content: string;
   readonly role: 'user' | 'assistant' | 'system' | string;
+  readonly createdAt?: number;
+  readonly speaker?: string;
+  readonly greetingIndex?: number;
 }
 
 export interface HostCharacter {
   readonly id: string;
+  readonly name?: string;
   readonly description?: string;
+  readonly firstMessage?: string;
   readonly worldBookIds?: readonly string[];
   // Lumi image_id column; null when no avatar uploaded.
   readonly imageId?: string | null;
@@ -145,6 +150,9 @@ export interface HostApi {
 export interface TriggerRuntimePreloaded {
   /** Output of `loadVars(api)` — `$`-prefixed internal key shape. */
   readonly varsCache?: Record<string, string>;
+  /** Risu's application-global chat variables (Lumiverse macro_variables.global). */
+  readonly globalVars?: Readonly<Record<string, string>>;
+  readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   /** Output of `api.chat.getMessages()` — pre-Risu-frame-shift. Same shape
    *  the runtime would receive from Spindle directly. */
   readonly messagesRaw?: readonly HostMessage[];
@@ -154,6 +162,11 @@ export interface TriggerRuntimePreloaded {
 
 export interface TriggerRuntimeOpts {
   readonly displayMode?: boolean;
+  readonly displayData?: string;
+  readonly requestData?: readonly {
+    readonly role: string;
+    readonly content: string;
+  }[];
   readonly lowLevelAccess?: boolean;
   readonly characterId?: string | null;
   readonly binding?: string;

@@ -14,6 +14,7 @@ import { getCachedMessages } from '../interpreter/messages-cache.js';
 import { getRegexScriptsApi } from '../adapters/spindle-extras.js';
 import type { LlmMessage } from '../adapters/spindle-extras.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
+import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 
 export const PROMPT_REGEX_PHASE: PipelinePhase = 'commit';
 
@@ -38,10 +39,22 @@ async function fetchMessages(
   chatId: string,
   log: PromptRegexApplyDeps['log'],
   errMsg: PromptRegexApplyDeps['errMsg'],
-): Promise<readonly { id: string; role: 'system' | 'user' | 'assistant'; content: string }[]> {
+): Promise<readonly {
+  id: string;
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  greetingIndex?: number;
+}[]> {
   try {
     const msgs = await spindle.chat.getMessages(chatId);
-    return msgs.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+    return msgs.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      ...(typeof m.extra?.greeting_index === 'number'
+        ? { greetingIndex: m.extra.greeting_index }
+        : {}),
+    }));
   } catch (err) {
     log.error(`prompt-regex fetchMessages chat=${chatId} failed: ${errMsg(err)}`);
     return [];
@@ -73,6 +86,7 @@ export async function buildBackendPipelineInput(
       global?: Record<string, string>;
     };
     chat_variables?: Record<string, string>;
+    activeGreetingIndex?: number;
   };
   const mv = metadata.macro_variables ?? {};
   const chatVars = metadata.chat_variables;
@@ -86,6 +100,10 @@ export async function buildBackendPipelineInput(
   const screenDims = getScreenDims(userId);
   const cachedMessages = getCachedMessages(chatId);
   const activeLore = getActiveLorebook(chatId);
+  const selectedGreeting =
+    messages.length > 0 && messages[0]!.role !== 'user'
+      ? messages[0]!.content
+      : undefined;
 
   const charImageUrl = imageUrlFromId(
     (character as { image_id?: unknown } | null | undefined)?.image_id as string | null | undefined,
@@ -118,6 +136,10 @@ export async function buildBackendPipelineInput(
       creatorNotes: character?.creator_notes ?? '',
       firstMessage: character?.first_mes ?? '',
       alternateGreetings: character?.alternate_greetings ?? [],
+      selectedAlternateGreetingIndex: toRisuFirstMessageIndex(
+        metadata.activeGreetingIndex ?? messages[0]?.greetingIndex,
+      ),
+      ...(selectedGreeting !== undefined ? { selectedGreeting } : {}),
       ...(assetIndexes ? { additionalAssets: assetIndexes.assets } : {}),
       ...(assetIndexes ? { emotionImages: assetIndexes.emotions } : {}),
       ...(charImageUrl ? { image: charImageUrl } : {}),
@@ -174,6 +196,17 @@ export async function applyPromptRegexToArray(
     if (messages[i] && isHistory(messages[i]!)) historyIndices.push(i);
   }
   const depthByIndex = new Map<number, number>();
+  const hasRepeatBack = scripts.some(
+    (script) => script.matchActions?.includes('repeat_back') === true,
+  );
+  const originalContent = hasRepeatBack
+    ? messages.map((message) =>
+        typeof message.content === 'string' ? message.content : undefined,
+      )
+    : [];
+  const historyPositionByIndex = hasRepeatBack
+    ? new Map<number, number>()
+    : null;
   // Per-message Risu chat index: history turns are 0-based in chat-history order
   // (Risu's editprocess loop `index`, index.svelte.ts:817-818). Non-history blocks
   // (system / WI / preset depth injections) have no message context → -1.
@@ -188,6 +221,7 @@ export async function applyPromptRegexToArray(
   const risuIndexByArrayIndex = new Map<number, number>();
   for (let pos = 0; pos < historyIndices.length; pos++) {
     depthByIndex.set(historyIndices[pos]!, historyIndices.length - 1 - pos);
+    historyPositionByIndex?.set(historyIndices[pos]!, pos);
     risuIndexByArrayIndex.set(historyIndices[pos]!, pos - 1);
   }
 
@@ -221,9 +255,30 @@ export async function applyPromptRegexToArray(
       risuIdx,
       risuIdx >= 0 && msg.role !== 'system' ? msg.role : undefined,
     );
+    const previousContent = (() => {
+      if (!hasRepeatBack || risuIdx < 0) return undefined;
+      for (
+        let pos = (historyPositionByIndex!.get(i) ?? 0) - 1;
+        pos >= 1;
+        pos--
+      ) {
+        const previousIndex = historyIndices[pos]!;
+        const previous = messages[previousIndex]!;
+        if (previous.role === msg.role) {
+          return originalContent[previousIndex];
+        }
+      }
+      return originalContent[historyIndices[0]!];
+    })();
 
     if (typeof msg.content === 'string') {
-      const next = applyRegexScriptsCore(msg.content, scripts, { placement, depth, evalTemplate, reResolveAfterRule: true });
+      const next = applyRegexScriptsCore(msg.content, scripts, {
+        placement,
+        depth,
+        evalTemplate,
+        reResolveAfterRule: true,
+        ...(previousContent !== undefined ? { previousContent } : {}),
+      });
       if (next !== msg.content) {
         messages[i] = { ...msg, content: next };
         changed = true;
@@ -234,7 +289,13 @@ export async function applyPromptRegexToArray(
       const nextParts = parts.map((rawPart) => {
         const part = rawPart as { type?: unknown; text?: unknown };
         if (part?.type === 'text' && typeof part.text === 'string') {
-          const next = applyRegexScriptsCore(part.text, scripts, { placement, depth, evalTemplate, reResolveAfterRule: true });
+          const next = applyRegexScriptsCore(part.text, scripts, {
+            placement,
+            depth,
+            evalTemplate,
+            reResolveAfterRule: true,
+            ...(previousContent !== undefined ? { previousContent } : {}),
+          });
           if (next !== part.text) {
             partsChanged = true;
             return { ...part, text: next };
@@ -265,6 +326,7 @@ interface RawRegexRow {
   min_depth?: unknown;
   max_depth?: unknown;
   trim_strings?: unknown;
+  metadata?: unknown;
 }
 
 function rowToPromptScript(r: unknown): RegexCoreScript | null {
@@ -274,17 +336,39 @@ function rowToPromptScript(r: unknown): RegexCoreScript | null {
   if (!isPrompt) return null;
   if (typeof row.find_regex !== 'string') return null;
   const mode = row.substitute_macros;
+  const metadata = row.metadata && typeof row.metadata === 'object'
+    ? row.metadata as Readonly<Record<string, unknown>>
+    : undefined;
+  const rawMatchActions = metadata?.['match_actions'];
+  const matchActions = Array.isArray(rawMatchActions)
+    ? rawMatchActions.filter(
+        (action): action is 'move_top' | 'move_bottom' | 'repeat_back' =>
+          action === 'move_top'
+          || action === 'move_bottom'
+          || action === 'repeat_back',
+      )
+    : [];
   return {
     find_regex: row.find_regex,
     replace_string: typeof row.replace_string === 'string' ? row.replace_string : '',
     flags: typeof row.flags === 'string' ? row.flags : 'g',
-    substitute_macros: mode === 'escaped' || mode === 'after' || mode === 'raw' ? mode : 'none',
+    substitute_macros:
+      mode === 'find' || mode === 'escaped' || mode === 'after' || mode === 'raw'
+        ? mode
+        : 'none',
     placement: Array.isArray(row.placement) ? (row.placement as string[]) : [],
     target: 'prompt',
     min_depth: typeof row.min_depth === 'number' ? row.min_depth : null,
     max_depth: typeof row.max_depth === 'number' ? row.max_depth : null,
     trim_strings: Array.isArray(row.trim_strings) ? (row.trim_strings as string[]) : [],
     disabled: false,
+    ...(matchActions.length > 0 ? { matchActions } : {}),
+    ...(typeof metadata?.['repeat_position'] === 'string'
+      ? { repeatPosition: metadata['repeat_position'] }
+      : {}),
+    ...(metadata?.['repeat_raw_match'] === true
+      ? { repeatRawMatch: true }
+      : {}),
   };
 }
 

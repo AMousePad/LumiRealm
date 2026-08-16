@@ -54,6 +54,7 @@ export interface LumiWorldBookEntry {
   group_weight: number;
   probability: number;
   scan_depth: number | null;
+  exclude_greeting: boolean;
   case_sensitive: boolean;
   match_whole_words: boolean;
   automation_id: string | null;
@@ -86,7 +87,7 @@ export type LumiRegexPlacement = "user_input" | "ai_output" | "world_info" | "re
 export type LumiRegexScope = "global" | "character" | "chat";
 
 /** Macro-substitution mode — matches [Lumiverse src/types/regex-script.ts]. */
-export type LumiRegexMacroMode = "none" | "raw" | "escaped" | "after";
+export type LumiRegexMacroMode = "none" | "find" | "raw" | "escaped" | "after";
 
 // Lumiverse src/types/regex-script.ts
 export interface LumiRegexScript {

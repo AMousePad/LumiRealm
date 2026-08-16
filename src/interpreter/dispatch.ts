@@ -26,7 +26,6 @@ export const GENERATION_STARTED_BINDINGS: readonly RisuBinding[] = [
 
 export const GENERATION_ENDED_BINDINGS: readonly RisuBinding[] = [
   'output',
-  'display',
 ];
 
 export interface ActiveCard {

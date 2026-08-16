@@ -1,6 +1,6 @@
 // Asset macros. Risu source: parser.svelte.ts.
 // Always return HTML when the asset resolves; `ctx.commit` is a side-effect gate, not a phase signal.
-// `raw` is an alias of `path` registered via the alias walk at macros.ts boot.
+// `raw` is an alias of `path` registered by the evaluator's catalog alias walk.
 
 import type { CharacterAsset, MacroHandler, RisuRuntimeContext } from "../../core/cbs/index.js";
 import { registry } from "../registry.js";

@@ -1,9 +1,8 @@
 import { translateFromCharxBundle } from '../core/pipeline/index.js';
 import { readCharx } from '../core/charx/reader.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
-import { CURRENT_CHARACTER_SCHEMA_VERSION } from '../state/translator-migrations.js';
+import { CURRENT_CHARACTER_SCHEMA_VERSION } from '../migrations/character.js';
 import type { LumirealmStoredSource } from './types.js';
-import { CatalogIndex, parseCatalog } from '../core/cbs/index.js';
 import {
   buildLumirealmData,
   preValidateRequires,
@@ -11,6 +10,7 @@ import {
   RisuConsentDeclinedError,
 } from './codec.js';
 import { type UserStorageLike } from './installer.js';
+import { readCharacterSidecar, mergeSidecarOverrides } from './sidecar-restore.js';
 import type {
   LumirealmCharacterData,
   LumirealmUserOverrides,
@@ -24,14 +24,6 @@ const logger = makeSafeLogger('import');
 const logInfo = (msg: string): void => logger.info(msg);
 const logWarn = (msg: string): void => logger.warn(msg);
 const logError = (msg: string): void => logger.error(msg);
-
-import catalogJson from '../core/cbs/catalog/risu-macros.json';
-let cachedCatalog: CatalogIndex | null = null;
-export function loadCatalog(): CatalogIndex {
-  if (cachedCatalog) return cachedCatalog;
-  cachedCatalog = new CatalogIndex(parseCatalog(catalogJson as unknown));
-  return cachedCatalog;
-}
 
 export interface ImportResult {
   readonly characterId: string;
@@ -58,7 +50,7 @@ export interface PendingRegexScript {
   readonly max_depth: number | null;
   readonly trim_strings: readonly string[];
   readonly run_on_edit: boolean;
-  readonly substitute_macros: 'none' | 'raw' | 'escaped' | 'after';
+  readonly substitute_macros: 'none' | 'find' | 'raw' | 'escaped' | 'after';
   readonly disabled: boolean;
   readonly sort_order: number;
   readonly description: string;
@@ -79,18 +71,26 @@ function makeLowLevelAccessConsentMessage(characterName: string): string {
   );
 }
 
+const MIME_BY_EXT: Readonly<Record<string, string>> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', jxl: 'image/jxl',
+  heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp',
+  apng: 'image/apng', ico: 'image/x-icon',
+
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  m4v: 'video/x-m4v', m4p: 'video/mp4', ogv: 'video/ogg',
+  mkv: 'video/x-matroska', avi: 'video/x-msvideo', '3gp': 'video/3gpp',
+  mpeg: 'video/mpeg', mpg: 'video/mpeg', ts: 'video/mp2t', flv: 'video/x-flv',
+
+  mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', wav: 'audio/wav',
+  m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac',
+  opus: 'audio/opus', weba: 'audio/webm',
+};
+
 export function guessMimeType(path: string): string {
-  const lower = path.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-  if (lower.endsWith('.gif')) return 'image/gif';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.mp3')) return 'audio/mpeg';
-  if (lower.endsWith('.ogg')) return 'audio/ogg';
-  if (lower.endsWith('.wav')) return 'audio/wav';
-  if (lower.endsWith('.mp4')) return 'video/mp4';
-  if (lower.endsWith('.webm')) return 'video/webm';
-  return 'application/octet-stream';
+  const dot = path.lastIndexOf('.');
+  if (dot < 0) return 'application/octet-stream';
+  return MIME_BY_EXT[path.slice(dot + 1).toLowerCase()] ?? 'application/octet-stream';
 }
 
 // Risu module asset names lack extensions, so Lumi stores files as `<uuid>.bin`
@@ -119,31 +119,114 @@ export function sniffImageMime(bytes: Uint8Array): { ext: string; mime: string }
   ) {
     return { ext: 'wav', mime: 'audio/wav' };
   }
+  if (
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x41 && b[9] === 0x56 && b[10] === 0x49 && b[11] === 0x20
+  ) {
+    return { ext: 'avi', mime: 'video/x-msvideo' };
+  }
+  if (b[0] === 0x42 && b[1] === 0x4d) {
+    return { ext: 'bmp', mime: 'image/bmp' };
+  }
+  if (b[0] === 0x66 && b[1] === 0x4c && b[2] === 0x61 && b[3] === 0x43) {
+    return { ext: 'flac', mime: 'audio/flac' };
+  }
+  if (b[0] === 0xff && b[1] === 0x0a) {
+    return { ext: 'jxl', mime: 'image/jxl' };
+  }
+  if (
+    b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x00 && b[3] === 0x0c &&
+    b[4] === 0x4a && b[5] === 0x58 && b[6] === 0x4c && b[7] === 0x20
+  ) {
+    return { ext: 'jxl', mime: 'image/jxl' };
+  }
   if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) {
     return { ext: 'mp3', mime: 'audio/mpeg' };
   }
   if (b[0] === 0xff && (b[1] === 0xfb || b[1] === 0xf3 || b[1] === 0xf2)) {
     return { ext: 'mp3', mime: 'audio/mpeg' };
   }
+  // ADTS AAC shares the 0xFF sync word with MP3, distinguished by the layer
+  // bits, so it has to be tested alongside rather than after a loose 0xFF match.
+  if (b[0] === 0xff && (b[1] === 0xf1 || b[1] === 0xf9)) {
+    return { ext: 'aac', mime: 'audio/aac' };
+  }
+  if (b[0] === 0x46 && b[1] === 0x4c && b[2] === 0x56 && b[3] === 0x01) {
+    return { ext: 'flv', mime: 'video/x-flv' };
+  }
+  if (b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x01 && b[3] === 0x00) {
+    return { ext: 'ico', mime: 'image/x-icon' };
+  }
+  // MPEG program stream pack header.
+  if (b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x01 && b[3] === 0xba) {
+    return { ext: 'mpeg', mime: 'video/mpeg' };
+  }
+  // MPEG-TS has no magic, only a 0x47 sync byte every 188. Two in a row is the
+  // conventional test; one alone matches far too much.
+  if (b.byteLength > 188 && b[0] === 0x47 && b[188] === 0x47) {
+    return { ext: 'ts', mime: 'video/mp2t' };
+  }
+  // Ogg is a container: the codec id sits after the 27-byte page header plus
+  // its segment table. Without this an .ogv is served as audio/ogg and never
+  // renders as video.
   if (b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) {
+    const head = latin1(b, 0, Math.min(b.byteLength, 64));
+    if (head.includes('theora')) return { ext: 'ogv', mime: 'video/ogg' };
+    if (head.includes('OpusHead')) return { ext: 'opus', mime: 'audio/opus' };
     return { ext: 'ogg', mime: 'audio/ogg' };
   }
+  // `ftyp` marks every ISOBMFF file, not just mp4: AVIF, HEIC, MOV and M4A all
+  // match here. The major brand at bytes 8..11 is what actually distinguishes
+  // them, and without it AVIF gets served as video/mp4 and renders as a broken
+  // <video> instead of an image.
   if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
-    return { ext: 'mp4', mime: 'video/mp4' };
+    const brand = String.fromCharCode(b[8]!, b[9]!, b[10]!, b[11]!);
+    switch (brand) {
+      case 'avif': case 'avis':
+        return { ext: 'avif', mime: 'image/avif' };
+      case 'heic': case 'heix': case 'hevc': case 'hevx':
+      case 'mif1': case 'msf1':
+        return { ext: 'heic', mime: 'image/heic' };
+      case 'qt  ':
+        return { ext: 'mov', mime: 'video/quicktime' };
+      case 'M4A ':
+        return { ext: 'm4a', mime: 'audio/mp4' };
+      case 'M4V ':
+        return { ext: 'm4v', mime: 'video/x-m4v' };
+      default:
+        if (brand.startsWith('3g')) return { ext: '3gp', mime: 'video/3gpp' };
+        return { ext: 'mp4', mime: 'video/mp4' };
+    }
   }
+  // EBML covers both WebM and Matroska; the DocType string in the header is the
+  // only cheap discriminator, and mislabelling .mkv as webm makes it unplayable.
   if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) {
+    const head = latin1(b, 4, Math.min(b.byteLength, 4096));
+    if (head.includes('matroska')) return { ext: 'mkv', mime: 'video/x-matroska' };
+    // Codec ids live in the Tracks element. Audio-only WebM served as video/webm
+    // still plays, but the type is wrong and downstream size/preview logic reads it.
+    const hasVideo = head.includes('V_');
+    if (!hasVideo && /A_(OPUS|VORBIS)/.test(head)) {
+      return { ext: 'weba', mime: 'audio/webm' };
+    }
     return { ext: 'webm', mime: 'video/webm' };
   }
   return null;
 }
 
+function latin1(b: Uint8Array, from: number, to: number): string {
+  let out = '';
+  for (let i = from; i < to; i++) out += String.fromCharCode(b[i]!);
+  return out;
+}
+
 function pickAvatar(
   assets: ReadonlyMap<string, Uint8Array>,
 ): { path: string; data: Uint8Array } | null {
-  const isImage = (p: string) => /\.(png|jpe?g|webp|gif)$/i.test(p);
+  const isImage = (p: string) => /\.(png|jpe?g|webp|gif|avif|jxl|heic|heif|bmp)$/i.test(p);
   // Canonical first.
   for (const [path, data] of assets) {
-    if (/^assets\/icon\/main\.(png|jpe?g|webp|gif)$/i.test(path)) return { path, data };
+    if (/^assets\/icon\/main\.(png|jpe?g|webp|gif|avif|jxl|heic|heif|bmp)$/i.test(path)) return { path, data };
   }
   // Any file inside an icon/ dir.
   for (const [path, data] of assets) {
@@ -227,13 +310,11 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
 
   progress('translating', 'Translating Risu card…', 0.15);
   const tTranslate = Date.now();
-  const catalog = loadCatalog();
   logInfo(`(2) translate: starting translateCharx bytes=${bytes.byteLength}`);
   const charxBundle = readCharx(bytes);
   const bundle: LumiBundle = translateFromCharxBundle(charxBundle, {
     sourceId: args.sourceId ?? `file:${args.fileName}`,
     mode: 'full',
-    catalog,
     // emitPackScripts triggers fengari/json.lua disk reads; those paths
     // are absent in dist/backend.js, so disable pack-script generation.
     emitPackScripts: false,
@@ -652,6 +733,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
           group_override: entry.group_override,
           group_weight: entry.group_weight,
           probability: entry.probability,
+          exclude_greeting: entry.exclude_greeting,
           case_sensitive: entry.case_sensitive,
           match_whole_words: entry.match_whole_words,
           use_regex: entry.use_regex,
@@ -775,8 +857,22 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
     module: charxBundle.moduleEnvelope?.module ?? null,
     path_to_image_id: { ...pathToImageId },
   };
+  // Our own archive: overlay the fields Risu's shapes cannot carry. Everything
+  // else already arrived through the normal translate path above, so storage
+  // stays identical to a plain .charx import.
+  const sidecarOverlay = readCharacterSidecar(charxBundle.sidecar);
+  if (sidecarOverlay) {
+    mergeSidecarOverrides(userOverrides, sidecarOverlay);
+    logInfo(
+      `(9) lumirealm sidecar applied: ${sidecarOverlay.applied.length} field(s) ` +
+        `[${sidecarOverlay.applied.slice(0, 8).join(', ')}]`,
+    );
+  }
+  const basePayload = sidecarOverlay?.backgroundHtmlSource !== undefined
+    ? { ...bundle.risuPayload, background_html_source: sidecarOverlay.backgroundHtmlSource }
+    : bundle.risuPayload;
   const lumirealmData = buildLumirealmData(
-    bundle.risuPayload,
+    basePayload,
     args.extensionVersion,
     storedRegexScripts,
     assetIndex,    // populated above via spindle.images.upload
@@ -786,13 +882,16 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
     storedSource,
     CURRENT_CHARACTER_SCHEMA_VERSION,
   );
+  const withTranslations = sidecarOverlay?.translations !== undefined
+    ? { ...lumirealmData, translations: sidecarOverlay.translations as never }
+    : lumirealmData;
   try {
     // display_owner: true MUST match writeLumirealm. The host gates FE-owned display on
     // character.extensions.lumirealm.display_owner, so omitting it imports an unowned
     // character that silently dead-zones (quirks §1.44).
     await args.spindle.characters.update(
       characterId,
-      { extensions: { [LUMIREALM_EXT_KEY]: { ...lumirealmData, display_owner: true } } },
+      { extensions: { [LUMIREALM_EXT_KEY]: { ...withTranslations, display_owner: true } } },
       args.userId,
     );
   } catch (err) {
@@ -809,7 +908,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   return {
     characterId,
     characterName: bundle.character.name,
-    lumirealm: lumirealmData,
+    lumirealm: withTranslations,
     imageIds,
     pendingRegexScripts,
     warnings,

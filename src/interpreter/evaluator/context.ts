@@ -1,6 +1,5 @@
-// Builds EvaluatorCtx for in-worker pipeline runs. Parallel to
-// macros.tsbuildRuntimeContext but takes a direct input (no RPC overhead).
-// Var writes fire a best-effort Spindle writeback for cross-pass visibility.
+// Builds EvaluatorCtx directly for in-worker pipeline runs. Var writes fire a
+// best-effort Spindle writeback for cross-pass visibility.
 
 import type {
   FunctionRegistry,
@@ -14,13 +13,21 @@ import type { EvaluatorCtx } from "./types.js";
 import type { AssetIndexEntry } from "../../payload/types.js";
 import { normalizeRoleToLumi } from "../../util/role-coerce.js";
 
+import manifest from "../../../spindle.json" with { type: "json" };
+
+// Impersonated, not detected. Cards version-gate on {{metadata::major}}. Inlined
+// at build time, so editing the manifest needs a rebuild to take effect.
+export const RISU_APP_VERSION = manifest.lumirealm.risu_app_version;
+// Lumi exposes no UI-locale setting. Constant rather than navigator.language so
+// the backend macro pass and the frontend display pass can't disagree.
+export const RISU_LANGUAGE = manifest.lumirealm.risu_language;
+
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI | undefined;
 
 const spindleGlobal: import("lumiverse-spindle-types").SpindleAPI | undefined =
   typeof spindle !== "undefined" ? spindle : undefined;
 
-// Session-scoped; known deviation from Risu which clears per-pass.
-const sessionFunctions: FunctionRegistry = (() => {
+function makeFunctionRegistry(): FunctionRegistry {
   const table = new Map<string, { body: string; argNames: readonly string[] }>();
   return {
     define: (name, body, argNames) => { table.set(name, { body, argNames }); },
@@ -28,7 +35,7 @@ const sessionFunctions: FunctionRegistry = (() => {
     delete: (name) => { table.delete(name); },
     has: (name) => table.has(name),
   };
-})();
+}
 
 // Per-chat write-through overlay; coherent setvar/getvar within a pipeline run.
 interface VarOverlay {
@@ -92,9 +99,8 @@ export interface VarReadRecorder {
 
 export const MSG_DEP_KEY = "__msg__";
 
-// Input shape for a single evaluator run. Mirrors the fields
-// buildRuntimeContext reads from MacroInvokeCtx.env plus direct identity +
-// messages slices pulled out of the extension's live ActiveCard state.
+// Input shape for a single evaluator run, including direct identity and
+// message slices pulled out of the extension's live ActiveCard state.
 export interface BuildEvaluatorCtxInput {
   readonly chatId: string;
   readonly userId?: string;
@@ -118,6 +124,7 @@ export interface BuildEvaluatorCtxInput {
     readonly firstMessage?: string;
     readonly alternateGreetings?: readonly string[];
     readonly selectedAlternateGreetingIndex?: number;
+    readonly selectedGreeting?: string;
     readonly additionalAssets?: Readonly<Record<string, AssetIndexEntry>>;
     readonly emotionImages?: Readonly<Record<string, AssetIndexEntry>>;
     // Risu parser.svelte.ts
@@ -352,6 +359,9 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     firstMessage: card.firstMessage ?? "",
     alternateGreetings: card.alternateGreetings ?? [],
     selectedAlternateGreetingIndex: card.selectedAlternateGreetingIndex ?? -1,
+    ...(card.selectedGreeting !== undefined
+      ? { selectedGreeting: card.selectedGreeting }
+      : {}),
     type: "character" as const,
     additionalAssets: indexToCharacterAssets(card.additionalAssets),
     emotionImages: indexToCharacterAssets(card.emotionImages),
@@ -363,14 +373,9 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
 
   const lorebook: readonly LorebookEntry[] = input.lorebook ?? [];
 
-  const functions: FunctionRegistry = commit
-    ? sessionFunctions
-    : {
-        define: () => { /* dry-fire: no-op */ },
-        get: (name) => sessionFunctions.get(name),
-        delete: () => { /* dry-fire: no-op */ },
-        has: (name) => sessionFunctions.has(name),
-      };
+  // Risu creates this table inside each risuChatParser call. Recursive calls
+  // share it through parser arguments, but independent templates never do.
+  const functions = makeFunctionRegistry();
 
   const rng = recorder
     ? { random: () => { recorder.volatile = true; return Math.random(); } }
@@ -380,6 +385,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     : { now: () => Date.now() };
 
   const out: EvaluatorCtx = {
+    chatId,
     vars,
     identity,
     character,
@@ -402,8 +408,8 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     lorebook,
     jailbreakToggle: false,
     maxContext: Number(input.system?.maxContext ?? 0),
-    language: "",
-    appVersion: "",
+    language: RISU_LANGUAGE,
+    appVersion: RISU_APP_VERSION,
     // Risu cbs.ts,1375. Backend populates from screen-dims-cache when available.
     screenWidth: Number(input.screenWidth ?? 0),
     screenHeight: Number(input.screenHeight ?? 0),

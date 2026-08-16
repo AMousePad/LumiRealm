@@ -3,9 +3,10 @@ import type { AssetIndexEntry } from '../payload/types.js';
 import type { HostMessage, HostWorldInfoEntry } from '../interpreter/host.js';
 import type { RuntimeAtAtAction } from '../interpreter/at-actions-runtime.js';
 import type { CompiledTriggerEntry } from '../interpreter/dispatcher.js';
+import type { TriggerScript } from '../core/schemas/triggerscript.js';
 
 export interface DisplayLuaTrigger {
-  readonly source: { readonly effect?: ReadonlyArray<{ readonly type?: string }> };
+  readonly source: TriggerScript;
   readonly luaCode: string;
 }
 
@@ -23,6 +24,7 @@ export interface DisplaySnapshotCharacter {
   readonly firstMessage: string;
   readonly alternateGreetings: readonly string[];
   readonly selectedAlternateGreetingIndex: number;
+  readonly selectedGreeting?: string;
   readonly additionalAssets: Readonly<Record<string, AssetIndexEntry>>;
   readonly emotionImages: Readonly<Record<string, AssetIndexEntry>>;
   readonly image: string;

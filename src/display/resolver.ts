@@ -8,7 +8,14 @@ import type {
   SpindleDisplayContext,
 } from 'lumiverse-spindle-types';
 import { runPipeline, type RunPipelineInput } from '../interpreter/evaluator/pipeline.js';
-import type { VarReadRecorder } from '../interpreter/evaluator/context.js';
+import {
+  MSG_DEP_KEY,
+  type VarReadRecorder,
+} from '../interpreter/evaluator/context.js';
+import {
+  getRuntimeAtActionDependencies,
+  isRowlessAtAction,
+} from '../interpreter/at-actions-runtime.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import {
   getDisplaySnapshot,
@@ -20,6 +27,14 @@ import {
 import { type FeRegexScript } from './regex-apply.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
+import { runDisplayTriggerChain } from './trigger-runner.js';
+import {
+  withCurrentDisplayMessage,
+  resolveHostDisplayMessageIndex,
+  resolveRisuDisplayMessageIndex,
+  type DisplayRuntimeEffectSink,
+} from './host-shim.js';
+import { buildModuleDisplayPlan } from './module-action-plan.js';
 const log = makeSafeLogger('display-resolver');
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
@@ -48,19 +63,7 @@ function buildInput(
   content: string,
   context: SpindleDisplayContext,
 ): RunPipelineInput {
-  const dyn = context.dynamicMacros;
-  // The host's dynamicMacros.chat_index is its chunked-render-window position,
-  // which drifts below our full-history lastmessageid on long chats. Reconstruct
-  // the absolute index from our own count + depth so chat_index/lastmessageid
-  // gates (Risu cbs.ts indexes both off chat.message[]) hold at any length.
-  const lastIdx = snap.chat.messages.length - 1;
-  const chatIndexStr = dyn?.chat_index;
-  const idxOverride = typeof context.depth === 'number' && context.depth >= 0
-    ? lastIdx - context.depth
-    : (typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)
-      ? parseInt(chatIndexStr, 10) - 1
-      : undefined);
-  const role = context.role ?? dyn?.role;
+  const role = context.role ?? context.dynamicMacros?.role;
   return {
     template: content,
     phase: 'display',
@@ -81,7 +84,7 @@ function buildInput(
     legacyMediaFindings: snap.legacyMediaFindings,
     modulesByNamespace: snap.modulesByNamespace,
     lorebook: snap.lorebook,
-    ...(idxOverride !== undefined ? { currentMessageIndexOverride: idxOverride } : {}),
+    currentMessageIndexOverride: resolveRisuDisplayMessageIndex(snap, context),
     ...(role ? { currentMessageRoleOverride: role } : {}),
   };
 }
@@ -174,50 +177,165 @@ async function fetchBackendApply(args: SpindleDisplayScriptsArgs): Promise<strin
   }
 }
 
-function runApply(
+const warnedActionBindings = new Set<string>();
+
+function warnActionBinding(scriptId: string, reason: string): void {
+  const key = `${scriptId}\u0000${reason}`;
+  if (warnedActionBindings.has(key)) return;
+  if (warnedActionBindings.size >= 256) warnedActionBindings.clear();
+  warnedActionBindings.add(key);
+  log.warn(`applyScripts: skipped module row=${scriptId}: ${reason}`);
+}
+
+function scriptApplies(
+  script: FeRegexScript,
+  context: SpindleDisplayContext,
+): boolean {
+  if (script.disabled === true) return false;
+  const placement = context.isUser ? 'user_input' : 'ai_output';
+  if (!script.placement.includes(placement)) return false;
+  if (script.min_depth !== null && context.depth < script.min_depth) return false;
+  if (script.max_depth !== null && context.depth > script.max_depth) return false;
+  return true;
+}
+
+function toCoreScript(script: FeRegexScript): RegexCoreScript {
+  const matchActions = readRegexMatchActions(script.metadata);
+  return {
+    find_regex: script.find_regex,
+    replace_string: script.replace_string,
+    flags: script.flags,
+    substitute_macros: script.substitute_macros,
+    placement: script.placement,
+    target: 'display',
+    min_depth: script.min_depth,
+    max_depth: script.max_depth,
+    trim_strings: script.trim_strings,
+    ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
+    ...(matchActions.length > 0 ? { matchActions } : {}),
+    ...(typeof script.metadata?.['repeat_position'] === 'string'
+      ? { repeatPosition: script.metadata['repeat_position'] }
+      : {}),
+    ...(script.metadata?.['repeat_raw_match'] === true
+      ? { repeatRawMatch: true }
+      : {}),
+  };
+}
+
+function readRegexMatchActions(
+  metadata: Readonly<Record<string, unknown>> | undefined,
+): NonNullable<RegexCoreScript['matchActions']> {
+  const raw = metadata?.['match_actions'];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (action): action is 'move_top' | 'move_bottom' | 'repeat_back' =>
+      action === 'move_top'
+      || action === 'move_bottom'
+      || action === 'repeat_back',
+  );
+}
+
+function displayBehaviorContext(
+  snap: DisplaySnapshot,
+  context: SpindleDisplayContext,
+): {
+  readonly previousContent?: string;
+} {
+  const currentIndex = resolveHostDisplayMessageIndex(snap, context);
+  if (
+    typeof currentIndex !== 'number'
+    || !Number.isInteger(currentIndex)
+    || currentIndex <= 0
+  ) return {};
+  const role = context.role
+    ?? snap.messagesHost[currentIndex]?.role
+    ?? (context.isUser ? 'user' : 'assistant');
+  for (let index = currentIndex - 1; index >= 1; index--) {
+    const message = snap.messagesHost[index];
+    if (message?.role === role) {
+      return {
+        previousContent: message.content,
+      };
+    }
+  }
+  const greeting = snap.messagesHost[0]?.content;
+  return {
+    ...(greeting !== undefined ? { previousContent: greeting } : {}),
+  };
+}
+
+async function runApply(
   snap: DisplaySnapshot,
   args: SpindleDisplayScriptsArgs,
   recorder: VarReadRecorder,
-): string {
+  onEffect?: DisplayRuntimeEffectSink,
+): Promise<string> {
   const ctx = args.context;
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
   const scripts = args.scripts as readonly FeRegexScript[];
+  const plan = buildModuleDisplayPlan(scripts, snap.atActions);
+  const hasRepeatBack = plan.some(
+    (step) =>
+      step.kind === 'script'
+      && readRegexMatchActions(step.script.metadata).includes('repeat_back'),
+  );
+  const behaviorContext = hasRepeatBack
+    ? displayBehaviorContext(snap, ctx)
+    : {};
+  if (hasRepeatBack) recorder.touched.add(MSG_DEP_KEY);
+  let content = args.content;
 
-  const coreScripts: RegexCoreScript[] = scripts.map((script) => {
-    const preFind = args.resolvedFindPatterns?.[script.id];
-    const preReplace = args.resolvedReplacements?.[script.id];
-    return {
-      find_regex: script.find_regex,
-      replace_string: script.replace_string,
-      flags: script.flags,
-      substitute_macros: script.substitute_macros,
-      placement: script.placement,
-      target: 'display',
-      min_depth: script.min_depth,
-      max_depth: script.max_depth,
-      trim_strings: script.trim_strings,
-      ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
-      ...(preFind !== undefined ? { preResolvedFind: preFind } : {}),
-      ...(preReplace !== undefined ? { preResolvedReplace: preReplace } : {}),
-    };
-  });
-
-  return applyRegexScriptsCore(args.content, coreScripts, {
-    placement,
-    depth: ctx.depth,
-    evalTemplate: (text) => {
-      try {
-        return evalTemplate(snap, text, ctx, recorder);
-      } catch (err) {
-        recorder.volatile = true;
-        throw err;
-      }
-    },
-    reResolveAfterRule: true,
-  });
+  for (let index = 0; index < plan.length; index++) {
+    const step = plan[index]!;
+    if (step.kind === 'skip') {
+      warnActionBinding(step.script.id, step.reason);
+      continue;
+    }
+    if (step.kind === 'action') {
+      if (!scriptApplies(step.script, ctx)) continue;
+      const dependencies = getRuntimeAtActionDependencies(step.action);
+      if (dependencies.messages) recorder.touched.add(MSG_DEP_KEY);
+      if (dependencies.effects) recorder.volatile = true;
+      content = await runEditDisplayAtActions(
+        snap,
+        content,
+        ctx,
+        [step.action],
+        {
+          resolveTemplate: (text) =>
+            evalTemplate(snap, text, ctx, recorder),
+          ...(onEffect ? { onEffect } : {}),
+        },
+      );
+      continue;
+    }
+    const coreScripts = [toCoreScript(step.script)];
+    while (plan[index + 1]?.kind === 'script') {
+      const next = plan[++index]!;
+      if (next.kind === 'script') coreScripts.push(toCoreScript(next.script));
+    }
+    content = applyRegexScriptsCore(content, coreScripts, {
+      placement,
+      depth: ctx.depth,
+      ...behaviorContext,
+      evalTemplate: (text) => {
+        try {
+          return evalTemplate(snap, text, ctx, recorder);
+        } catch (err) {
+          recorder.volatile = true;
+          throw err;
+        }
+      },
+      reResolveAfterRule: true,
+    });
+  }
+  return content;
 }
 
-export function createDisplayResolver(writeback?: DisplayWritebackSink): SpindleDisplayResolver {
+export function createDisplayResolver(
+  writeback?: DisplayWritebackSink,
+  onEffect?: DisplayRuntimeEffectSink,
+): SpindleDisplayResolver {
   return {
     ready(chatId: string): boolean {
       return isDisplayResolutionReady(chatId);
@@ -231,21 +349,44 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
+        const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
+        const liveSnap = (snap.luaTriggers.length > 0 || rowlessAtActions.length > 0)
+          ? withCurrentDisplayMessage(snap, args.context, args.content)
+          : snap;
         let body = args.content;
-        if (snap.luaTriggers.length > 0) {
-          body = runPipeline(buildInput(snap, body, args.context), { recorder });
+        if (liveSnap.luaTriggers.length > 0) {
           body = await runEditDisplayChain(
-            snap,
+            liveSnap,
             body,
             args.context,
-            (t) => Promise.resolve(runPipeline(buildInput(snap, t, args.context), { recorder })),
+            (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })),
             (vars) => writeback?.(chatId, vars),
+            onEffect,
           );
         }
-        if (snap.atActions.length > 0) {
-          body = await runEditDisplayAtActions(snap, body, args.context);
+        const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
+        body = displayTriggerResult.content;
+        if (displayTriggerResult.ran) recorder.volatile = true;
+        body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
+        if (rowlessAtActions.length > 0) {
+          for (const action of rowlessAtActions) {
+            const dependencies = getRuntimeAtActionDependencies(action);
+            if (dependencies.messages) recorder.touched.add(MSG_DEP_KEY);
+            if (dependencies.effects) recorder.volatile = true;
+          }
+          body = await runEditDisplayAtActions(
+            liveSnap,
+            body,
+            args.context,
+            rowlessAtActions,
+            {
+              resolveTemplate: (text) =>
+                evalTemplate(liveSnap, text, args.context, recorder),
+              ...(onEffect ? { onEffect } : {}),
+            },
+          );
         }
-        feContent = runPipeline(buildInput(snap, body, args.context), { recorder });
+        feContent = body;
       } catch (err) {
         log.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;
@@ -328,7 +469,7 @@ export function createDisplayResolver(writeback?: DisplayWritebackSink): Spindle
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
-        feContent = runApply(snap, args, recorder);
+        feContent = await runApply(snap, args, recorder, onEffect);
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
         return null;

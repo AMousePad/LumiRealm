@@ -3,6 +3,9 @@ const ALLOWED_TAGS = new Set([
   'blockquote', 'ul', 'ol', 'li',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'a', 'img', 'span', 'div',
+  // Card and module descriptions lean on these for license / changelog blocks.
+  'details', 'summary',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td',
 ]);
 
 // Bodies are CDATA, not content: unwrap would leak CSS/JS as visible text.
@@ -131,13 +134,18 @@ function isAllowedUrl(url: string): boolean {
   }
 }
 
+// Numeric rather than Node.*: the `Node` global isn't guaranteed everywhere
+// this renders, but nodeType values are fixed by the DOM spec.
+const TEXT_NODE = 3;
+const ELEMENT_NODE = 1;
+
 function sanitizeNode(input: Node, target: Node, doc: Document): void {
   const node = input as ChildNode;
-  if (node.nodeType === Node.TEXT_NODE) {
+  if (node.nodeType === TEXT_NODE) {
     target.appendChild(doc.createTextNode((node as Text).data));
     return;
   }
-  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  if (node.nodeType !== ELEMENT_NODE) return;
   const el = node as Element;
   const tagName = el.tagName.toLowerCase();
   if (DROP_TAGS.has(tagName)) return;
@@ -178,7 +186,10 @@ export function renderDescription(raw: string): DocumentFragment {
   const frag = doc.createDocumentFragment();
   if (!raw) return frag;
   const html = blockMarkdownToHtml(raw);
-  const parsed = new DOMParser().parseFromString(`<div id="root">${html}</div>`, 'text/html');
+  // Inert document rather than DOMParser: same no-script-execution guarantee,
+  // one fewer global to depend on.
+  const parsed = doc.implementation.createHTMLDocument('');
+  parsed.body.innerHTML = `<div id="root">${html}</div>`;
   const sourceRoot = parsed.getElementById('root');
   if (!sourceRoot) {
     frag.appendChild(doc.createTextNode(raw));

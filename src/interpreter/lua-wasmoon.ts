@@ -1,7 +1,11 @@
 import jsonLuaSource from './lua-json.lua' with { type: 'text' };
 
 interface WasmoonEngine {
-  global: { set: (n: string, v: unknown) => void; get: (n: string) => unknown };
+  global: {
+    set: (n: string, v: unknown) => void;
+    get: (n: string) => unknown;
+    close?: () => void;
+  };
   doString: (s: string) => Promise<unknown>;
 }
 interface WasmoonFactory {
@@ -58,6 +62,38 @@ end
 
 function cbs(value)
   return cbsMain(value):await()
+end
+
+function getName(id)
+  return getNameMain(id):await()
+end
+
+function setName(id, value)
+  return setNameMain(id, value):await()
+end
+
+function getDescription(id)
+  return getDescriptionMain(id):await()
+end
+
+function setDescription(id, value)
+  return setDescriptionMain(id, value):await()
+end
+
+function getPersonaDescription(id)
+  return getPersonaDescriptionMain(id):await()
+end
+
+function getAuthorsNote(id)
+  return getAuthorsNoteMain(id):await()
+end
+
+function getCharacterFirstMessage(id)
+  return getCharacterFirstMessageMain(id):await()
+end
+
+function setCharacterFirstMessage(id, value)
+  return setCharacterFirstMessageMain(id, value):await()
 end
 
 local editRequestFuncs = {}
@@ -179,6 +215,13 @@ export async function executeWasmoon(
 ): Promise<unknown> {
   const entry = await getEngineEntry(opts.wasmoonKey);
   const run = entry.tail.then(async () => {
+    if (entry.code !== null && entry.code !== code) {
+      entry.engine.global.close?.();
+      const factory = await ensureFactory();
+      entry.engine = await factory.createEngine({ injectObjects: true });
+      entry.code = null;
+      entry.bound.clear();
+    }
     const engine = entry.engine;
     entry.current = globals;
     for (const name of Object.keys(globals)) {
@@ -186,7 +229,7 @@ export async function executeWasmoon(
       engine.global.set(name, (...args: unknown[]) => (entry.current[name] as (...a: unknown[]) => unknown)(...args));
       entry.bound.add(name);
     }
-    if (entry.code !== code) {
+    if (entry.code === null) {
       await engine.doString(PRELUDE + '\n' + code);
       entry.code = code;
     }

@@ -8,6 +8,10 @@ import {
 export interface DecodedRisum {
   readonly module: unknown;
   readonly assets: readonly Uint8Array[];
+  readonly icon?: {
+    readonly data: Uint8Array;
+    readonly ext: string;
+  };
 }
 
 export interface SchemaParseSuccess {
@@ -46,6 +50,7 @@ export interface ImageUploadResult {
 
 export interface ModuleUploaderDeps {
   readonly decodeRisum: (bytes: Uint8Array) => DecodedRisum;
+  readonly decodeCharx: (bytes: Uint8Array) => DecodedRisum;
   readonly parseSchema: (data: unknown) => SchemaParseResult;
   readonly newUuid: () => string;
   readonly requestConsent: (opts: ConsentRequest, userId: string) => Promise<{ confirmed: boolean }>;
@@ -88,12 +93,17 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
       `processModuleUpload: file=${fileName} bytes=${inputBytes} userId=${userId}`,
     );
     const tDecodeStart = Date.now();
-    const decoded = deps.decodeRisum(bytesIn);
-    // decodeRPack allocates fresh per-asset buffers, source no longer needed.
+    const isCharx = fileName.toLowerCase().endsWith('.charx');
+    const decoded = isCharx
+      ? deps.decodeCharx(bytesIn)
+      : deps.decodeRisum(bytesIn);
+    // Both decoders return independent per-asset buffers, so the source is no longer needed.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (bytesIn as any) = new Uint8Array(0);
     deps.log.info(
-      `processModuleUpload: decodeRisum done assets=${decoded.assets.length} elapsed=${Date.now() - tDecodeStart}ms`,
+      `processModuleUpload: decode ${isCharx ? 'CharX' : 'RisuM'} done ` +
+        `assets=${decoded.assets.length} icon=${decoded.icon ? 'yes' : 'no'} ` +
+        `elapsed=${Date.now() - tDecodeStart}ms`,
     );
     const parsed = deps.parseSchema(decoded.module);
     if (!parsed.success) {
@@ -313,6 +323,41 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
       );
     }
 
+    if (decoded.icon) {
+      const declaredExt = /^[a-z0-9]{1,10}$/i.test(decoded.icon.ext)
+        ? decoded.icon.ext.toLowerCase()
+        : '';
+      const sniff = deps.sniffImageMime(decoded.icon.data);
+      const ext = sniff?.ext ?? declaredExt;
+      const filename = ext ? `module-icon.${ext}` : 'module-icon';
+      try {
+        const result = await deps.uploadImageOne(
+          {
+            data: decoded.icon.data,
+            mime_type: sniff?.mime ?? deps.guessMimeType(filename),
+            filename,
+          },
+          userId,
+        );
+        if (typeof result?.id !== 'string' || result.id.length === 0) {
+          throw new Error('upload returned without an image id');
+        }
+        moduleBody.icon = result.id;
+        try {
+          await deps.appendToJournal(userId, moduleBody.id, [result.id]);
+        } catch (err) {
+          deps.log.warn(
+            `processModuleUpload: icon journal append failed module=${moduleBody.id}: ${deps.errMsg(err)}`,
+          );
+        }
+      } catch (err) {
+        moduleBody.icon = '';
+        deps.log.warn(
+          `processModuleUpload: module icon upload failed module=${moduleBody.id}: ${deps.errMsg(err)}`,
+        );
+      }
+    }
+
     const baseEnvelope: ModuleEnvelope = {
       schema_version: MODULE_SCHEMA_VERSION,
       id: moduleBody.id,
@@ -345,6 +390,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         `regex=${(moduleBody.regex ?? []).length} ` +
         `triggers=${(moduleBody.trigger ?? []).length} ` +
         `assets=${decoded.assets.length} ` +
+        `icon=${moduleBody.icon ? 'yes' : 'no'} ` +
         `assetUploadFailures=${assetUploadFailures} ` +
         `wb=${envelope.installed_world_book_id ?? '-'} ` +
         `elapsed=${Date.now() - t0}ms`,

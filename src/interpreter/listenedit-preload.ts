@@ -10,8 +10,11 @@
 // reused across the chain.
 
 import type { HostApi, HostMessage, TriggerRuntimePreloaded } from './host.js';
-import type { LorebookCache } from './runtime/lorebook.js';
-import { loadVars } from './runtime/chat-state.js';
+import {
+  sortLorebookEntriesBySourceOrder,
+  type LorebookCache,
+} from './runtime/lorebook.js';
+import { loadGlobalVars, loadVars } from './runtime/chat-state.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
 const log = makeSafeLogger('listenEdit.preload');
@@ -53,6 +56,7 @@ export function resetListenEditPreloadCache(): void {
  *
  * Returns a fully-populated TriggerRuntimePreloaded:
  *   - varsCache (loadVars)
+ *   - globalVars (macro_variables.global)
  *   - messagesRaw (api.chat.getMessages , pre-frame-shift; runtime.ts owns
  *     buildRisuChatView per-trigger so each Lua sees an identical view)
  *   - lorebook (api.characters.get → api.worldInfo.entries.list)
@@ -77,11 +81,12 @@ export async function preloadForListenEditChain(
   }
 
   const t0 = Date.now();
-  // Fetch all three in parallel , they're independent IPCs; serial fetching
-  // would pay 3× wall clock for no reason. Promise.allSettled so a single
+  // Fetch all four in parallel , they're independent IPCs; serial fetching
+  // would pay 4× wall clock for no reason. Promise.allSettled so a single
   // failure doesn't bring down the rest.
-  const [varsResult, msgsResult, charResult] = await Promise.allSettled([
+  const [varsResult, globalVarsResult, msgsResult, charResult] = await Promise.allSettled([
     loadVars(api, chatId),
+    loadGlobalVars(api),
     api.chat.getMessages(),
     characterId && api.characters?.get
       ? api.characters.get(characterId)
@@ -92,6 +97,10 @@ export async function preloadForListenEditChain(
   let varsCache: Record<string, string> | undefined;
   if (varsResult.status === 'fulfilled') varsCache = varsResult.value;
   else log.warn(`loadVars failed — ${(varsResult.reason as { message?: string })?.message ?? varsResult.reason}`);
+
+  let globalVars: Record<string, string> | undefined;
+  if (globalVarsResult.status === 'fulfilled') globalVars = globalVarsResult.value;
+  else log.warn(`loadGlobalVars failed — ${(globalVarsResult.reason as { message?: string })?.message ?? globalVarsResult.reason}`);
 
   let messagesRaw: readonly HostMessage[] | undefined;
   if (msgsResult.status === 'fulfilled') messagesRaw = msgsResult.value;
@@ -113,11 +122,13 @@ export async function preloadForListenEditChain(
       );
       for (const r of lists) {
         if (r.status !== 'fulfilled' || !r.value.res || !Array.isArray(r.value.res.data)) continue;
-        for (const e of r.value.res.data) {
-          entries.push({ ...e, worldBookId: e.worldBookId || r.value.bid });
-        }
+        entries.push(...sortLorebookEntriesBySourceOrder(
+          r.value.res.data.map((e) => ({
+            ...e,
+            worldBookId: e.worldBookId || r.value.bid,
+          })),
+        ));
       }
-      entries.sort((a, b) => Number(b.orderValue || 0) - Number(a.orderValue || 0));
       lorebook = { entries, primaryBookId: bookIds[0] ?? null };
       log.debug(`lorebook fetched chat=${chatId ?? '<none>'} books=${bookIds.length} entries=${entries.length} elapsed=${Date.now() - tLore}ms`);
     } else {
@@ -129,6 +140,7 @@ export async function preloadForListenEditChain(
 
   const snapshot: TriggerRuntimePreloaded = {
     ...(varsCache !== undefined ? { varsCache } : {}),
+    ...(globalVars !== undefined ? { globalVars } : {}),
     ...(messagesRaw !== undefined ? { messagesRaw } : {}),
     ...(lorebook !== undefined ? { lorebook } : {}),
   };
@@ -140,6 +152,7 @@ export async function preloadForListenEditChain(
   log.trace(`preload.done chat=${chatId ?? '<none>'} parallel_fetch=${tParallel}ms ` +
       `total=${Date.now() - t0}ms ` +
       `vars=${varsCache ? Object.keys(varsCache).length : '<failed>'} ` +
+      `globalVars=${globalVars ? Object.keys(globalVars).length : '<failed>'} ` +
       `msgs=${messagesRaw?.length ?? '<failed>'} ` +
       `lore_entries=${lorebook?.entries.length ?? '<failed>'} ` +
       `cached=${chatId ? 'yes' : 'no'}`,

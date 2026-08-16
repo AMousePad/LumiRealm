@@ -10,6 +10,8 @@ const _log = makeSafeLogger('runtime.setVar');
 export interface VarsState {
   // Keys are $-prefixed; loadVars/saveVars strip on persist.
   readonly varsCache: Record<string, string>;
+  readonly scriptstateDefaults?: Readonly<Record<string, string>>;
+  readonly tempVars?: Record<string, string>;
   // indent -> name -> value; deepest indent wins over varsCache.
   readonly localScopes: Map<number, Map<string, string>>;
   // Boxed so reference is shared across module boundaries.
@@ -43,15 +45,22 @@ export function makeVarsApi(state: VarsState): VarsApi {
     const fromCache = state.varsCache['$' + n];
     if (fromCache !== undefined) return toStr(fromCache);
     // Risu chatVar.svelte.ts: consult defaultVariables before returning 'null'.
-    const defaults = getScriptstateDefaultsByCharacter(state.characterId);
+    const defaults = state.scriptstateDefaults
+      ?? getScriptstateDefaultsByCharacter(state.characterId);
     const fromDefaults = defaults?.[n];
     if (fromDefaults !== undefined) return toStr(fromDefaults);
+    const fromTemp = state.tempVars?.[n];
+    if (fromTemp !== undefined) return toStr(fromTemp);
     return 'null';
   }
 
   function setVar(name: string, value: unknown): void {
     const n = toStr(name);
     const v = toStr(value);
+    if (state.tempVars) {
+      state.tempVars[n] = v;
+      return;
+    }
     state.varsCache['$' + n] = v;
     state.dirty.value = true;
     _log.info(`$${n}=${JSON.stringify(v.slice(0, 80))}`);

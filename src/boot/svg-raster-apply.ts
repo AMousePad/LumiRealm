@@ -3,6 +3,7 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { BackendToFrontend } from '../types/messages.js';
+import { ensureRegexOwnership } from '../state/regex-ownership.js';
 
 export interface ApplySvgRasterIndexDeps {
   readonly updateLumirealm: (
@@ -106,31 +107,34 @@ export function createApplySvgRasterIndex(
         `applySvgRasterIndex: re-dispatching install_regex_scripts char=${characterId} ` +
           `count=${lumiManaged.length} (post-SVG-substitution)`,
       );
+      const pending = lumiManaged.map((r) => ({
+        name: (r as { name?: string }).name ?? '',
+        script_id: (r as { script_id?: string }).script_id ?? '',
+        find_regex: (r as { find_regex?: string }).find_regex ?? '',
+        replace_string: (r as { replace_string?: string }).replace_string ?? '',
+        flags: (r as { flags?: string }).flags ?? '',
+        placement: (r as { placement?: readonly string[] }).placement ?? [],
+        scope: (r as { scope?: string }).scope ?? 'character',
+        scope_id: (r as { scope_id?: string }).scope_id ?? characterId,
+        target: (r as { target?: string }).target ?? 'display',
+        min_depth: (r as { min_depth?: number | null }).min_depth ?? null,
+        max_depth: (r as { max_depth?: number | null }).max_depth ?? null,
+        trim_strings: (r as { trim_strings?: readonly string[] }).trim_strings ?? [],
+        run_on_edit: (r as { run_on_edit?: boolean }).run_on_edit ?? false,
+        substitute_macros: (r as { substitute_macros?: string }).substitute_macros ?? 'none',
+        disabled: (r as { disabled?: boolean }).disabled ?? false,
+        sort_order: (r as { sort_order?: number }).sort_order ?? 0,
+        description: (r as { description?: string }).description ?? '',
+        folder: (r as { folder?: string }).folder ?? '',
+        metadata: { ...((r as { metadata?: Record<string, unknown> }).metadata ?? {}) },
+      })) as Extract<BackendToFrontend, { type: 'install_regex_scripts' }>['scripts'];
+      const ownership = await ensureRegexOwnership(spindle.regex_scripts, pending, userId);
       send({
         type: 'install_regex_scripts',
         characterId,
         characterName,
-        scripts: lumiManaged.map((r) => ({
-          name: (r as { name?: string }).name ?? '',
-          script_id: (r as { script_id?: string }).script_id ?? '',
-          find_regex: (r as { find_regex?: string }).find_regex ?? '',
-          replace_string: (r as { replace_string?: string }).replace_string ?? '',
-          flags: (r as { flags?: string }).flags ?? '',
-          placement: (r as { placement?: readonly string[] }).placement ?? [],
-          scope: (r as { scope?: string }).scope ?? 'character',
-          scope_id: (r as { scope_id?: string }).scope_id ?? characterId,
-          target: (r as { target?: string }).target ?? 'display',
-          min_depth: (r as { min_depth?: number | null }).min_depth ?? null,
-          max_depth: (r as { max_depth?: number | null }).max_depth ?? null,
-          trim_strings: (r as { trim_strings?: readonly string[] }).trim_strings ?? [],
-          run_on_edit: (r as { run_on_edit?: boolean }).run_on_edit ?? false,
-          substitute_macros: (r as { substitute_macros?: string }).substitute_macros ?? 'none',
-          disabled: (r as { disabled?: boolean }).disabled ?? false,
-          sort_order: (r as { sort_order?: number }).sort_order ?? 0,
-          description: (r as { description?: string }).description ?? '',
-          folder: (r as { folder?: string }).folder ?? '',
-          metadata: { ...((r as { metadata?: Record<string, unknown> }).metadata ?? {}) },
-        })) as never,
+        scripts: ownership.scripts,
+        cleanupStale: ownership.allOwned,
       }, userId);
     }
 

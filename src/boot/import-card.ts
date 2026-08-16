@@ -5,6 +5,7 @@ import type { PendingImportCompletion } from '../handlers/import.js';
 import type { UserStorageLike } from '../payload/installer.js';
 import { importCard, type SpindleImportApi } from '../payload/import.js';
 import { RisuConsentDeclinedError } from '../payload/codec.js';
+import { ensureRegexOwnership } from '../state/regex-ownership.js';
 
 export interface ImportCardOrchestratorDeps {
   readonly extensionVersion: string;
@@ -181,6 +182,11 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
       });
 
       const scriptsToInstall = result.pendingRegexScripts;
+      const ownership = await ensureRegexOwnership(
+        spindle.regex_scripts,
+        scriptsToInstall,
+        userId,
+      );
       const byTarget = new Map<string, number>();
       for (const s of scriptsToInstall) byTarget.set(s.target, (byTarget.get(s.target) ?? 0) + 1);
       const targetSummary = [...byTarget.entries()].map(([t, n]) => `${t}=${n}`).join(',') || 'none';
@@ -192,7 +198,8 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
         type: 'install_regex_scripts',
         characterId: result.characterId,
         characterName: result.characterName,
-        scripts: scriptsToInstall,
+        scripts: ownership.scripts,
+        cleanupStale: ownership.allOwned,
       }, userId);
 
       const hasPendingSvgRaster = result.pendingSvgRasters.length > 0;

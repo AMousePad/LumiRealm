@@ -1793,7 +1793,7 @@
     "lumiverseCollision": {
       "name": "lastmessageid",
       "compatible": false,
-      "notes": "Risu: chat.message[].length - 1 (greeting excluded) → -1 on greeting-only. Lumi: messages.length - 1 (greeting included as msg 0) → 0 on greeting-only. Off-by-one. Card-level literal comparisons like {{equal::lastmessageid::-1}} require Risu-frame — the rewriter emits {{risu_lastmessageid}} and our handler returns the Risu-frame value."
+      "notes": "Risu: chat.message[].length - 1 (greeting excluded) → -1 on greeting-only. Lumi: messages.length - 1 (greeting included as msg 0) → 0 on greeting-only. Card-level literal comparisons like {{equal::lastmessageid::-1}} require the compatibility evaluator's Risu-frame handler."
     },
     "risuFile": "src/ts/cbs.ts",
     "risuLine": 737,
@@ -2094,7 +2094,7 @@
     "lumiverseCollision": null,
     "risuFile": "src/ts/cbs.ts",
     "risuLine": 1863,
-    "summary": "Host metadata. Supported: imateapot, mobile/local/node, risutype, modelname/modelshortname/modelinternalid. Other keys return 'Error: X is not a valid metadata key.'.",
+    "summary": "Host metadata. Supported: imateapot, mobile/local/node, risutype, modelname/modelshortname/modelinternalid, version, majorversion/majorver/major, maxcontext, language/locale/lang, browserlanguage/browserlocale/browserlang. Unsupported (still error): modelformat, modelprovider, modeltokenizer.",
     "notes": ""
   },
   {
@@ -3321,22 +3321,6 @@
     "risuLine": 1082,
     "summary": "Legacy {#if cond\ncontent#} form. Returns trimmed content if cond is not the empty string, 0, or -1.",
     "notes": "Deprecated Risu form; preserved for compatibility."
-  },
-  {
-    "name": "unknown",
-    "aliases": [],
-    "category": "control_flow",
-    "argShape": "any + body",
-    "minArgs": 0,
-    "maxArgs": -1,
-    "pure": true,
-    "readsState": [],
-    "writesState": [],
-    "lumiverseCollision": null,
-    "risuFile": "packages/core/src/cbs/rewrite/blocks.ts",
-    "risuLine": 1,
-    "summary": "Fallback handler for unrecognized block kinds. Returns body verbatim without interpretation, matching Risu's \"nothing\" type fall-through.",
-    "notes": "Synthetic name emitted by the rewriter when it sees {{#someUnknownBlock}}…{{/someUnknownBlock}}. Not a Risu macro."
   },
   {
     "name": "deletevar",

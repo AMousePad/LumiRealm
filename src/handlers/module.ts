@@ -4,6 +4,7 @@ import type { SpindleCharactersApi } from '../state/lumirealm-character.js';
 import type { OrphanDetectDeps } from '../state/orphan-detect.js';
 import { buildLiveImageIdSet } from '../state/orphan-detect.js';
 import type { Handler } from './types.js';
+import { completeRegexInstall } from '../migrations/install-coordinator.js';
 
 export type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 
@@ -46,6 +47,12 @@ export interface ModuleHandlerDeps {
   readonly charactersAttachedTo: (moduleId: string, userId: string) => Promise<readonly string[]>;
   readonly refreshAttachedModule: (characterId: string, env: ModuleEnvelope, userId: string) => Promise<void>;
   readonly pushModules: (userId: string) => Promise<void>;
+  readonly setGlobalModules: (moduleIds: readonly string[], userId: string) => Promise<void>;
+  readonly recordGlobalModuleArtifacts: (
+    moduleId: string,
+    artifacts: { regexScriptIds?: readonly string[]; worldBookId?: string | null },
+    userId: string,
+  ) => Promise<void>;
   readonly pushAttachedForCharacter: (characterId: string, userId: string) => Promise<void>;
   readonly charactersApi: () => SpindleCharactersApi;
   readonly updateLumirealm: (
@@ -73,6 +80,7 @@ export interface ModuleHandlerDeps {
 export function createModuleHandlers(deps: ModuleHandlerDeps): {
   readonly process_module_from_upload: Handler<'process_module_from_upload'>;
   readonly request_modules: Handler<'request_modules'>;
+  readonly set_global_modules: Handler<'set_global_modules'>;
   readonly delete_module: Handler<'delete_module'>;
   readonly attach_module: Handler<'attach_module'>;
   readonly detach_module: Handler<'detach_module'>;
@@ -133,6 +141,10 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       }
     },
     request_modules: async (_msg, ctx) => {
+      await deps.pushModules(ctx.userId);
+    },
+    set_global_modules: async (msg, ctx) => {
+      await deps.setGlobalModules(msg.moduleIds, ctx.userId);
       await deps.pushModules(ctx.userId);
     },
     delete_module: async (msg, ctx) => {
@@ -261,14 +273,38 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       await deps.pushModules(ctx.userId);
     },
     module_artifacts_installed: async (msg, ctx) => {
+      // Global installs have no character to stash against; their ids go in the
+      // module index so teardown can delete exactly what was created.
+      if (msg.characterId === null) {
+        if (msg.ok) {
+          await deps.recordGlobalModuleArtifacts(
+            msg.moduleId,
+            { regexScriptIds: msg.regexScriptIds },
+            ctx.userId,
+          );
+        }
+        deps.log.info(
+          `module_artifacts_installed: global module=${msg.moduleId} ok=${msg.ok} ` +
+            `cleanup=${msg.cleanupCompleted} regex=${msg.regexScriptIds.length}`,
+        );
+        if (msg.requestId) {
+          completeRegexInstall(msg.requestId, ctx.userId, {
+            ok: msg.ok,
+            cleanupCompleted: msg.cleanupCompleted,
+          });
+        }
+        return;
+      }
       // FE finished its cookie-auth POSTs. Stash resulting resource ids on
       // the character's user_overrides for clean detach later.
       await deps.updateLumirealm(deps.charactersApi(), msg.characterId, ctx.userId, (cur) => {
         const wb = { ...(cur.user_overrides.attached_module_world_books ?? {}) };
         if (msg.worldBookId) wb[msg.moduleId] = msg.worldBookId;
         const rx = { ...(cur.user_overrides.attached_module_regex_script_ids ?? {}) };
-        if (msg.regexScriptIds.length > 0) rx[msg.moduleId] = msg.regexScriptIds;
-        else delete rx[msg.moduleId];
+        if (msg.ok) {
+          if (msg.regexScriptIds.length > 0) rx[msg.moduleId] = msg.regexScriptIds;
+          else delete rx[msg.moduleId];
+        }
         return {
           ...cur,
           user_overrides: deps.mergeUserOverrides(cur.user_overrides, {
@@ -285,9 +321,16 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       }
       deps.invalidateActiveForCharacter(msg.characterId, ctx.userId);
       deps.log.info(
-        `module_artifacts_installed: char=${msg.characterId} module=${msg.moduleId} ` +
-          `worldBookId=${msg.worldBookId ?? 'null'} regex=${msg.regexScriptIds.length}`,
+        `module_artifacts_installed: char=${msg.characterId} module=${msg.moduleId} ok=${msg.ok} ` +
+          `cleanup=${msg.cleanupCompleted} worldBookId=${msg.worldBookId ?? 'null'} ` +
+          `regex=${msg.regexScriptIds.length}`,
       );
+      if (msg.requestId) {
+        completeRegexInstall(msg.requestId, ctx.userId, {
+          ok: msg.ok,
+          cleanupCompleted: msg.cleanupCompleted,
+        });
+      }
     },
     module_artifacts_uninstalled: async (msg, _ctx) => {
       deps.log.info(

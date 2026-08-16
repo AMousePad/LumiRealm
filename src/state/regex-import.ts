@@ -1,8 +1,8 @@
 import type { BackendToFrontend, FrontendToBackend, PendingRegexScriptMsg } from '../types/messages.js';
 import type { parseDirectRegex } from '../payload/regex-direct-import.js';
 import type { mapRegex } from '../core/mappers/regex.js';
-import type { CatalogIndex } from '../core/cbs/catalog/loader.js';
 import type { LumiRegexScript } from '../core/lumiverse/types.js';
+import { ensureRegexOwnership } from './regex-ownership.js';
 
 export type ImportRegexMsg = Extract<FrontendToBackend, { type: 'import_regex' }>;
 
@@ -12,15 +12,14 @@ export interface RegexImporterDeps {
   readonly errMsg: (err: unknown) => string;
   readonly parseDirectRegex: typeof parseDirectRegex;
   readonly mapRegex: typeof mapRegex;
-  readonly loadCatalog: () => CatalogIndex;
+  readonly regexApi: Parameters<typeof ensureRegexOwnership>[0];
 }
 
 export interface RegexImporter {
   handle(msg: ImportRegexMsg, userId: string): Promise<void>;
 }
 
-// Marks rows as user-imported so the card-install pre-clean (which wipes
-// character-scoped rows on re-translate / migration) leaves them alone.
+// Marks rows as user-imported so verified card-row cleanup leaves them alone.
 function toPendingMsg(row: LumiRegexScript): PendingRegexScriptMsg {
   const risu = (row.metadata?.['_risu'] ?? {}) as Record<string, unknown>;
   return {
@@ -77,7 +76,6 @@ export function createRegexImporter(deps: RegexImporterDeps): RegexImporter {
         scope: characterId ? 'character' : 'global',
         scopeId: characterId,
         folder,
-        catalog: deps.loadCatalog(),
       });
     } catch (err) {
       fail(parsed.scripts.length, parsed.dropped, `regex translation failed: ${deps.errMsg(err)}`);
@@ -101,9 +99,25 @@ export function createRegexImporter(deps: RegexImporterDeps): RegexImporter {
       return;
     }
 
+    const ownership = await ensureRegexOwnership(deps.regexApi, scripts, userId);
+    if (!ownership.allOwned) {
+      deps.log.warn(
+        `import_regex: ownership incomplete unowned=${ownership.unowned} failed=${ownership.failed}; ` +
+          'REST import will continue without deleting anything',
+      );
+    }
+
     deps.send({
       type: 'standalone_regex_install',
-      ok: true, scripts, parsed: parsed.scripts.length, dropped, folder, characterId,
+      ok: ownership.allOwned,
+      scripts: ownership.scripts,
+      parsed: parsed.scripts.length,
+      dropped,
+      folder,
+      characterId,
+      ...(!ownership.allOwned
+        ? { reason: `regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}` }
+        : {}),
     }, userId);
   }
 

@@ -5,7 +5,6 @@ import { translateFromStoredSource } from '../core/pipeline/translate.js';
 import { prepareBackgroundHtmlForRuntime } from '../core/mappers/background-html.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
-import type { CatalogIndex } from '../core/cbs/catalog/loader.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import type { SvgRasterTask } from '../core/svg-rasterize.js';
 import {
@@ -14,14 +13,18 @@ import {
   type StoredRegexScript,
 } from '../payload/types.js';
 import { buildAssetIndexes } from '../payload/import.js';
+import {
+  LEGACY_ENTRY_HASH_FIELDS_V1,
+  computeEntrySourceHashWithFields,
+} from '../core/mappers/lorebook-hash.js';
 
 export interface LiveWorldBookEntry {
   readonly id: string;
+  readonly exclude_greeting: boolean;
   readonly extensions: Readonly<Record<string, unknown>> | null;
 }
 
 export interface MigrationDeps {
-  loadCatalog: () => CatalogIndex;
   installCharacterRegexScripts: (
     characterId: string,
     characterName: string,
@@ -46,6 +49,14 @@ export interface MigrationDeps {
   updateWorldBookEntryExtensions: (
     entryId: string,
     extensions: Readonly<Record<string, unknown>>,
+    userId: string,
+  ) => Promise<void>;
+  updateWorldBookEntryActivation: (
+    entryId: string,
+    input: {
+      readonly exclude_greeting: boolean;
+      readonly extensions: Readonly<Record<string, unknown>>;
+    },
     userId: string,
   ) => Promise<void>;
   // Walks Lumi's regex_scripts for character scope, applies transform per row's
@@ -106,6 +117,7 @@ export interface CharacterMigrationStep {
     | 'payload.background_html'
     | 'payload.triggers'
     | 'payload.lua_scripts'
+    | 'payload.at_actions'
     | 'attached_modules'
   )[];
   readonly apply: (
@@ -216,8 +228,82 @@ async function applyV7ReinstallRegex(
     return m?._risu?.source_type === 'divider';
   }).length;
   return {
-    nextEnvelope: args.envelope,
+    nextEnvelope: {
+      ...args.envelope,
+      regex_scripts: stored,
+    },
     notes: [`reinstalled ${stored.length} regex_script(s), dividers=${dividerCount}`],
+  };
+}
+
+async function applyV16RefreshRegexRuntime(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const refreshed = await applyV7ReinstallRegex(args, deps);
+  return {
+    nextEnvelope: {
+      ...refreshed.nextEnvelope,
+      payload: {
+        ...refreshed.nextEnvelope.payload,
+        at_actions: args.newBundle.risuPayload!.at_actions,
+      },
+    },
+    notes: [
+      ...refreshed.notes,
+      `runtime_actions=${args.newBundle.risuPayload!.at_actions.length}`,
+    ],
+  };
+}
+
+function normalizeRegexScriptId(raw: string): string {
+  return raw.toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
+}
+
+function ownedRegexScriptId(raw: string, index: number): string {
+  const normalized = normalizeRegexScriptId(raw) || `row_${index}`;
+  if (normalized.length <= 85) return `lr_owned_${normalized}`;
+  let hash = 2166136261;
+  for (const ch of normalized) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `lr_owned_${(hash >>> 0).toString(16)}_${normalized.slice(-80)}`;
+}
+
+async function applyV19MigrateRegexOwnership(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const stored = args.envelope.regex_scripts.map((script, index) => ({
+    ...script,
+    script_id: ownedRegexScriptId(script.script_id, index),
+    metadata: {
+      ...(script.metadata ?? {}),
+      // Lumiverse resolves regexInstalled through this alias, so references to
+      // the pre-migration generated id keep working after ownership changes.
+      imported_script_id: normalizeRegexScriptId(script.script_id),
+    },
+  }));
+  await deps.installCharacterRegexScripts(args.characterId, args.characterName, stored);
+  return {
+    nextEnvelope: { ...args.envelope, regex_scripts: stored },
+    notes: [`migrated ownership for ${stored.length} regex_script(s)`],
+  };
+}
+
+async function applyV20RepairRegexOwnershipCleanup(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const stored = args.envelope.regex_scripts.map((script) => ({
+    ...script,
+    metadata: { ...(script.metadata ?? {}) },
+  }));
+  await deps.installCharacterRegexScripts(args.characterId, args.characterName, stored);
+  return {
+    nextEnvelope: { ...args.envelope, regex_scripts: stored },
+    notes: [`verified ownership cleanup for ${stored.length} regex_script(s)`],
   };
 }
 
@@ -455,12 +541,10 @@ async function applyV12RecoverMissingRegex(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
-  // Migration's install_regex_scripts is a fire-and-forget send. When it never
-  // lands (FE not mounted during a boot/capture mass sweep) the version is
-  // still stamped CURRENT, so the card sits with zero Risu rows and is never
-  // retried. This step is idempotent: it reinstalls ONLY when the live rowset
-  // is empty, so cards that migrated correctly are a pure no-op (no write, no
-  // install, user disable/edit state untouched).
+  // Earlier migration installs were fire-and-forget. When one never landed,
+  // the version was still stamped and the card could remain without live rows.
+  // This historical recovery step is idempotent and reinstalls only an empty
+  // rowset; current installs use an acknowledged, verified handoff.
   if (!deps.applyCharacterRegexReplaceStringTransform) {
     return applyV7ReinstallRegex(args, deps);
   }
@@ -516,6 +600,117 @@ async function applyV13FixEscapedPerMessageGate(
     );
     return applyV7ReinstallRegex(args, deps);
   }
+  return {
+    nextEnvelope: args.envelope,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`,
+    ],
+  };
+}
+
+async function applyV15ExcludeGreetingPerEntry(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const targetBySourceHash = new Map<string, string>();
+  for (const entry of args.newBundle.worldBookEntries) {
+    const record = entry as unknown as Record<string, unknown>;
+    const extensions = entry.extensions as Record<string, unknown>;
+    const currentHash = extensions['_risu_source_hash'];
+    if (typeof currentHash !== 'string') continue;
+    const legacyHash = computeEntrySourceHashWithFields(
+      record,
+      LEGACY_ENTRY_HASH_FIELDS_V1,
+    );
+    targetBySourceHash.set(legacyHash, currentHash);
+    targetBySourceHash.set(currentHash, currentHash);
+  }
+  if (targetBySourceHash.size === 0) {
+    return {
+      nextEnvelope: args.envelope,
+      notes: ['no source-hashed entries in new bundle'],
+    };
+  }
+
+  const worldBookIds = await deps.getCharacterWorldBookIds(
+    args.characterId,
+    args.userId,
+  );
+  let scanned = 0;
+  let matched = 0;
+  let updated = 0;
+  let failed = 0;
+  for (const worldBookId of worldBookIds) {
+    const entries = await deps.listWorldBookEntries(worldBookId, args.userId);
+    scanned += entries.length;
+    for (const entry of entries) {
+      const extensions = (entry.extensions ?? {}) as Record<string, unknown>;
+      const storedHash = extensions['_risu_source_hash'];
+      if (typeof storedHash !== 'string') continue;
+      const currentHash = targetBySourceHash.get(storedHash);
+      if (!currentHash) continue;
+      matched += 1;
+      if (entry.exclude_greeting && storedHash === currentHash) continue;
+      try {
+        await deps.updateWorldBookEntryActivation(
+          entry.id,
+          {
+            exclude_greeting: true,
+            extensions: {
+              ...extensions,
+              _risu_source_hash: currentHash,
+            },
+          },
+          args.userId,
+        );
+        updated += 1;
+      } catch (err) {
+        failed += 1;
+        deps.log.warn(
+          `migrate(${args.characterId}) v15: update entry=${entry.id} failed: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
+  }
+  if (failed > 0) {
+    throw new Error(`failed to update ${failed}/${matched} matched lorebook entries`);
+  }
+  return {
+    nextEnvelope: args.envelope,
+    notes: [
+      `wbs=${worldBookIds.length}`,
+      `scanned=${scanned}`,
+      `matched=${matched}`,
+      `updated=${updated}`,
+    ],
+  };
+}
+
+async function applyV17UseFindMacroMode(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  if (!deps.applyCharacterRegexRowPatch) {
+    return applyV7ReinstallRegex(args, deps);
+  }
+  const result = await deps.applyCharacterRegexRowPatch(
+    args.characterId,
+    args.userId,
+    (row) => {
+      if (row['substitute_macros'] !== 'none') return null;
+      const metadata = row['metadata'] as {
+        _risu?: { flag_actions?: unknown };
+      } | undefined;
+      const actions = metadata?._risu?.flag_actions;
+      return Array.isArray(actions) && actions.includes('cbs')
+        ? { substitute_macros: 'find' }
+        : null;
+    },
+  );
+  if (result === null) return applyV7ReinstallRegex(args, deps);
   return {
     nextEnvelope: args.envelope,
     notes: [
@@ -595,6 +790,51 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
     touches: ['regex_scripts'],
     apply: applyV13FixEscapedPerMessageGate,
   },
+  // v14 was persisted by the rolled-back prompt-wide greeting migration.
+  // Keep it burned so installations that ran that build execute this corrected
+  // per-entry migration instead of treating it as already complete.
+  {
+    version: 15,
+    description:
+      'Mark each projected Risu lorebook entry to exclude the character greeting during activation.',
+    touches: ['world_book_entries'],
+    apply: applyV15ExcludeGreetingPerEntry,
+  },
+  {
+    version: 16,
+    description:
+      'Reinstall character regex rows with native move, repeat-back, and find-pattern macro actions.',
+    touches: ['regex_scripts', 'payload.at_actions'],
+    apply: applyV16RefreshRegexRuntime,
+  },
+  {
+    version: 17,
+    description:
+      'Store find-only macro parsing in the native regex macro mode.',
+    touches: ['regex_scripts'],
+    apply: applyV17UseFindMacroMode,
+  },
+  {
+    version: 18,
+    description:
+      'Refresh character repeat-back rows to preserve raw-match compatibility.',
+    touches: ['regex_scripts', 'payload.at_actions'],
+    apply: applyV16RefreshRegexRuntime,
+  },
+  {
+    version: 19,
+    description:
+      'Create extension-owned replacements before verified cleanup of legacy character regex rows.',
+    touches: ['regex_scripts'],
+    apply: applyV19MigrateRegexOwnership,
+  },
+  {
+    version: 20,
+    description:
+      'Remove verified legacy card rows after preserving both character and embedded-module regex sources.',
+    touches: ['regex_scripts'],
+    apply: applyV20RepairRegexOwnershipCleanup,
+  },
 ];
 
 export const CURRENT_CHARACTER_SCHEMA_VERSION: number =
@@ -627,7 +867,6 @@ export async function migrateCharacterIfNeeded(
       {
         sourceId: `migrate:${args.characterId}`,
         mode: 'full',
-        catalog: deps.loadCatalog(),
         emitPackScripts: false,
       },
     );

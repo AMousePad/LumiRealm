@@ -8,6 +8,15 @@ function register(name: string, handler: MacroHandler, description: string): voi
   registry.register({ name, handler, description, category: "Risu / Chat", scoped: false });
 }
 
+function selectedGreeting(ctx: Parameters<MacroHandler>[0]): string {
+  const character = ctx.character;
+  if (character.selectedGreeting !== undefined) return character.selectedGreeting;
+  return character.selectedAlternateGreetingIndex === -1
+    ? character.firstMessage
+    : (character.alternateGreetings[character.selectedAlternateGreetingIndex]
+      ?? character.firstMessage);
+}
+
 // Serialize using Risu's role vocabulary for CBS templates that inspect .role.
 function risuRole(r: "user" | "assistant" | "system"): "user" | "char" | "system" {
   return r === "assistant" ? "char" : r;
@@ -60,11 +69,19 @@ register("charhistory", (ctx) => {
 register("history", (ctx, a) => {
   const msgs = ctx.messages.all();
   if (a.length === 0) {
-    const fm = ctx.character.selectedAlternateGreetingIndex === -1
-      ? ctx.character.firstMessage
-      : (ctx.character.alternateGreetings[ctx.character.selectedAlternateGreetingIndex] ?? ctx.character.firstMessage);
-    const head = [{ role: "char" as const, data: fm, time: 0 }];
-    return makeArray([...head, ...msgs.map(toSerializableMsg)].map((v) => JSON.stringify(v)));
+    const fm = selectedGreeting(ctx);
+    const head = [{
+      role: "char" as const,
+      data: ctx.evaluate ? ctx.evaluate(fm) : fm,
+      time: 0,
+    }];
+    return makeArray([
+      ...head,
+      ...msgs.map((m) => ({
+        ...toSerializableMsg(m),
+        data: ctx.evaluate ? ctx.evaluate(m.content) : m.content,
+      })),
+    ].map((v) => JSON.stringify(v)));
   }
   const withRole = a.includes("role");
   return makeArray(msgs.map((m) => (withRole ? `${risuRole(m.role)}: ${m.content}` : m.content)));
@@ -87,10 +104,7 @@ register("previouscharchat", (ctx) => {
     const m = msgs[i];
     if (m && m.role === "assistant") return m.content;
   }
-  const c = ctx.character;
-  return c.selectedAlternateGreetingIndex === -1
-    ? c.firstMessage
-    : (c.alternateGreetings[c.selectedAlternateGreetingIndex] ?? c.firstMessage);
+  return selectedGreeting(ctx);
 }, "Last character (assistant) message; cbs walks from chat-end, others from currentMessageIndex-1.");
 
 // Risu cbs() with chatID=-1 returns '' (early exit). Outside cbs: walk from currentMessageIndex-1.
@@ -102,21 +116,17 @@ register("previoususerchat", (ctx) => {
     const m = msgs[i];
     if (m && m.role === "user") return m.content;
   }
-  const c = ctx.character;
-  return c.selectedAlternateGreetingIndex === -1
-    ? c.firstMessage
-    : (c.alternateGreetings[c.selectedAlternateGreetingIndex] ?? c.firstMessage);
+  return selectedGreeting(ctx);
 }, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
 
-// cbs.ts. Lumi collision; rewriter renames to `risu_lastmessage`.
-register("risu_lastmessage", (ctx) => {
+// cbs.ts.
+register("lastmessage", (ctx) => {
   const last = ctx.messages.last();
   return last?.content ?? "";
 }, "Content of the most recent message, regardless of role.");
 
-// cbs.ts. Lumi collision; off-by-one vs Lumi's native `lastmessageid`.
-// Rewriter emits `risu_lastmessageid`; this handler uses Risu's count-1 formula.
-register("risu_lastmessageid", (ctx) => {
+// Off-by-one vs Lumi's native implementation; this uses Risu's count-1 formula.
+register("lastmessageid", (ctx) => {
   const n = ctx.messages.count();
   return Math.max(-1, n - 1).toString();
 }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");

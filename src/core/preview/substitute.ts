@@ -27,7 +27,7 @@ export function substituteForPreview(template: string, ctx: PreviewSubstitutionC
     const name = (parts[0] ?? '').toLowerCase();
     if (name === 'user') return userName;
     if (name === 'char' || name === 'character') return charName;
-    if (name === 'getvar' || name === 'risu_getvar') {
+    if (name === 'getvar') {
       const key = parts[1] ?? '';
       const value = defaults[key];
       if (typeof value === 'string') return value;

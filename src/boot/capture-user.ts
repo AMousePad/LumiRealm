@@ -1,9 +1,10 @@
 export interface CaptureUserIdDeps {
   readonly capturedUserIds: Set<string>;
   readonly getSettingsForUser: (userId: string) => Promise<unknown>;
+  readonly seedGlobalModules: (userId: string) => Promise<void>;
   readonly runMassModuleMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runMassCharacterMigrationIfNeeded: (userId: string) => Promise<void>;
-  readonly runMacroUnprefixSweepIfNeeded: (userId: string) => Promise<void>;
+  readonly runRetiredMacroMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runVarScopeMigrationIfNeeded: (userId: string) => Promise<void>;
   // Sends the initial missing-permissions notification to the newly captured
   // user. Without this, a user who connects after permissions finish loading
@@ -19,9 +20,10 @@ export function makeCaptureUserId(deps: CaptureUserIdDeps): (userId: string | un
   const {
     capturedUserIds,
     getSettingsForUser,
+    seedGlobalModules,
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
-    runMacroUnprefixSweepIfNeeded,
+    runRetiredMacroMigrationIfNeeded,
     runVarScopeMigrationIfNeeded,
     log,
     errMsg,
@@ -38,6 +40,11 @@ export function makeCaptureUserId(deps: CaptureUserIdDeps): (userId: string | un
     void getSettingsForUser(userId).catch((err) => {
       log.warn(`captureUserId: settings preload failed for user=${userId}: ${errMsg(err)}`);
     });
+    // Before any chat can open, or the first active card is built with an empty
+    // global list and silently misses those modules until the next module push.
+    void seedGlobalModules(userId).catch((err) => {
+      log.warn(`captureUserId: global module seed failed for user=${userId}: ${errMsg(err)}`);
+    });
     // Modules first since characters attach to them, then characters.
     setTimeout(() => {
       void (async () => {
@@ -52,9 +59,9 @@ export function makeCaptureUserId(deps: CaptureUserIdDeps): (userId: string | un
           log.warn(`captureUserId: mass character migration failed: ${errMsg(err)}`);
         }
         try {
-          await runMacroUnprefixSweepIfNeeded(userId);
+          await runRetiredMacroMigrationIfNeeded(userId);
         } catch (err) {
-          log.warn(`captureUserId: macro un-prefix sweep failed: ${errMsg(err)}`);
+          log.warn(`captureUserId: retired macro migration failed: ${errMsg(err)}`);
         }
         try {
           await runVarScopeMigrationIfNeeded(userId);

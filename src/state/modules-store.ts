@@ -100,6 +100,31 @@ export interface ModuleIndexEntry {
 export interface ModuleIndex {
   readonly schema_version: typeof MODULE_SCHEMA_VERSION;
   readonly entries: readonly ModuleIndexEntry[];
+  /** Applied to every character, on top of that character's attached ids. */
+  readonly global_module_ids?: readonly string[];
+  /** Regex rows a global install created, per module. Teardown deletes exactly
+   *  these, so rows the user made themselves are never touched. */
+  readonly global_module_regex_script_ids?: Readonly<Record<string, readonly string[]>>;
+  /** World books a global install added to `world_books.setGlobal`, per module.
+   *  Tracked separately because the book may also have been added by the user,
+   *  and we must only remove what we added. */
+  readonly global_module_world_books?: Readonly<Record<string, string>>;
+}
+
+// Globals first so a character's own attachments resolve later and win on
+// conflict, matching how per-character config overrides defaults elsewhere.
+export function resolveEffectiveModuleIds(
+  globalIds: readonly string[] | undefined,
+  attachedIds: readonly string[] | undefined,
+): readonly string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [...(globalIds ?? []), ...(attachedIds ?? [])]) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 
@@ -257,9 +282,87 @@ export async function deleteModule(
   }
   const index = await readIndex(storage, userId);
   const next = removeFromIndex(index, moduleId);
-  if (next !== index) {
-    await writeIndex(storage, userId, next);
+  const globals = next.global_module_ids ?? [];
+  // A deleted module must not linger as a global, or it silently fails to
+  // resolve on every character forever.
+  const prunedGlobals = globals.filter((id) => id !== moduleId);
+  const withGlobals = prunedGlobals.length === globals.length
+    ? next
+    : { ...next, global_module_ids: prunedGlobals };
+  if (withGlobals !== index) {
+    await writeIndex(storage, userId, withGlobals);
   }
+}
+
+export async function readGlobalModuleIds(
+  storage: UserStorageLike,
+  userId: string | undefined,
+): Promise<readonly string[]> {
+  const index = await readIndex(storage, userId);
+  const ids = index.global_module_ids;
+  if (!Array.isArray(ids)) return [];
+  const known = new Set(index.entries.map((e) => e.id));
+  return ids.filter((id) => typeof id === 'string' && known.has(id));
+}
+
+export async function writeGlobalModuleIds(
+  storage: UserStorageLike,
+  userId: string | undefined,
+  ids: readonly string[],
+): Promise<{ applied: readonly string[]; added: readonly string[]; removed: readonly string[] }> {
+  const index = await readIndex(storage, userId);
+  const known = new Set(index.entries.map((e) => e.id));
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const id of ids) {
+    if (typeof id !== 'string' || !known.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    next.push(id);
+  }
+  const prev = index.global_module_ids ?? [];
+  const prevSet = new Set(prev);
+  await writeIndex(storage, userId, { ...index, global_module_ids: next });
+  return {
+    applied: next,
+    added: next.filter((id) => !prevSet.has(id)),
+    removed: prev.filter((id) => !seen.has(id)),
+  };
+}
+
+export async function readGlobalModuleArtifacts(
+  storage: UserStorageLike,
+  userId: string | undefined,
+  moduleId: string,
+): Promise<{ regexScriptIds: readonly string[]; worldBookId: string | null }> {
+  const index = await readIndex(storage, userId);
+  return {
+    regexScriptIds: index.global_module_regex_script_ids?.[moduleId] ?? [],
+    worldBookId: index.global_module_world_books?.[moduleId] ?? null,
+  };
+}
+
+export async function writeGlobalModuleArtifacts(
+  storage: UserStorageLike,
+  userId: string | undefined,
+  moduleId: string,
+  artifacts: { regexScriptIds?: readonly string[]; worldBookId?: string | null },
+): Promise<void> {
+  const index = await readIndex(storage, userId);
+  const regexMap: Record<string, readonly string[]> = { ...(index.global_module_regex_script_ids ?? {}) };
+  const wbMap: Record<string, string> = { ...(index.global_module_world_books ?? {}) };
+  if (artifacts.regexScriptIds !== undefined) {
+    if (artifacts.regexScriptIds.length === 0) delete regexMap[moduleId];
+    else regexMap[moduleId] = [...artifacts.regexScriptIds];
+  }
+  if (artifacts.worldBookId !== undefined) {
+    if (artifacts.worldBookId === null) delete wbMap[moduleId];
+    else wbMap[moduleId] = artifacts.worldBookId;
+  }
+  await writeIndex(storage, userId, {
+    ...index,
+    global_module_regex_script_ids: regexMap,
+    global_module_world_books: wbMap,
+  });
 }
 
 /** Read the cached index. For a full rebuild use `rebuildIndex`. */

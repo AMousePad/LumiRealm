@@ -146,6 +146,7 @@ export function createLorebookImporter(deps: LorebookImporterDeps): LorebookImpo
           group_override: entry.group_override,
           group_weight: entry.group_weight,
           probability: entry.probability,
+          exclude_greeting: entry.exclude_greeting,
           case_sensitive: entry.case_sensitive,
           match_whole_words: entry.match_whole_words,
           use_regex: entry.use_regex,

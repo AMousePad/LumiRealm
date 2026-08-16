@@ -38,6 +38,7 @@ import {
   buildBundle,
   downloadBundle,
 } from './log/frontend-capture.js';
+import { buildArchive, downloadBlob } from './export/archive-writer.js';
 
 const HANDSHAKE_RETRY_MS = 3000;
 
@@ -107,14 +108,31 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   if (hasReadiness) readiness.deferReady!();
 
   const displayRegistered = Boolean(ctx.display);
-  if (ctx.display) {
-    cleanups.push(ctx.display.registerResolver(createDisplayResolver(
+  const display = ctx.display;
+  if (display) {
+    cleanups.push(display.registerResolver(createDisplayResolver(
       (chatId, vars) => {
         // Mirror editDisplay writes into the local snapshot so init-once guards
         // see their guard var set next render. Without it the guard never engages,
         // init re-runs every render, and writeback clobbers committed progress.
         applyVarDelta(chatId, 'local', vars);
         ctx.sendToBackend({ type: 'display_writeback', chatId, vars });
+      },
+      (effect) => {
+        if (effect.kind === 'set-expression') {
+          display.setExpression(effect);
+          return;
+        }
+        void ctx.chats.updateMessage(
+          effect.chatId,
+          effect.messageId,
+          { content: effect.content },
+        ).catch((err) => {
+          flog.warn(
+            `display action message update failed chat=${effect.chatId} ` +
+              `message=${effect.messageId}: ${String(err)}`,
+          );
+        });
       },
     )));
   }
@@ -556,6 +574,30 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       // Auto-disable per spec.
       sendToBackend({ type: 'log_set_state', enabled: false, includeChatData: false });
       // Fall through so the Logs panel can show "Downloaded".
+    }
+    if (msg.type === 'export_archive') {
+      const plan = msg.plan;
+      void (async () => {
+        try {
+          const result = await buildArchive(plan, flog);
+          downloadBlob(result.blob, result.fileName);
+          const skipped = result.skippedAssets.length;
+          flog.info(
+            `export_archive: wrote ${result.fileName} entries=${plan.entries.length}` +
+              (skipped > 0 ? ` skipped=${skipped}` : ''),
+          );
+          if (skipped > 0) {
+            window.alert(
+              `Exported ${result.fileName}, but ${skipped} asset(s) could not be read ` +
+                `and were left out. The archive is incomplete.`,
+            );
+          }
+        } catch (err) {
+          flog.error('export_archive: archive build failed', err);
+          window.alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      })();
+      return;
     }
     if (msg.type === 'display_snapshot') {
       if (getDisplayResolutionMode() !== 'off') {

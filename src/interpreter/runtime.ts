@@ -13,7 +13,11 @@ import { makeVarsApi } from './runtime/vars.js';
 import { makeArraysDictsApi } from './runtime/arrays-dicts.js';
 import { makeChatApi } from './runtime/chat.js';
 import { makeCharacterNoteApi } from './runtime/character-note.js';
-import { makeLorebookApi, type LorebookCache } from './runtime/lorebook.js';
+import {
+  makeLorebookApi,
+  sortLorebookEntriesBySourceOrder,
+  type LorebookCache,
+} from './runtime/lorebook.js';
 import { makeDisplayStateApi } from './runtime/display-state.js';
 import { runLLM as _runLLM, parseLuaPromptArg } from './runtime/llm.js';
 import {
@@ -36,6 +40,7 @@ const _logMake            = makeSafeLogger('runtime.makeRisuTriggerRuntime');
 const _logTriggercode     = makeSafeLogger('runtime.triggercode');
 const _logRunLua          = makeSafeLogger('runtime.runLua');
 const _logSetChat         = makeSafeLogger('runtime.setChat');
+const _logSetFullChat     = makeSafeLogger('runtime.setFullChat');
 const _logAddChat         = makeSafeLogger('runtime.addChat');
 const _logLLMMain         = makeSafeLogger('runtime.LLMMain');
 const _logAxLLMMain       = makeSafeLogger('runtime.axLLMMain');
@@ -82,7 +87,7 @@ export {
 } from './runtime/dispatch-context.js';
 export type { AuxDebugCaptureEvent } from './runtime/dispatch-context.js';
 
-import { loadVars, saveVars } from './runtime/chat-state.js';
+import { loadGlobalVars, loadVars, saveVars } from './runtime/chat-state.js';
 import { inheritedVarsAls, withInheritedVarsCache } from './runtime/als.js';
 
 export { compareValues } from './runtime/compare.js';
@@ -207,6 +212,10 @@ export interface RisuTriggerRuntime {
   getRequestStateRole(i: unknown): string;
   setRequestStateRole(i: unknown, v: unknown): void;
   getRequestStateLength(): number;
+  getRequestStateMessages(): readonly {
+    readonly role: string;
+    readonly content: string;
+  }[];
   // lifecycle
   flush(): Promise<void>;
   warnDroppedTriggerCode(label?: string): void;
@@ -292,10 +301,13 @@ export async function makeRisuTriggerRuntime(
   // PRELOAD FAST-PATH: when caller passes `opts.preloaded`, we skip the
   // matching IPC fetch and reuse the provided snapshot. Used by
   // `runListenEditChain` to share one snapshot across all triggers in the
-  // same chain (Mortal Realm: 48 outbound IPCs → 3, drops the Spindle
-  // worker IPC channel pressure that caused 4.5s stalls per stuck call).
+  // same chain, dropping repeated Spindle worker IPC channel pressure that
+  // caused 4.5s stalls per stuck call.
   const preloaded = opts.preloaded;
   const _factoryStart = Date.now();
+  const globalVarsPromise = preloaded?.globalVars
+    ? Promise.resolve({ ...preloaded.globalVars })
+    : loadGlobalVars(api);
   let varsCache: Record<string, string>;
   let isInheritedVarsCache = false;
   let _tVars = 0;
@@ -317,6 +329,7 @@ export async function makeRisuTriggerRuntime(
     varsCache = await loadVars(api);
     _tVars = Date.now() - _t0;
   }
+  const globalVarsCache = await globalVarsPromise;
   let messagesCache: HostMessage[] = [];
   // Risu's `char.firstMessage` (greeting), excluded from messagesCache to
   // match `chat.message[]`. getFirstMessage / getCharacterLastMessage use it.
@@ -379,11 +392,12 @@ export async function makeRisuTriggerRuntime(
               const res = await api.worldInfo.entries.list(bid, { limit: 1000 });
               if (res && Array.isArray(res.data)) {
                 _entryCount += res.data.length;
-                for (const e of res.data) lorebook.entries.push({ ...e, worldBookId: e.worldBookId || bid });
+                lorebook.entries.push(...sortLorebookEntriesBySourceOrder(
+                  res.data.map((e) => ({ ...e, worldBookId: e.worldBookId || bid })),
+                ));
               }
             } catch { /* skip */ }
           }
-          lorebook.entries.sort((a, b) => Number(b.orderValue || 0) - Number(a.orderValue || 0));
           _tLore = Date.now() - _tLoreStart;
         }
       }
@@ -404,17 +418,160 @@ export async function makeRisuTriggerRuntime(
       `binding=${binding} characterId=${characterId ?? '<none>'}`,
   );
 
-  // addChat persists immediately via sendMessage (Risu defers to trigger end),
-  // so track the pending real id per cache entry for removeChat to delete the
-  // row it created. flush() drains these so add+remove settles before the
-  // post-dispatch refresh (Risu nets show-then-clear idioms to no-op).
+  // Lumi stores chat messages as individual rows, while Risu mutates one
+  // in-memory array and commits its final state. Serialize every row mutation
+  // and track IDs assigned to new rows so later edits/deletes cannot race them.
   const pendingSendIds = new WeakMap<HostMessage, Promise<string>>();
-  const pendingChatOps: Promise<unknown>[] = [];
+  let chatMutationTail: Promise<void> = Promise.resolve();
+
+  function enqueueChatMutation(label: string, operation: () => Promise<void>): Promise<void> {
+    const next = chatMutationTail.then(operation);
+    chatMutationTail = next.catch((err) => {
+      _logSetFullChat.warn(
+        `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+    return chatMutationTail;
+  }
+
+  function trackPendingSend(entry: HostMessage, completion: Promise<void>): void {
+    pendingSendIds.set(entry, completion.then(() => entry.id));
+  }
+
+  function inheritPendingSend(previous: HostMessage, next: HostMessage): void {
+    const pendingId = pendingSendIds.get(previous);
+    if (!pendingId) return;
+    pendingSendIds.set(next, pendingId);
+    void pendingId.then((id) => {
+      if (id) (next as { id: string }).id = id;
+    });
+  }
+
+  async function resolveHostMessageId(entry: HostMessage): Promise<string> {
+    return pendingSendIds.get(entry) ?? entry.id;
+  }
+
+  async function persistChatSend(entry: HostMessage): Promise<void> {
+    try {
+      const result = await api.chat.sendMessage(entry.content, { role: entry.role });
+      const id = result && typeof result.id === 'string' ? result.id : '';
+      if (id) (entry as { id: string }).id = id;
+    } catch (err) {
+      _logSetFullChat.warn(`send threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function persistChatDelete(entry: HostMessage): Promise<void> {
+    try {
+      const id = await resolveHostMessageId(entry);
+      if (id) await api.chat.deleteMessage(id);
+    } catch (err) {
+      _logSetFullChat.warn(
+        `delete msgId=${entry.id} threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  async function persistChatEdit(previous: HostMessage, next: HostMessage): Promise<void> {
+    try {
+      const id = await resolveHostMessageId(previous);
+      if (!id) return;
+      if (rememberOurWrite && portalChatId) {
+        try { rememberOurWrite(portalChatId, id, next.content); } catch { /* */ }
+      }
+      await api.chat.editMessage(id, next.content);
+    } catch (err) {
+      _logSetFullChat.warn(
+        `edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  function reconcileFullChat(value: unknown): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(toStr(value));
+    } catch (err) {
+      _logSetFullChat.warn(
+        `invalid JSON ignored: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+    if (!Array.isArray(parsed)) {
+      _logSetFullChat.warn('non-array payload ignored');
+      return;
+    }
+
+    const previous = [...messagesCache];
+    const desired = parsed.map((raw) => {
+      const item = raw && typeof raw === 'object'
+        ? raw as { role?: unknown; data?: unknown }
+        : {};
+      return {
+        role: risuRoleToLumi(toStr(item.role)),
+        content: toStr(item.data),
+      };
+    });
+    const overlap = Math.min(previous.length, desired.length);
+    const roleChange = previous.findIndex(
+      (entry, index) => index < overlap && entry.role !== desired[index]!.role,
+    );
+    const stablePrefixLength = roleChange >= 0 ? roleChange : overlap;
+    const edits: Array<{ previous: HostMessage; next: HostMessage }> = [];
+    const deletes = previous.slice(roleChange >= 0 ? roleChange : overlap);
+    const sends: HostMessage[] = [];
+    const next: HostMessage[] = [];
+
+    for (let i = 0; i < stablePrefixLength; i++) {
+      const oldEntry = previous[i]!;
+      const wanted = desired[i]!;
+      if (oldEntry.content === wanted.content) {
+        next.push(oldEntry);
+        continue;
+      }
+      const replacement: HostMessage = { ...oldEntry, content: wanted.content };
+      inheritPendingSend(oldEntry, replacement);
+      edits.push({ previous: oldEntry, next: replacement });
+      next.push(replacement);
+    }
+
+    const desiredTailStart = roleChange >= 0 ? roleChange : overlap;
+    for (let i = desiredTailStart; i < desired.length; i++) {
+      const wanted = desired[i]!;
+      const added: HostMessage = { id: '', role: wanted.role, content: wanted.content };
+      sends.push(added);
+      next.push(added);
+    }
+    messagesCache.splice(0, messagesCache.length, ...next);
+
+    if (edits.length > 0 || deletes.length > 0 || sends.length > 0) {
+      const completion = enqueueChatMutation('setFullChat', async () => {
+        for (const edit of edits) await persistChatEdit(edit.previous, edit.next);
+        for (const entry of deletes) await persistChatDelete(entry);
+        for (const entry of sends) await persistChatSend(entry);
+      });
+      for (const entry of sends) trackPendingSend(entry, completion);
+    }
+    _logSetFullChat.info(
+      `reconciled old=${previous.length} new=${next.length} edits=${edits.length} ` +
+        `deletes=${deletes.length} sends=${sends.length} chatId=${portalChatId ?? '<none>'}`,
+    );
+  }
 
   // `dirty` boxed so flush() observes setVar writes across the closure boundary.
   const dirty: { value: boolean } = { value: false };
   const localScopes = new Map<number, Map<string, string>>();
-  const _vars = makeVarsApi({ varsCache, localScopes, dirty, characterId });
+  const tempVars = displayMode ? {} : undefined;
+  const _vars = makeVarsApi({
+    varsCache,
+    localScopes,
+    dirty,
+    characterId,
+    ...(preloaded?.scriptstateDefaults !== undefined
+      ? { scriptstateDefaults: preloaded.scriptstateDefaults }
+      : {}),
+    ...(tempVars !== undefined ? { tempVars } : {}),
+  });
   const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal } = _vars;
 
   let stopSending = false;
@@ -627,7 +784,7 @@ export async function makeRisuTriggerRuntime(
     return {
       getChatVar: (_id: unknown, key: unknown) => getVar(toStr(key)),
       setChatVar: (_id: unknown, key: unknown, value: unknown) => setVar(toStr(key), toStr(value)),
-      getGlobalVar: (_id: unknown, key: unknown) => getVar(toStr(key)),
+      getGlobalVar: (_id: unknown, key: unknown) => globalVarsCache[toStr(key)] ?? 'null',
       stopChat: (_id: unknown) => { stopSending = true; },
       // Risu parity: fire-and-forget. Returning the Promise would force Lua to await or leak an unhandledRejection on modal-infra throw.
       alertError: (_id: unknown, value: unknown) => {
@@ -713,41 +870,30 @@ export async function makeRisuTriggerRuntime(
         const newEntry = { ...oldEntry, content: raw };
         messagesCache[real] = newEntry;
 
-        // Without rememberOurWrite, Lua-emitted content (no {{ markers) would flip userEdited=true.
-        if (rememberOurWrite && portalChatId) {
-          try { rememberOurWrite(portalChatId, msgId, raw); }
-          catch { /* */ }
-        }
-
         _logSetChat.info(
           `index=${index} (real=${real}) msgId=${msgId} ` +
-            `len=${raw.length} chatId=${portalChatId ?? '<none>'} ` +
-            `rememberOurWrite=${rememberOurWrite && portalChatId ? 'called' : 'skipped'}`,
+            `len=${raw.length} chatId=${portalChatId ?? '<none>'}`,
         );
 
         // Editing an addChat'd message before its sendMessage resolved: id is
         // still ''. Carry the pending mapping to the replacement object (so a
         // later removeChat can still delete the row) and apply the edit once
         // the real id lands instead of dropping it on editMessage('').
-        const pend = pendingSendIds.get(oldEntry);
-        if (pend) {
-          pendingSendIds.set(newEntry, pend);
-          const ed = pend.then((rid) => {
-            if (!rid) return;
-            if (rememberOurWrite && portalChatId) {
-              try { rememberOurWrite(portalChatId, rid, raw); } catch { /* */ }
-            }
-            return api.chat.editMessage?.(rid, raw);
-          }).catch(() => { /* */ });
-          pendingChatOps.push(ed);
-          return;
-        }
-
-        try { api.chat.editMessage?.(msgId, raw); } catch { /* */ }
+        inheritPendingSend(oldEntry, newEntry);
+        enqueueChatMutation('setChat', () => persistChatEdit(oldEntry, newEntry));
       },
       setChatRole: (_id: unknown, index: unknown, value: unknown) => {
         const n = Number(index);
-        if (messagesCache[n]) messagesCache[n] = { ...messagesCache[n]!, role: risuRoleToLumi(toStr(value)) };
+        if (!messagesCache[n]) return;
+        const desired = messagesCache.map((message) => ({
+          role: lumiRoleToRisu(message.role),
+          data: message.content,
+        }));
+        desired[n] = {
+          ...desired[n]!,
+          role: lumiRoleToRisu(risuRoleToLumi(toStr(value))),
+        };
+        reconcileFullChat(JSON.stringify(desired));
       },
       cutChat: (_id: unknown, start: unknown, end: unknown) => { cutChat(start, end); },
       removeChat: (_id: unknown, index: unknown) => {
@@ -760,18 +906,7 @@ export async function makeRisuTriggerRuntime(
         const start = n < 0 ? Math.max(len + n, 0) : Math.min(n, len);
         if (start >= len) return;
         const m = messagesCache[start];
-        if (m) {
-          const pend = pendingSendIds.get(m);
-          if (pend) {
-            const del = pend.then((rid) => { if (rid) return api.chat.deleteMessage?.(rid); }).catch(() => { /* */ });
-            pendingChatOps.push(del);
-          } else if (m.id) {
-            try {
-              const del = api.chat.deleteMessage?.(m.id);
-              if (del && typeof (del as Promise<unknown>).then === 'function') pendingChatOps.push(del as Promise<unknown>);
-            } catch { /* */ }
-          }
-        }
+        if (m) enqueueChatMutation('removeChat', () => persistChatDelete(m));
         messagesCache.splice(start, 1);
       },
       addChat: (_id: unknown, role: unknown, value: unknown) => {
@@ -782,38 +917,25 @@ export async function makeRisuTriggerRuntime(
         _logAddChat.info(
           `role=${toStr(role)} len=${raw.length} chatId=${portalChatId ?? '<none>'}`,
         );
-        try {
-          const send = api.chat.sendMessage?.(raw, { role: lumiRole });
-          if (send && typeof (send as Promise<{ id: string }>).then === 'function') {
-            const idP = (send as Promise<{ id: string }>)
-              .then((r) => {
-                const realId = (r && typeof r.id === 'string') ? r.id : '';
-                if (realId) (entry as { id: string }).id = realId;
-                return realId;
-              })
-              .catch(() => '');
-            pendingSendIds.set(entry, idP);
-            pendingChatOps.push(idP);
-          }
-        } catch { /* */ }
+        trackPendingSend(
+          entry,
+          enqueueChatMutation('addChat', () => persistChatSend(entry)),
+        );
       },
       insertChat: (_id: unknown, index: unknown, role: unknown, value: unknown) => {
-        messagesCache.splice(Number(index), 0, { id: String(Date.now()), role: risuRoleToLumi(toStr(role)), content: toStr(value) });
+        const desired = messagesCache.map((message) => ({
+          role: lumiRoleToRisu(message.role),
+          data: message.content,
+        }));
+        desired.splice(Number(index), 0, {
+          role: lumiRoleToRisu(risuRoleToLumi(toStr(role))),
+          data: toStr(value),
+        });
+        reconcileFullChat(JSON.stringify(desired));
       },
       getChatLength: (_id: unknown) => messagesCache.length,
       getFullChatMain: (_id: unknown) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
-      setFullChatMain: (_id: unknown, value: unknown) => {
-        try {
-          const arr = JSON.parse(toStr(value));
-          if (Array.isArray(arr)) {
-            messagesCache.length = 0;
-            for (let i = 0; i < arr.length; i++) {
-              const entry = arr[i] as { role?: unknown; data?: unknown };
-              messagesCache.push({ id: String(i + 1), role: risuRoleToLumi(toStr(entry.role)), content: toStr(entry.data) });
-            }
-          }
-        } catch { /* */ }
-      },
+      setFullChatMain: (_id: unknown, value: unknown) => { reconcileFullChat(value); },
       sleep: (_id: unknown, ms: unknown) => new Promise<void>((r) => setTimeout(r, Math.max(0, Number(ms) || 0))),
       // Risu parity: user-facing `cbs` is sync. The lua-bridge prelude wraps `cbsMain():await()` so cards calling `cbs("...")` get a string.
       cbsMain: async (value: unknown): Promise<string> => {
@@ -849,15 +971,46 @@ export async function makeRisuTriggerRuntime(
       reloadChat: (_id: unknown, _index: unknown) => {
         notifyStateChanged('reloadChat');
       },
-      getName: (_id: unknown) => toStr((data as { characterName?: unknown }).characterName || ''),
-      setName: (_id: unknown, _name: unknown) => { /* */ },
-      getDescription: (_id: unknown) => getVar('__risu_char_desc__') || '',
-      setDescription: (_id: unknown, desc: unknown) => setVar('__risu_char_desc__', toStr(desc)),
-      getCharacterFirstMessage: (_id: unknown) => getVar('__risu_first_msg__') || '',
-      setCharacterFirstMessage: (_id: unknown, v: unknown) => setVar('__risu_first_msg__', toStr(v)),
+      getNameMain: async (_id: unknown) => {
+        const cid = characterId || (data as { characterId?: string }).characterId;
+        if (!cid) return '';
+        try {
+          return toStr((await api.characters.get(cid)).name);
+        } catch {
+          return toStr((data as { characterName?: unknown }).characterName || '');
+        }
+      },
+      setNameMain: async (_id: unknown, name: unknown) => {
+        const cid = characterId || (data as { characterId?: string }).characterId;
+        if (cid) await api.characters.update(cid, { name: toStr(name) });
+      },
+      getDescriptionMain: (_id: unknown) => _charNote.getCharacterDesc(),
+      setDescriptionMain: (_id: unknown, desc: unknown) => _charNote.setCharacterDesc(desc),
+      getCharacterFirstMessageMain: async (_id: unknown) => {
+        const cid = characterId || (data as { characterId?: string }).characterId;
+        if (!cid) return toStr(firstMessage ?? '');
+        try {
+          return toStr((await api.characters.get(cid)).firstMessage);
+        } catch {
+          return toStr(firstMessage ?? '');
+        }
+      },
+      setCharacterFirstMessageMain: async (_id: unknown, value: unknown) => {
+        const cid = characterId || (data as { characterId?: string }).characterId;
+        if (cid) await api.characters.update(cid, { firstMessage: toStr(value) });
+      },
       getPersonaName: (_id: unknown) => toStr((data as { userName?: unknown }).userName || 'user'),
-      getPersonaDescription: (_id: unknown) => getVar('__risu_persona_desc__') || '',
-      getAuthorsNote: (_id: unknown) => getVar('__risu_author_note__') || '',
+      getPersonaDescriptionMain: async (_id: unknown) => {
+        const description = await _charNote.getPersonaDesc();
+        const resolver = capturedResolveTemplate;
+        if (!resolver) return description;
+        try {
+          return await resolver(description);
+        } catch {
+          return description;
+        }
+      },
+      getAuthorsNoteMain: (_id: unknown) => _charNote.getAuthorNote(),
       getBackgroundEmbedding: (_id: unknown) => '',
       setBackgroundEmbedding: (_id: unknown, _data: unknown) => { /* */ },
       // Risu scriptings.ts getCharacterLastMessage falls back to char.firstMessage
@@ -1080,12 +1233,12 @@ export async function makeRisuTriggerRuntime(
     deleteLorebookByIndex, setLorebookActivation, setLorebookAlwaysActive,
   } = _lore;
 
-  const _displayState = makeDisplayStateApi();
+  const _displayState = makeDisplayStateApi(opts.displayData, opts.requestData);
   const {
     getDisplayState, setDisplayState,
     getRequestState, setRequestState,
     getRequestStateRole, setRequestStateRole,
-    getRequestStateLength,
+    getRequestStateLength, getRequestStateMessages,
   } = _displayState;
 
 
@@ -1113,11 +1266,7 @@ export async function makeRisuTriggerRuntime(
       }
     }
     dirty.value = false;
-    if (pendingChatOps.length > 0) {
-      const ops = pendingChatOps.splice(0);
-      flog(`draining ${ops.length} pending chat op(s)`);
-      await Promise.allSettled(ops);
-    }
+    await chatMutationTail;
     flog(`DONE`);
   }
 
@@ -1153,6 +1302,7 @@ export async function makeRisuTriggerRuntime(
     modifyLorebookByIndex, deleteLorebookByIndex, setLorebookAlwaysActive,
     getDisplayState, setDisplayState, getRequestState, setRequestState,
     getRequestStateRole, setRequestStateRole, getRequestStateLength,
+    getRequestStateMessages,
     flush,
     warnDroppedTriggerCode,
   };

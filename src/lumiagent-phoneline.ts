@@ -252,7 +252,7 @@ function checkWritePath(extPath: string): { ok: boolean; message?: string } {
       ok: false,
       message:
         'lumirealm.payload.asset_index / emotion_index map asset NAMES (the user-facing handles referenced by `{{img::name}}` / `{{emotion::name}}` / `<img="name">` in regex replace_string and bg-html) to their underlying image ids. Writing through a path bypasses the refresh hooks (`refreshRisuAssetMap`, attached-character invalidation) and leaves the runtime out of sync.\n\n' +
-        'Use the dedicated tools, NOT a path write: `asset_rename` and `asset_delete` wrap the rename / delete wire ops with the refresh hooks fired correctly. Adding a NEW asset (`add_asset` / `add_assets`) has no agent tool: surface that asset upload is a LumiRealm Viewer → Assets tab action. ' + COUPLING_REMINDER,
+        'Use the dedicated tools, NOT a path write: `asset_rename` and `asset_delete` wrap the rename / delete wire ops with the refresh hooks fired correctly. `asset_delete` takes `assetNames` (an array): pass every name in ONE call rather than looping, since each call rewrites the envelope and runs an image-reclaim sweep. Deleting an asset also deletes its image file unless something else still references it. Adding a NEW asset (`add_assets`) has no agent tool: surface that asset upload is a LumiRealm Viewer → Assets tab action. ' + COUPLING_REMINDER,
     };
   }
 
@@ -514,7 +514,7 @@ If a path is NOT in this table and NOT a top-level \`char/\` / \`rx/\` / \`wb/\`
 
 These have wired LumiAgent tools. Use the tool, NOT a path write to the underlying storage (path writes bypass refresh hooks / runtime invalidations and the runtime silently diverges):
 
-- Asset rename / delete (character or module): \`asset_rename\` / \`asset_delete\`.
+- Asset rename / delete (character or module): \`asset_rename\` / \`asset_delete\` (\`assetNames\` array, batch in one call).
 - Module attach / detach on a character: \`module_attach\` / \`module_detach\`.
 - Toggle value for a chat: \`set_toggle\` (key as defined in the module \`customModuleToggle\` DSL, without the \`toggle_\` prefix).
 - Chat-scope local variable: \`set_chat_variable\`.
@@ -636,7 +636,7 @@ interface AssetMutateRequest extends PhoneLineRequestBase {
   source: AssetSource;
   action:
     | { kind: 'rename'; oldName: string; newName: string }
-    | { kind: 'delete'; assetName: string };
+    | { kind: 'delete'; assetNames: readonly string[] };
 }
 
 interface ModuleAttachRequest extends PhoneLineRequestBase {
@@ -691,7 +691,7 @@ export type OnModuleEnvelopeWritten = (env: ModuleEnvelope, userId: string) => P
 
 type AssetMutationLikeMessage =
   | { type: 'rename_asset'; source: AssetSource; oldName: string; newName: string }
-  | { type: 'delete_asset'; source: AssetSource; assetName: string };
+  | { type: 'delete_assets'; source: AssetSource; assetNames: readonly string[] };
 
 export interface MutationDeps {
   // Each is wired to the same internal function the WS handler calls, so the
@@ -917,7 +917,10 @@ async function dispatchMutation(
     if (!mutations.mutateAssetIndex) return notWired('asset_mutate');
     const msg: AssetMutationLikeMessage = req.action.kind === 'rename'
       ? { type: 'rename_asset', source: req.source, oldName: req.action.oldName, newName: req.action.newName }
-      : { type: 'delete_asset', source: req.source, assetName: req.action.assetName };
+      : { type: 'delete_assets', source: req.source, assetNames: req.action.assetNames };
+    if (msg.type === 'delete_assets' && msg.assetNames.length === 0) {
+      return { ok: false, error: 'asset_delete: assetNames is empty' };
+    }
     const r = await mutations.mutateAssetIndex(msg, req.userId);
     return r.ok ? { ok: true } : { ok: false, error: r.reason ?? 'failed' };
   }

@@ -36,6 +36,8 @@ export interface CharacterFields {
   readonly alternateGreetings: readonly string[];
   /** Risu chat.fmIndex. -1 = default firstMessage. */
   readonly selectedAlternateGreetingIndex: number;
+  /** Effective greeting stored on the current host chat, including user edits. */
+  readonly selectedGreeting?: string;
   readonly type: "character" | "group";
   readonly additionalAssets: readonly CharacterAsset[];
   readonly emotionImages: readonly CharacterAsset[];
@@ -86,6 +88,7 @@ export interface Clock {
 
 
 export interface RisuRuntimeContext {
+  readonly chatId: string;
   readonly vars: VariableStore;
   readonly identity: IdentityFields;
   readonly character: CharacterFields;

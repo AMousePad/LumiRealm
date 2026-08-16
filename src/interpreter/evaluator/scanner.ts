@@ -62,6 +62,36 @@ function dispatchLeaf(
   }
 }
 
+function rewindLastWord(root: string): string {
+  if (!root) return root;
+  const trimmed = root.trimEnd();
+  let trimPointer = trimmed.length - 1;
+  for (; trimPointer >= 0; trimPointer--) {
+    const char = trimmed[trimPointer];
+    if (trimPointer === 0 || char === " " || char === "\n" || char === "\t") break;
+  }
+  if (trimPointer === -1) trimPointer = 0;
+  return trimmed.substring(0, trimPointer).trimEnd();
+}
+
+function rewindLastSentence(root: string): string {
+  if (!root) return root;
+  const trimmed = root.trimEnd();
+  let trimPointer = trimmed.length - 1;
+  let sentenceEndFound = false;
+  for (; trimPointer >= 0; trimPointer--) {
+    const char = trimmed[trimPointer];
+    if (char === "." || char === "!" || char === "?" || char === "\n") {
+      sentenceEndFound = true;
+      break;
+    }
+    if (trimPointer === 0) break;
+  }
+  if (trimPointer === -1) trimPointer = 0;
+  else if (sentenceEndFound) trimPointer += 1;
+  return trimmed.substring(0, trimPointer).trimEnd();
+}
+
 export function evaluate(
   template: string,
   ctx: EvaluatorCtx,
@@ -250,6 +280,16 @@ export function evaluate(
             nested[0] += evaluate(data, innerCtx, { callStack });
             break;
           }
+        }
+
+        const leafName = normalizeMacroName(splitMacroArgs(dat).name);
+        if (!isPureMode() && leafName === "bkspc") {
+          nested[0] = rewindLastWord(nested[0] ?? "");
+          break;
+        }
+        if (!isPureMode() && leafName === "erase") {
+          nested[0] = rewindLastSentence(nested[0] ?? "");
+          break;
         }
 
         const mc = isPureMode() ? null : dispatchLeaf(dat, innerCtx, callStack);

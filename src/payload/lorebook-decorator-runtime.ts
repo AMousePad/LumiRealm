@@ -33,8 +33,8 @@ export interface WorldInfoCtx {
   readonly messages: readonly WorldInfoMessageView[];
   readonly chatTurn: number;
   readonly chatMetadata: Readonly<Record<string, unknown>>;
-  /** Default scan window for predicate scans. Risu's runtime fallback is 4. */
-  readonly defaultScanDepth?: number;
+  /** Default scan window for predicate scans. Null scans all messages. */
+  readonly defaultScanDepth?: number | null;
 }
 
 const RISU_FALLBACK_SCAN_DEPTH = 4;
@@ -223,13 +223,18 @@ function getStickyState(
 
 function buildScanWindow(
   messages: readonly WorldInfoMessageView[],
-  scanDepth: number,
+  scanDepth?: number | null,
 ): readonly string[] {
-  const start = Math.max(0, messages.length - Math.max(0, scanDepth));
+  const effectiveDepth = scanDepth === undefined
+    ? RISU_FALLBACK_SCAN_DEPTH
+    : scanDepth;
+  const start = effectiveDepth === null
+    ? 0
+    : Math.max(0, messages.length - Math.max(0, effectiveDepth));
   const out: string[] = [];
   for (let i = start; i < messages.length; i++) {
     const m = messages[i];
-    if (!m) continue;
+    if (!m || m.is_greeting === true) continue;
     out.push(m.content);
   }
   return out;
@@ -346,8 +351,7 @@ export function excludeKeysPredicate(
   ctx: WorldInfoCtx,
 ): DecoratorEvalResult {
   if (args.length === 0) return { keep: true };
-  const scanDepth = ctx.defaultScanDepth ?? RISU_FALLBACK_SCAN_DEPTH;
-  const win = buildScanWindow(ctx.messages, scanDepth);
+  const win = buildScanWindow(ctx.messages, ctx.defaultScanDepth);
   const matched = scanKeysMatch(win, args, /* all */ false);
   if (matched) return { keep: false, reason: `exclude_keys:matched` };
   return { keep: true };
@@ -358,8 +362,7 @@ export function excludeKeysAllPredicate(
   ctx: WorldInfoCtx,
 ): DecoratorEvalResult {
   if (args.length === 0) return { keep: true };
-  const scanDepth = ctx.defaultScanDepth ?? RISU_FALLBACK_SCAN_DEPTH;
-  const win = buildScanWindow(ctx.messages, scanDepth);
+  const win = buildScanWindow(ctx.messages, ctx.defaultScanDepth);
   const matched = scanKeysMatch(win, args, /* all */ true);
   if (matched) return { keep: false, reason: `exclude_keys_all:all_matched` };
   return { keep: true };
@@ -371,8 +374,7 @@ export function entryMatchedScanWindow(
 ): boolean {
   const allKeys = [...entry.key, ...entry.keysecondary];
   if (allKeys.length === 0) return false;
-  const scanDepth = ctx.defaultScanDepth ?? RISU_FALLBACK_SCAN_DEPTH;
-  const win = buildScanWindow(ctx.messages, scanDepth);
+  const win = buildScanWindow(ctx.messages, ctx.defaultScanDepth);
   return scanKeysMatch(win, allKeys, /* all */ false);
 }
 

@@ -1,4 +1,4 @@
-export type FeRegexMode = 'none' | 'raw' | 'after' | 'escaped';
+export type FeRegexMode = 'none' | 'find' | 'raw' | 'after' | 'escaped';
 
 export interface FeRegexScript {
   readonly id: string;
@@ -12,6 +12,7 @@ export interface FeRegexScript {
   readonly min_depth: number | null;
   readonly max_depth: number | null;
   readonly disabled?: boolean;
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface FeRegexMatch {

@@ -5,6 +5,7 @@ import type {
   RealmBackendToFrontend,
 } from '../realm/messages.js';
 import type { DisplaySnapshot } from '../display/snapshot.js';
+import type { ArchivePlan } from '../core/export/archive-types.js';
 
 /** One-entry-per-imported-card summary. Backend composes from `StoredRisuCard`
  *  + `spindle.characters.get` name lookup. UI renders directly. */
@@ -18,6 +19,8 @@ export interface CardSummary {
   readonly translator_version: string;
   readonly uses_lua: boolean;
   readonly stored_at: number;
+  /** Last time a chat for this character was opened. Absent = never. */
+  readonly last_opened_at?: number;
 }
 
 /** Phase is a strict union for reliable UI colour/error styling. */
@@ -102,7 +105,7 @@ export interface PendingRegexScriptMsg {
   readonly max_depth: number | null;
   readonly trim_strings: readonly string[];
   readonly run_on_edit: boolean;
-  readonly substitute_macros: 'none' | 'raw' | 'escaped' | 'after';
+  readonly substitute_macros: 'none' | 'find' | 'raw' | 'escaped' | 'after';
   readonly disabled: boolean;
   readonly sort_order: number;
   readonly description: string;
@@ -236,32 +239,28 @@ export type FrontendToBackend =
   | { type: 'delete_module'; moduleId: string }
   | { type: 'attach_module'; characterId: string; moduleId: string }
   | { type: 'detach_module'; characterId: string; moduleId: string }
+  // Full replacement, not a delta: the chip list sends its whole set.
+  | { type: 'set_global_modules'; moduleIds: readonly string[] }
+  | { type: 'export_module'; moduleId: string }
+  | { type: 'export_character'; characterId: string }
   | {
       type: 'request_viewer_data';
       source: { kind: 'character'; characterId: string }
         | { kind: 'module'; moduleId: string };
     }
-  | {
-      type: 'add_asset';
-      source: { kind: 'character'; characterId: string }
-        | { kind: 'module'; moduleId: string };
-      /** Author-cased asset name. CBS macros use it verbatim (`{{img::AssetName}}`). */
-      assetName: string;
-      /** Lumi image id from `POST /api/v1/images` — FE already uploaded the bytes. */
-      imageId: string;
-      /** File extension without leading dot (e.g. "png", "mp4"). Drives
-       *  `{{asset::NAME}}` video-vs-image branching. */
-      ext?: string;
-    }
-  // Bulk variant of `add_asset`: single envelope write + single viewer re-push
-  // regardless of `entries.length`. FE pre-uploads bytes via `/api/v1/images`.
+  // Single envelope write + single viewer re-push regardless of `entries.length`.
+  // FE pre-uploads bytes via `/api/v1/images`.
   | {
       type: 'add_assets';
       source: { kind: 'character'; characterId: string }
         | { kind: 'module'; moduleId: string };
       entries: ReadonlyArray<{
+        /** Author-cased asset name. CBS macros use it verbatim (`{{img::AssetName}}`). */
         assetName: string;
+        /** Lumi image id from `POST /api/v1/images` — FE already uploaded the bytes. */
         imageId: string;
+        /** File extension without leading dot (e.g. "png", "mp4"). Drives
+         *  `{{asset::NAME}}` video-vs-image branching. */
         ext?: string;
       }>;
     }
@@ -272,11 +271,14 @@ export type FrontendToBackend =
       oldName: string;
       newName: string;
     }
+  // Single envelope write regardless of `assetNames.length`. Images are reclaimed
+  // in the same pass: entries drop from the index first, then a live-ref sweep
+  // decides which of their image ids nothing else still points at.
   | {
-      type: 'delete_asset';
+      type: 'delete_assets';
       source: { kind: 'character'; characterId: string }
         | { kind: 'module'; moduleId: string };
-      assetName: string;
+      assetNames: readonly string[];
     }
   // Risu-parity master string for defaults. `null` reverts to the card-side baseline.
   | {
@@ -338,16 +340,29 @@ export type FrontendToBackend =
   // carries new resource ids so backend can stash them on user_overrides for clean detach.
   | {
       type: 'module_artifacts_installed';
-      characterId: string;
+      requestId?: string;
+      /** `null` = global scope. */
+      characterId: string | null;
       moduleId: string;
       /** `null` when the module had zero lorebook entries (no book created). */
       worldBookId: string | null;
       /** May be shorter than requested if some scripts were rejected. */
       regexScriptIds: readonly string[];
+      /** False preserves the previously tracked artifacts for a safe retry. */
+      ok: boolean;
+      /** True only when requested stale-row cleanup was verified complete. */
+      cleanupCompleted: boolean;
+    }
+  | {
+      type: 'regex_scripts_installed';
+      requestId: string;
+      ok: boolean;
+      cleanupCompleted: boolean;
     }
   | {
       type: 'module_artifacts_uninstalled';
-      characterId: string;
+      /** `null` = global scope. */
+      characterId: string | null;
       moduleId: string;
       /** True when every targeted artifact was deleted (or already absent; 404 counts as success). */
       ok: boolean;
@@ -423,6 +438,9 @@ export type BackendToFrontend =
       characterId: string;
       characterName: string;
       scripts: readonly PendingRegexScriptMsg[];
+      /** Delete superseded card rows only after every replacement is owned. */
+      cleanupStale: boolean;
+      requestId?: string;
     }
   // Result of a regex import. FE POSTs `scripts` to
   // `/api/v1/regex-scripts/import` (only FE has the cookie) and reports the count.
@@ -584,11 +602,20 @@ export type BackendToFrontend =
       type: 'modules_pushed';
       modules: readonly ModuleSummary[];
       attached_by_character?: Readonly<Record<string, readonly AttachedModuleSummary[]>>;
+      /** Applied to every character on top of its own attachments. */
+      global_module_ids?: readonly string[];
     }
   | {
       type: 'attached_modules_pushed';
       characterId: string;
       attached: readonly AttachedModuleSummary[];
+    }
+  // The worker cannot read asset bytes back (`spindle.images.get` returns
+  // metadata and a URL only), so it ships an entry plan and the FE fetches
+  // each image with the session cookie before assembling the ZIP.
+  | {
+      type: 'export_archive';
+      plan: ArchivePlan;
     }
   // `source.kind === 'character'` carries id+name; `'module'` carries id+display name.
   // Lorebook for characters is grouped by world_book; for modules it's a flat list.
@@ -622,16 +649,21 @@ export type BackendToFrontend =
   // `lorebookEntries` mirrors `/api/v1/world-books/:id/entries/import` schema.
   | {
       type: 'install_module_artifacts';
-      characterId: string;
+      /** `null` = global scope: install once for every character. */
+      characterId: string | null;
       moduleId: string;
       /** FE only creates a world_book when `lorebookEntries.length > 0`. */
       worldBookName: string;
       lorebookEntries: readonly ModuleLorebookEntry[];
       regexScripts: readonly PendingRegexScriptMsg[];
+      /** Delete superseded module rows only after every replacement is owned. */
+      cleanupStale: boolean;
+      requestId?: string;
     }
   | {
       type: 'uninstall_module_artifacts';
-      characterId: string;
+      /** `null` = global scope. */
+      characterId: string | null;
       moduleId: string;
       worldBookId: string | null;
       regexScriptIds: readonly string[];

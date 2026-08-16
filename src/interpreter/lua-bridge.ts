@@ -280,6 +280,14 @@ function log(value)
   logMain(json.encode(value))
 end
 
+function getLoreBooks(id, search)
+  return json.decode(getLoreBooksMain(id, search))
+end
+
+function loadLoreBooks(id)
+  return json.decode(loadLoreBooksMain(id):await())
+end
+
 -- Risu scriptings.ts.
 function getCharacterImage(id)
   return getCharacterImageMain(id):await()
@@ -305,6 +313,38 @@ end
 -- Risu parity: cards write cbs("...") and get a string. JS-side cbsMain is async because resolveTemplate routes through resolveReadonly IPC.
 function cbs(value)
   return cbsMain(value):await()
+end
+
+function getName(id)
+  return getNameMain(id):await()
+end
+
+function setName(id, value)
+  return setNameMain(id, value):await()
+end
+
+function getDescription(id)
+  return getDescriptionMain(id):await()
+end
+
+function setDescription(id, value)
+  return setDescriptionMain(id, value):await()
+end
+
+function getPersonaDescription(id)
+  return getPersonaDescriptionMain(id):await()
+end
+
+function getAuthorsNote(id)
+  return getAuthorsNoteMain(id):await()
+end
+
+function getCharacterFirstMessage(id)
+  return getCharacterFirstMessageMain(id):await()
+end
+
+function setCharacterFirstMessage(id, value)
+  return setCharacterFirstMessageMain(id, value):await()
 end
 
 local editRequestFuncs = {}

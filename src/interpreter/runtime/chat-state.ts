@@ -26,6 +26,22 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
   }
 }
 
+export async function loadGlobalVars(api: HostApi): Promise<Record<string, string>> {
+  try {
+    const raw = await api.chat.getMetadata('macro_variables');
+    if (!raw || typeof raw !== 'object') return {};
+    const global = (raw as { global?: unknown }).global;
+    if (!global || typeof global !== 'object') return {};
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(global as Record<string, unknown>)) {
+      out[key] = toStr(value);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export async function saveVars(api: HostApi, vars: Record<string, string>, chatId?: string): Promise<void> {
   const write = async (): Promise<void> => {
     const bare: Record<string, string> = {};

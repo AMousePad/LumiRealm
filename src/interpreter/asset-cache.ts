@@ -1,6 +1,5 @@
 // Per-chat asset + emotion index cache. Written on CHAT_CHANGED by backend.ts;
-// read by buildRuntimeContext in macros.ts. Module-scoped because
-// spindle.registerMacro handlers have no per-invocation context channel.
+// Read while constructing the active in-worker evaluator context.
 
 import type { AssetIndexEntry } from '../payload/types.js';
 

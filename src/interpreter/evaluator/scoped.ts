@@ -2,7 +2,8 @@
 
 import type { BlockMatch, EvaluatorCtx, BlockKind } from "./types.js";
 
-// Trim before truthy comparison: rewriter can emit trailing whitespace on args.
+// Trim before truthy comparison because card-authored block arguments may
+// contain trailing whitespace.
 function isTruthy(s: string): boolean {
   const t = s.trim();
   return t === "true" || t === "1";
@@ -24,22 +25,8 @@ export function risuEscape(text: string): string {
   });
 }
 
-// Risu parser.svelte.ts. Accepts both raw Risu form and rewritten form.
-// Rewriter (core/cbs/rewrite/blocks.ts) renames `{{#if}}` -> `{{#risu_if}}` etc.
-// and shifts separator from space to `::`. denormalise reverses that.
-function denormalise(input: string): string {
-  if (!input.startsWith("#risu_")) return input;
-  const rest = input.slice(6);
-  const ci = rest.indexOf("::");
-  if (ci === -1) return "#" + rest;
-  const name = rest.slice(0, ci);
-  const tail = rest.slice(ci + 2);
-  if (name === "if" || name === "if_pure") return `#${name} ${tail}`;
-  return `#${name}::${tail}`;
-}
-
 export function blockStartMatcher(input: string, ctx: EvaluatorCtx): BlockMatch {
-  const p1 = denormalise(input);
+  const p1 = input;
   if (p1.startsWith("#if") || p1.startsWith("#if_pure ")) {
     const statement = p1.split(" ", 2);
     const state = statement[1];
@@ -165,6 +152,7 @@ export function blockStartMatcher(input: string, ctx: EvaluatorCtx): BlockMatch 
 
   if (p1 === "#pure") return { type: "pure" };
   if (p1 === "#pure_display" || p1 === "#puredisplay") return { type: "pure-display" };
+  if (p1 === "#ignore") return { type: "ignore" };
   if (p1 === "#code") return { type: "normalize" };
   if (p1.startsWith("#escape")) {
     const t2 = p1.substring(7).trim();
@@ -213,19 +201,12 @@ export function blockEndMatcher(
       return p1;
     case "newif":
     case "newif-falsy": {
-      // Accept both `{{:else}}` (Risu-verbatim; parser.svelte.ts,1462) and
-      // `{{else}}` (translator emits this form; see core/cbs/rewrite/blocks.ts).
-      // Longer match wins so `{{:else}}` is not mis-split.
       const findElse = (s: string): { index: number; len: number } => {
-        const withColon = s.indexOf("{{:else}}");
-        if (withColon !== -1) return { index: withColon, len: 9 };
-        const noColon = s.indexOf("{{else}}");
-        if (noColon !== -1) return { index: noColon, len: 8 };
-        return { index: -1, len: 0 };
+        const index = s.indexOf("{{:else}}");
+        return { index, len: index === -1 ? 0 : 9 };
       };
       const isElseLine = (v: string): boolean => {
-        const t = v.trim();
-        return t === "{{:else}}" || t === "{{else}}";
+        return v.trim() === "{{:else}}";
       };
       const lines = p1.split("\n");
       if (lines.length === 1) {

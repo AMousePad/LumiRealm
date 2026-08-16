@@ -90,6 +90,12 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   // Cleared on the next viewer_data_pushed (backend re-push = success signal).
   let assetUploadStatus: { kind: 'info' | 'error'; message: string } | null = null;
   let renamingAssetName: string | null = null;
+  // Selection lives outside the DOM: the grid is virtualized, so tiles unmount
+  // on scroll and anything stored on them is lost.
+  let assetSelectMode = false;
+  const assetSelected = new Set<string>();
+  // Anchor for shift-click range select, an index into the filtered list.
+  let assetLastClickedIndex: number | null = null;
   let editingTriggerIndex: number | null = null;
   let editingTriggerLua = '';
   // null = no unsaved changes (textarea derives from snapshot)
@@ -279,6 +285,9 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     bgHtmlTextBuffer = null;
     renamingAssetName = null;
     assetSearchTerm = '';
+    assetSelectMode = false;
+    assetSelected.clear();
+    assetLastClickedIndex = null;
     // Modules have no creator notes, jump straight to Assets.
     activeSubTab = o.kind === 'character' ? 'notes' : 'assets';
     assetPagesShown = 1;
@@ -409,7 +418,12 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
       btn.addEventListener('click', () => {
         if (activeSubTab === t.id) return;
         activeSubTab = t.id;
-        if (t.id !== 'assets') assetPagesShown = 1; // reset pagination on tab leave
+        if (t.id !== 'assets') {
+          assetPagesShown = 1; // reset pagination on tab leave
+          assetSelectMode = false;
+          assetSelected.clear();
+          assetLastClickedIndex = null;
+        }
         render();
       });
       bar.appendChild(btn);
@@ -696,14 +710,41 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   function renderAssetsSection(assets: readonly ViewerAssetEntry[]): HTMLElement {
     const det = document.createElement('section');
 
+    // Filter (case-insensitive substring match on asset name).
+    const term = assetSearchTerm.trim().toLowerCase();
+    const filtered = term
+      ? assets.filter((a) => a.name.toLowerCase().includes(term))
+      : assets;
+
+    const filteredIndexByName = new Map(filtered.map((a, i) => [a.name, i] as const));
+
+    // Drop selections for assets that no longer exist (delete, rename, source switch).
+    if (assetSelected.size > 0) {
+      const live = new Set(assets.map((a) => a.name));
+      for (const name of [...assetSelected]) if (!live.has(name)) assetSelected.delete(name);
+    }
+
     const toolbar = document.createElement('div');
     toolbar.className = 'lrv-asset-toolbar';
+
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
     addBtn.className = 'lrv-btn lrv-btn-primary';
     addBtn.textContent = '+ Add asset';
     addBtn.addEventListener('click', () => { void onAddAssetClicked(); });
     toolbar.appendChild(addBtn);
+
+    const selectBtn = document.createElement('button');
+    selectBtn.type = 'button';
+    selectBtn.className = 'lrv-btn';
+    if (assetSelectMode) selectBtn.classList.add('lrv-btn-active');
+    selectBtn.textContent = assetSelectMode ? 'Done' : 'Select';
+    selectBtn.title = assetSelectMode
+      ? 'Leave selection mode.'
+      : 'Select multiple assets to delete them in one pass.';
+    selectBtn.addEventListener('click', () => { setAssetSelectMode(!assetSelectMode); });
+    toolbar.appendChild(selectBtn);
+
     const search = document.createElement('input');
     search.type = 'search';
     search.className = 'lrv-asset-search';
@@ -713,7 +754,23 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     toolbar.appendChild(search);
     const filterCount = document.createElement('span');
     filterCount.className = 'lrv-asset-filter-count';
+    filterCount.textContent = term ? `${filtered.length} of ${assets.length}` : '';
     toolbar.appendChild(filterCount);
+
+    // Filter-scoped bulk delete, the common case (`bg_` -> delete all matching)
+    // without stepping through selection mode.
+    if (!assetSelectMode && term && filtered.length > 0) {
+      const deleteMatchingBtn = document.createElement('button');
+      deleteMatchingBtn.type = 'button';
+      deleteMatchingBtn.className = 'lrv-btn lrv-btn-danger';
+      deleteMatchingBtn.textContent = `Delete all ${filtered.length} matching`;
+      deleteMatchingBtn.title = `Delete every asset matching "${assetSearchTerm}".`;
+      deleteMatchingBtn.addEventListener('click', () => {
+        confirmAndDeleteAssets(filtered.map((a) => a.name), `matching "${assetSearchTerm}"`);
+      });
+      toolbar.appendChild(deleteMatchingBtn);
+    }
+
     if (assetUploadStatus !== null) {
       const status = document.createElement('span');
       status.className = 'lrv-asset-upload-status';
@@ -725,12 +782,9 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     }
     det.appendChild(toolbar);
 
-    // Filter (case-insensitive substring match on asset name).
-    const term = assetSearchTerm.trim().toLowerCase();
-    const filtered = term
-      ? assets.filter((a) => a.name.toLowerCase().includes(term))
-      : assets;
-    filterCount.textContent = term ? `${filtered.length} of ${assets.length}` : '';
+    if (assetSelectMode) {
+      det.appendChild(renderSelectionBar(assets, filtered, term));
+    }
 
     if (assets.length === 0) {
       const empty = document.createElement('div');
@@ -754,7 +808,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
       minTileWidth: ASSET_TILE_MIN_W,
       overscanRows: ASSET_OVERSCAN_ROWS,
       getItems: () => filtered,
-      renderItem: (a) => renderAssetTile(a),
+      renderItem: (a) => renderAssetTile(a, filteredIndexByName.get(a.name) ?? -1),
       pinnedIndices: () => {
         if (renamingAssetName === null) return [];
         const idx = filtered.findIndex((a) => a.name === renamingAssetName);
@@ -786,17 +840,246 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     return det;
   }
 
+  function isCoarsePointer(): boolean {
+    try {
+      return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    } catch {
+      return false;
+    }
+  }
+
+  function setAssetSelectMode(on: boolean): void {
+    assetSelectMode = on;
+    if (!on) {
+      assetSelected.clear();
+      assetLastClickedIndex = null;
+    } else {
+      renamingAssetName = null;
+    }
+    render();
+  }
+
+  function renderSelectionBar(
+    assets: readonly ViewerAssetEntry[],
+    filtered: readonly ViewerAssetEntry[],
+    term: string,
+  ): HTMLElement {
+    const bar = document.createElement('div');
+    bar.className = 'lrv-asset-selbar';
+
+    const count = document.createElement('span');
+    count.className = 'lrv-asset-selbar-count';
+    count.textContent = `${assetSelected.size} selected`;
+    bar.appendChild(count);
+
+    // Scope is always spelled out. "Select all" over a filtered grid silently
+    // meaning "all 1500" is how people delete the wrong thing.
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.type = 'button';
+    selectAllBtn.className = 'lrv-asset-action';
+    selectAllBtn.textContent = term
+      ? `Select all ${filtered.length} matching`
+      : `Select all ${assets.length}`;
+    selectAllBtn.addEventListener('click', () => {
+      for (const a of filtered) assetSelected.add(a.name);
+      render();
+    });
+    bar.appendChild(selectAllBtn);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'lrv-asset-action';
+    clearBtn.textContent = 'Clear';
+    clearBtn.disabled = assetSelected.size === 0;
+    clearBtn.addEventListener('click', () => {
+      assetSelected.clear();
+      assetLastClickedIndex = null;
+      render();
+    });
+    bar.appendChild(clearBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'lrv-asset-action lrv-asset-action-danger';
+    deleteBtn.textContent = `Delete ${assetSelected.size}`;
+    deleteBtn.disabled = assetSelected.size === 0;
+    deleteBtn.addEventListener('click', () => {
+      confirmAndDeleteAssets([...assetSelected], 'selected');
+    });
+    bar.appendChild(deleteBtn);
+
+    const hint = document.createElement('span');
+    hint.className = 'lrv-asset-selbar-hint';
+    // Shift-click and Esc are keyboard-only. On touch the bulk path is
+    // search + Select all matching, so advertise that instead.
+    hint.textContent = isCoarsePointer()
+      ? 'Tap to select · hold to extend from the last one'
+      : 'Shift-click for a range · Esc to exit';
+    bar.appendChild(hint);
+
+    return bar;
+  }
+
+  function confirmAndDeleteAssets(names: readonly string[], scopeLabel: string): void {
+    if (names.length === 0) return;
+    const n = names.length;
+    const preview = names.slice(0, 5).map((s) => `  ${s}`).join('\n');
+    const more = n > 5 ? `\n  …and ${n - 5} more` : '';
+    if (!confirm(
+      `Delete ${n} ${scopeLabel} asset${n === 1 ? '' : 's'}?\n\n${preview}${more}\n\n` +
+        `Their image files are deleted too, unless something else still uses them. ` +
+        `This cannot be undone.`,
+    )) return;
+    log.info(`viewer-panel: delete_assets count=${n} scope=${scopeLabel}`);
+    sendCurrentSourceMutation({ type: 'delete_assets', assetNames: names });
+    assetSelected.clear();
+    assetLastClickedIndex = null;
+    assetSelectMode = false;
+  }
+
+  function toggleAssetSelection(name: string, index: number, extend: boolean): void {
+    if (extend && assetLastClickedIndex !== null) {
+      selectAssetRange(assetLastClickedIndex, index);
+    } else if (assetSelected.has(name)) {
+      assetSelected.delete(name);
+    } else {
+      assetSelected.add(name);
+    }
+    assetLastClickedIndex = index;
+    render();
+  }
+
+  function selectAssetRange(from: number, to: number): void {
+    const list = currentFilteredAssets();
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    // Range select always adds, matching file managers: extending never deselects.
+    for (let i = lo; i <= hi; i++) {
+      const entry = list[i];
+      if (entry) assetSelected.add(entry.name);
+    }
+  }
+
+  // Touch has no shift key. Long-press covers both mobile idioms: outside
+  // select mode it enters selection (Photos / Files behaviour), inside it
+  // extends from the anchor, which is what shift-click does on desktop.
+  const LONG_PRESS_MS = 450;
+  const LONG_PRESS_SLOP_PX = 10;
+  // A fired long-press must not also register as a tap, or it would toggle back off.
+  let suppressNextTileClick = false;
+
+  function attachLongPress(tile: HTMLElement, name: string, filteredIndex: number): void {
+    let timer: number | undefined;
+    let startX = 0;
+    let startY = 0;
+
+    const cancel = (): void => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    tile.addEventListener('pointerdown', (e) => {
+      // Cleared per gesture, not after use: a long-press that enters select mode
+      // re-renders the grid, so its trailing click may land on a detached tile
+      // and never reach the handler that would have consumed the flag.
+      suppressNextTileClick = false;
+      // Desktop keeps shift-click; a held mouse button shouldn't select.
+      if (e.pointerType !== 'touch') return;
+      const t = e.target as HTMLElement | null;
+      if (t && t.closest('video, audio, a, input, button')) return;
+      startX = e.clientX;
+      startY = e.clientY;
+      cancel();
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        suppressNextTileClick = true;
+        try { (navigator as { vibrate?: (p: number) => boolean }).vibrate?.(15); } catch { /* not supported */ }
+        if (!assetSelectMode) {
+          assetSelectMode = true;
+          renamingAssetName = null;
+          assetSelected.add(name);
+          assetLastClickedIndex = filteredIndex;
+          render();
+          return;
+        }
+        if (assetLastClickedIndex !== null) selectAssetRange(assetLastClickedIndex, filteredIndex);
+        else assetSelected.add(name);
+        assetLastClickedIndex = filteredIndex;
+        render();
+      }, LONG_PRESS_MS);
+    });
+
+    // Movement past the slop means a scroll, not a press.
+    tile.addEventListener('pointermove', (e) => {
+      if (timer === undefined) return;
+      if (Math.abs(e.clientX - startX) > LONG_PRESS_SLOP_PX
+        || Math.abs(e.clientY - startY) > LONG_PRESS_SLOP_PX) cancel();
+    });
+    tile.addEventListener('pointerup', cancel);
+    tile.addEventListener('pointercancel', cancel);
+    tile.addEventListener('pointerleave', cancel);
+  }
+
+  function currentFilteredAssets(): readonly ViewerAssetEntry[] {
+    const all = viewerData?.assets ?? [];
+    const term = assetSearchTerm.trim().toLowerCase();
+    return term ? all.filter((a) => a.name.toLowerCase().includes(term)) : all;
+  }
+
+  // Preview-only. Risu's narrower video set still drives `{{asset::}}`
+  // image-vs-video branching, so widening here can't change card output.
+  const VIEWER_VIDEO_EXTS = new Set([
+    'mp4', 'webm', 'mov', 'm4v', 'm4p', 'ogv', 'mkv', 'avi',
+    '3gp', 'mpeg', 'mpg', 'ts', 'flv',
+  ]);
+  const VIEWER_AUDIO_EXTS = new Set([
+    'mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'weba',
+  ]);
+
   function assetMediaKind(ext: string | undefined): 'video' | 'audio' | 'image' {
     if (!ext) return 'image';
     const e = ext.toLowerCase();
-    if (e === 'mp4' || e === 'webm' || e === 'mov' || e === 'm4v' || e === 'ogv') return 'video';
-    if (e === 'mp3' || e === 'wav' || e === 'ogg' || e === 'oga' || e === 'm4a' || e === 'aac' || e === 'flac' || e === 'opus') return 'audio';
+    if (VIEWER_VIDEO_EXTS.has(e)) return 'video';
+    if (VIEWER_AUDIO_EXTS.has(e)) return 'audio';
     return 'image';
   }
 
-  function renderAssetTile(a: ViewerAssetEntry): HTMLDivElement {
+  function renderAssetTile(a: ViewerAssetEntry, filteredIndex: number): HTMLDivElement {
     const tile = document.createElement('div');
     tile.className = 'lrv-asset-tile';
+    // Armed even outside select mode: on touch that's how you get into it.
+    attachLongPress(tile, a.name, filteredIndex);
+    // Long-press otherwise raises the OS callout over the tile.
+    tile.addEventListener('contextmenu', (e) => { e.preventDefault(); });
+    if (assetSelectMode) {
+      tile.classList.add('lrv-asset-tile-selectable');
+      const selected = assetSelected.has(a.name);
+      if (selected) tile.classList.add('lrv-asset-tile-selected');
+
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.className = 'lrv-asset-tile-check';
+      box.checked = selected;
+      box.setAttribute('aria-label', `Select ${a.name}`);
+      box.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (suppressNextTileClick) { suppressNextTileClick = false; return; }
+        toggleAssetSelection(a.name, filteredIndex, (e as MouseEvent).shiftKey);
+      });
+      tile.appendChild(box);
+
+      // Whole-tile click toggles, but media controls and links keep working:
+      // scrubbing a video shouldn't flip a selection.
+      tile.addEventListener('click', (e) => {
+        const t = e.target as HTMLElement | null;
+        if (t && t.closest('video, audio, a, input, button')) return;
+        e.preventDefault();
+        if (suppressNextTileClick) { suppressNextTileClick = false; return; }
+        toggleAssetSelection(a.name, filteredIndex, e.shiftKey);
+      });
+    }
     const kind = assetMediaKind(a.ext);
     if (kind === 'video') {
       const vid = document.createElement('video');
@@ -889,8 +1172,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
       deleteBtn.textContent = 'Delete';
       deleteBtn.title = `Remove "${a.name}" from the asset list.`;
       deleteBtn.addEventListener('click', () => {
-        if (!window.confirm(`Remove asset "${a.name}"?`)) return;
-        sendCurrentSourceMutation({ type: 'delete_asset', assetName: a.name });
+        confirmAndDeleteAssets([a.name], 'this');
       });
       actions.appendChild(deleteBtn);
       cap.appendChild(actions);
@@ -917,13 +1199,12 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
 
   function sendCurrentSourceMutation(
     partial:
-      | { type: 'add_asset'; assetName: string; imageId: string; ext?: string }
       | {
           type: 'add_assets';
           entries: ReadonlyArray<{ assetName: string; imageId: string; ext?: string }>;
         }
       | { type: 'rename_asset'; oldName: string; newName: string }
-      | { type: 'delete_asset'; assetName: string },
+      | { type: 'delete_assets'; assetNames: readonly string[] },
   ): void {
     if (!viewerData) return;
     const source = viewerData.source.kind === 'character'
@@ -1766,8 +2047,18 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     }
   }
 
+  // Document-level because tiles aren't focusable, so a root listener would miss
+  // Escape whenever focus sat on body. The select-mode guard keeps it narrow.
+  function onEscapeKeyDown(e: KeyboardEvent): void {
+    if (e.key !== 'Escape' || !assetSelectMode) return;
+    e.stopPropagation();
+    setAssetSelectMode(false);
+  }
+  document.addEventListener('keydown', onEscapeKeyDown, true);
+
   function destroy(): void {
     log.info('viewer-panel: destroy');
+    try { document.removeEventListener('keydown', onEscapeKeyDown, true); } catch { /* */ }
     try { sourceSelect.destroy(); } catch { /* */ }
     try { unsubTranslate(); } catch { /* */ }
     try { root.replaceChildren(); } catch { /* */ }

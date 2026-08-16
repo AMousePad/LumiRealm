@@ -840,8 +840,8 @@ function emitV2GetDictValues(op: TriggerEffect, ctx: EmitContext): EmitResult {
 function emitV2GetCharacterDesc(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getCharacterDesc()`)};`),
-    needsAwait: false,
+    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getCharacterDesc()`)};`),
+    needsAwait: true,
   };
 }
 
@@ -856,8 +856,8 @@ function emitV2SetCharacterDesc(op: TriggerEffect, ctx: EmitContext): EmitResult
 function emitV2GetPersonaDesc(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getPersonaDesc()`)};`),
-    needsAwait: false,
+    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getPersonaDesc()`)};`),
+    needsAwait: true,
   };
 }
 
@@ -872,8 +872,8 @@ function emitV2SetPersonaDesc(op: TriggerEffect, ctx: EmitContext): EmitResult {
 function emitV2GetReplaceGlobalNote(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getReplaceGlobalNote()`)};`),
-    needsAwait: false,
+    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getReplaceGlobalNote()`)};`),
+    needsAwait: true,
   };
 }
 
@@ -888,8 +888,8 @@ function emitV2SetReplaceGlobalNote(op: TriggerEffect, ctx: EmitContext): EmitRe
 function emitV2GetAuthorNote(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getAuthorNote()`)};`),
-    needsAwait: false,
+    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getAuthorNote()`)};`),
+    needsAwait: true,
   };
 }
 

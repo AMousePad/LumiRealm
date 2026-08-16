@@ -1,8 +1,17 @@
 import type { SpindleDisplayContext } from 'lumiverse-spindle-types';
 import type { DispatchData, HostMessage } from '../interpreter/host.js';
 import { runListenEditChain } from '../interpreter/listen-edit.js';
-import { runAtActionsForPhase } from '../interpreter/at-actions-runtime.js';
-import { makeSnapshotHostApi, buildPreloaded, type DisplayVarWriteback } from './host-shim.js';
+import {
+  runAtActionsForPhase,
+  type RuntimeAtAtAction,
+} from '../interpreter/at-actions-runtime.js';
+import {
+  makeSnapshotHostApi,
+  buildPreloaded,
+  resolveRisuDisplayMessageIndex,
+  type DisplayVarWriteback,
+  type DisplayRuntimeEffectSink,
+} from './host-shim.js';
 import type { DisplaySnapshot } from './snapshot.js';
 import { makeDispatcherScriptNS, registerManualTriggers } from '../interpreter/dispatcher.js';
 import { setWasmoonExecutor } from '../interpreter/runtime.js';
@@ -11,11 +20,7 @@ import { executeWasmoon } from '../interpreter/lua-wasmoon.js';
 setWasmoonExecutor(executeWasmoon);
 
 function risuChatIndex(context: SpindleDisplayContext, snap: DisplaySnapshot): number {
-  const dyn = context.dynamicMacros;
-  const chatIndexStr = dyn?.chat_index;
-  if (typeof chatIndexStr === 'string' && /^-?\d+$/.test(chatIndexStr)) return parseInt(chatIndexStr, 10) - 1;
-  if (typeof context.messageIndex === 'number') return context.messageIndex - 1;
-  return snap.chat.lastMessageId - 1;
+  return resolveRisuDisplayMessageIndex(snap, context);
 }
 
 export async function runEditDisplayChain(
@@ -24,9 +29,10 @@ export async function runEditDisplayChain(
   context: SpindleDisplayContext,
   resolveTemplate: (text: string) => Promise<string>,
   onVarWrite: DisplayVarWriteback,
+  onEffect?: DisplayRuntimeEffectSink,
 ): Promise<string> {
   if (snap.luaTriggers.length === 0) return content;
-  const api = makeSnapshotHostApi(snap, onVarWrite);
+  const api = makeSnapshotHostApi(snap, onVarWrite, onEffect);
   const scriptNS = makeDispatcherScriptNS();
   registerManualTriggers(scriptNS, snap.compiledLibraries, api);
   const data: DispatchData = {
@@ -48,7 +54,8 @@ export async function runEditDisplayChain(
       characterId: snap.characterId,
       resolveTemplate,
       preloaded: buildPreloaded(snap),
-      wasmoonKey: snap.characterId,
+      // Risu owns one engine per hook mode and recreates it when source changes.
+      wasmoonKey: 'editDisplay',
     },
   );
 }
@@ -57,13 +64,21 @@ export async function runEditDisplayAtActions(
   snap: DisplaySnapshot,
   content: string,
   context: SpindleDisplayContext,
+  actions: readonly RuntimeAtAtAction[] = snap.atActions,
+  options: {
+    readonly resolveTemplate?: (text: string) => string | Promise<string>;
+    readonly onEffect?: DisplayRuntimeEffectSink;
+  } = {},
 ): Promise<string> {
-  if (snap.atActions.length === 0) return content;
-  const api = makeSnapshotHostApi(snap);
+  if (actions.length === 0) return content;
+  const api = makeSnapshotHostApi(snap, undefined, options.onEffect);
   const role = (context.role ?? undefined) as HostMessage['role'] | undefined;
-  return runAtActionsForPhase(snap.atActions, 'editdisplay', content, {
+  return runAtActionsForPhase(actions, 'editdisplay', content, {
     api,
     chatIndex: risuChatIndex(context, snap),
     ...(role ? { role } : {}),
+    ...(options.resolveTemplate
+      ? { resolveTemplate: options.resolveTemplate }
+      : {}),
   });
 }

@@ -3,16 +3,11 @@ import { customscriptSchema } from "./customscript.js";
 import { loreBookSchema } from "./lorebook.js";
 import { triggerscriptSchema } from "./triggerscript.js";
 
-// Risu modules.ts MCPModule is `{ url: string }` but our extension does not
-// execute MCP at all. Accept any shape so a malformed mcp block doesn't fail
-// the whole module; the translator surfaces a manifest issue when present.
+// MCP config is preserved but never executed, so unknown fields remain intact.
 export const mcpModuleSchema = z.object({}).passthrough();
 export type MCPModule = z.infer<typeof mcpModuleSchema>;
 
-// Risu modules.ts: asset triple [name, url, hash]; url blanked before serialize.
-// Risu reads asset[0]/[1]/[2] directly without length checks, so missing trailing
-// elements are tolerated as undefined. Mirror by accepting any array of strings,
-// padding to 3 entries.
+// Asset tuples tolerate missing trailing values because imports read by index.
 export const moduleAssetSchema = z.preprocess(
   (v) => {
     if (!Array.isArray(v)) return v;
@@ -44,6 +39,7 @@ export const risuModuleSchema = z
     namespace: nullish(z.string()),
     customModuleToggle: nullish(z.string()),
     mcp: nullish(mcpModuleSchema),
+    icon: nullish(z.string()),
   })
   .passthrough();
 

@@ -5,8 +5,111 @@ import type {
   ModuleLorebookEntry,
   PendingRegexScriptMsg,
 } from '../types/messages.js';
-import { unprefixHtmlClasses, normalizeIncompleteHtmlEntities, unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
-import { normaliseRisuFlag, pickSubstituteMacroMode } from '../core/mappers/regex.js';
+import {
+  TRANSFORMED_FLAG,
+  detectAtAction,
+  getRegexMatchActions,
+  normaliseRisuFlag,
+  normalizeDisplayReplaceString,
+  normalizeMatchActionDisplayReplaceString,
+  pickSubstituteMacroMode,
+} from '../core/mappers/regex.js';
+
+interface ModuleRegexIdentityRow {
+  readonly id?: unknown;
+  readonly metadata?: unknown;
+}
+
+export interface ModuleRegexScriptIdRecovery {
+  readonly ids: readonly string[];
+  readonly exact: boolean;
+}
+
+export function normalizeModuleDisplayReplaceString(
+  replaceString: string,
+  preTransformed = false,
+): string {
+  const action = detectAtAction(replaceString);
+  if (action === null) {
+    return normalizeDisplayReplaceString(replaceString, { preTransformed });
+  }
+  if (action !== 'move_top' && action !== 'move_bottom') {
+    return replaceString;
+  }
+  const prefix = `@@${action}`;
+  const tail = replaceString.slice(prefix.length);
+  const separator = tail.match(/^\s+/)?.[0] ?? '';
+  return prefix + separator + normalizeDisplayReplaceString(
+    tail.slice(separator.length),
+    { action: true, preTransformed },
+  );
+}
+
+function readRisuMetadata(
+  row: ModuleRegexIdentityRow,
+): Record<string, unknown> | null {
+  if (!row.metadata || typeof row.metadata !== 'object') return null;
+  const risu = (row.metadata as Record<string, unknown>)['_risu'];
+  return risu && typeof risu === 'object'
+    ? risu as Record<string, unknown>
+    : null;
+}
+
+function readModuleRegexSourceRow(
+  row: ModuleRegexIdentityRow,
+  moduleId: string,
+): number | null {
+  const metadata = readRisuMetadata(row);
+  const sourceRowIndex = metadata?.['source_row_index'];
+  return metadata?.['module_id'] === moduleId
+      && typeof sourceRowIndex === 'number'
+      && Number.isInteger(sourceRowIndex)
+    ? sourceRowIndex
+    : null;
+}
+
+/**
+ * Restores host row ids to module source order after import. Host list order
+ * may differ from source order because Risu order flags change sort_order.
+ */
+export function recoverModuleRegexScriptIds(
+  moduleId: string,
+  projectedRows: readonly ModuleRegexIdentityRow[],
+  liveRows: readonly ModuleRegexIdentityRow[],
+): ModuleRegexScriptIdRecovery {
+  const moduleRows = liveRows.filter(
+    (row) => readRisuMetadata(row)?.['module_id'] === moduleId,
+  );
+  const cleanupIds = moduleRows
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const idsBySourceRow = new Map<number, string[]>();
+  for (const row of moduleRows) {
+    if (typeof row.id !== 'string' || row.id.length === 0) continue;
+    const sourceRow = readModuleRegexSourceRow(row, moduleId);
+    if (sourceRow === null) continue;
+    const ids = idsBySourceRow.get(sourceRow) ?? [];
+    ids.push(row.id);
+    idsBySourceRow.set(sourceRow, ids);
+  }
+
+  const ordered: string[] = [];
+  for (const projected of projectedRows) {
+    const sourceRow = readModuleRegexSourceRow(projected, moduleId);
+    if (sourceRow === null) return { ids: cleanupIds, exact: false };
+    const ids = idsBySourceRow.get(sourceRow);
+    if (ids?.length !== 1) return { ids: cleanupIds, exact: false };
+    ordered.push(ids[0]!);
+  }
+  if (new Set(ordered).size !== ordered.length) {
+    return { ids: cleanupIds, exact: false };
+  }
+  const boundIds = new Set(ordered);
+  return {
+    ids: [...ordered, ...cleanupIds.filter((id) => !boundIds.has(id))],
+    exact: true,
+  };
+}
 
 export function projectModuleLorebookEntries(
   moduleId: string,
@@ -70,14 +173,17 @@ export function projectModuleLorebookEntries(
 export function projectModuleRegexEntries(
   moduleId: string,
   moduleName: string,
-  characterId: string,
+  // `null` projects global scope: one row set that fires on every character,
+  // instead of N per-character copies.
+  characterId: string | null,
   raw: readonly unknown[] | undefined,
   idGen: () => string,
 ): readonly PendingRegexScriptMsg[] {
   if (!Array.isArray(raw)) return [];
   const out: PendingRegexScriptMsg[] = [];
   let sortBase = 0;
-  for (const e of raw) {
+  for (let sourceIndex = 0; sourceIndex < raw.length; sourceIndex++) {
+    const e = raw[sourceIndex];
     if (!e || typeof e !== 'object') continue;
     const eo = e as Record<string, unknown>;
     const findRegex = typeof eo['in'] === 'string' ? eo['in'] : '';
@@ -92,7 +198,7 @@ export function projectModuleRegexEntries(
         replace_string: '',
         flags: 'g',
         placement: ['ai_output'],
-        scope: 'character',
+        scope: characterId === null ? 'global' : 'character',
         scope_id: characterId,
         target: 'display',
         min_depth: null,
@@ -108,6 +214,8 @@ export function projectModuleRegexEntries(
           _risu: {
             module_id: moduleId,
             source_type: 'divider',
+            source_index: sourceIndex,
+            source_row_index: sortBase,
           },
         },
       });
@@ -116,21 +224,56 @@ export function projectModuleRegexEntries(
     }
     const ruleType = typeof eo['type'] === 'string' ? eo['type'] : 'editdisplay';
     const { placement, target, disabled } = riskCustomScriptTypeToLumi(ruleType);
-    if (target === 'display' && replaceString.length > 0) {
-      replaceString = unprefixHtmlClasses(replaceString);
-      replaceString = unprefixCssInStyleBlocks(replaceString);
-      replaceString = normalizeIncompleteHtmlEntities(replaceString);
-    }
     const ableFlagRaw = eo['ableFlag'];
     const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null
       ? true
       : !!ableFlagRaw;
     const rawFlag = typeof eo['flag'] === 'string' ? eo['flag'] : undefined;
     const normalisedFlag = normaliseRisuFlag(rawFlag, ableFlag);
+    const directAction = detectAtAction(replaceString);
+    const matchActions = getRegexMatchActions(
+      directAction,
+      normalisedFlag.actions,
+    );
+    const movesMatch = matchActions.includes('move_top')
+      || matchActions.includes('move_bottom');
+    replaceString = replaceString.replaceAll('$n', '\n');
+    if (
+      replaceString.endsWith('>')
+      && !normalisedFlag.actions.includes('no_end_nl')
+    ) {
+      replaceString += '\n';
+    }
+    const repeatPosition = matchActions.includes('repeat_back')
+      ? replaceString.split(' ', 2)[1]
+      : undefined;
+    if (target === 'display' && replaceString.length > 0) {
+      replaceString = normalizeMatchActionDisplayReplaceString(
+        replaceString,
+        matchActions,
+        directAction,
+        eo[TRANSFORMED_FLAG] === true,
+      );
+    } else if (directAction === 'move_top') {
+      replaceString = replaceString.replace('@@move_top ', '');
+    } else if (directAction === 'move_bottom') {
+      replaceString = replaceString.replace('@@move_bottom ', '');
+    }
     let flags = normalisedFlag.flag;
     const findHasCbs = findRegex.indexOf('{{') >= 0;
-    if (findHasCbs) flags = flags.replace(/u/g, '');
-    if (flags.length === 0) flags = 'g';
+    const resolveFindCbs = normalisedFlag.actions.includes('cbs');
+    if (findHasCbs && resolveFindCbs) flags = flags.replace(/u/g, '');
+    if (movesMatch) {
+      flags = flags.replace(/g/g, '');
+    }
+    if (flags.length === 0) flags = 'u';
+    const baseSubstitute = movesMatch
+      ? 'none'
+      : pickSubstituteMacroMode(replaceString, false);
+    const substituteMacros =
+      resolveFindCbs && baseSubstitute === 'none'
+        ? 'find'
+        : baseSubstitute;
     const ruleNameRaw = comment.length > 0 ? comment : `rule_${sortBase + 1}`;
     out.push({
       name: ruleNameRaw,
@@ -139,24 +282,34 @@ export function projectModuleRegexEntries(
       replace_string: replaceString,
       flags,
       placement,
-      scope: 'character',
+      scope: characterId === null ? 'global' : 'character',
       scope_id: characterId,
       target,
       min_depth: null,
       max_depth: target === 'prompt' && ruleType === 'editinput' ? 0 : null,
       trim_strings: [],
       run_on_edit: false,
-      substitute_macros: pickSubstituteMacroMode(replaceString, findHasCbs),
+      substitute_macros: substituteMacros,
       disabled,
       // Risu sorts <order N> descending, Lumi reads sort_order ASC: negate.
       sort_order: 1000 + sortBase - (normalisedFlag.order ?? 0) * 100000,
       description: `From .risum module: ${moduleName}`,
       folder: `Module: ${moduleName}`,
       metadata: {
+        ...(matchActions.length > 0 ? { match_actions: matchActions } : {}),
+        ...(repeatPosition !== undefined ? { repeat_position: repeatPosition } : {}),
+        ...(matchActions.includes('repeat_back') ? { repeat_raw_match: true } : {}),
         _risu: {
           module_id: moduleId,
           source_type: ruleType,
+          phase: ruleType,
+          source_index: sourceIndex,
+          source_row_index: sortBase,
           ...(normalisedFlag.order !== undefined ? { order_flag: normalisedFlag.order } : {}),
+          ...(normalisedFlag.actions.length > 0
+            ? { flag_actions: normalisedFlag.actions }
+            : {}),
+          ...(directAction ? { at_action: directAction } : {}),
         },
       },
     });

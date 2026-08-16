@@ -80,6 +80,7 @@ export class MockFunctionRegistry implements FunctionRegistry {
 }
 
 export interface MockContextOptions {
+  chatId?: string;
   identity?: Partial<IdentityFields>;
   character?: Partial<CharacterFields>;
   messages?: readonly Message[];
@@ -100,6 +101,7 @@ export interface MockContextOptions {
   screenHeight?: number;
   commit?: boolean;
   legacyMediaFindings?: boolean;
+  cbsContext?: boolean;
   rmVar?: boolean;
   runVar?: boolean;
 }
@@ -137,6 +139,7 @@ const DEFAULT_CHARACTER: CharacterFields = {
 
 export function makeMockContext(opts: MockContextOptions = {}): RisuRuntimeContext {
   return {
+    chatId: opts.chatId ?? "",
     vars: new MockVariableStore(),
     identity: { ...DEFAULT_IDENTITY, ...opts.identity },
     character: { ...DEFAULT_CHARACTER, ...opts.character },
@@ -159,6 +162,7 @@ export function makeMockContext(opts: MockContextOptions = {}): RisuRuntimeConte
     screenHeight: opts.screenHeight ?? 0,
     commit: opts.commit ?? true,
     legacyMediaFindings: opts.legacyMediaFindings ?? false,
+    ...(opts.cbsContext ? { cbsContext: true } : {}),
     ...(opts.rmVar ? { rmVar: true } : {}),
     ...(opts.runVar ? { runVar: true } : {}),
   };

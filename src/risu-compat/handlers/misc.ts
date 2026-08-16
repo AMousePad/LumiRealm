@@ -51,7 +51,7 @@ register("crypt", (_c, a) => {
   return result;
 }, "Caesar-style Unicode shift cipher (default shift 32768 which self-inverts).");
 
-register("risu_date", (ctx, a) => {
+register("date", (ctx, a) => {
   if (a.length === 0) {
     const d = new Date(ctx.clock.now());
     return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
@@ -73,7 +73,7 @@ register("hiddenkey", () => "",
   "A key that activates lorebook entries without being sent to the model.");
 
 // Risu: cbs (displaying=false) and prompt-assembly (commit=true) both return ''. Only the display path renders the div.
-register("risu_comment", (ctx, a) => {
+register("comment", (ctx, a) => {
   if (ctx.commit || ctx.cbsContext) return "";
   // Both class forms so card-authored CSS (unprefixed by LumiRealm) and the shipped
   // risu-environment.css baseline (.x-risu-risu-comment) both match, matching Risu.
@@ -150,6 +150,7 @@ register("moduleassetlist", (ctx, a) => {
 }, "Returns a JSON array of asset names for the specified module namespace. Returns empty string if namespace not found.");
 
 // Subset: model fields read from ctx.aiModel, platform fields default to non-native.
+// modelformat/modelprovider/modeltokenizer still error, Lumi exposes no equivalent.
 register("metadata", (ctx, a) => {
   const key = (a[0] ?? "").toLocaleLowerCase();
   switch (key) {
@@ -157,9 +158,17 @@ register("metadata", (ctx, a) => {
     case "mobile": case "local": case "node": return "0";
     case "risutype": return "web";
     case "modelname": case "modelshortname": case "modelinternalid": return ctx.aiModel || "";
+    case "version": return ctx.appVersion;
+    case "majorversion": case "majorver": case "major":
+      return ctx.appVersion.split(".")[0] ?? "";
+    case "maxcontext": return ctx.maxContext.toString();
+    // Risu splits these (app setting vs navigator); we have one source.
+    case "language": case "locale": case "lang":
+    case "browserlanguage": case "browserlocale": case "browserlang":
+      return ctx.language;
     default: return `Error: ${a[0]} is not a valid metadata key.`;
   }
-}, "Returns host metadata. Subset implemented — model fields read from ctx.aiModel; platform fields default to non-native.");
+}, "Returns host metadata. Subset implemented — model fields read from ctx.aiModel; platform fields default to non-native; language and browserlanguage collapse to one value.");
 
 register("chatindex", (ctx) => {
   // Reads ctx.currentMessageIndex. cbs callers set it to -1.

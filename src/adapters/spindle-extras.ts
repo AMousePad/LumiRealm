@@ -6,6 +6,7 @@ export interface MessageContentProcessorCtx {
   readonly chatId: string;
   readonly messageId?: string;
   readonly content: string;
+  readonly isUser: boolean;
   readonly extra?: Record<string, unknown>;
   readonly origin: 'create' | 'update' | 'swipe_add' | 'swipe_update' | 'render';
   readonly swipeIndex?: number;

@@ -9,8 +9,8 @@ import {
 } from './realm/backend.js';
 import type { RealmBackendToFrontend } from './realm/messages.js';
 import type { StoredRisuCard } from './payload/types.js';
-import { CURRENT_CHARACTER_SCHEMA_VERSION } from './state/translator-migrations.js';
-import { CURRENT_MODULE_SCHEMA_VERSION } from './state/module-migrations.js';
+import { CURRENT_CHARACTER_SCHEMA_VERSION } from './migrations/character.js';
+import { CURRENT_MODULE_SCHEMA_VERSION } from './migrations/module.js';
 import { type UserStorageLike } from './payload/installer.js';
 import {
   preValidateRequires,
@@ -50,8 +50,8 @@ import { parseDirectLorebook } from './payload/lorebook-direct-import.js';
 import { parseDirectRegex } from './payload/regex-direct-import.js';
 import { mapRegex } from './core/mappers/regex.js';
 import { createRegexImporter } from './state/regex-import.js';
+import { completeRegexInstall } from './migrations/install-coordinator.js';
 import { mapLoreBook } from './core/mappers/lorebook.js';
-import { clearMacroVarOverlay } from './interpreter/macros.js';
 import { setActiveAssetIndexes, clearActiveAssetIndexes } from './interpreter/asset-cache.js';
 import {
   setActiveCharacterImage,
@@ -76,6 +76,12 @@ import {
 import { clearVarOverlay } from './interpreter/evaluator/context.js';
 import { invalidateListenEditPreload } from './interpreter/listenedit-preload.js';
 import { setCachedMessages, invalidateCachedMessages } from './interpreter/messages-cache.js';
+import { setGlobalModuleIdsCache } from './state/global-modules-cache.js';
+import {
+  readCharacterRecency,
+  touchRecency,
+  writeCharacterRecency,
+} from './state/character-recency.js';
 import { setScreenDims } from './interpreter/screen-dims-cache.js';
 import { VariableStateStore } from './state/variables-state.js';
 import { ToggleStateStore } from './state/toggle-state.js';
@@ -107,6 +113,7 @@ import { createImportTextHandlers } from './handlers/import-text.js';
 import { createAssetsHandlers } from './handlers/assets.js';
 import { createViewerHandlers } from './handlers/viewer.js';
 import { createModuleHandlers } from './handlers/module.js';
+import { createExportHandlers } from './handlers/export.js';
 import {
   createImportHandlers,
   type PendingImportCompletion,
@@ -124,8 +131,8 @@ import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
 import { createTriggerDispatcher } from './state/trigger-dispatch.js';
 import { createRepairOrchestrator } from './state/repair-orchestrator.js';
-import { createMigrationsRunner } from './state/migrations.js';
-import { createMassMigrationsRunner } from './boot/mass-migrations.js';
+import { createMigrationsRunner } from './migrations/runner.js';
+import { createMassMigrationsRunner } from './migrations/mass.js';
 import { createActiveCardLoader } from './state/active-card.js';
 import { createApplySvgRasterIndex } from './boot/svg-raster-apply.js';
 import {
@@ -173,9 +180,10 @@ import { resolveAlertDismissal } from './interpreter/alert-bridge.js';
 import { resolvePickResolution } from './interpreter/pick-bridge.js';
 import { userIdAls, currentUserId } from './interpreter/runtime/als.js';
 import { checkHostVersion, type HostVersionCheckResult } from './util/version-check.js';
+import { decodeModuleCharx } from './core/charx/index.js';
 import { decodeRisum } from './core/risum/index.js';
 import { risuModuleSchema } from './core/schemas/module.js';
-import { guessMimeType, sniffImageMime, loadCatalog } from './payload/import.js';
+import { guessMimeType, sniffImageMime } from './payload/import.js';
 import {
   type ModuleEnvelope,
   deleteModule as deleteModuleFromStore,
@@ -183,6 +191,10 @@ import {
   pairModuleAssetsForUpload,
   readEnvelope as readModuleEnvelope,
   writeEnvelope as writeModuleEnvelope,
+  readGlobalModuleIds,
+  writeGlobalModuleIds,
+  readGlobalModuleArtifacts,
+  writeGlobalModuleArtifacts,
 } from './state/modules-store.js';
 import { registerLumiagentPhoneline } from './lumiagent-phoneline.js';
 
@@ -376,9 +388,9 @@ function modulesByNamespaceFromCard(card: StoredRisuCard): Readonly<Record<strin
   return Object.keys(out).length > 0 ? out : null;
 }
 
-// We do not register macros with Lumi's MacroRegistry. The macroInterceptor
-// resolves every macro through our own evaluator on each Lumi evaluate(), and
-// display/bg-html resolve in-worker, so Lumi's registry is never consulted.
+// Risu macro compatibility does not register aliases with Lumi's MacroRegistry.
+// The macroInterceptor resolves supported raw names through our evaluator before
+// Lumi considers its native registry; display/bg-html resolve in-worker.
 
 const variableState = new VariableStateStore();
 
@@ -546,10 +558,13 @@ const clearDeadJournals = (userId: string) => orphanOrchestrator.clearDeadJourna
 const captureUserId = makeCaptureUserId({
   capturedUserIds,
   getSettingsForUser,
+  seedGlobalModules: async (uid) => {
+    setGlobalModuleIdsCache(uid, await readGlobalModuleIds(moduleStorage(), uid));
+  },
   // Trampolines: massMigrations is declared further down, this closure resolves it at call time.
   runMassModuleMigrationIfNeeded: (uid) => massMigrations.runMassModuleMigrationIfNeeded(uid),
   runMassCharacterMigrationIfNeeded: (uid) => massMigrations.runMassCharacterMigrationIfNeeded(uid),
-  runMacroUnprefixSweepIfNeeded: (uid) => massMigrations.runMacroUnprefixSweepIfNeeded(uid),
+  runRetiredMacroMigrationIfNeeded: (uid) => massMigrations.runRetiredMacroMigrationIfNeeded(uid),
   runVarScopeMigrationIfNeeded: (uid) => massMigrations.runVarScopeMigrationIfNeeded(uid),
   notifyMissingPermsForUser: (userId) => {
     const missing = getMissingPermissions();
@@ -697,8 +712,10 @@ async function listCards(userId: string | undefined): Promise<readonly CardSumma
     paginate: true,
   });
   const lang = TRANSLATE_TARGET_LANG;
+  const recency = await readCharacterRecency(userStorage(), userId);
   const summaries: CardSummary[] = entries.map((e) => {
     const tx = e.data.translations?.[lang]?.name;
+    const lastOpened = recency.seen[e.character.id];
     return {
       character_id: e.character.id,
       character_name: e.character.name,
@@ -706,9 +723,13 @@ async function listCards(userId: string | undefined): Promise<readonly CardSumma
       translator_version: e.data.translator_version,
       uses_lua: e.data.payload.requires.lua,
       stored_at: e.data.imported_at,
+      ...(lastOpened !== undefined ? { last_opened_at: lastOpened } : {}),
     };
   });
-  summaries.sort((a, b) => b.stored_at - a.stored_at);
+  // Recently opened first, then never-opened by import time. Sorting purely by
+  // import time buried whatever you actually use behind the newest download.
+  summaries.sort((a, b) =>
+    (b.last_opened_at ?? 0) - (a.last_opened_at ?? 0) || b.stored_at - a.stored_at);
   log.debug(`listCards: done count=${summaries.length} elapsed=${Date.now() - t0}ms`);
   return summaries;
 }
@@ -843,6 +864,29 @@ function isPromptRegexOwnedChat(chatId: string): boolean {
   return false;
 }
 
+// Fire-and-forget: chat-open must not block on a storage write, and a lost
+// timestamp only costs picker ordering.
+let recencyWriteChain: Promise<void> = Promise.resolve();
+async function touchCharacterRecency(
+  characterId: string,
+  userId: string | undefined,
+): Promise<void> {
+  if (userId === undefined) return;
+  // Serialised, otherwise two rapid chat switches read the same map and the
+  // second write drops the first character's timestamp.
+  recencyWriteChain = recencyWriteChain.then(async () => {
+    try {
+      const cur = await readCharacterRecency(userStorage(), userId);
+      if (cur.seen[characterId] !== undefined
+        && Date.now() - cur.seen[characterId]! < 60_000) return;
+      await writeCharacterRecency(userStorage(), userId, touchRecency(cur, characterId, Date.now()));
+    } catch (err) {
+      log.debug(`touchCharacterRecency: ${errMsg(err)}`);
+    }
+  });
+  return recencyWriteChain;
+}
+
 function sendSetActiveChat(
   activeChatId: string | null,
   activeCharacterId: string | null,
@@ -853,6 +897,7 @@ function sendSetActiveChat(
   } catch (err) {
     log.warn(`sendSetActiveChat: ${(err as Error).message}`);
   }
+  if (activeCharacterId !== null) void touchCharacterRecency(activeCharacterId, userId);
   if (PROMPT_REGEX_ACTIVE && userId !== undefined) {
     const nowOwned = activeChatId !== null;
     const prevOwned = promptRegexOwnedByUser.get(userId);
@@ -940,6 +985,7 @@ const readonlyResolver = createReadonlyResolver({
   errMsg,
 });
 const resolveReadonly = readonlyResolver.resolve;
+const resolveReadonlyMany = readonlyResolver.resolveMany;
 
 // Page size 200 matches Lumi's server-side clamp. Module-installed rows live
 // at character scope too, so we exclude them by metadata._risu.module_id.
@@ -1084,6 +1130,7 @@ createLumiInterceptors({
   getCachedSettingsSync,
   modulesByNamespaceFromCard,
   resolveReadonly,
+  resolveReadonlyMany,
   runMessageVarPass: (chatId, characterId, uid) => messageVarPass.run(chatId, characterId, uid),
   runBinding,
   log,
@@ -1156,7 +1203,6 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   clearActiveScriptstateDefaults,
   clearActiveLorebook,
   clearVarOverlay,
-  clearMacroVarOverlay,
   refreshPersonaImage: (userId) => refreshPersonaImage(userId),
   refreshBgHtml,
   refreshVariables,
@@ -1261,6 +1307,7 @@ registerLumiagentPhoneline(
 
 const moduleUploader = createModuleUploader({
   decodeRisum,
+  decodeCharx: decodeModuleCharx,
   parseSchema: (data) => risuModuleSchema.safeParse(data) as never,
   newUuid: () => crypto.randomUUID(),
   requestConsent: (opts, userId) => requestConsent(opts, userId),
@@ -1307,6 +1354,7 @@ async function processModuleUpload(
 
 const modulePushes = createModulePushes({
   translateLang: TRANSLATE_TARGET_LANG,
+  readGlobalModuleIds: (userId) => readGlobalModuleIds(moduleStorage(), userId),
   readLumirealm: (charId, userId) => readLumirealm(charactersApi(), charId, userId),
   writeLumirealm: (charId, data, userId) => writeLumirealm(charactersApi(), charId, data, userId),
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
@@ -1361,6 +1409,14 @@ const assetTriggerMutate = createAssetTriggerMutate({
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
   writeModuleEnvelope: async (userId, env) => { await writeModuleEnvelope(moduleStorage(), userId, env); },
   pushModules,
+  reclaimImageIds: async (imageIds, userId, context) => {
+    const live = await buildLiveImageIdSet(orphanDetectBuilders.buildOrphanDetectDeps(userId));
+    const safe = imageIds.filter((id) => !live.liveIds.has(id));
+    const shielded = imageIds.length - safe.length;
+    if (safe.length === 0) return { deleted: 0, shielded };
+    const stats = await deleteImageIds(safe, userId, context);
+    return { deleted: stats.deleted, shielded };
+  },
   log,
   errMsg,
 });
@@ -1431,7 +1487,7 @@ const regexImporter = createRegexImporter({
   errMsg,
   parseDirectRegex,
   mapRegex,
-  loadCatalog,
+  regexApi: spindle.regex_scripts,
 });
 
 
@@ -1444,8 +1500,15 @@ const migrationsRunner = createMigrationsRunner({
   send,
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
   writeModuleEnvelope: async (userId, env) => { await writeModuleEnvelope(moduleStorage(), userId, env); },
-  dispatchModuleArtifactInstall: (charId, env, userId) => dispatchModuleArtifactInstall(charId, env, userId),
+  dispatchModuleArtifactInstall: (charId, env, userId, options) =>
+    worldBookOps.dispatchModuleArtifactInstall(charId, env, userId, options),
+  dispatchGlobalModuleArtifactInstall: (env, userId, options) =>
+    worldBookOps.dispatchGlobalModuleArtifactInstall(env, userId, options),
+  isGlobalModule: async (moduleId, userId) =>
+    (await readGlobalModuleIds(moduleStorage(), userId)).includes(moduleId),
   writeLumirealm: (charId, data, userId) => writeLumirealm(charactersApi(), charId, data, userId),
+  updateLumirealm: (charId, userId, mutator) =>
+    updateLumirealm(charactersApi(), charId, userId, mutator),
   invalidateActiveForCharacter,
   toastFor,
   archiveModuleWorldBookBeforeMigration: (env, userId) => archiveModuleWorldBookBeforeMigration(env, userId),
@@ -1505,9 +1568,9 @@ subscribeToMissingChanges((missing) => {
         log.warn(`permissions.changed: mass character migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
-        await massMigrations.runMacroUnprefixSweepIfNeeded(userId);
+        await massMigrations.runRetiredMacroMigrationIfNeeded(userId);
       } catch (err) {
-        log.warn(`permissions.changed: macro un-prefix sweep retry failed userId=${userId}: ${errMsg(err)}`);
+        log.warn(`permissions.changed: retired macro migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
         await massMigrations.runVarScopeMigrationIfNeeded(userId);
@@ -1715,6 +1778,44 @@ const repairHandlers = createRepairHandlers({
 });
 const moduleHandlers = createModuleHandlers({
   worldBookIdsByCharacter,
+  setGlobalModules: async (moduleIds, userId) => {
+    const { applied, added, removed } = await writeGlobalModuleIds(moduleStorage(), userId, moduleIds);
+    setGlobalModuleIdsCache(userId, applied);
+
+    // Teardown first: if a module is removed and re-added in one edit, the
+    // stale rows must go before the new ones are recorded against it.
+    for (const moduleId of removed) {
+      const artifacts = await readGlobalModuleArtifacts(moduleStorage(), userId, moduleId);
+      await worldBookOps.dispatchGlobalModuleArtifactUninstall(moduleId, artifacts, userId);
+      await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, {
+        regexScriptIds: [],
+        worldBookId: null,
+      });
+    }
+    for (const moduleId of added) {
+      const env = await readModuleEnvelope(moduleStorage(), userId, moduleId);
+      if (!env) {
+        log.warn(`set_global_modules: module ${moduleId} has no envelope, artifacts not installed`);
+        continue;
+      }
+      const { worldBookId } = await worldBookOps.dispatchGlobalModuleArtifactInstall(env, userId);
+      // Regex ids arrive later on module_artifacts_installed; the world book is
+      // known now and must be recorded even when the module ships no regex.
+      await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, { worldBookId });
+    }
+
+    // Runtime cards were built with the old list, so every one is stale. Reuses
+    // the per-character eviction rather than adding a second invalidation path.
+    const chars = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
+    for (const c of chars) invalidateActiveForCharacter(c.character.id, userId);
+    log.info(
+      `set_global_modules: user=${userId} count=${applied.length} ` +
+        `added=${added.length} removed=${removed.length} invalidated=${chars.length}`,
+    );
+  },
+  recordGlobalModuleArtifacts: async (moduleId, artifacts, userId) => {
+    await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, artifacts);
+  },
   processModuleUpload,
   getUpload,
   deleteUpload,
@@ -1725,7 +1826,20 @@ const moduleHandlers = createModuleHandlers({
     return file?.imageIds ?? [];
   },
   clearModuleImageJournal: (uid, moduleId) => clearModuleImageJournal(journalStorage(), uid, moduleId),
-  deleteModuleFromStore: (uid, moduleId) => deleteModuleFromStore(moduleStorage(), uid, moduleId),
+  deleteModuleFromStore: async (uid, moduleId) => {
+    // Global artifacts are keyed off the module, not any character, so the
+    // per-character detach sweep never sees them. Tear them down here or the
+    // global regex rows and world-book entry outlive the module.
+    const artifacts = await readGlobalModuleArtifacts(moduleStorage(), uid, moduleId);
+    if (artifacts.regexScriptIds.length > 0 || artifacts.worldBookId) {
+      await worldBookOps.dispatchGlobalModuleArtifactUninstall(moduleId, artifacts, uid);
+      await writeGlobalModuleArtifacts(moduleStorage(), uid, moduleId, {
+        regexScriptIds: [],
+        worldBookId: null,
+      });
+    }
+    await deleteModuleFromStore(moduleStorage(), uid, moduleId);
+  },
   deleteSharedWorldBook: (wbId, uid) => spindle.world_books.delete(wbId, uid).then(() => undefined),
   buildOrphanDetectDeps,
   deleteImageIds,
@@ -1746,6 +1860,59 @@ const moduleHandlers = createModuleHandlers({
   errMsg,
 });
 
+const exportHandlers = createExportHandlers({
+  readModuleEnvelope: (uid, moduleId) => readModuleEnvelope(moduleStorage(), uid, moduleId),
+  readCharacterForExport: async (characterId, userId) => {
+    const fetched = await readLumirealm(charactersApi(), characterId, userId);
+    if (!fetched || !fetched.data) return null;
+    const ch = fetched.character as unknown as Record<string, unknown>;
+    return {
+      character: ch as never,
+      data: fetched.data,
+      worldBookIds: Array.isArray(ch['world_book_ids'])
+        ? (ch['world_book_ids'] as unknown[]).filter((x): x is string => typeof x === 'string')
+        : [],
+    };
+  },
+  listCharacterRegexRows: async (characterId, userId) => {
+    const regexApi = getRegexScriptsApi();
+    if (!regexApi?.list) throw new Error('spindle.regex_scripts.list is not available on this host');
+    const PAGE_SIZE = 200;
+    const out: Record<string, unknown>[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await regexApi.list({ userId, limit: PAGE_SIZE, offset });
+      if (!Array.isArray(page.data) || page.data.length === 0) break;
+      for (const r of page.data) {
+        const row = r as Record<string, unknown> & { metadata?: { _risu?: { module_id?: unknown } } };
+        if (row['scope'] !== 'character' || row['scope_id'] !== characterId) continue;
+        const mid = row.metadata?._risu?.module_id;
+        if (typeof mid === 'string' && mid.length > 0) continue;
+        out.push(row);
+      }
+      offset += page.data.length;
+      if (typeof page.total === 'number' && offset >= page.total) break;
+    }
+    return out.sort((a, b) => Number(a['sort_order'] ?? 0) - Number(b['sort_order'] ?? 0));
+  },
+  listWorldBookEntries: async (wbId, userId) => {
+    const PAGE_SIZE = 200;
+    const out: unknown[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await spindle.world_books.entries.list(wbId, { limit: PAGE_SIZE, offset, userId });
+      if (!Array.isArray(page.data) || page.data.length === 0) break;
+      out.push(...page.data);
+      if (page.data.length < PAGE_SIZE) break;
+      offset += page.data.length;
+    }
+    return out as never;
+  },
+  extensionVersion: EXTENSION_VERSION,
+  log,
+  errMsg,
+});
+
 // Typed exhaustive registry: any new FrontendToBackend variant without a
 // handler entry here trips a compile-time error.
 const handlerRegistry: HandlerRegistry = {
@@ -1758,6 +1925,7 @@ const handlerRegistry: HandlerRegistry = {
   ...connectionsHandlers,
   ...togglesHandlers,
   ...moduleHandlers,
+  ...exportHandlers,
   ...assetsHandlers,
   ...viewerHandlers,
   ...lorebookHandlers,
@@ -1768,6 +1936,12 @@ const handlerRegistry: HandlerRegistry = {
   ...orphanHandlers,
   ...repairHandlers,
   ...createDisplayWritebackHandlers(),
+  regex_scripts_installed: async (msg, ctx) => {
+    completeRegexInstall(msg.requestId, ctx.userId, {
+      ok: msg.ok,
+      cleanupCompleted: msg.cleanupCompleted,
+    });
+  },
   display_authority: async (msg) => {
     if (msg.authoritative) feDisplayShadowOptOut.delete(msg.chatId);
     else feDisplayShadowOptOut.add(msg.chatId);

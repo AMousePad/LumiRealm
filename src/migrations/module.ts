@@ -1,17 +1,32 @@
 // Per-version module migration registry. Steps walked sequentially, persist
 // after each apply for resumability.
 
-import type { ModuleEnvelope } from './modules-store.js';
+import type { ModuleEnvelope } from '../state/modules-store.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
+import { projectModuleLorebookForCreate } from '../state/world-book-ops.js';
+import { normalizeModuleDisplayReplaceString } from '../state/module-artifact-project.js';
+import {
+  LEGACY_ENTRY_HASH_FIELDS_V1,
+  computeEntrySourceHashWithFields,
+} from '../core/mappers/lorebook-hash.js';
+
+export interface LiveModuleWorldBookEntry {
+  readonly id: string;
+  readonly exclude_greeting: boolean;
+  readonly extensions: Readonly<Record<string, unknown>> | null;
+}
 
 export interface ModuleMigrationDeps {
   // syncWorldBook re-runs lorebook projection and rewrites the world_book in place.
   syncWorldBook: (env: ModuleEnvelope) => Promise<string | null>;
   reinstallArtifactsForAttached: (moduleId: string) => Promise<number>;
-  // refreshArtifactsForAttached: detach + reattach for every attached character,
-  // so the new projection (regex names, flags, etc.) replaces the old rows.
+  // Replacement-first refresh for every attached character. Stale rows are
+  // removed only after the new projection is verified live.
   refreshArtifactsForAttached?: (moduleId: string) => Promise<number>;
+  repairRegexBindingsForAttached: (
+    moduleId: string,
+  ) => Promise<{ repaired: number; refreshed: number }>;
   // In-place patches per row, scoped to rows whose metadata._risu.module_id
   // matches. Returns null when host lacks regex_scripts.update.
   applyModuleRegexReplaceStringTransform?: (
@@ -22,6 +37,16 @@ export interface ModuleMigrationDeps {
     moduleId: string,
     patch: (row: Readonly<Record<string, unknown>>) => Record<string, unknown> | null,
   ) => Promise<{ scanned: number; updated: number; failed: number } | null>;
+  listWorldBookEntries: (
+    worldBookId: string,
+  ) => Promise<readonly LiveModuleWorldBookEntry[]>;
+  updateWorldBookEntryActivation: (
+    entryId: string,
+    input: {
+      readonly exclude_greeting: boolean;
+      readonly extensions: Readonly<Record<string, unknown>>;
+    },
+  ) => Promise<void>;
   writeEnvelope: (env: ModuleEnvelope) => Promise<void>;
   log: {
     info: (s: string) => void;
@@ -45,6 +70,7 @@ export interface ModuleMigrationStep {
   readonly touches: readonly (
     | 'world_book_entries'
     | 'regex_scripts_attached_chars'
+    | 'regex_scripts_global'
     | 'asset_index'
     | 'envelope_metadata'
   )[];
@@ -89,6 +115,34 @@ async function applyV5RefreshAttachedRegex(
     notes.push('refreshArtifactsForAttached dep missing, skipping refresh');
   }
   return { nextEnv: args.env, notes };
+}
+
+async function applyV16MigrateRegexOwnership(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  if (!deps.refreshArtifactsForAttached) {
+    throw new Error('refreshArtifactsForAttached dependency is required');
+  }
+  const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
+  return {
+    nextEnv: args.env,
+    notes: [`migrated ownership for ${refreshed} module attachment(s)`],
+  };
+}
+
+async function applyV11RepairAttachedRegexIdentity(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  const result = await deps.repairRegexBindingsForAttached(args.env.id);
+  return {
+    nextEnv: args.env,
+    notes: [
+      `repaired ${result.repaired} attached char(s) in place`,
+      `refreshed ${result.refreshed} incomplete attachment(s)`,
+    ],
+  };
 }
 
 async function applyV6StripStylePrefixInPlace(
@@ -221,6 +275,145 @@ async function applyV8FixEscapedPerMessageGate(
   };
 }
 
+async function applyV10ExcludeGreetingPerEntry(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  const worldBookId = args.env.installed_world_book_id;
+  const module = args.env.module as { lorebook?: readonly unknown[] };
+  const lorebook = Array.isArray(module.lorebook) ? module.lorebook : [];
+  if (!worldBookId || lorebook.length === 0) {
+    return {
+      nextEnv: args.env,
+      notes: [worldBookId ? 'module has no lorebook entries' : 'module has no installed world book'],
+    };
+  }
+
+  const projected = projectModuleLorebookForCreate(
+    lorebook,
+    args.env.id,
+    worldBookId,
+  );
+  const targetBySourceHash = new Map<string, string>();
+  for (const entry of projected) {
+    const extensions = entry['extensions'];
+    if (!extensions || typeof extensions !== 'object' || Array.isArray(extensions)) continue;
+    const currentHash = (extensions as Record<string, unknown>)['_risu_source_hash'];
+    if (typeof currentHash !== 'string') continue;
+    const legacyHash = computeEntrySourceHashWithFields(
+      entry,
+      LEGACY_ENTRY_HASH_FIELDS_V1,
+    );
+    targetBySourceHash.set(legacyHash, currentHash);
+    targetBySourceHash.set(currentHash, currentHash);
+  }
+
+  const entries = await deps.listWorldBookEntries(worldBookId);
+  let matched = 0;
+  let updated = 0;
+  let failed = 0;
+  for (const entry of entries) {
+    const extensions = (entry.extensions ?? {}) as Record<string, unknown>;
+    if (extensions['_risu_module_id'] !== args.env.id) continue;
+    const storedHash = extensions['_risu_source_hash'];
+    if (typeof storedHash !== 'string') continue;
+    const currentHash = targetBySourceHash.get(storedHash);
+    if (!currentHash) continue;
+    matched += 1;
+    if (entry.exclude_greeting && storedHash === currentHash) continue;
+    try {
+      await deps.updateWorldBookEntryActivation(entry.id, {
+        exclude_greeting: true,
+        extensions: {
+          ...extensions,
+          _risu_source_hash: currentHash,
+        },
+      });
+      updated += 1;
+    } catch (err) {
+      failed += 1;
+      deps.log.warn(
+        `migrate-module(${args.env.id}) v10: update entry=${entry.id} failed: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  }
+  if (failed > 0) {
+    throw new Error(`failed to update ${failed}/${matched} matched lorebook entries`);
+  }
+  return {
+    nextEnv: args.env,
+    notes: [
+      `scanned=${entries.length}`,
+      `matched=${matched}`,
+      `updated=${updated}`,
+    ],
+  };
+}
+
+async function applyV12NormalizeDisplayRows(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  if (!deps.applyModuleRegexRowPatch) {
+    deps.log.warn(
+      `migrate-module(${args.env.id}) v12: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`,
+    );
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
+    if (row['target'] !== 'display') return null;
+    const replaceString = row['replace_string'];
+    if (typeof replaceString !== 'string') return null;
+    const normalized = normalizeModuleDisplayReplaceString(replaceString);
+    return normalized === replaceString
+      ? null
+      : { replace_string: normalized };
+  });
+  if (result === null) {
+    deps.log.warn(
+      `migrate-module(${args.env.id}) v12: row-patch returned null, falling back to wholesale refresh`,
+    );
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  return {
+    nextEnv: args.env,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`,
+    ],
+  };
+}
+
+async function applyV14UseFindMacroMode(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  if (!deps.applyModuleRegexRowPatch) {
+    return applyV5RefreshAttachedRegex(args, deps);
+  }
+  const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
+    if (row['substitute_macros'] !== 'none') return null;
+    const metadata = row['metadata'] as {
+      _risu?: { flag_actions?: unknown };
+    } | undefined;
+    const actions = metadata?._risu?.flag_actions;
+    return Array.isArray(actions) && actions.includes('cbs')
+      ? { substitute_macros: 'find' }
+      : null;
+  });
+  if (result === null) return applyV5RefreshAttachedRegex(args, deps);
+  return {
+    nextEnv: args.env,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`,
+    ],
+  };
+}
+
 export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
   {
     version: 5,
@@ -249,6 +442,57 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
       "Re-route module 'escaped' regex rows whose replace_string has a per-message {{chat_index}} gate to 'after'. In-place per row, preserves user disable + edits.",
     touches: ['regex_scripts_attached_chars'],
     apply: applyV8FixEscapedPerMessageGate,
+  },
+  // v9 was persisted by the rolled-back prompt-wide greeting migration.
+  // Keep it burned so modules touched by that build run the corrected step.
+  {
+    version: 10,
+    description:
+      'Mark each projected Risu module lorebook entry to exclude the character greeting during activation.',
+    touches: ['world_book_entries'],
+    apply: applyV10ExcludeGreetingPerEntry,
+  },
+  {
+    version: 11,
+    description:
+      'Repair attached module regex action bindings using module source-row order.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV11RepairAttachedRegexIdentity,
+  },
+  {
+    version: 12,
+    description:
+      'Apply the character display-row normalization path to module display rows.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV12NormalizeDisplayRows,
+  },
+  {
+    version: 13,
+    description:
+      'Refresh attached regex rows with native move, repeat-back, and find-pattern macro actions.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV5RefreshAttachedRegex,
+  },
+  {
+    version: 14,
+    description:
+      'Store find-only macro parsing in the native regex macro mode.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV14UseFindMacroMode,
+  },
+  {
+    version: 15,
+    description:
+      'Refresh attached repeat-back rows to preserve raw-match compatibility.',
+    touches: ['regex_scripts_attached_chars'],
+    apply: applyV5RefreshAttachedRegex,
+  },
+  {
+    version: 16,
+    description:
+      'Create extension-owned replacements before verified cleanup of attached and global module regex rows.',
+    touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
+    apply: applyV16MigrateRegexOwnership,
   },
 ];
 

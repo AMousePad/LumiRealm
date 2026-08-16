@@ -41,13 +41,9 @@ function init(): void {
   if (initialised) return;
   initialised = true;
 
-  // 1. Risu-compat handlers. Also register risu_X handlers under bare X for
-  //    raw CBS; rewritten CBS uses the risu_X form.
+  // 1. Risu-compat handlers use the exact names accepted by RisuAI.
   for (const reg of registry.entries()) {
     registerInto(reg.name, reg.handler, reg.scoped);
-    if (reg.name.startsWith("risu_")) {
-      registerInto(reg.name.slice(5), reg.handler, reg.scoped);
-    }
   }
 
   // 2. Catalog aliases (Risu cbs.ts).

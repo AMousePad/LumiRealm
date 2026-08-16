@@ -10,12 +10,18 @@ import { getActiveAssetIndexes } from '../interpreter/asset-cache.js';
 import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { imageUrlFromId } from '../interpreter/image-cache.js';
 import { getDecoratorBuffers as readDecoratorBuffers } from '../interpreter/decorator-buffers.js';
+import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
+import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
+import type { Message } from '../core/cbs/index.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 
 export interface ChatMessage {
   readonly id: string;
   readonly role: 'system' | 'user' | 'assistant';
   readonly content: string;
+  readonly createdAt: number;
+  readonly speaker?: string;
+  readonly greetingIndex?: number;
 }
 
 export interface ReadonlyResolverDeps {
@@ -41,6 +47,13 @@ export interface ReadonlyResolver {
     userId: string | undefined,
     opts?: { cbsContext?: boolean; rmVar?: boolean },
   ) => Promise<string>;
+  readonly resolveMany: (
+    templates: readonly string[],
+    chatId: string,
+    characterId: string,
+    userId: string | undefined,
+    opts?: { cbsContext?: boolean; rmVar?: boolean },
+  ) => Promise<readonly string[]>;
   readonly resolveInWorker: (
     template: string,
     chatId: string,
@@ -68,7 +81,16 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
   async function fetchMessages(chatId: string): Promise<readonly ChatMessage[]> {
     try {
       const msgs = await spindle.chat.getMessages(chatId);
-      return msgs.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+      return msgs.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.send_date ?? m.created_at ?? 0,
+        ...(m.name ? { speaker: m.name } : {}),
+        ...(typeof m.extra?.greeting_index === 'number'
+          ? { greetingIndex: m.extra.greeting_index }
+          : {}),
+      }));
     } catch (err) {
       log.error(`fetchChatMessages chat=${chatId} failed: ${errMsg(err)}`);
       return [];
@@ -96,13 +118,21 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         chat?: Record<string, string>;
       };
       chat_variables?: Record<string, string>;
+      activeGreetingIndex?: number;
     };
     const mv = metadata.macro_variables ?? {};
     const chatVars = metadata.chat_variables;
 
-    const lastMessageId = messages.length === 0 ? -1 : messages.length - 1;
-    const assistantTail = [...messages].reverse().find((m) => m.role === 'assistant');
-    const userTail = [...messages].reverse().find((m) => m.role === 'user');
+    const view = buildRisuChatView({ messages });
+    const risuMessages: Message[] = view.messages.map((m) => ({
+      role: m.role === 'system' ? 'system' : m.role === 'user' ? 'user' : 'assistant',
+      content: m.content,
+      createdAt: m.createdAt ?? 0,
+      ...(m.speaker ? { speaker: m.speaker } : {}),
+    }));
+    const lastMessageId = risuMessages.length - 1;
+    const assistantTail = [...risuMessages].reverse().find((m) => m.role === 'assistant');
+    const userTail = [...risuMessages].reverse().find((m) => m.role === 'user');
     const assetIndexes = getActiveAssetIndexes(chatId);
     const activeCard = activeCardByChat.get(chatId)?.card;
     const scriptstateDefaults = activeCard?.risuPayload.scriptstate_defaults;
@@ -138,16 +168,25 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         creatorNotes: character?.creator_notes ?? '',
         firstMessage: character?.first_mes ?? '',
         alternateGreetings: character?.alternate_greetings ?? [],
+        selectedAlternateGreetingIndex: toRisuFirstMessageIndex(
+          metadata.activeGreetingIndex ?? view.greetingIndex,
+        ),
+        ...(view.greeting !== undefined
+          ? { selectedGreeting: view.greeting }
+          : {}),
         ...(assetIndexes ? { additionalAssets: assetIndexes.assets } : {}),
         ...(assetIndexes ? { emotionImages: assetIndexes.emotions } : {}),
         ...(charImageUrl ? { image: charImageUrl } : {}),
       },
       chat: {
-        messageCount: messages.length,
+        // The evaluator accepts Lumi's greeting-included count and shifts it
+        // once; the full array itself is already in Risu's greeting-free frame.
+        messageCount: risuMessages.length + 1,
         lastMessageId,
-        lastMessage: messages[messages.length - 1]?.content ?? '',
+        lastMessage: risuMessages[risuMessages.length - 1]?.content ?? '',
         lastCharMessage: assistantTail?.content ?? '',
         lastUserMessage: userTail?.content ?? '',
+        messages: risuMessages,
       },
       variables: {
         ...(mv.local ? { local: mv.local } : {}),
@@ -181,6 +220,52 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     });
   }
 
+  async function resolveMany(
+    templates: readonly string[],
+    chatId: string,
+    characterId: string,
+    userId: string | undefined,
+    opts?: { cbsContext?: boolean; rmVar?: boolean },
+  ): Promise<readonly string[]> {
+    if (templates.length === 0) return [];
+    if (userId === undefined) {
+      log.warn(`resolveReadonlyMany: userId not captured chat=${chatId}, returning templates verbatim`);
+      return [...templates];
+    }
+
+    const t0 = Date.now();
+    try {
+      const messages = await fetchMessages(chatId);
+      const ctxInput = await buildCtxInput(
+        chatId,
+        characterId,
+        userId,
+        messages,
+        opts?.cbsContext === true,
+      );
+      const resolved = templates.map((template) =>
+        runPipeline({
+          ...ctxInput,
+          template,
+          phase: 'display',
+          ...(opts?.rmVar === true ? { rmVar: true } : {}),
+          wrapIslands: false,
+        }),
+      );
+      log.debug(
+        `resolveReadonlyMany: DONE chat=${chatId} entries=${templates.length} ` +
+          `elapsed=${Date.now() - t0}ms`,
+      );
+      return resolved;
+    } catch (err) {
+      log.error(
+        `resolveReadonlyMany: worker-eval threw chat=${chatId}: ${(err as Error).message}. ` +
+          `Returning templates verbatim (no Lumi-native fallback).`,
+      );
+      return [...templates];
+    }
+  }
+
   async function stripMessageSetvars(
     chatId: string,
     characterId: string,
@@ -190,8 +275,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     varWrites: ReadonlyArray<readonly [string, string | null]>;
   }> {
     const all = await fetchMessages(chatId);
-    // Risu chat.message[] excludes the greeting, Lumi stores it as row 0.
-    const messages = all.length > 0 && all[0]!.role !== 'user' ? all.slice(1) : all;
+    const messages = buildRisuChatView({ messages: all }).messages;
     if (!messages.some((m) => hasSetvarFamily(m.content))) {
       return { changed: [], varWrites: [] };
     }
@@ -247,5 +331,5 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     }
   }
 
-  return { resolve, resolveInWorker, fetchMessages, stripMessageSetvars };
+  return { resolve, resolveMany, resolveInWorker, fetchMessages, stripMessageSetvars };
 }
