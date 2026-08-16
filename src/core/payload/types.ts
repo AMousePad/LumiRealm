@@ -146,8 +146,8 @@ export interface LumirealmStoredSource {
   readonly path_to_image_id: Readonly<Record<string, string>>;
 }
 
-// Domain-specific versions live in `state/translator-migrations.ts` and
-// `state/module-migrations.ts`. This shared constant is kept as the max of
+// Domain-specific versions live in `migrations/character.ts` and
+// `migrations/module.ts`. This shared constant is kept as the max of
 // both for any caller that genuinely doesn't care which domain.
 export const CURRENT_TRANSLATOR_SCHEMA_VERSION = 5;
 

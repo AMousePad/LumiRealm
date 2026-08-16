@@ -915,35 +915,19 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     }
     setRegexStatus(`Installing ${msg.scripts.length} rule(s)…`, false);
     try {
-      const resp = await fetch('/api/v1/regex-scripts/import', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scripts: msg.scripts, folder: msg.folder }),
-        credentials: 'include',
-      });
-      if (!resp.ok) {
-        let detail = '';
-        try { detail = ' — ' + (await resp.text()).slice(0, 200); } catch { /* */ }
-        throw new Error(`HTTP ${resp.status}${detail}`);
-      }
-      const body = (await resp.json()) as { imported?: number; skipped?: number; errors?: string[] };
-      const imported = body?.imported ?? 0;
-      const skipped = body?.skipped ?? 0;
       const dropSuffix = msg.dropped > 0 ? `, ${msg.dropped} runtime-only rule(s) dropped` : '';
-      const skipSuffix = skipped > 0 ? `, ${skipped} rejected by Lumiverse` : '';
       const where = msg.characterId
         ? `for "${cards.find((c) => c.character_id === msg.characterId)?.character_name ?? msg.characterId}"`
         : 'global';
       log.info(
-        `modules-panel: regex import imported=${imported} skipped=${skipped} ` +
-          `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length} target=${msg.characterId ?? 'global'}`,
+        `modules-panel: regex install verified=${msg.scripts.length} target=${msg.characterId ?? 'global'}`,
       );
       setRegexStatus(
-        `Installed ${imported} ${where} rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`,
-        imported === 0,
+        `Installed ${msg.scripts.length} ${where} rule(s) under folder "${msg.folder}"${dropSuffix}.`,
+        false,
       );
     } catch (err) {
-      log.error('modules-panel: regex import POST failed', err);
+      log.error('modules-panel: regex install status failed', err);
       setRegexStatus(`Install failed: ${errMsg(err)}`, true);
     } finally {
       regexImportInFlight = false;

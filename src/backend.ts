@@ -9,8 +9,8 @@ import {
 } from './realm/backend.js';
 import type { RealmBackendToFrontend } from './realm/messages.js';
 import type { StoredRisuCard } from './payload/types.js';
-import { CURRENT_CHARACTER_SCHEMA_VERSION } from './state/translator-migrations.js';
-import { CURRENT_MODULE_SCHEMA_VERSION } from './state/module-migrations.js';
+import { CURRENT_CHARACTER_SCHEMA_VERSION } from './migrations/character.js';
+import { CURRENT_MODULE_SCHEMA_VERSION } from './migrations/module.js';
 import { type UserStorageLike } from './payload/installer.js';
 import {
   preValidateRequires,
@@ -50,6 +50,7 @@ import { parseDirectLorebook } from './payload/lorebook-direct-import.js';
 import { parseDirectRegex } from './payload/regex-direct-import.js';
 import { mapRegex } from './core/mappers/regex.js';
 import { createRegexImporter } from './state/regex-import.js';
+import { completeRegexInstall } from './migrations/install-coordinator.js';
 import { mapLoreBook } from './core/mappers/lorebook.js';
 import { setActiveAssetIndexes, clearActiveAssetIndexes } from './interpreter/asset-cache.js';
 import {
@@ -130,8 +131,8 @@ import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
 import { createTriggerDispatcher } from './state/trigger-dispatch.js';
 import { createRepairOrchestrator } from './state/repair-orchestrator.js';
-import { createMigrationsRunner } from './state/migrations.js';
-import { createMassMigrationsRunner } from './boot/mass-migrations.js';
+import { createMigrationsRunner } from './migrations/runner.js';
+import { createMassMigrationsRunner } from './migrations/mass.js';
 import { createActiveCardLoader } from './state/active-card.js';
 import { createApplySvgRasterIndex } from './boot/svg-raster-apply.js';
 import {
@@ -1486,6 +1487,7 @@ const regexImporter = createRegexImporter({
   errMsg,
   parseDirectRegex,
   mapRegex,
+  regexApi: spindle.regex_scripts,
 });
 
 
@@ -1498,7 +1500,12 @@ const migrationsRunner = createMigrationsRunner({
   send,
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
   writeModuleEnvelope: async (userId, env) => { await writeModuleEnvelope(moduleStorage(), userId, env); },
-  dispatchModuleArtifactInstall: (charId, env, userId) => dispatchModuleArtifactInstall(charId, env, userId),
+  dispatchModuleArtifactInstall: (charId, env, userId, options) =>
+    worldBookOps.dispatchModuleArtifactInstall(charId, env, userId, options),
+  dispatchGlobalModuleArtifactInstall: (env, userId, options) =>
+    worldBookOps.dispatchGlobalModuleArtifactInstall(env, userId, options),
+  isGlobalModule: async (moduleId, userId) =>
+    (await readGlobalModuleIds(moduleStorage(), userId)).includes(moduleId),
   writeLumirealm: (charId, data, userId) => writeLumirealm(charactersApi(), charId, data, userId),
   updateLumirealm: (charId, userId, mutator) =>
     updateLumirealm(charactersApi(), charId, userId, mutator),
@@ -1929,6 +1936,12 @@ const handlerRegistry: HandlerRegistry = {
   ...orphanHandlers,
   ...repairHandlers,
   ...createDisplayWritebackHandlers(),
+  regex_scripts_installed: async (msg, ctx) => {
+    completeRegexInstall(msg.requestId, ctx.userId, {
+      ok: msg.ok,
+      cleanupCompleted: msg.cleanupCompleted,
+    });
+  },
   display_authority: async (msg) => {
     if (msg.authoritative) feDisplayShadowOptOut.delete(msg.chatId);
     else feDisplayShadowOptOut.add(msg.chatId);

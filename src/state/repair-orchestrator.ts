@@ -5,7 +5,7 @@ import type {
 } from '../types/messages.js';
 import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ModuleEnvelope } from './modules-store.js';
-import type { MigrationResult } from './translator-migrations.js';
+import type { MigrationResult } from '../migrations/character.js';
 
 type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 

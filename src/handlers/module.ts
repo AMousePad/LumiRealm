@@ -4,6 +4,7 @@ import type { SpindleCharactersApi } from '../state/lumirealm-character.js';
 import type { OrphanDetectDeps } from '../state/orphan-detect.js';
 import { buildLiveImageIdSet } from '../state/orphan-detect.js';
 import type { Handler } from './types.js';
+import { completeRegexInstall } from '../migrations/install-coordinator.js';
 
 export type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 
@@ -275,14 +276,23 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       // Global installs have no character to stash against; their ids go in the
       // module index so teardown can delete exactly what was created.
       if (msg.characterId === null) {
-        await deps.recordGlobalModuleArtifacts(
-          msg.moduleId,
-          { regexScriptIds: msg.regexScriptIds },
-          ctx.userId,
-        );
+        if (msg.ok) {
+          await deps.recordGlobalModuleArtifacts(
+            msg.moduleId,
+            { regexScriptIds: msg.regexScriptIds },
+            ctx.userId,
+          );
+        }
         deps.log.info(
-          `module_artifacts_installed: global module=${msg.moduleId} regex=${msg.regexScriptIds.length}`,
+          `module_artifacts_installed: global module=${msg.moduleId} ok=${msg.ok} ` +
+            `cleanup=${msg.cleanupCompleted} regex=${msg.regexScriptIds.length}`,
         );
+        if (msg.requestId) {
+          completeRegexInstall(msg.requestId, ctx.userId, {
+            ok: msg.ok,
+            cleanupCompleted: msg.cleanupCompleted,
+          });
+        }
         return;
       }
       // FE finished its cookie-auth POSTs. Stash resulting resource ids on
@@ -291,8 +301,10 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
         const wb = { ...(cur.user_overrides.attached_module_world_books ?? {}) };
         if (msg.worldBookId) wb[msg.moduleId] = msg.worldBookId;
         const rx = { ...(cur.user_overrides.attached_module_regex_script_ids ?? {}) };
-        if (msg.regexScriptIds.length > 0) rx[msg.moduleId] = msg.regexScriptIds;
-        else delete rx[msg.moduleId];
+        if (msg.ok) {
+          if (msg.regexScriptIds.length > 0) rx[msg.moduleId] = msg.regexScriptIds;
+          else delete rx[msg.moduleId];
+        }
         return {
           ...cur,
           user_overrides: deps.mergeUserOverrides(cur.user_overrides, {
@@ -309,9 +321,16 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       }
       deps.invalidateActiveForCharacter(msg.characterId, ctx.userId);
       deps.log.info(
-        `module_artifacts_installed: char=${msg.characterId} module=${msg.moduleId} ` +
-          `worldBookId=${msg.worldBookId ?? 'null'} regex=${msg.regexScriptIds.length}`,
+        `module_artifacts_installed: char=${msg.characterId} module=${msg.moduleId} ok=${msg.ok} ` +
+          `cleanup=${msg.cleanupCompleted} worldBookId=${msg.worldBookId ?? 'null'} ` +
+          `regex=${msg.regexScriptIds.length}`,
       );
+      if (msg.requestId) {
+        completeRegexInstall(msg.requestId, ctx.userId, {
+          ok: msg.ok,
+          cleanupCompleted: msg.cleanupCompleted,
+        });
+      }
     },
     module_artifacts_uninstalled: async (msg, _ctx) => {
       deps.log.info(

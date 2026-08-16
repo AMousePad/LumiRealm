@@ -24886,7 +24886,7 @@ function buildAssetIndexes(payload, uploads, ccdefaultImageId) {
   return { assetIndex, emotionIndex, mappedCount };
 }
 
-// src/state/translator-migrations.ts
+// src/migrations/character.ts
 async function applyV5AssetIndexRebuild(args, deps) {
   const source = args.envelope.source;
   if (!source)
@@ -24982,6 +24982,46 @@ async function applyV16RefreshRegexRuntime(args, deps) {
       ...refreshed.notes,
       `runtime_actions=${args.newBundle.risuPayload.at_actions.length}`
     ]
+  };
+}
+function normalizeRegexScriptId(raw) {
+  return raw.toLowerCase().replace(/[\s\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+}
+function ownedRegexScriptId(raw, index) {
+  const normalized = normalizeRegexScriptId(raw) || `row_${index}`;
+  if (normalized.length <= 85)
+    return `lr_owned_${normalized}`;
+  let hash = 2166136261;
+  for (const ch of normalized) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `lr_owned_${(hash >>> 0).toString(16)}_${normalized.slice(-80)}`;
+}
+async function applyV19MigrateRegexOwnership(args, deps) {
+  const stored = args.envelope.regex_scripts.map((script, index) => ({
+    ...script,
+    script_id: ownedRegexScriptId(script.script_id, index),
+    metadata: {
+      ...script.metadata ?? {},
+      imported_script_id: normalizeRegexScriptId(script.script_id)
+    }
+  }));
+  await deps.installCharacterRegexScripts(args.characterId, args.characterName, stored);
+  return {
+    nextEnvelope: { ...args.envelope, regex_scripts: stored },
+    notes: [`migrated ownership for ${stored.length} regex_script(s)`]
+  };
+}
+async function applyV20RepairRegexOwnershipCleanup(args, deps) {
+  const stored = args.envelope.regex_scripts.map((script) => ({
+    ...script,
+    metadata: { ...script.metadata ?? {} }
+  }));
+  await deps.installCharacterRegexScripts(args.characterId, args.characterName, stored);
+  return {
+    nextEnvelope: { ...args.envelope, regex_scripts: stored },
+    notes: [`verified ownership cleanup for ${stored.length} regex_script(s)`]
   };
 }
 async function applyV6BackfillArrayIndex(args, deps) {
@@ -25381,6 +25421,18 @@ var CHARACTER_MIGRATIONS = [
     description: "Refresh character repeat-back rows to preserve raw-match compatibility.",
     touches: ["regex_scripts", "payload.at_actions"],
     apply: applyV16RefreshRegexRuntime
+  },
+  {
+    version: 19,
+    description: "Create extension-owned replacements before verified cleanup of legacy character regex rows.",
+    touches: ["regex_scripts"],
+    apply: applyV19MigrateRegexOwnership
+  },
+  {
+    version: 20,
+    description: "Remove verified legacy card rows after preserving both character and embedded-module regex sources.",
+    touches: ["regex_scripts"],
+    apply: applyV20RepairRegexOwnershipCleanup
   }
 ];
 var CURRENT_CHARACTER_SCHEMA_VERSION = CHARACTER_MIGRATIONS.length > 0 ? Math.max(...CHARACTER_MIGRATIONS.map((m) => m.version)) : 1;
@@ -25683,12 +25735,115 @@ function consumeOwnCharacterEdit(characterId) {
   return true;
 }
 
+// src/state/regex-ownership.ts
+function normalizeScriptId(raw) {
+  return raw.toLowerCase().replace(/[\s\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+}
+function scopeKey(script) {
+  return `${script.scope}\x00${script.scope_id ?? ""}`;
+}
+async function listScope(api, script, userId) {
+  const rows = new Map;
+  let offset = 0;
+  while (true) {
+    const page = await api.list({
+      scope: script.scope,
+      ...script.scope_id === null ? {} : { scopeId: script.scope_id },
+      limit: 200,
+      offset,
+      userId
+    });
+    for (const row of page.data) {
+      if (row.script_id)
+        rows.set(row.script_id, row);
+    }
+    if (page.data.length < 200)
+      break;
+    offset += page.data.length;
+  }
+  return rows;
+}
+function createInput(script) {
+  return {
+    ...script,
+    placement: [...script.placement],
+    trim_strings: [...script.trim_strings],
+    metadata: { ...script.metadata }
+  };
+}
+async function ensureRegexOwnership(api, scripts, userId) {
+  const normalizedScripts = scripts.map((script) => ({
+    ...script,
+    script_id: normalizeScriptId(script.script_id)
+  }));
+  const rowsByScope = new Map;
+  const seen = new Set;
+  let created = 0;
+  let alreadyOwned = 0;
+  let unowned = 0;
+  let failed = 0;
+  for (const script of normalizedScripts) {
+    if (!script.script_id || seen.has(script.script_id)) {
+      failed++;
+      continue;
+    }
+    seen.add(script.script_id);
+    const key = scopeKey(script);
+    let existingById = rowsByScope.get(key);
+    if (!existingById) {
+      try {
+        existingById = await listScope(api, script, userId);
+        rowsByScope.set(key, existingById);
+      } catch {
+        failed++;
+        continue;
+      }
+    }
+    const existing = existingById.get(script.script_id);
+    if (existing) {
+      if (existing.can_mutate !== true) {
+        unowned++;
+        continue;
+      }
+      try {
+        await api.update(existing.id, createInput(script), userId);
+        alreadyOwned++;
+      } catch {
+        failed++;
+      }
+      continue;
+    }
+    try {
+      const createdRow = await api.create(createInput(script), userId);
+      created++;
+      existingById.set(script.script_id, {
+        id: createdRow.id,
+        script_id: script.script_id,
+        can_mutate: true
+      });
+    } catch {
+      failed++;
+    }
+  }
+  return {
+    scripts: normalizedScripts,
+    allOwned: unowned === 0 && failed === 0,
+    created,
+    alreadyOwned,
+    unowned,
+    failed
+  };
+}
+
 // src/state/world-book-ops.ts
 function cryptoUuidLocal() {
   const c = globalThis.crypto;
   if (c?.randomUUID)
     return c.randomUUID();
   return `mod-rx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+function normalizeScriptId2(raw) {
+  return raw.toLowerCase().replace(/[\s\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
 }
 function projectModuleLorebookForCreate(rawLorebook, moduleId, worldBookId) {
   const valid = [];
@@ -25833,15 +25988,17 @@ function createWorldBookOps(deps) {
     expectCharacterEdit(characterId);
     await spindle.characters.update(characterId, { world_book_ids: ids.filter((id) => id !== worldBookId) }, userId);
   }
-  async function dispatchModuleArtifactInstall(characterId, env, userId) {
+  async function dispatchModuleArtifactInstall(characterId, env, userId, options) {
     const m = env.module;
     const moduleName = typeof m.name === "string" && m.name.length > 0 ? m.name : env.id;
-    const regexScripts = projectModuleRegexEntries(env.id, moduleName, characterId, m.regex, () => cryptoUuidLocal());
-    if (regexScripts.length === 0) {
-      log.info(`dispatchModuleArtifactInstall: module=${env.id} char=${characterId} no regex to install`);
-      return;
-    }
+    let stableIndex = 0;
+    const regexScripts = projectModuleRegexEntries(env.id, moduleName, characterId, m.regex, () => options?.stableIdPrefix ? `${options.stableIdPrefix}_${stableIndex++}` : cryptoUuidLocal()).map((script) => {
+      const sourceRow = script.metadata?._risu?.source_row_index;
+      const legacyId = typeof sourceRow === "number" ? options?.legacyScriptIdsBySourceRow?.get(sourceRow) : undefined;
+      return legacyId ? { ...script, metadata: { ...script.metadata, imported_script_id: normalizeScriptId2(legacyId) } } : script;
+    });
     const lorebookEntries = [];
+    const ownership = userId === undefined ? { allOwned: false, scripts: regexScripts } : await ensureRegexOwnership(spindle.regex_scripts, regexScripts, userId);
     log.info(`dispatchModuleArtifactInstall: module=${env.id} char=${characterId} ` + `lorebookEntries=${lorebookEntries.length} regexScripts=${regexScripts.length}`);
     send({
       type: "install_module_artifacts",
@@ -25849,10 +26006,12 @@ function createWorldBookOps(deps) {
       moduleId: env.id,
       worldBookName: `Module: ${moduleName}`,
       lorebookEntries,
-      regexScripts
+      regexScripts: ownership.scripts,
+      cleanupStale: ownership.allOwned,
+      ...options?.requestId ? { requestId: options.requestId } : {}
     }, userId);
   }
-  async function dispatchGlobalModuleArtifactInstall(env, userId) {
+  async function dispatchGlobalModuleArtifactInstall(env, userId, options) {
     const m = env.module;
     const moduleName = typeof m.name === "string" && m.name.length > 0 ? m.name : env.id;
     let addedWorldBookId = null;
@@ -25869,18 +26028,24 @@ function createWorldBookOps(deps) {
         log.warn(`dispatchGlobalModuleArtifactInstall: setGlobal failed module=${env.id}: ${errMsg2(err)}`);
       }
     }
-    const regexScripts = projectModuleRegexEntries(env.id, moduleName, null, m.regex, () => cryptoUuidLocal());
-    if (regexScripts.length > 0) {
-      log.info(`dispatchGlobalModuleArtifactInstall: module=${env.id} regexScripts=${regexScripts.length} (global scope)`);
-      send({
-        type: "install_module_artifacts",
-        characterId: null,
-        moduleId: env.id,
-        worldBookName: `Module: ${moduleName}`,
-        lorebookEntries: [],
-        regexScripts
-      }, userId);
-    }
+    let stableIndex = 0;
+    const regexScripts = projectModuleRegexEntries(env.id, moduleName, null, m.regex, () => options?.stableIdPrefix ? `${options.stableIdPrefix}_${stableIndex++}` : cryptoUuidLocal()).map((script) => {
+      const sourceRow = script.metadata?._risu?.source_row_index;
+      const legacyId = typeof sourceRow === "number" ? options?.legacyScriptIdsBySourceRow?.get(sourceRow) : undefined;
+      return legacyId ? { ...script, metadata: { ...script.metadata, imported_script_id: normalizeScriptId2(legacyId) } } : script;
+    });
+    const ownership = userId === undefined ? { allOwned: false, scripts: regexScripts } : await ensureRegexOwnership(spindle.regex_scripts, regexScripts, userId);
+    log.info(`dispatchGlobalModuleArtifactInstall: module=${env.id} regexScripts=${regexScripts.length} (global scope)`);
+    send({
+      type: "install_module_artifacts",
+      characterId: null,
+      moduleId: env.id,
+      worldBookName: `Module: ${moduleName}`,
+      lorebookEntries: [],
+      regexScripts: ownership.scripts,
+      cleanupStale: ownership.allOwned,
+      ...options?.requestId ? { requestId: options.requestId } : {}
+    }, userId);
     return { worldBookId: addedWorldBookId };
   }
   async function dispatchGlobalModuleArtifactUninstall(moduleId, artifacts, userId) {
@@ -25918,7 +26083,7 @@ function createWorldBookOps(deps) {
   };
 }
 
-// src/state/module-migrations.ts
+// src/migrations/module.ts
 async function applyV5RefreshAttachedRegex(args, deps) {
   const notes = [];
   if (deps.refreshArtifactsForAttached) {
@@ -25932,6 +26097,16 @@ async function applyV5RefreshAttachedRegex(args, deps) {
     notes.push("refreshArtifactsForAttached dep missing, skipping refresh");
   }
   return { nextEnv: args.env, notes };
+}
+async function applyV16MigrateRegexOwnership(args, deps) {
+  if (!deps.refreshArtifactsForAttached) {
+    throw new Error("refreshArtifactsForAttached dependency is required");
+  }
+  const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
+  return {
+    nextEnv: args.env,
+    notes: [`migrated ownership for ${refreshed} module attachment(s)`]
+  };
 }
 async function applyV11RepairAttachedRegexIdentity(args, deps) {
   const result = await deps.repairRegexBindingsForAttached(args.env.id);
@@ -26219,6 +26394,12 @@ var MODULE_MIGRATIONS = [
     description: "Refresh attached repeat-back rows to preserve raw-match compatibility.",
     touches: ["regex_scripts_attached_chars"],
     apply: applyV5RefreshAttachedRegex
+  },
+  {
+    version: 16,
+    description: "Create extension-owned replacements before verified cleanup of attached and global module regex rows.",
+    touches: ["regex_scripts_attached_chars", "regex_scripts_global"],
+    apply: applyV16MigrateRegexOwnership
   }
 ];
 var CURRENT_MODULE_SCHEMA_VERSION = MODULE_MIGRATIONS.length > 0 ? Math.max(...MODULE_MIGRATIONS.map((m) => m.version)) : 4;
@@ -31376,17 +31557,52 @@ function createRegexImporter(deps) {
       fail(parsed.scripts.length, dropped, "all regex rules were runtime-only or invalid");
       return;
     }
+    const ownership = await ensureRegexOwnership(deps.regexApi, scripts, userId);
+    if (!ownership.allOwned) {
+      deps.log.warn(`import_regex: ownership incomplete unowned=${ownership.unowned} failed=${ownership.failed}; ` + "REST import will continue without deleting anything");
+    }
     deps.send({
       type: "standalone_regex_install",
-      ok: true,
-      scripts,
+      ok: ownership.allOwned,
+      scripts: ownership.scripts,
       parsed: parsed.scripts.length,
       dropped,
       folder,
-      characterId
+      characterId,
+      ...!ownership.allOwned ? { reason: `regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}` } : {}
     }, userId);
   }
   return { handle };
+}
+
+// src/migrations/install-coordinator.ts
+var pending = new Map;
+function awaitRegexInstall(userId, dispatch, timeoutMs = 30000) {
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pending.delete(requestId);
+      resolve({ ok: false, cleanupCompleted: false });
+    }, timeoutMs);
+    pending.set(requestId, { userId, resolve, timer });
+    Promise.resolve(dispatch(requestId)).catch(() => {
+      const entry = pending.get(requestId);
+      if (!entry)
+        return;
+      pending.delete(requestId);
+      clearTimeout(entry.timer);
+      entry.resolve({ ok: false, cleanupCompleted: false });
+    });
+  });
+}
+function completeRegexInstall(requestId, userId, result) {
+  const entry = pending.get(requestId);
+  if (!entry || entry.userId !== userId)
+    return false;
+  pending.delete(requestId);
+  clearTimeout(entry.timer);
+  entry.resolve(result);
+  return true;
 }
 
 // src/interpreter/asset-cache.ts
@@ -31506,7 +31722,7 @@ function clearActiveModulesByNamespace(chatId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.8.3",
+  version: "0.8.6",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -31544,7 +31760,7 @@ var spindle_default = {
   ],
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.1.2",
+  minimum_lumiverse_version: "1.1.5",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"
@@ -33302,12 +33518,12 @@ function createModuleUploader(deps) {
     let assetUploadFailures = 0;
     if (decoded.assets.length > 0) {
       const moduleAssets = moduleBody.assets ?? [];
-      const pending = deps.pairAssets(moduleAssets, decoded.assets, () => "", deps.guessMimeType);
-      if (pending.length < decoded.assets.length) {
-        deps.log.warn(`processModuleUpload: ${decoded.assets.length - pending.length} asset(s) ` + `couldn't be paired with a module.assets[] name, dropped. ` + `(decoded.assets index out of bounds vs module.assets list.)`);
+      const pending2 = deps.pairAssets(moduleAssets, decoded.assets, () => "", deps.guessMimeType);
+      if (pending2.length < decoded.assets.length) {
+        deps.log.warn(`processModuleUpload: ${decoded.assets.length - pending2.length} asset(s) ` + `couldn't be paired with a module.assets[] name, dropped. ` + `(decoded.assets index out of bounds vs module.assets list.)`);
       }
       const tUpload = Date.now();
-      const totalCount = pending.length;
+      const totalCount = pending2.length;
       let processed = 0;
       const moduleNameForProgress = typeof moduleBody.name === "string" && moduleBody.name.length > 0 ? moduleBody.name : moduleBody.id;
       const journalBuffer = [];
@@ -33348,13 +33564,13 @@ function createModuleUploader(deps) {
       if (typeof uploadMany === "function" && totalCount > 0) {
         deps.log.info(`processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` + `(module=${moduleBody.id}, batched)`);
         let i = 0;
-        while (i < pending.length) {
+        while (i < pending2.length) {
           const batchItems = [];
           const batchAssetNames = [];
           const batchSniffedExts = [];
           let batchBytes = 0;
-          while (i < pending.length && batchItems.length < BATCH_MAX_ITEMS) {
-            const meta = pending[i];
+          while (i < pending2.length && batchItems.length < BATCH_MAX_ITEMS) {
+            const meta = pending2[i];
             const bytes = meta ? decoded.assets[meta.sourceIndex] : undefined;
             if (!meta || !bytes) {
               i += 1;
@@ -33400,9 +33616,9 @@ function createModuleUploader(deps) {
         const uploadWorker = async () => {
           while (true) {
             const idx = nextIndex++;
-            if (idx >= pending.length)
+            if (idx >= pending2.length)
               break;
-            const meta = pending[idx];
+            const meta = pending2[idx];
             const bytes = meta ? decoded.assets[meta.sourceIndex] : undefined;
             if (!meta || !bytes)
               continue;
@@ -33428,14 +33644,14 @@ function createModuleUploader(deps) {
           }
         };
         const workers = [];
-        for (let w = 0;w < Math.min(UPLOAD_CONCURRENCY, pending.length); w++) {
+        for (let w = 0;w < Math.min(UPLOAD_CONCURRENCY, pending2.length); w++) {
           workers.push(uploadWorker());
         }
         await Promise.all(workers);
       }
       flushJournal();
       await journalChain;
-      deps.log.info(`processModuleUpload: uploaded ${Object.keys(moduleAssetIndex).length}/${pending.length} ` + `failed=${assetUploadFailures} elapsed=${Date.now() - tUpload}ms`);
+      deps.log.info(`processModuleUpload: uploaded ${Object.keys(moduleAssetIndex).length}/${pending2.length} ` + `failed=${assetUploadFailures} elapsed=${Date.now() - tUpload}ms`);
     }
     if (decoded.icon) {
       const declaredExt = /^[a-z0-9]{1,10}$/i.test(decoded.icon.ext) ? decoded.icon.ext.toLowerCase() : "";
@@ -33889,20 +34105,20 @@ function createScreenHandlers(deps) {
 function createConsentHandlers(deps) {
   return {
     consent_response: async (msg, ctx) => {
-      const pending = deps.pendingConsents.get(msg.requestId);
-      if (!pending) {
+      const pending2 = deps.pendingConsents.get(msg.requestId);
+      if (!pending2) {
         deps.log.warn(`consent_response: no pending request for requestId=${msg.requestId}`);
         ctx.send({ type: "error", message: `consent: unknown request` }, ctx.userId);
         return;
       }
-      if (pending.ownerUserId !== ctx.userId) {
-        deps.log.warn(`consent_response: ownership mismatch requestId=${msg.requestId} owner=${pending.ownerUserId} responder=${ctx.userId ?? "<none>"}`);
+      if (pending2.ownerUserId !== ctx.userId) {
+        deps.log.warn(`consent_response: ownership mismatch requestId=${msg.requestId} owner=${pending2.ownerUserId} responder=${ctx.userId ?? "<none>"}`);
         ctx.send({ type: "error", message: `consent: unknown request` }, ctx.userId);
         return;
       }
       deps.pendingConsents.delete(msg.requestId);
       deps.log.info(`consent_response: requestId=${msg.requestId} confirmed=${msg.confirmed}`);
-      pending.resolver(msg.confirmed);
+      pending2.resolver(msg.confirmed);
     },
     alert_dismissed: async (msg, ctx) => {
       const r = deps.resolveAlertDismissal(msg.requestId, ctx.userId);
@@ -34493,8 +34709,16 @@ function createModuleHandlers(deps) {
     },
     module_artifacts_installed: async (msg, ctx) => {
       if (msg.characterId === null) {
-        await deps.recordGlobalModuleArtifacts(msg.moduleId, { regexScriptIds: msg.regexScriptIds }, ctx.userId);
-        deps.log.info(`module_artifacts_installed: global module=${msg.moduleId} regex=${msg.regexScriptIds.length}`);
+        if (msg.ok) {
+          await deps.recordGlobalModuleArtifacts(msg.moduleId, { regexScriptIds: msg.regexScriptIds }, ctx.userId);
+        }
+        deps.log.info(`module_artifacts_installed: global module=${msg.moduleId} ok=${msg.ok} ` + `cleanup=${msg.cleanupCompleted} regex=${msg.regexScriptIds.length}`);
+        if (msg.requestId) {
+          completeRegexInstall(msg.requestId, ctx.userId, {
+            ok: msg.ok,
+            cleanupCompleted: msg.cleanupCompleted
+          });
+        }
         return;
       }
       await deps.updateLumirealm(deps.charactersApi(), msg.characterId, ctx.userId, (cur) => {
@@ -34502,10 +34726,12 @@ function createModuleHandlers(deps) {
         if (msg.worldBookId)
           wb[msg.moduleId] = msg.worldBookId;
         const rx = { ...cur.user_overrides.attached_module_regex_script_ids ?? {} };
-        if (msg.regexScriptIds.length > 0)
-          rx[msg.moduleId] = msg.regexScriptIds;
-        else
-          delete rx[msg.moduleId];
+        if (msg.ok) {
+          if (msg.regexScriptIds.length > 0)
+            rx[msg.moduleId] = msg.regexScriptIds;
+          else
+            delete rx[msg.moduleId];
+        }
         return {
           ...cur,
           user_overrides: deps.mergeUserOverrides(cur.user_overrides, {
@@ -34521,7 +34747,13 @@ function createModuleHandlers(deps) {
         }
       }
       deps.invalidateActiveForCharacter(msg.characterId, ctx.userId);
-      deps.log.info(`module_artifacts_installed: char=${msg.characterId} module=${msg.moduleId} ` + `worldBookId=${msg.worldBookId ?? "null"} regex=${msg.regexScriptIds.length}`);
+      deps.log.info(`module_artifacts_installed: char=${msg.characterId} module=${msg.moduleId} ok=${msg.ok} ` + `cleanup=${msg.cleanupCompleted} worldBookId=${msg.worldBookId ?? "null"} ` + `regex=${msg.regexScriptIds.length}`);
+      if (msg.requestId) {
+        completeRegexInstall(msg.requestId, ctx.userId, {
+          ok: msg.ok,
+          cleanupCompleted: msg.cleanupCompleted
+        });
+      }
     },
     module_artifacts_uninstalled: async (msg, _ctx) => {
       deps.log.info(`module_artifacts_uninstalled: char=${msg.characterId} module=${msg.moduleId} ok=${msg.ok}`);
@@ -37261,46 +37493,20 @@ function toRisuFirstMessageIndex(value) {
 }
 
 // src/interpreter/alert-bridge.ts
-var pending = new Map;
-function awaitAlertDismissal(requestId, ownerUserId, timeoutMs = 60000) {
-  return new Promise((resolve) => {
-    pending.set(requestId, { ownerUserId, resolve });
-    setTimeout(() => {
-      const cur = pending.get(requestId);
-      if (cur && cur.ownerUserId === ownerUserId) {
-        pending.delete(requestId);
-        resolve();
-      }
-    }, timeoutMs);
-  });
-}
-function resolveAlertDismissal(requestId, responderUserId) {
-  const rec = pending.get(requestId);
-  if (!rec)
-    return { ok: false, reason: "unknown_request" };
-  if (responderUserId === undefined || rec.ownerUserId !== responderUserId) {
-    return { ok: false, reason: "ownership_mismatch" };
-  }
-  pending.delete(requestId);
-  rec.resolve();
-  return { ok: true };
-}
-
-// src/interpreter/pick-bridge.ts
 var pending2 = new Map;
-function awaitPickResolution(requestId, ownerUserId, timeoutMs = 120000) {
+function awaitAlertDismissal(requestId, ownerUserId, timeoutMs = 60000) {
   return new Promise((resolve) => {
     pending2.set(requestId, { ownerUserId, resolve });
     setTimeout(() => {
       const cur = pending2.get(requestId);
       if (cur && cur.ownerUserId === ownerUserId) {
         pending2.delete(requestId);
-        resolve(null);
+        resolve();
       }
     }, timeoutMs);
   });
 }
-function resolvePickResolution(requestId, responderUserId, value) {
+function resolveAlertDismissal(requestId, responderUserId) {
   const rec = pending2.get(requestId);
   if (!rec)
     return { ok: false, reason: "unknown_request" };
@@ -37308,6 +37514,32 @@ function resolvePickResolution(requestId, responderUserId, value) {
     return { ok: false, reason: "ownership_mismatch" };
   }
   pending2.delete(requestId);
+  rec.resolve();
+  return { ok: true };
+}
+
+// src/interpreter/pick-bridge.ts
+var pending3 = new Map;
+function awaitPickResolution(requestId, ownerUserId, timeoutMs = 120000) {
+  return new Promise((resolve) => {
+    pending3.set(requestId, { ownerUserId, resolve });
+    setTimeout(() => {
+      const cur = pending3.get(requestId);
+      if (cur && cur.ownerUserId === ownerUserId) {
+        pending3.delete(requestId);
+        resolve(null);
+      }
+    }, timeoutMs);
+  });
+}
+function resolvePickResolution(requestId, responderUserId, value) {
+  const rec = pending3.get(requestId);
+  if (!rec)
+    return { ok: false, reason: "unknown_request" };
+  if (responderUserId === undefined || rec.ownerUserId !== responderUserId) {
+    return { ok: false, reason: "ownership_mismatch" };
+  }
+  pending3.delete(requestId);
   rec.resolve(value);
   return { ok: true };
 }
@@ -37358,11 +37590,11 @@ function makeSpindleHost(ctx) {
     }
     const chat = await spindle.chats.get(chatId, uid);
     const meta = chat?.metadata ?? {};
-    const pending3 = Array.isArray(meta["_risu_pending_injections"]) ? [...meta["_risu_pending_injections"]] : [];
-    pending3.push({ id, content, opts });
+    const pending4 = Array.isArray(meta["_risu_pending_injections"]) ? [...meta["_risu_pending_injections"]] : [];
+    pending4.push({ id, content, opts });
     expectChatChange(chatId);
     await spindle.chats.update(chatId, {
-      metadata: { ...meta, _risu_pending_injections: pending3 }
+      metadata: { ...meta, _risu_pending_injections: pending4 }
     }, uid);
   }
   async function charGet(id) {
@@ -39468,18 +39700,18 @@ function isPromptRegexRunnerAvailable() {
 }
 function createPromptRegexRunnerClient(deps) {
   const { log: log8, errMsg: errMsg2 } = deps;
-  const pending3 = new Map;
+  const pending4 = new Map;
   let handle = null;
   let handleProcessId = null;
   let spawnInFlight = null;
   let listenersWired = false;
   let requestSeq = 0;
   function failAllPending(reason) {
-    for (const [requestId, p] of pending3) {
+    for (const [requestId, p] of pending4) {
       clearTimeout(p.timer);
       p.resolve({ requestId, ok: false, error: reason });
     }
-    pending3.clear();
+    pending4.clear();
   }
   function wireListeners(api) {
     if (listenersWired)
@@ -39491,10 +39723,10 @@ function createPromptRegexRunnerClient(deps) {
       const reply = event.payload;
       if (!reply || typeof reply.requestId !== "string")
         return;
-      const p = pending3.get(reply.requestId);
+      const p = pending4.get(reply.requestId);
       if (!p)
         return;
-      pending3.delete(reply.requestId);
+      pending4.delete(reply.requestId);
       clearTimeout(p.timer);
       p.resolve(reply);
     });
@@ -39566,23 +39798,23 @@ function createPromptRegexRunnerClient(deps) {
     const requestId = `prq-${++requestSeq}`;
     const replyPromise = new Promise((resolve) => {
       const timer = setTimeout(() => {
-        if (!pending3.has(requestId))
+        if (!pending4.has(requestId))
           return;
-        pending3.delete(requestId);
+        pending4.delete(requestId);
         resolve({ requestId, ok: false, error: `timeout after ${PROMPT_REGEX_TIMEOUT_MS}ms` });
       }, PROMPT_REGEX_TIMEOUT_MS);
       if (typeof timer.unref === "function") {
         timer.unref();
       }
-      pending3.set(requestId, { resolve, timer });
+      pending4.set(requestId, { resolve, timer });
     });
     try {
       active.send({ requestId, prebuilt, scripts, messages });
     } catch (err) {
-      const p = pending3.get(requestId);
+      const p = pending4.get(requestId);
       if (p) {
         clearTimeout(p.timer);
-        pending3.delete(requestId);
+        pending4.delete(requestId);
       }
       log8.error(`prompt-regex runner send failed: ${errMsg2(err)}; shipping prompt without inline regex`);
       respawnAfterFault();
@@ -40517,7 +40749,21 @@ async function markLegacyReimportWarned(storage, userId, characterId) {
   return { alreadyWarned: false };
 }
 
-// src/state/migrations.ts
+// src/migrations/runner.ts
+function stableIdToken(raw) {
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  if (normalized.length <= 32)
+    return normalized;
+  let hash = 2166136261;
+  for (const ch of normalized) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${normalized.slice(0, 23)}_${(hash >>> 0).toString(16)}`;
+}
+function moduleOwnershipPrefix(moduleId, scopeId) {
+  return `lr_module_${stableIdToken(moduleId)}_${stableIdToken(scopeId)}`;
+}
 async function applyRegexReplaceStringTransform(predicate, userId, transform, log8, errMsg2) {
   const api = getRegexScriptsApi();
   if (!api?.list || !api.update)
@@ -40618,6 +40864,8 @@ function createMigrationsRunner(deps) {
     readModuleEnvelope,
     writeModuleEnvelope,
     dispatchModuleArtifactInstall,
+    dispatchGlobalModuleArtifactInstall,
+    isGlobalModule,
     writeLumirealm: writeLumirealm2,
     invalidateActiveForCharacter,
     toastFor,
@@ -40634,12 +40882,27 @@ function createMigrationsRunner(deps) {
       extensionVersion,
       log: log8,
       installCharacterRegexScripts: async (charId, charName, scripts) => {
-        send({
-          type: "install_regex_scripts",
-          characterId: charId,
-          characterName: charName,
-          scripts: scripts.map((s) => ({ ...s, metadata: { ...s.metadata ?? {} } }))
-        }, userId);
+        const pending4 = scripts.map((script) => ({
+          ...script,
+          metadata: { ...script.metadata ?? {} }
+        }));
+        const ownership = await ensureRegexOwnership(spindle.regex_scripts, pending4, userId);
+        if (!ownership.allOwned) {
+          throw new Error(`regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}`);
+        }
+        const completion = await awaitRegexInstall(userId, (requestId) => {
+          send({
+            type: "install_regex_scripts",
+            characterId: charId,
+            characterName: charName,
+            scripts: ownership.scripts.map((s) => ({ ...s, metadata: { ...s.metadata ?? {} } })),
+            cleanupStale: true,
+            requestId
+          }, userId);
+        });
+        if (!completion.ok || !completion.cleanupCompleted) {
+          throw new Error("regex install or verified stale cleanup did not complete");
+        }
       },
       reinstallAttachedModules: async (charId) => {
         const ids = envelope.user_overrides.attached_module_ids ?? [];
@@ -40763,6 +41026,37 @@ function createMigrationsRunner(deps) {
     if (stored >= currentModuleSchemaVersion)
       return { ok: true };
     let archiveWbId = null;
+    const legacyAliases = async (mid, scope, scopeId) => {
+      const aliases = new Map;
+      const api = getRegexScriptsApi();
+      if (!api?.list)
+        return aliases;
+      let offset = 0;
+      while (true) {
+        const page = await api.list({
+          userId,
+          scope,
+          ...scopeId ? { scopeId } : {},
+          limit: 200,
+          offset
+        });
+        for (const raw of page.data) {
+          const row = raw;
+          const metadata = row["metadata"];
+          if (metadata?._risu?.module_id !== mid)
+            continue;
+          const sourceRow = metadata._risu.source_row_index;
+          const scriptId = typeof metadata.imported_script_id === "string" ? metadata.imported_script_id : row["script_id"];
+          if (typeof sourceRow === "number" && typeof scriptId === "string") {
+            aliases.set(sourceRow, scriptId);
+          }
+        }
+        if (page.data.length < 200)
+          break;
+        offset += page.data.length;
+      }
+      return aliases;
+    };
     const moduleDeps = {
       syncWorldBook: async (e) => {
         archiveWbId = await archiveModuleWorldBookBeforeMigration(e, userId);
@@ -40814,12 +41108,30 @@ function createMigrationsRunner(deps) {
         const charIds = await charactersAttachedTo(mid, userId);
         let count = 0;
         for (const charId of charIds) {
-          try {
-            await refreshAttachedModule(charId, env, userId);
-            count++;
-          } catch (err) {
-            log8.warn(`runModuleMigration: refresh char=${charId} module=${mid} threw: ${errMsg2(err)}`);
+          const aliases = await legacyAliases(mid, "character", charId);
+          const completion = await awaitRegexInstall(userId, (requestId) => dispatchModuleArtifactInstall(charId, env, userId, {
+            requestId,
+            stableIdPrefix: moduleOwnershipPrefix(mid, charId),
+            legacyScriptIdsBySourceRow: aliases
+          }));
+          if (!completion.ok || !completion.cleanupCompleted) {
+            throw new Error(`module regex install/cleanup failed for character ${charId}`);
           }
+          count++;
+        }
+        if (await isGlobalModule(mid, userId)) {
+          const aliases = await legacyAliases(mid, "global", null);
+          const completion = await awaitRegexInstall(userId, (requestId) => dispatchGlobalModuleArtifactInstall(env, userId, {
+            requestId,
+            stableIdPrefix: moduleOwnershipPrefix(mid, "global"),
+            legacyScriptIdsBySourceRow: aliases
+          }).then(() => {
+            return;
+          }));
+          if (!completion.ok || !completion.cleanupCompleted) {
+            throw new Error("global module regex install/cleanup failed");
+          }
+          count++;
         }
         return count;
       },
@@ -40902,7 +41214,7 @@ function createMigrationsRunner(deps) {
   return { runCharacterMigration, runModuleMigration };
 }
 
-// src/state/migration-state.ts
+// src/migrations/state.ts
 var MIGRATION_STATE_PATH = "lumirealm/migration-state.json";
 var EMPTY_MIGRATION_STATE = {
   schema_version: 1,
@@ -40948,7 +41260,7 @@ async function writeMigrationState(storage, userId, state) {
   await storage.setJson(MIGRATION_STATE_PATH, out, { indent: 2, userId });
 }
 
-// src/boot/retired-macro-migration.ts
+// src/migrations/retired-macro.ts
 var RETIRED_PREFIX = "risu_";
 var STRUCTURAL_KINDS = new Set(["if", "if_pure", "when"]);
 var OPAQUE_KINDS2 = new Set([
@@ -41190,7 +41502,7 @@ function migrateRetiredMacroNames(text) {
   return out;
 }
 
-// src/boot/mass-migrations.ts
+// src/migrations/mass.ts
 var ARCHIVE_BATCH_DELAY_MS = 2000;
 var MAX_ARCHIVE_LIST = 10;
 function createMassMigrationsRunner(deps) {
@@ -41224,12 +41536,12 @@ function createMassMigrationsRunner(deps) {
   const pendingArchivesByUser = new Map;
   const archiveFlushTimerByUser = new Map;
   async function flushLorebookMigrationArchives(userId) {
-    const pending3 = pendingArchivesByUser.get(userId);
-    if (!pending3 || pending3.length === 0)
+    const pending4 = pendingArchivesByUser.get(userId);
+    if (!pending4 || pending4.length === 0)
       return;
     pendingArchivesByUser.delete(userId);
     const items = [];
-    for (const p of pending3) {
+    for (const p of pending4) {
       let archiveName = null;
       try {
         const wb = await spindle.world_books.get(p.archiveWbId, userId);
@@ -41375,10 +41687,6 @@ function createMassMigrationsRunner(deps) {
         await writeMigrationState(spindle.userStorage, userId, state);
       }
     }
-    if (state.last_swept_characters >= currentCharacterSchemaVersion) {
-      log8.info(`mass-migration(characters): user=${userId} already swept to v${state.last_swept_characters}, skipping`);
-      return;
-    }
     const all = await listLumirealmCharacters2(userId);
     const candidates = [];
     for (const entry of all) {
@@ -41407,7 +41715,11 @@ function createMassMigrationsRunner(deps) {
       }
       translatorMigrationChecked.add(c.id);
       try {
-        await runCharacterMigration(c.id, c.name, userId, c.data);
+        const result = await runCharacterMigration(c.id, c.name, userId, c.data, { silent: true });
+        if (result === "failed") {
+          failed++;
+          translatorMigrationChecked.delete(c.id);
+        }
       } catch (err) {
         failed++;
         translatorMigrationChecked.delete(c.id);
@@ -41907,31 +42219,34 @@ function createApplySvgRasterIndex(deps) {
         }
       } catch {}
       log8.info(`applySvgRasterIndex: re-dispatching install_regex_scripts char=${characterId} count=${lumiManaged.length} (post-SVG-substitution)`);
+      const pending4 = lumiManaged.map((r) => ({
+        name: r.name ?? "",
+        script_id: r.script_id ?? "",
+        find_regex: r.find_regex ?? "",
+        replace_string: r.replace_string ?? "",
+        flags: r.flags ?? "",
+        placement: r.placement ?? [],
+        scope: r.scope ?? "character",
+        scope_id: r.scope_id ?? characterId,
+        target: r.target ?? "display",
+        min_depth: r.min_depth ?? null,
+        max_depth: r.max_depth ?? null,
+        trim_strings: r.trim_strings ?? [],
+        run_on_edit: r.run_on_edit ?? false,
+        substitute_macros: r.substitute_macros ?? "none",
+        disabled: r.disabled ?? false,
+        sort_order: r.sort_order ?? 0,
+        description: r.description ?? "",
+        folder: r.folder ?? "",
+        metadata: { ...r.metadata ?? {} }
+      }));
+      const ownership = await ensureRegexOwnership(spindle.regex_scripts, pending4, userId);
       send({
         type: "install_regex_scripts",
         characterId,
         characterName,
-        scripts: lumiManaged.map((r) => ({
-          name: r.name ?? "",
-          script_id: r.script_id ?? "",
-          find_regex: r.find_regex ?? "",
-          replace_string: r.replace_string ?? "",
-          flags: r.flags ?? "",
-          placement: r.placement ?? [],
-          scope: r.scope ?? "character",
-          scope_id: r.scope_id ?? characterId,
-          target: r.target ?? "display",
-          min_depth: r.min_depth ?? null,
-          max_depth: r.max_depth ?? null,
-          trim_strings: r.trim_strings ?? [],
-          run_on_edit: r.run_on_edit ?? false,
-          substitute_macros: r.substitute_macros ?? "none",
-          disabled: r.disabled ?? false,
-          sort_order: r.sort_order ?? 0,
-          description: r.description ?? "",
-          folder: r.folder ?? "",
-          metadata: { ...r.metadata ?? {} }
-        }))
+        scripts: ownership.scripts,
+        cleanupStale: ownership.allOwned
       }, userId);
     }
     const newSvgImageIds = Object.values(markerToImageId).filter((v) => typeof v === "string" && v.length > 0);
@@ -42053,24 +42368,24 @@ function makeSeedAuthorsNoteFromDepthPrompt(deps) {
 function makeMaybeFinalizeImport(deps) {
   const { pendingImportCompletions, send, listCards, pushCards, log: log8, errMsg: errMsg2 } = deps;
   return async (characterId) => {
-    const pending3 = pendingImportCompletions.get(characterId);
-    if (!pending3)
+    const pending4 = pendingImportCompletions.get(characterId);
+    if (!pending4)
       return;
-    if (pending3.hasPendingSvgRaster) {
-      log8.info(`import.finalize: char=${characterId} still pending,svg=${pending3.hasPendingSvgRaster}`);
+    if (pending4.hasPendingSvgRaster) {
+      log8.info(`import.finalize: char=${characterId} still pending,svg=${pending4.hasPendingSvgRaster}`);
       return;
     }
     pendingImportCompletions.delete(characterId);
-    log8.info(`import.finalize: char=${characterId} both async ops complete after ${Date.now() - pending3.startedAt}ms,emitting phase=done`);
+    log8.info(`import.finalize: char=${characterId} both async ops complete after ${Date.now() - pending4.startedAt}ms,emitting phase=done`);
     send({
       type: "import_progress",
       phase: "done",
-      message: `Imported ${pending3.characterName}`,
+      message: `Imported ${pending4.characterName}`,
       fraction: 1,
       characterId
-    }, pending3.ownerUserId);
+    }, pending4.ownerUserId);
     try {
-      pushCards(await listCards(pending3.ownerUserId), pending3.ownerUserId);
+      pushCards(await listCards(pending4.ownerUserId), pending4.ownerUserId);
     } catch (err) {
       log8.warn(`import.finalize: pushCards failed: ${errMsg2(err)}`);
     }
@@ -42883,6 +43198,7 @@ function createImportCardOrchestrator(deps) {
         log8.warn(`importCardFromBytes: refreshRisuAssetMap threw char=${result.characterId}: ${errMsg2(err)}`);
       });
       const scriptsToInstall = result.pendingRegexScripts;
+      const ownership = await ensureRegexOwnership(spindle.regex_scripts, scriptsToInstall, userId);
       const byTarget = new Map;
       for (const s of scriptsToInstall)
         byTarget.set(s.target, (byTarget.get(s.target) ?? 0) + 1);
@@ -42892,7 +43208,8 @@ function createImportCardOrchestrator(deps) {
         type: "install_regex_scripts",
         characterId: result.characterId,
         characterName: result.characterName,
-        scripts: scriptsToInstall
+        scripts: ownership.scripts,
+        cleanupStale: ownership.allOwned
       }, userId);
       const hasPendingSvgRaster = result.pendingSvgRasters.length > 0;
       if (hasPendingSvgRaster) {
@@ -43506,26 +43823,6 @@ function createCharacterModuleAttach(deps) {
     const fetched = await readLumirealm2(characterId, userId);
     if (!fetched || !fetched.data)
       return;
-    const regexIds = fetched.data.user_overrides.attached_module_regex_script_ids?.[env.id] ?? [];
-    await updateLumirealm2(characterId, userId, (cur) => {
-      const rx = { ...cur.user_overrides.attached_module_regex_script_ids ?? {} };
-      delete rx[env.id];
-      return {
-        ...cur,
-        user_overrides: mergeUserOverrides(cur.user_overrides, {
-          attached_module_regex_script_ids: Object.keys(rx).length > 0 ? rx : null
-        })
-      };
-    });
-    if (regexIds.length > 0) {
-      send({
-        type: "uninstall_module_artifacts",
-        characterId,
-        moduleId: env.id,
-        worldBookId: null,
-        regexScriptIds: regexIds
-      }, userId);
-    }
     await dispatchModuleArtifactInstall(characterId, env, userId);
     invalidateActiveForCharacter(characterId, userId);
     await refreshRisuAssetMap(characterId, userId);
@@ -46083,7 +46380,8 @@ var regexImporter = createRegexImporter({
   log: log8,
   errMsg,
   parseDirectRegex,
-  mapRegex
+  mapRegex,
+  regexApi: spindle.regex_scripts
 });
 var migrationsRunner = createMigrationsRunner({
   extensionVersion: EXTENSION_VERSION,
@@ -46094,7 +46392,9 @@ var migrationsRunner = createMigrationsRunner({
   writeModuleEnvelope: async (userId, env) => {
     await writeEnvelope(moduleStorage(), userId, env);
   },
-  dispatchModuleArtifactInstall: (charId, env, userId) => dispatchModuleArtifactInstall(charId, env, userId),
+  dispatchModuleArtifactInstall: (charId, env, userId, options) => worldBookOps.dispatchModuleArtifactInstall(charId, env, userId, options),
+  dispatchGlobalModuleArtifactInstall: (env, userId, options) => worldBookOps.dispatchGlobalModuleArtifactInstall(env, userId, options),
+  isGlobalModule: async (moduleId, userId) => (await readGlobalModuleIds(moduleStorage(), userId)).includes(moduleId),
   writeLumirealm: (charId, data, userId) => writeLumirealm(charactersApi(), charId, data, userId),
   updateLumirealm: (charId, userId, mutator) => updateLumirealm(charactersApi(), charId, userId, mutator),
   invalidateActiveForCharacter,
@@ -46507,6 +46807,12 @@ var handlerRegistry = {
   ...orphanHandlers,
   ...repairHandlers,
   ...createDisplayWritebackHandlers(),
+  regex_scripts_installed: async (msg, ctx) => {
+    completeRegexInstall(msg.requestId, ctx.userId, {
+      ok: msg.ok,
+      cleanupCompleted: msg.cleanupCompleted
+    });
+  },
   display_authority: async (msg) => {
     if (msg.authoritative)
       feDisplayShadowOptOut.delete(msg.chatId);

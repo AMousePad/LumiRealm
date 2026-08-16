@@ -9,11 +9,22 @@ import {
 import { loreBookSchema, type LoreBook } from '../core/schemas/lorebook.js';
 import { projectModuleRegexEntries } from './module-artifact-project.js';
 import { expectCharacterEdit } from './own-character-edit.js';
+import { ensureRegexOwnership } from './regex-ownership.js';
+
+export interface ModuleArtifactInstallOptions {
+  readonly requestId?: string;
+  readonly stableIdPrefix?: string;
+  readonly legacyScriptIdsBySourceRow?: ReadonlyMap<number, string>;
+}
 
 function cryptoUuidLocal(): string {
   const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
   if (c?.randomUUID) return c.randomUUID();
   return `mod-rx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeScriptId(raw: string): string {
+  return raw.toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
 }
 
 export function projectModuleLorebookForCreate(
@@ -77,10 +88,12 @@ export interface WorldBookOps {
     characterId: string,
     env: ModuleEnvelope,
     userId: string | undefined,
+    options?: ModuleArtifactInstallOptions,
   ) => Promise<void>;
   readonly dispatchGlobalModuleArtifactInstall: (
     env: ModuleEnvelope,
     userId: string | undefined,
+    options?: ModuleArtifactInstallOptions,
   ) => Promise<{ worldBookId: string | null }>;
   readonly dispatchGlobalModuleArtifactUninstall: (
     moduleId: string,
@@ -252,6 +265,7 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
     characterId: string,
     env: ModuleEnvelope,
     userId: string | undefined,
+    options?: ModuleArtifactInstallOptions,
   ): Promise<void> {
     const m = env.module as {
       name?: unknown;
@@ -260,20 +274,29 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
     const moduleName = typeof m.name === 'string' && m.name.length > 0
       ? m.name
       : env.id;
+    let stableIndex = 0;
     const regexScripts = projectModuleRegexEntries(
       env.id,
       moduleName,
       characterId,
       m.regex,
-      () => cryptoUuidLocal(),
-    );
-    if (regexScripts.length === 0) {
-      log.info(
-        `dispatchModuleArtifactInstall: module=${env.id} char=${characterId} no regex to install`,
-      );
-      return;
-    }
+      () => options?.stableIdPrefix
+        ? `${options.stableIdPrefix}_${stableIndex++}`
+        : cryptoUuidLocal(),
+    ).map((script) => {
+      const sourceRow = (script.metadata?._risu as { source_row_index?: unknown } | undefined)
+        ?.source_row_index;
+      const legacyId = typeof sourceRow === 'number'
+        ? options?.legacyScriptIdsBySourceRow?.get(sourceRow)
+        : undefined;
+      return legacyId
+        ? { ...script, metadata: { ...script.metadata, imported_script_id: normalizeScriptId(legacyId) } }
+        : script;
+    });
     const lorebookEntries: never[] = [];
+    const ownership = userId === undefined
+      ? { allOwned: false, scripts: regexScripts }
+      : await ensureRegexOwnership(spindle.regex_scripts, regexScripts, userId);
     log.info(
       `dispatchModuleArtifactInstall: module=${env.id} char=${characterId} ` +
         `lorebookEntries=${lorebookEntries.length} regexScripts=${regexScripts.length}`,
@@ -284,7 +307,9 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
       moduleId: env.id,
       worldBookName: `Module: ${moduleName}`,
       lorebookEntries,
-      regexScripts,
+      regexScripts: ownership.scripts,
+      cleanupStale: ownership.allOwned,
+      ...(options?.requestId ? { requestId: options.requestId } : {}),
     }, userId);
   }
 
@@ -294,6 +319,7 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
   async function dispatchGlobalModuleArtifactInstall(
     env: ModuleEnvelope,
     userId: string | undefined,
+    options?: ModuleArtifactInstallOptions,
   ): Promise<{ worldBookId: string | null }> {
     const m = env.module as { name?: unknown; regex?: readonly unknown[] };
     const moduleName = typeof m.name === 'string' && m.name.length > 0 ? m.name : env.id;
@@ -318,22 +344,41 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
       }
     }
 
+    let stableIndex = 0;
     const regexScripts = projectModuleRegexEntries(
-      env.id, moduleName, null, m.regex, () => cryptoUuidLocal(),
+      env.id,
+      moduleName,
+      null,
+      m.regex,
+      () => options?.stableIdPrefix
+        ? `${options.stableIdPrefix}_${stableIndex++}`
+        : cryptoUuidLocal(),
+    ).map((script) => {
+      const sourceRow = (script.metadata?._risu as { source_row_index?: unknown } | undefined)
+        ?.source_row_index;
+      const legacyId = typeof sourceRow === 'number'
+        ? options?.legacyScriptIdsBySourceRow?.get(sourceRow)
+        : undefined;
+      return legacyId
+        ? { ...script, metadata: { ...script.metadata, imported_script_id: normalizeScriptId(legacyId) } }
+        : script;
+    });
+    const ownership = userId === undefined
+      ? { allOwned: false, scripts: regexScripts }
+      : await ensureRegexOwnership(spindle.regex_scripts, regexScripts, userId);
+    log.info(
+      `dispatchGlobalModuleArtifactInstall: module=${env.id} regexScripts=${regexScripts.length} (global scope)`,
     );
-    if (regexScripts.length > 0) {
-      log.info(
-        `dispatchGlobalModuleArtifactInstall: module=${env.id} regexScripts=${regexScripts.length} (global scope)`,
-      );
-      send({
-        type: 'install_module_artifacts',
-        characterId: null,
-        moduleId: env.id,
-        worldBookName: `Module: ${moduleName}`,
-        lorebookEntries: [],
-        regexScripts,
-      }, userId);
-    }
+    send({
+      type: 'install_module_artifacts',
+      characterId: null,
+      moduleId: env.id,
+      worldBookName: `Module: ${moduleName}`,
+      lorebookEntries: [],
+      regexScripts: ownership.scripts,
+      cleanupStale: ownership.allOwned,
+      ...(options?.requestId ? { requestId: options.requestId } : {}),
+    }, userId);
     return { worldBookId: addedWorldBookId };
   }
 

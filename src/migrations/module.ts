@@ -1,11 +1,11 @@
 // Per-version module migration registry. Steps walked sequentially, persist
 // after each apply for resumability.
 
-import type { ModuleEnvelope } from './modules-store.js';
+import type { ModuleEnvelope } from '../state/modules-store.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
-import { projectModuleLorebookForCreate } from './world-book-ops.js';
-import { normalizeModuleDisplayReplaceString } from './module-artifact-project.js';
+import { projectModuleLorebookForCreate } from '../state/world-book-ops.js';
+import { normalizeModuleDisplayReplaceString } from '../state/module-artifact-project.js';
 import {
   LEGACY_ENTRY_HASH_FIELDS_V1,
   computeEntrySourceHashWithFields,
@@ -21,8 +21,8 @@ export interface ModuleMigrationDeps {
   // syncWorldBook re-runs lorebook projection and rewrites the world_book in place.
   syncWorldBook: (env: ModuleEnvelope) => Promise<string | null>;
   reinstallArtifactsForAttached: (moduleId: string) => Promise<number>;
-  // refreshArtifactsForAttached: detach + reattach for every attached character,
-  // so the new projection (regex names, flags, etc.) replaces the old rows.
+  // Replacement-first refresh for every attached character. Stale rows are
+  // removed only after the new projection is verified live.
   refreshArtifactsForAttached?: (moduleId: string) => Promise<number>;
   repairRegexBindingsForAttached: (
     moduleId: string,
@@ -70,6 +70,7 @@ export interface ModuleMigrationStep {
   readonly touches: readonly (
     | 'world_book_entries'
     | 'regex_scripts_attached_chars'
+    | 'regex_scripts_global'
     | 'asset_index'
     | 'envelope_metadata'
   )[];
@@ -114,6 +115,20 @@ async function applyV5RefreshAttachedRegex(
     notes.push('refreshArtifactsForAttached dep missing, skipping refresh');
   }
   return { nextEnv: args.env, notes };
+}
+
+async function applyV16MigrateRegexOwnership(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  if (!deps.refreshArtifactsForAttached) {
+    throw new Error('refreshArtifactsForAttached dependency is required');
+  }
+  const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
+  return {
+    nextEnv: args.env,
+    notes: [`migrated ownership for ${refreshed} module attachment(s)`],
+  };
 }
 
 async function applyV11RepairAttachedRegexIdentity(
@@ -471,6 +486,13 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
       'Refresh attached repeat-back rows to preserve raw-match compatibility.',
     touches: ['regex_scripts_attached_chars'],
     apply: applyV5RefreshAttachedRegex,
+  },
+  {
+    version: 16,
+    description:
+      'Create extension-owned replacements before verified cleanup of attached and global module regex rows.',
+    touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
+    apply: applyV16MigrateRegexOwnership,
   },
 ];
 

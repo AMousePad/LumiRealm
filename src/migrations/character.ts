@@ -256,6 +256,57 @@ async function applyV16RefreshRegexRuntime(
   };
 }
 
+function normalizeRegexScriptId(raw: string): string {
+  return raw.toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
+}
+
+function ownedRegexScriptId(raw: string, index: number): string {
+  const normalized = normalizeRegexScriptId(raw) || `row_${index}`;
+  if (normalized.length <= 85) return `lr_owned_${normalized}`;
+  let hash = 2166136261;
+  for (const ch of normalized) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `lr_owned_${(hash >>> 0).toString(16)}_${normalized.slice(-80)}`;
+}
+
+async function applyV19MigrateRegexOwnership(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const stored = args.envelope.regex_scripts.map((script, index) => ({
+    ...script,
+    script_id: ownedRegexScriptId(script.script_id, index),
+    metadata: {
+      ...(script.metadata ?? {}),
+      // Lumiverse resolves regexInstalled through this alias, so references to
+      // the pre-migration generated id keep working after ownership changes.
+      imported_script_id: normalizeRegexScriptId(script.script_id),
+    },
+  }));
+  await deps.installCharacterRegexScripts(args.characterId, args.characterName, stored);
+  return {
+    nextEnvelope: { ...args.envelope, regex_scripts: stored },
+    notes: [`migrated ownership for ${stored.length} regex_script(s)`],
+  };
+}
+
+async function applyV20RepairRegexOwnershipCleanup(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const stored = args.envelope.regex_scripts.map((script) => ({
+    ...script,
+    metadata: { ...(script.metadata ?? {}) },
+  }));
+  await deps.installCharacterRegexScripts(args.characterId, args.characterName, stored);
+  return {
+    nextEnvelope: { ...args.envelope, regex_scripts: stored },
+    notes: [`verified ownership cleanup for ${stored.length} regex_script(s)`],
+  };
+}
+
 async function applyV6BackfillArrayIndex(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
@@ -490,12 +541,10 @@ async function applyV12RecoverMissingRegex(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
-  // Migration's install_regex_scripts is a fire-and-forget send. When it never
-  // lands (FE not mounted during a boot/capture mass sweep) the version is
-  // still stamped CURRENT, so the card sits with zero Risu rows and is never
-  // retried. This step is idempotent: it reinstalls ONLY when the live rowset
-  // is empty, so cards that migrated correctly are a pure no-op (no write, no
-  // install, user disable/edit state untouched).
+  // Earlier migration installs were fire-and-forget. When one never landed,
+  // the version was still stamped and the card could remain without live rows.
+  // This historical recovery step is idempotent and reinstalls only an empty
+  // rowset; current installs use an acknowledged, verified handoff.
   if (!deps.applyCharacterRegexReplaceStringTransform) {
     return applyV7ReinstallRegex(args, deps);
   }
@@ -771,6 +820,20 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
       'Refresh character repeat-back rows to preserve raw-match compatibility.',
     touches: ['regex_scripts', 'payload.at_actions'],
     apply: applyV16RefreshRegexRuntime,
+  },
+  {
+    version: 19,
+    description:
+      'Create extension-owned replacements before verified cleanup of legacy character regex rows.',
+    touches: ['regex_scripts'],
+    apply: applyV19MigrateRegexOwnership,
+  },
+  {
+    version: 20,
+    description:
+      'Remove verified legacy card rows after preserving both character and embedded-module regex sources.',
+    touches: ['regex_scripts'],
+    apply: applyV20RepairRegexOwnershipCleanup,
   },
 ];
 

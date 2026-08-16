@@ -22373,7 +22373,7 @@ var require_url_parse = __commonJS((exports, module) => {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.8.3",
+  version: "0.8.6",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -22411,7 +22411,7 @@ var spindle_default = {
   ],
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.1.2",
+  minimum_lumiverse_version: "1.1.5",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"
@@ -37067,6 +37067,35 @@ function recoverModuleRegexScriptIds(moduleId, projectedRows, liveRows) {
   };
 }
 
+// src/state/regex-cleanup.ts
+function desiredIds(scripts) {
+  return new Set(scripts.map((script) => script.script_id).filter(Boolean));
+}
+function replacementsExist(rows, desired) {
+  const live = new Set(rows.map((row) => row.script_id).filter((id) => !!id));
+  return [...desired].every((id) => live.has(id));
+}
+function planCardRegexCleanup(rows, characterId, scripts) {
+  const scoped = rows.filter((row) => row.scope === "character" && row.scope_id === characterId);
+  const desired = desiredIds(scripts);
+  if (!replacementsExist(scoped, desired))
+    return { verified: false, staleIds: [] };
+  return {
+    verified: true,
+    staleIds: scoped.filter((row) => (row.metadata?._risu?.origin === "character" || row.metadata?._risu?.origin === "module") && !row.metadata?._risu?.module_id && !row.metadata?._risu?.imported_regex && !desired.has(row.script_id ?? "")).map((row) => row.id)
+  };
+}
+function planModuleRegexCleanup(rows, moduleId, scripts) {
+  const moduleRows = rows.filter((row) => row.metadata?._risu?.module_id === moduleId);
+  const desired = desiredIds(scripts);
+  if (!replacementsExist(moduleRows, desired))
+    return { verified: false, staleIds: [] };
+  return {
+    verified: true,
+    staleIds: moduleRows.filter((row) => !desired.has(row.script_id ?? "")).map((row) => row.id)
+  };
+}
+
 // src/ui/drawer.ts
 var ACCEPT_EXTENSIONS = [".charx", ".png", ".json", ".jpg", ".jpeg"];
 var UPLOAD_ENDPOINT = "/api/v1/spindle-uploads";
@@ -37212,87 +37241,64 @@ function mountCardsPanel(opts) {
   importBtn.addEventListener("click", () => {
     onImportClicked();
   });
+  async function listAllRegexRows(query) {
+    const rows = [];
+    let total = 0;
+    do {
+      const resp = await fetch(`/api/v1/regex-scripts?${query}&limit=1000&offset=${rows.length}`, { credentials: "include" });
+      if (!resp.ok)
+        throw new Error(`list HTTP ${resp.status}`);
+      const page = await resp.json();
+      const data = page.data ?? [];
+      rows.push(...data);
+      total = page.total ?? rows.length;
+      if (data.length === 0)
+        break;
+    } while (rows.length < total);
+    return rows;
+  }
   async function onInstallRegexScripts(msg) {
     log8.info(`drawer: install_regex_scripts characterId=${msg.characterId} name=${msg.characterName} count=${msg.scripts.length}`);
     const sampleDisplay = msg.scripts.find((s) => s.target === "display");
     if (sampleDisplay) {
       log8.info(`drawer: first display rule name=${sampleDisplay.name} ` + `scope=${sampleDisplay.scope} scope_id=${sampleDisplay.scope_id} ` + `sub_macros=${sampleDisplay.substitute_macros} find=${JSON.stringify(sampleDisplay.find_regex).slice(0, 100)} ` + `replace[0..400]=${JSON.stringify(sampleDisplay.replace_string).slice(0, 400)}`);
     }
-    const t0 = performance.now();
+    let replacementVerified = false;
+    let cleanupCompleted = !msg.cleanupStale;
     try {
-      const existingResp = await fetch(`/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=1000`, { credentials: "include" });
-      if (existingResp.ok) {
-        const body = await existingResp.json();
-        const existingIds = (body.data ?? []).filter((r) => r.scope === "character" && r.scope_id === msg.characterId && !r.metadata?._risu?.module_id && !r.metadata?._risu?.imported_regex).map((r) => r.id);
-        if (existingIds.length > 0) {
-          log8.info(`drawer: pre-clean removing ${existingIds.length} existing character-scoped rule(s) for char=${msg.characterId}`);
+      const rows = await listAllRegexRows(`scope=character&character_id=${encodeURIComponent(msg.characterId)}`);
+      const plan = planCardRegexCleanup(rows, msg.characterId, msg.scripts);
+      if (!plan.verified)
+        throw new Error("replacement rows could not be verified");
+      replacementVerified = true;
+      if (msg.cleanupStale) {
+        if (plan.staleIds.length > 0) {
           const delResp = await fetch("/api/v1/regex-scripts/bulk-delete", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ids: existingIds }),
+            body: JSON.stringify({ ids: plan.staleIds }),
             credentials: "include"
           });
-          if (!delResp.ok) {
-            log8.warn(`drawer: pre-clean bulk-delete HTTP ${delResp.status} — proceeding with install anyway (will accumulate)`);
-          } else {
-            const delBody = await delResp.json();
-            log8.info(`drawer: pre-clean deleted=${delBody?.count ?? "?"}`);
+          if (!delResp.ok)
+            throw new Error(`bulk-delete HTTP ${delResp.status}`);
+          const deleted = await delResp.json();
+          if (deleted.count !== plan.staleIds.length) {
+            throw new Error(`bulk-delete count ${deleted.count ?? 0}/${plan.staleIds.length}`);
           }
-        } else {
-          log8.info(`drawer: pre-clean no existing character-scoped rules for char=${msg.characterId}`);
+          log8.info(`drawer: removed ${plan.staleIds.length} verified stale card regex row(s) char=${msg.characterId}`);
         }
-      } else {
-        log8.warn(`drawer: pre-clean list fetch HTTP ${existingResp.status} — proceeding without pre-clean`);
+        cleanupCompleted = true;
       }
     } catch (err) {
-      log8.warn(`drawer: pre-clean threw — proceeding with install`, err);
+      log8.warn(`drawer: post-install verification or stale cleanup failed; existing rows were kept`, err);
     }
-    if (msg.scripts.length === 0) {
-      log8.info(`drawer: install_regex_scripts done (cleanup-only, nothing to install) for char=${msg.characterId}`);
-      return;
-    }
-    try {
-      const resp = await fetch("/api/v1/regex-scripts/import", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ scripts: msg.scripts }),
-        credentials: "include"
+    if (msg.requestId) {
+      sendToBackend({
+        type: "regex_scripts_installed",
+        requestId: msg.requestId,
+        ok: replacementVerified,
+        cleanupCompleted
       });
-      if (!resp.ok) {
-        let detail = "";
-        try {
-          detail = " — " + (await resp.text()).slice(0, 200);
-        } catch {}
-        throw new Error(`HTTP ${resp.status}${detail}`);
-      }
-      const body = await resp.json();
-      const imported = body?.imported ?? 0;
-      const skipped = body?.skipped ?? 0;
-      const errors2 = Array.isArray(body?.errors) ? body.errors : [];
-      log8.info(`drawer: regex import response imported=${imported} skipped=${skipped} errors=${errors2.length} ` + `httpStatus=${resp.status} elapsed=${Math.round(performance.now() - t0)}ms ` + `expected=${msg.scripts.length}`);
-      if (errors2.length > 0) {
-        for (const e of errors2)
-          log8.warn(`drawer: regex error — ${e}`);
-      }
-      if (imported !== msg.scripts.length) {
-        log8.warn(`drawer: regex install count mismatch — sent ${msg.scripts.length}, Lumi accepted ${imported}. ` + `Display-target rules may be incomplete for this character.`);
-      }
-      if (skipped > 0 || errors2.length > 0) {
-        const notices = [...state.notices];
-        notices.push(`${skipped} regex rule(s) were skipped by Lumiverse (${imported} installed).`);
-        for (const e of errors2.slice(0, 3))
-          notices.push(`  • ${e}`);
-        if (errors2.length > 3)
-          notices.push(`  • …and ${errors2.length - 3} more`);
-        state.notices = notices;
-        render();
-      }
-    } catch (err) {
-      log8.error(`drawer: regex import failed`, err);
-      const notices = [...state.notices];
-      notices.push(`Failed to install ${msg.scripts.length} regex rule(s): ${errMsg(err)}`);
-      state.notices = notices;
-      render();
     }
   }
   async function cleanupCharacterArtifacts(characterId, worldBookIds) {
@@ -37393,42 +37399,55 @@ function mountCardsPanel(opts) {
         log8.warn(`drawer.installModuleArtifacts: world_book pipeline threw`, err);
       }
     }
-    if (msg.regexScripts.length > 0) {
+    let regexInstallOk = msg.cleanupStale;
+    let cleanupCompleted = !msg.cleanupStale;
+    let liveRows = [];
+    if (regexInstallOk) {
       try {
-        const resp = await fetch("/api/v1/regex-scripts/import", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ scripts: msg.regexScripts }),
-          credentials: "include"
-        });
-        if (resp.ok) {
-          try {
-            const listQuery = msg.characterId === null ? "scope=global" : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
-            const listResp = await fetch(`/api/v1/regex-scripts?${listQuery}&limit=2000`, { credentials: "include" });
-            if (listResp.ok) {
-              const listBody = await listResp.json();
-              const recovered = recoverModuleRegexScriptIds(msg.moduleId, msg.regexScripts, listBody.data ?? []);
-              regexScriptIds.push(...recovered.ids);
-              if (!recovered.exact) {
-                log8.warn(`drawer.installModuleArtifacts: could not pair every imported row by source identity ` + `for module=${msg.moduleId}; stored cleanup ids only`);
-              }
+        const listQuery = msg.characterId === null ? "scope=global" : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
+        liveRows = await listAllRegexRows(listQuery);
+        if (msg.cleanupStale) {
+          const plan = planModuleRegexCleanup(liveRows, msg.moduleId, msg.regexScripts);
+          if (!plan.verified)
+            throw new Error("replacement rows could not be verified");
+          if (plan.staleIds.length > 0) {
+            const delResp = await fetch("/api/v1/regex-scripts/bulk-delete", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ids: plan.staleIds }),
+              credentials: "include"
+            });
+            if (!delResp.ok)
+              throw new Error(`bulk-delete HTTP ${delResp.status}`);
+            const deleted = await delResp.json();
+            if (deleted.count !== plan.staleIds.length) {
+              throw new Error(`bulk-delete count ${deleted.count ?? 0}/${plan.staleIds.length}`);
             }
-          } catch (err) {
-            log8.warn(`drawer.installModuleArtifacts: id-recovery list fetch threw`, err);
+            const stale = new Set(plan.staleIds);
+            liveRows = liveRows.filter((row) => !stale.has(row.id));
           }
-        } else {
-          log8.warn(`drawer.installModuleArtifacts: regex import HTTP ${resp.status} for module=${msg.moduleId}`);
+          cleanupCompleted = true;
+        }
+        const recovered = recoverModuleRegexScriptIds(msg.moduleId, msg.regexScripts, liveRows);
+        regexScriptIds.push(...recovered.ids);
+        if (!recovered.exact) {
+          regexInstallOk = false;
+          log8.warn(`drawer.installModuleArtifacts: could not verify one live row per source rule ` + `for module=${msg.moduleId}; previous tracking is preserved`);
         }
       } catch (err) {
-        log8.warn(`drawer.installModuleArtifacts: regex pipeline threw`, err);
+        regexInstallOk = false;
+        log8.warn(`drawer.installModuleArtifacts: verification/cleanup failed; existing rows were kept`, err);
       }
     }
     sendToBackend({
       type: "module_artifacts_installed",
+      ...msg.requestId ? { requestId: msg.requestId } : {},
       characterId: msg.characterId,
       moduleId: msg.moduleId,
       worldBookId,
-      regexScriptIds
+      regexScriptIds,
+      ok: regexInstallOk,
+      cleanupCompleted
     });
   }
   async function uninstallModuleArtifacts(msg) {
@@ -41690,29 +41709,12 @@ filename: ${m.filename}`;
     }
     setRegexStatus(`Installing ${msg.scripts.length} rule(s)…`, false);
     try {
-      const resp = await fetch("/api/v1/regex-scripts/import", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ scripts: msg.scripts, folder: msg.folder }),
-        credentials: "include"
-      });
-      if (!resp.ok) {
-        let detail = "";
-        try {
-          detail = " — " + (await resp.text()).slice(0, 200);
-        } catch {}
-        throw new Error(`HTTP ${resp.status}${detail}`);
-      }
-      const body = await resp.json();
-      const imported = body?.imported ?? 0;
-      const skipped = body?.skipped ?? 0;
       const dropSuffix = msg.dropped > 0 ? `, ${msg.dropped} runtime-only rule(s) dropped` : "";
-      const skipSuffix = skipped > 0 ? `, ${skipped} rejected by Lumiverse` : "";
       const where = msg.characterId ? `for "${cards.find((c) => c.character_id === msg.characterId)?.character_name ?? msg.characterId}"` : "global";
-      log8.info(`modules-panel: regex import imported=${imported} skipped=${skipped} ` + `errors=${(body?.errors ?? []).length} expected=${msg.scripts.length} target=${msg.characterId ?? "global"}`);
-      setRegexStatus(`Installed ${imported} ${where} rule(s) under folder "${msg.folder}"${dropSuffix}${skipSuffix}.`, imported === 0);
+      log8.info(`modules-panel: regex install verified=${msg.scripts.length} target=${msg.characterId ?? "global"}`);
+      setRegexStatus(`Installed ${msg.scripts.length} ${where} rule(s) under folder "${msg.folder}"${dropSuffix}.`, false);
     } catch (err) {
-      log8.error("modules-panel: regex import POST failed", err);
+      log8.error("modules-panel: regex install status failed", err);
       setRegexStatus(`Install failed: ${errMsg(err)}`, true);
     } finally {
       regexImportInFlight = false;

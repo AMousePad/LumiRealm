@@ -1,7 +1,7 @@
 import { translateFromCharxBundle } from '../core/pipeline/index.js';
 import { readCharx } from '../core/charx/reader.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
-import { CURRENT_CHARACTER_SCHEMA_VERSION } from '../state/translator-migrations.js';
+import { CURRENT_CHARACTER_SCHEMA_VERSION } from '../migrations/character.js';
 import type { LumirealmStoredSource } from './types.js';
 import {
   buildLumirealmData,

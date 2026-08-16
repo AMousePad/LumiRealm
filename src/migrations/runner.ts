@@ -1,24 +1,27 @@
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { LumirealmCharacterData } from '../payload/types.js';
-import type { ModuleEnvelope } from './modules-store.js';
+import type { ModuleEnvelope } from '../state/modules-store.js';
 import type { BackendToFrontend } from '../types/messages.js';
 import {
   migrateCharacterIfNeeded,
   type MigrationDeps,
   type MigrationResult,
-} from './translator-migrations.js';
+} from './character.js';
 import {
   migrateModuleIfNeeded,
   type ModuleMigrationDeps,
-} from './module-migrations.js';
-import { markLegacyReimportWarned } from './legacy-reimport-warnings.js';
+} from './module.js';
+import { markLegacyReimportWarned } from '../state/legacy-reimport-warnings.js';
 import { getRegexScriptsApi } from '../adapters/spindle-extras.js';
 import {
   projectModuleRegexEntries,
   recoverModuleRegexScriptIds,
-} from './module-artifact-project.js';
-import { mergeUserOverrides } from './lumirealm-character.js';
+} from '../state/module-artifact-project.js';
+import { mergeUserOverrides } from '../state/lumirealm-character.js';
+import { ensureRegexOwnership } from '../state/regex-ownership.js';
+import { awaitRegexInstall } from './install-coordinator.js';
+import type { ModuleArtifactInstallOptions } from '../state/world-book-ops.js';
 
 export interface MigrationsFactoryDeps {
   readonly extensionVersion: string;
@@ -31,7 +34,14 @@ export interface MigrationsFactoryDeps {
     characterId: string,
     env: ModuleEnvelope,
     userId: string | undefined,
+    options?: ModuleArtifactInstallOptions,
   ) => Promise<void>;
+  readonly dispatchGlobalModuleArtifactInstall: (
+    env: ModuleEnvelope,
+    userId: string | undefined,
+    options?: ModuleArtifactInstallOptions,
+  ) => Promise<{ worldBookId: string | null }>;
+  readonly isGlobalModule: (moduleId: string, userId: string) => Promise<boolean>;
   readonly writeLumirealm: (
     characterId: string,
     data: LumirealmCharacterData,
@@ -85,6 +95,21 @@ export interface MigrationsRunner {
     moduleId: string,
     userId: string,
   ) => Promise<{ ok: boolean }>;
+}
+
+function stableIdToken(raw: string): string {
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  if (normalized.length <= 32) return normalized;
+  let hash = 2166136261;
+  for (const ch of normalized) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${normalized.slice(0, 23)}_${(hash >>> 0).toString(16)}`;
+}
+
+function moduleOwnershipPrefix(moduleId: string, scopeId: string): string {
+  return `lr_module_${stableIdToken(moduleId)}_${stableIdToken(scopeId)}`;
 }
 
 // Walk Lumi's regex_scripts pages, run transform on each row's replace_string,
@@ -195,6 +220,8 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
     readModuleEnvelope,
     writeModuleEnvelope,
     dispatchModuleArtifactInstall,
+    dispatchGlobalModuleArtifactInstall,
+    isGlobalModule,
     writeLumirealm,
     invalidateActiveForCharacter,
     toastFor,
@@ -218,12 +245,29 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       extensionVersion,
       log,
       installCharacterRegexScripts: async (charId, charName, scripts) => {
-        send({
-          type: 'install_regex_scripts',
-          characterId: charId,
-          characterName: charName,
-          scripts: scripts.map((s) => ({ ...s, metadata: { ...(s.metadata ?? {}) } })),
-        }, userId);
+        const pending = scripts.map((script) => ({
+          ...script,
+          metadata: { ...(script.metadata ?? {}) },
+        }));
+        const ownership = await ensureRegexOwnership(spindle.regex_scripts, pending, userId);
+        if (!ownership.allOwned) {
+          throw new Error(
+            `regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}`,
+          );
+        }
+        const completion = await awaitRegexInstall(userId, (requestId) => {
+          send({
+            type: 'install_regex_scripts',
+            characterId: charId,
+            characterName: charName,
+            scripts: ownership.scripts.map((s) => ({ ...s, metadata: { ...(s.metadata ?? {}) } })),
+            cleanupStale: true,
+            requestId,
+          }, userId);
+        });
+        if (!completion.ok || !completion.cleanupCompleted) {
+          throw new Error('regex install or verified stale cleanup did not complete');
+        }
       },
       reinstallAttachedModules: async (charId) => {
         const ids = envelope.user_overrides.attached_module_ids ?? [];
@@ -382,6 +426,43 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
     const stored = env.translator_schema_version ?? 1;
     if (stored >= currentModuleSchemaVersion) return { ok: true };
     let archiveWbId: string | null = null;
+    const legacyAliases = async (
+      mid: string,
+      scope: 'character' | 'global',
+      scopeId: string | null,
+    ): Promise<Map<number, string>> => {
+      const aliases = new Map<number, string>();
+      const api = getRegexScriptsApi();
+      if (!api?.list) return aliases;
+      let offset = 0;
+      while (true) {
+        const page = await api.list({
+          userId,
+          scope,
+          ...(scopeId ? { scopeId } : {}),
+          limit: 200,
+          offset,
+        });
+        for (const raw of page.data) {
+          const row = raw as unknown as Record<string, unknown>;
+          const metadata = row['metadata'] as {
+            imported_script_id?: unknown;
+            _risu?: { module_id?: unknown; source_row_index?: unknown };
+          } | undefined;
+          if (metadata?._risu?.module_id !== mid) continue;
+          const sourceRow = metadata._risu.source_row_index;
+          const scriptId = typeof metadata.imported_script_id === 'string'
+            ? metadata.imported_script_id
+            : row['script_id'];
+          if (typeof sourceRow === 'number' && typeof scriptId === 'string') {
+            aliases.set(sourceRow, scriptId);
+          }
+        }
+        if (page.data.length < 200) break;
+        offset += page.data.length;
+      }
+      return aliases;
+    };
     const moduleDeps: ModuleMigrationDeps = {
       syncWorldBook: async (e) => {
         archiveWbId = await archiveModuleWorldBookBeforeMigration(e, userId);
@@ -460,14 +541,32 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
         const charIds = await charactersAttachedTo(mid, userId);
         let count = 0;
         for (const charId of charIds) {
-          try {
-            await refreshAttachedModule(charId, env, userId);
-            count++;
-          } catch (err) {
-            log.warn(
-              `runModuleMigration: refresh char=${charId} module=${mid} threw: ${errMsg(err)}`,
-            );
+          const aliases = await legacyAliases(mid, 'character', charId);
+          const completion = await awaitRegexInstall(userId, (requestId) =>
+            dispatchModuleArtifactInstall(charId, env, userId, {
+              requestId,
+              stableIdPrefix: moduleOwnershipPrefix(mid, charId),
+              legacyScriptIdsBySourceRow: aliases,
+            }),
+          );
+          if (!completion.ok || !completion.cleanupCompleted) {
+            throw new Error(`module regex install/cleanup failed for character ${charId}`);
           }
+          count++;
+        }
+        if (await isGlobalModule(mid, userId)) {
+          const aliases = await legacyAliases(mid, 'global', null);
+          const completion = await awaitRegexInstall(userId, (requestId) =>
+            dispatchGlobalModuleArtifactInstall(env, userId, {
+              requestId,
+              stableIdPrefix: moduleOwnershipPrefix(mid, 'global'),
+              legacyScriptIdsBySourceRow: aliases,
+            }).then(() => undefined),
+          );
+          if (!completion.ok || !completion.cleanupCompleted) {
+            throw new Error('global module regex install/cleanup failed');
+          }
+          count++;
         }
         return count;
       },

@@ -9902,7 +9902,7 @@ var init_scanner = __esm(() => {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.8.3",
+  version: "0.8.6",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -9940,7 +9940,7 @@ var spindle_default = {
   ],
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.1.2",
+  minimum_lumiverse_version: "1.1.5",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"

@@ -6,8 +6,8 @@ import type { ModalConfirmOptions } from '../adapters/spindle-extras.js';
 import {
   readMigrationState,
   writeMigrationState,
-} from '../state/migration-state.js';
-import { migrateRetiredMacroNames } from './retired-macro-migration.js';
+} from './state.js';
+import { migrateRetiredMacroNames } from './retired-macro.js';
 
 type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 
@@ -44,7 +44,8 @@ export interface MassMigrationsDeps {
     characterName: string,
     userId: string,
     envelope: LumirealmCharacterData,
-  ) => Promise<unknown>;
+    opts?: { silent?: boolean },
+  ) => Promise<'migrated' | 'noop' | 'needs_reimport' | 'failed'>;
   readonly emitOperationProgress: (
     userId: string,
     operationId: string,
@@ -302,10 +303,6 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
         await writeMigrationState(spindle.userStorage, userId, state);
       }
     }
-    if (state.last_swept_characters >= currentCharacterSchemaVersion) {
-      log.info(`mass-migration(characters): user=${userId} already swept to v${state.last_swept_characters}, skipping`);
-      return;
-    }
     const all = await listLumirealmCharacters(userId);
     const candidates: { id: string; name: string; data: LumirealmCharacterData }[] = [];
     for (const entry of all) {
@@ -342,7 +339,11 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
       }
       translatorMigrationChecked.add(c.id);
       try {
-        await runCharacterMigration(c.id, c.name, userId, c.data);
+        const result = await runCharacterMigration(c.id, c.name, userId, c.data, { silent: true });
+        if (result === 'failed') {
+          failed++;
+          translatorMigrationChecked.delete(c.id);
+        }
       } catch (err) {
         failed++;
         translatorMigrationChecked.delete(c.id);

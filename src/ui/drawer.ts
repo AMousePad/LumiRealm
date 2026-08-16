@@ -3,6 +3,11 @@ import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend, CardSummary, ImportProgress } from '../types/messages.js';
 import { errMsg } from '../util/coerce.js';
 import { recoverModuleRegexScriptIds } from '../state/module-artifact-project.js';
+import {
+  planCardRegexCleanup,
+  planModuleRegexCleanup,
+  type RegexCleanupRow,
+} from '../state/regex-cleanup.js';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
@@ -191,13 +196,31 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
 
   importBtn.addEventListener('click', () => { void onImportClicked(); });
 
-  // Regex-script install via cookie-auth REST (worker can't reach this route).
+  async function listAllRegexRows(query: string): Promise<RegexCleanupRow[]> {
+    const rows: RegexCleanupRow[] = [];
+    let total = 0;
+    do {
+      const resp = await fetch(
+        `/api/v1/regex-scripts?${query}&limit=1000&offset=${rows.length}`,
+        { credentials: 'include' },
+      );
+      if (!resp.ok) throw new Error(`list HTTP ${resp.status}`);
+      const page = (await resp.json()) as { data?: RegexCleanupRow[]; total?: number };
+      const data = page.data ?? [];
+      rows.push(...data);
+      total = page.total ?? rows.length;
+      if (data.length === 0) break;
+    } while (rows.length < total);
+    return rows;
+  }
+
+  // Verify backend-installed rows, then clean legacy rows via cookie-auth REST.
   async function onInstallRegexScripts(
     msg: Extract<BackendToFrontend, { type: 'install_regex_scripts' }>,
   ): Promise<void> {
     log.info(`drawer: install_regex_scripts characterId=${msg.characterId} name=${msg.characterName} count=${msg.scripts.length}`);
-    // Empty array is intentional. Pre-clean still runs to evict stale
-    // rules from older extension versions.
+    // Empty arrays are intentional: a verified empty replacement set removes
+    // stale card rows after the ownership phase succeeds.
     const sampleDisplay = msg.scripts.find((s) => s.target === 'display');
     if (sampleDisplay) {
       log.info(
@@ -207,111 +230,42 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
           `replace[0..400]=${JSON.stringify(sampleDisplay.replace_string).slice(0, 400)}`,
       );
     }
-    const t0 = performance.now();
-
-    // Pre-clean: Lumi has no FK cascade on character delete, so re-imports
-    // stack duplicate rules unless we evict the old ones first. Skip module-
-    // owned rows (those have their own attach/detach lifecycle).
+    let replacementVerified = false;
+    let cleanupCompleted = !msg.cleanupStale;
     try {
-      const existingResp = await fetch(
-        `/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(msg.characterId)}&limit=1000`,
-        { credentials: 'include' },
+      const rows = await listAllRegexRows(
+        `scope=character&character_id=${encodeURIComponent(msg.characterId)}`,
       );
-      if (existingResp.ok) {
-        const body = (await existingResp.json()) as {
-          data?: Array<{
-            id: string;
-            scope?: string;
-            scope_id?: string;
-            metadata?: { _risu?: { module_id?: string; imported_regex?: boolean } };
-          }>;
-        };
-        const existingIds = (body.data ?? [])
-          .filter((r) =>
-            r.scope === 'character'
-              && r.scope_id === msg.characterId
-              && !r.metadata?._risu?.module_id
-              // User-imported regex (Import → Regex) has its own lifecycle.
-              && !r.metadata?._risu?.imported_regex,
-          )
-          .map((r) => r.id);
-        if (existingIds.length > 0) {
-          log.info(`drawer: pre-clean removing ${existingIds.length} existing character-scoped rule(s) for char=${msg.characterId}`);
+      const plan = planCardRegexCleanup(rows, msg.characterId, msg.scripts);
+      if (!plan.verified) throw new Error('replacement rows could not be verified');
+      replacementVerified = true;
+      if (msg.cleanupStale) {
+        if (plan.staleIds.length > 0) {
           const delResp = await fetch('/api/v1/regex-scripts/bulk-delete', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ ids: existingIds }),
+            body: JSON.stringify({ ids: plan.staleIds }),
             credentials: 'include',
           });
-          if (!delResp.ok) {
-            log.warn(`drawer: pre-clean bulk-delete HTTP ${delResp.status} — proceeding with install anyway (will accumulate)`);
-          } else {
-            const delBody = (await delResp.json()) as { count?: number };
-            log.info(`drawer: pre-clean deleted=${delBody?.count ?? '?'}`);
+          if (!delResp.ok) throw new Error(`bulk-delete HTTP ${delResp.status}`);
+          const deleted = (await delResp.json()) as { count?: number };
+          if (deleted.count !== plan.staleIds.length) {
+            throw new Error(`bulk-delete count ${deleted.count ?? 0}/${plan.staleIds.length}`);
           }
-        } else {
-          log.info(`drawer: pre-clean no existing character-scoped rules for char=${msg.characterId}`);
+          log.info(`drawer: removed ${plan.staleIds.length} verified stale card regex row(s) char=${msg.characterId}`);
         }
-      } else {
-        log.warn(`drawer: pre-clean list fetch HTTP ${existingResp.status} — proceeding without pre-clean`);
+        cleanupCompleted = true;
       }
     } catch (err) {
-      log.warn(`drawer: pre-clean threw — proceeding with install`, err);
+      log.warn(`drawer: post-install verification or stale cleanup failed; existing rows were kept`, err);
     }
-
-    if (msg.scripts.length === 0) {
-      log.info(`drawer: install_regex_scripts done (cleanup-only, nothing to install) for char=${msg.characterId}`);
-      return;
-    }
-
-    try {
-      const resp = await fetch('/api/v1/regex-scripts/import', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scripts: msg.scripts }),
-        credentials: 'include',
+    if (msg.requestId) {
+      sendToBackend({
+        type: 'regex_scripts_installed',
+        requestId: msg.requestId,
+        ok: replacementVerified,
+        cleanupCompleted,
       });
-      if (!resp.ok) {
-        let detail = '';
-        try { detail = ' — ' + (await resp.text()).slice(0, 200); } catch { /* */ }
-        throw new Error(`HTTP ${resp.status}${detail}`);
-      }
-      const body = (await resp.json()) as {
-        imported?: number; skipped?: number; errors?: string[];
-      };
-      const imported = body?.imported ?? 0;
-      const skipped = body?.skipped ?? 0;
-      const errors = Array.isArray(body?.errors) ? body.errors : [];
-      log.info(
-        `drawer: regex import response imported=${imported} skipped=${skipped} errors=${errors.length} ` +
-          `httpStatus=${resp.status} elapsed=${Math.round(performance.now() - t0)}ms ` +
-          `expected=${msg.scripts.length}`,
-      );
-      if (errors.length > 0) {
-        for (const e of errors) log.warn(`drawer: regex error — ${e}`);
-      }
-      if (imported !== msg.scripts.length) {
-        log.warn(
-          `drawer: regex install count mismatch — sent ${msg.scripts.length}, Lumi accepted ${imported}. ` +
-            `Display-target rules may be incomplete for this character.`,
-        );
-      }
-      if (skipped > 0 || errors.length > 0) {
-        const notices = [...state.notices];
-        notices.push(
-          `${skipped} regex rule(s) were skipped by Lumiverse (${imported} installed).`,
-        );
-        for (const e of errors.slice(0, 3)) notices.push(`  • ${e}`);
-        if (errors.length > 3) notices.push(`  • …and ${errors.length - 3} more`);
-        state.notices = notices;
-        render();
-      }
-    } catch (err) {
-      log.error(`drawer: regex import failed`, err);
-      const notices = [...state.notices];
-      notices.push(`Failed to install ${msg.scripts.length} regex rule(s): ${errMsg(err)}`);
-      state.notices = notices;
-      render();
     }
   }
 
@@ -458,65 +412,65 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
       }
     }
 
-    if (msg.regexScripts.length > 0) {
+    let regexInstallOk = msg.cleanupStale;
+    let cleanupCompleted = !msg.cleanupStale;
+    let liveRows: RegexCleanupRow[] = [];
+    if (regexInstallOk) {
       try {
-        const resp = await fetch('/api/v1/regex-scripts/import', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ scripts: msg.regexScripts }),
-          credentials: 'include',
-        });
-        if (resp.ok) {
-          try {
-            const listQuery = msg.characterId === null
-              ? 'scope=global'
-              : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
-            const listResp = await fetch(
-              `/api/v1/regex-scripts?${listQuery}&limit=2000`,
-              { credentials: 'include' },
-            );
-            if (listResp.ok) {
-              const listBody = (await listResp.json()) as {
-                data?: Array<{
-                  id: string;
-                  metadata?: Record<string, unknown>;
-                }>;
-              };
-              const recovered = recoverModuleRegexScriptIds(
-                msg.moduleId,
-                msg.regexScripts,
-                listBody.data ?? [],
-              );
-              regexScriptIds.push(...recovered.ids);
-              if (!recovered.exact) {
-                // Keep every row reachable for detach. Runtime binding checks
-                // the row's source identity and fails closed if this fallback
-                // cannot prove a one-to-one match.
-                log.warn(
-                  `drawer.installModuleArtifacts: could not pair every imported row by source identity ` +
-                    `for module=${msg.moduleId}; stored cleanup ids only`,
-                );
-              }
+        const listQuery = msg.characterId === null
+          ? 'scope=global'
+          : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
+        liveRows = await listAllRegexRows(listQuery);
+
+        if (msg.cleanupStale) {
+          const plan = planModuleRegexCleanup(liveRows, msg.moduleId, msg.regexScripts);
+          if (!plan.verified) throw new Error('replacement rows could not be verified');
+          if (plan.staleIds.length > 0) {
+            const delResp = await fetch('/api/v1/regex-scripts/bulk-delete', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ ids: plan.staleIds }),
+              credentials: 'include',
+            });
+            if (!delResp.ok) throw new Error(`bulk-delete HTTP ${delResp.status}`);
+            const deleted = (await delResp.json()) as { count?: number };
+            if (deleted.count !== plan.staleIds.length) {
+              throw new Error(`bulk-delete count ${deleted.count ?? 0}/${plan.staleIds.length}`);
             }
-          } catch (err) {
-            log.warn(`drawer.installModuleArtifacts: id-recovery list fetch threw`, err);
+            const stale = new Set(plan.staleIds);
+            liveRows = liveRows.filter((row) => !stale.has(row.id));
           }
-        } else {
+          cleanupCompleted = true;
+        }
+
+        const recovered = recoverModuleRegexScriptIds(
+          msg.moduleId,
+          msg.regexScripts,
+          liveRows,
+        );
+        regexScriptIds.push(...recovered.ids);
+        if (!recovered.exact) {
+          regexInstallOk = false;
           log.warn(
-            `drawer.installModuleArtifacts: regex import HTTP ${resp.status} for module=${msg.moduleId}`,
+            `drawer.installModuleArtifacts: could not verify one live row per source rule ` +
+              `for module=${msg.moduleId}; previous tracking is preserved`,
           );
         }
       } catch (err) {
-        log.warn(`drawer.installModuleArtifacts: regex pipeline threw`, err);
+        regexInstallOk = false;
+        log.warn(`drawer.installModuleArtifacts: verification/cleanup failed; existing rows were kept`, err);
       }
     }
 
     sendToBackend({
       type: 'module_artifacts_installed',
+      ...(msg.requestId ? { requestId: msg.requestId } : {}),
       characterId: msg.characterId,
       moduleId: msg.moduleId,
       worldBookId,
       regexScriptIds,
+      ok: regexInstallOk,
+      cleanupCompleted,
     });
   }
 

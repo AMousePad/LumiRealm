@@ -340,6 +340,7 @@ export type FrontendToBackend =
   // carries new resource ids so backend can stash them on user_overrides for clean detach.
   | {
       type: 'module_artifacts_installed';
+      requestId?: string;
       /** `null` = global scope. */
       characterId: string | null;
       moduleId: string;
@@ -347,6 +348,16 @@ export type FrontendToBackend =
       worldBookId: string | null;
       /** May be shorter than requested if some scripts were rejected. */
       regexScriptIds: readonly string[];
+      /** False preserves the previously tracked artifacts for a safe retry. */
+      ok: boolean;
+      /** True only when requested stale-row cleanup was verified complete. */
+      cleanupCompleted: boolean;
+    }
+  | {
+      type: 'regex_scripts_installed';
+      requestId: string;
+      ok: boolean;
+      cleanupCompleted: boolean;
     }
   | {
       type: 'module_artifacts_uninstalled';
@@ -427,6 +438,9 @@ export type BackendToFrontend =
       characterId: string;
       characterName: string;
       scripts: readonly PendingRegexScriptMsg[];
+      /** Delete superseded card rows only after every replacement is owned. */
+      cleanupStale: boolean;
+      requestId?: string;
     }
   // Result of a regex import. FE POSTs `scripts` to
   // `/api/v1/regex-scripts/import` (only FE has the cookie) and reports the count.
@@ -642,6 +656,9 @@ export type BackendToFrontend =
       worldBookName: string;
       lorebookEntries: readonly ModuleLorebookEntry[];
       regexScripts: readonly PendingRegexScriptMsg[];
+      /** Delete superseded module rows only after every replacement is owned. */
+      cleanupStale: boolean;
+      requestId?: string;
     }
   | {
       type: 'uninstall_module_artifacts';

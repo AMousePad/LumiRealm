@@ -234,26 +234,8 @@ export function createCharacterModuleAttach(deps: CharacterModuleAttachDeps): Ch
   ): Promise<void> {
     const fetched = await readLumirealm(characterId, userId);
     if (!fetched || !fetched.data) return;
-    const regexIds = fetched.data.user_overrides.attached_module_regex_script_ids?.[env.id] ?? [];
-    await updateLumirealm(characterId, userId, (cur) => {
-      const rx = { ...(cur.user_overrides.attached_module_regex_script_ids ?? {}) };
-      delete rx[env.id];
-      return {
-        ...cur,
-        user_overrides: mergeUserOverrides(cur.user_overrides, {
-          attached_module_regex_script_ids: Object.keys(rx).length > 0 ? rx : null,
-        }),
-      };
-    });
-    if (regexIds.length > 0) {
-      send({
-        type: 'uninstall_module_artifacts',
-        characterId,
-        moduleId: env.id,
-        worldBookId: null,
-        regexScriptIds: regexIds,
-      }, userId);
-    }
+    // Install and verify the replacement first. The frontend removes stale
+    // rows only after every projected row is present, then reports the new ids.
     await dispatchModuleArtifactInstall(characterId, env, userId);
     invalidateActiveForCharacter(characterId, userId);
     await refreshRisuAssetMap(characterId, userId);
