@@ -1,12 +1,6 @@
-import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
+import type { SpindleFrontendContext, SpindleModalHandle } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from '../types/messages.js';
 import type { FrontendLog } from './drawer.js';
-
-interface ShowModalHandle {
-  readonly root: HTMLElement;
-  dismiss(): void;
-  onDismiss(handler: () => void): () => void;
-}
 
 export interface PermissionsModalHandle {
   handleBackendMessage(msg: BackendToFrontend): void;
@@ -20,7 +14,7 @@ export function setupPermissionsModal(opts: {
 }): PermissionsModalHandle {
   const { ctx, log } = opts;
   void opts.sendToBackend;
-  let current: ShowModalHandle | null = null;
+  let current: SpindleModalHandle | null = null;
   let lastShownKey: string | null = null;
 
   function show(
@@ -42,11 +36,9 @@ export function setupPermissionsModal(opts: {
       current = null;
     }
 
-    let modal: ShowModalHandle;
+    let modal: SpindleModalHandle;
     try {
-      modal = (ctx.ui as unknown as {
-        showModal: (o: { title: string; width?: number }) => ShowModalHandle;
-      }).showModal({ title: 'LumiRealm: missing permissions', width: 520 });
+      modal = ctx.ui.showModal({ title: 'LumiRealm: missing permissions', width: 520 });
     } catch (err) {
       log.error('permissions-modal: showModal failed', err);
       return;

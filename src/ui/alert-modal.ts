@@ -1,16 +1,10 @@
-import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
+import type { SpindleFrontendContext, SpindleModalHandle } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from '../types/messages.js';
 import type { FrontendLog } from './drawer.js';
 
 // Owned alert modal. Backend sends `request_alert`; we mount via
 // ctx.ui.showModal with our own DOM (just message + OK button) and
 // reply with `alert_dismissed` once the user closes it.
-
-interface ShowModalHandle {
-  readonly root: HTMLElement;
-  dismiss(): void;
-  onDismiss(handler: () => void): () => void;
-}
 
 export interface AlertModalHandle {
   handleBackendMessage(msg: BackendToFrontend): void;
@@ -23,14 +17,12 @@ export function setupAlertModal(opts: {
   log: FrontendLog;
 }): AlertModalHandle {
   const { ctx, sendToBackend, log } = opts;
-  const open = new Map<string, ShowModalHandle>();
+  const open = new Map<string, SpindleModalHandle>();
 
   function show(msg: Extract<BackendToFrontend, { type: 'request_alert' }>): void {
-    let modal: ShowModalHandle;
+    let modal: SpindleModalHandle;
     try {
-      modal = (ctx.ui as unknown as {
-        showModal: (o: { title: string; width?: number }) => ShowModalHandle;
-      }).showModal({ title: '', width: 380 });
+      modal = ctx.ui.showModal({ title: '', width: 380 });
     } catch (err) {
       log.error('alert-modal: showModal failed', err);
       sendToBackend({ type: 'alert_dismissed', requestId: msg.requestId });

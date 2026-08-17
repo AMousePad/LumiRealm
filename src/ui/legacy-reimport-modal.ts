@@ -1,15 +1,9 @@
-import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
+import type { SpindleFrontendContext, SpindleModalHandle } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from '../types/messages.js';
 import type { FrontendLog } from './drawer.js';
 
 // One-time 0.2.4 -> 0.3 transition notice. Cards imported before raw-source
 // storage shipped don't auto-migrate, so the user needs to re-import once.
-
-interface ShowModalHandle {
-  readonly root: HTMLElement;
-  dismiss(): void;
-  onDismiss(handler: () => void): () => void;
-}
 
 export interface LegacyReimportModalHandle {
   handleBackendMessage(msg: BackendToFrontend): void;
@@ -23,7 +17,7 @@ export function setupLegacyReimportModal(opts: {
 }): LegacyReimportModalHandle {
   const { ctx, log } = opts;
   void opts.sendToBackend;
-  const open = new Map<string, ShowModalHandle>();
+  const open = new Map<string, SpindleModalHandle>();
   const shownThisSession = new Set<string>();
 
   function show(
@@ -32,11 +26,9 @@ export function setupLegacyReimportModal(opts: {
     if (shownThisSession.has(msg.characterId)) return;
     shownThisSession.add(msg.characterId);
 
-    let modal: ShowModalHandle;
+    let modal: SpindleModalHandle;
     try {
-      modal = (ctx.ui as unknown as {
-        showModal: (o: { title: string; width?: number }) => ShowModalHandle;
-      }).showModal({ title: 'Legacy Card Detected', width: 460 });
+      modal = ctx.ui.showModal({ title: 'Legacy Card Detected', width: 460 });
     } catch (err) {
       log.error('legacy-reimport-modal: showModal failed', err);
       return;

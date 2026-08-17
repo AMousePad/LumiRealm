@@ -1,12 +1,6 @@
-import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
+import type { SpindleFrontendContext, SpindleModalHandle } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from '../types/messages.js';
 import type { FrontendLog } from './drawer.js';
-
-interface ShowModalHandle {
-  readonly root: HTMLElement;
-  dismiss(): void;
-  onDismiss(handler: () => void): () => void;
-}
 
 export interface HostVersionModalHandle {
   handleBackendMessage(msg: BackendToFrontend): void;
@@ -20,7 +14,7 @@ export function setupHostVersionModal(opts: {
 }): HostVersionModalHandle {
   const { ctx, log } = opts;
   void opts.sendToBackend;
-  let current: ShowModalHandle | null = null;
+  let current: SpindleModalHandle | null = null;
   let shownThisSession = false;
 
   function show(
@@ -29,11 +23,9 @@ export function setupHostVersionModal(opts: {
     if (shownThisSession) return;
     shownThisSession = true;
 
-    let modal: ShowModalHandle;
+    let modal: SpindleModalHandle;
     try {
-      modal = (ctx.ui as unknown as {
-        showModal: (o: { title: string; width?: number }) => ShowModalHandle;
-      }).showModal({ title: 'Update Lumiverse', width: 460 });
+      modal = ctx.ui.showModal({ title: 'Update Lumiverse', width: 460 });
     } catch (err) {
       log.error('host-version-modal: showModal failed', err);
       return;
