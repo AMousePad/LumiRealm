@@ -3,9 +3,8 @@ import type {
   CardSummary,
 } from '../types/messages.js';
 import type {
-  ModalConfirmApi,
-  ModalConfirmOptions,
-} from '../adapters/spindle-extras.js';
+  SpindleAPI,
+} from 'lumiverse-spindle-types';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import { clearActiveAssetIndexes } from '../interpreter/asset-cache.js';
 import { clearActiveCharacterImage } from '../interpreter/image-cache.js';
@@ -80,24 +79,24 @@ export function createConsentApi(deps: ConsentApiDeps): ConsentApi {
 }
 
 export interface ModalConfirmDeps {
-  readonly getModalConfirmApi: () => ModalConfirmApi | null;
+  readonly confirmModal: SpindleAPI['modal']['confirm'];
   readonly log: { readonly warn: (m: string) => void };
   readonly errMsg: (e: unknown) => string;
 }
+
+export type ModalConfirmOptions = Parameters<SpindleAPI['modal']['confirm']>[0];
 
 // Lumi caps each extension at 2 concurrent modals, two boot-time prompts can race (orphan review, lorebook archive). Serialize per-user.
 export function makeQueueModalConfirm(deps: ModalConfirmDeps): (
   userId: string,
   options: Omit<ModalConfirmOptions, 'userId'>,
 ) => Promise<{ confirmed: boolean } | null> {
-  const { getModalConfirmApi, log, errMsg } = deps;
+  const { confirmModal, log, errMsg } = deps;
   const modalChainByUser = new Map<string, Promise<unknown>>();
 
   return (userId, options) => {
-    const modalApi = getModalConfirmApi();
-    if (!modalApi) return Promise.resolve(null);
     const run = (): Promise<{ confirmed: boolean } | null> =>
-      modalApi.confirm({ ...options, userId }).catch((err) => {
+      confirmModal({ ...options, userId }).catch((err) => {
         log.warn(`queueModalConfirm: modal.confirm threw: ${errMsg(err)}`);
         return null;
       });
