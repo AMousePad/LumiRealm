@@ -35961,8 +35961,8 @@ function createImportHandlers(deps) {
       if (ctx.userId)
         getCardsInFlight.add(ctx.userId);
       try {
-        const hostVersionCheck = deps.hostVersionCheckRef.current;
-        if (hostVersionCheck?.needsUpdate) {
+        const hostVersionCheck = deps.hostVersionCheck;
+        if (hostVersionCheck.needsUpdate) {
           deps.notifyHostVersionOutdated({
             type: "notify_host_version_outdated",
             hostVersion: hostVersionCheck.hostVersion,
@@ -44527,15 +44527,18 @@ function compareVersions(a, b) {
   }
   return 0;
 }
-function checkHostVersion(hostVersion, minimum) {
-  if (!hostVersion) {
-    return {
-      needsUpdate: false,
-      hostVersion: null,
-      minimum,
-      message: `Lumiverse version could not be determined, skipping minimum-version check (required minimum ${minimum})`
-    };
+function readRuntimeVersionInfo(source) {
+  const minimumLumiverseVersion = source.manifest.minimum_lumiverse_version?.trim();
+  if (!minimumLumiverseVersion) {
+    throw new Error("LumiRealm requires a non-empty spindle.manifest.minimum_lumiverse_version");
   }
+  return {
+    extensionVersion: source.manifest.version,
+    minimumLumiverseVersion,
+    hostVersion: source.host.lumiverseVersion
+  };
+}
+function checkHostVersion(hostVersion, minimum) {
   const cmp = compareVersions(hostVersion, minimum);
   if (cmp >= 0) {
     return {
@@ -45511,8 +45514,9 @@ function registerLumiagentPhoneline(spindle2, moduleStorage, log8 = () => {}, on
 }
 
 // src/backend.ts
-var EXTENSION_VERSION = "0.1.0";
-var MINIMUM_LUMIVERSE_VERSION = "1.0.0";
+var runtimeVersionInfo = readRuntimeVersionInfo(spindle);
+var EXTENSION_VERSION = runtimeVersionInfo.extensionVersion;
+var MINIMUM_LUMIVERSE_VERSION = runtimeVersionInfo.minimumLumiverseVersion;
 function logUid() {
   return currentUserId() ?? null;
 }
@@ -45556,26 +45560,11 @@ var log8 = {
   }
 };
 log8.info(`backend boot: version=${EXTENSION_VERSION} features=[lorebook-cache,worldbook-events]`);
-var hostVersionCheck = null;
-(async () => {
-  let backend = null;
-  let frontend = null;
-  try {
-    backend = await spindle.version.getBackend();
-  } catch (err) {
-    log8.warn(`spindle.version.getBackend() failed: ${errMsg(err)}`);
-  }
-  try {
-    frontend = await spindle.version.getFrontend();
-  } catch (err) {
-    log8.warn(`spindle.version.getFrontend() failed: ${errMsg(err)}`);
-  }
-  hostVersionCheck = checkHostVersion(backend, MINIMUM_LUMIVERSE_VERSION);
-  const tag = hostVersionCheck.needsUpdate ? "WARN" : "ok";
-  log8.info(`host-version: lumiverse backend=${backend ?? "unknown"} frontend=${frontend ?? "unknown"} min=${MINIMUM_LUMIVERSE_VERSION} ${tag}`);
-  if (hostVersionCheck.needsUpdate)
-    log8.warn(hostVersionCheck.message);
-})();
+var hostVersionCheck = checkHostVersion(runtimeVersionInfo.hostVersion, MINIMUM_LUMIVERSE_VERSION);
+var hostVersionTag = hostVersionCheck.needsUpdate ? "WARN" : "ok";
+log8.info(`host-version: lumiverse=${runtimeVersionInfo.hostVersion} min=${MINIMUM_LUMIVERSE_VERSION} ${hostVersionTag}`);
+if (hostVersionCheck.needsUpdate)
+  log8.warn(hostVersionCheck.message);
 initPermissions(log8);
 subscribeToMissingChanges((missing) => {
   const purposes = {};
@@ -46790,9 +46779,7 @@ var importHandlers = createImportHandlers({
   lastSentBgHtmlByChat,
   activeCardByChat,
   lastActiveChatByUser,
-  hostVersionCheckRef: { get current() {
-    return hostVersionCheck;
-  } },
+  hostVersionCheck,
   getMissingPermissions,
   permissionPurpose: PERMISSION_PURPOSE,
   listCards: async (uid) => listCards(uid),

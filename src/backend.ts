@@ -179,7 +179,7 @@ import {
 import { resolveAlertDismissal } from './interpreter/alert-bridge.js';
 import { resolvePickResolution } from './interpreter/pick-bridge.js';
 import { userIdAls, currentUserId } from './interpreter/runtime/als.js';
-import { checkHostVersion, type HostVersionCheckResult } from './util/version-check.js';
+import { checkHostVersion, readRuntimeVersionInfo } from './util/version-check.js';
 import { decodeModuleCharx } from './core/charx/index.js';
 import { decodeRisum } from './core/risum/index.js';
 import { openRisumUpload, type UploadChunk } from './core/risum/upload-reader.js';
@@ -199,11 +199,9 @@ import {
 } from './state/modules-store.js';
 import { registerLumiagentPhoneline } from './lumiagent-phoneline.js';
 
-const EXTENSION_VERSION = '0.1.0';
-
-// Mirrored from `spindle.json minimum_lumiverse_version`. Lumi may not enforce
-// the manifest field at load time, so we re-check at runtime and nag the user.
-const MINIMUM_LUMIVERSE_VERSION = '1.0.0';
+const runtimeVersionInfo = readRuntimeVersionInfo(spindle);
+const EXTENSION_VERSION = runtimeVersionInfo.extensionVersion;
+const MINIMUM_LUMIVERSE_VERSION = runtimeVersionInfo.minimumLumiverseVersion;
 
 // ALS-backed user attribution: each event handler runs its body inside a
 // `userIdAls.run(userId, ...)` frame, so `currentUserId()` returns the firing
@@ -261,29 +259,12 @@ const log = {
 
 log.info(`backend boot: version=${EXTENSION_VERSION} features=[lorebook-cache,worldbook-events]`);
 
-// Lumi may not enforce manifest minimum_lumiverse_version, so we re-check at
-// runtime and nag via get_cards handshake (mirrors Hone's pattern).
-let hostVersionCheck: HostVersionCheckResult | null = null;
-void (async () => {
-  let backend: string | null = null;
-  let frontend: string | null = null;
-  try {
-    backend = await spindle.version.getBackend();
-  } catch (err) {
-    log.warn(`spindle.version.getBackend() failed: ${errMsg(err)}`);
-  }
-  try {
-    frontend = await spindle.version.getFrontend();
-  } catch (err) {
-    log.warn(`spindle.version.getFrontend() failed: ${errMsg(err)}`);
-  }
-  hostVersionCheck = checkHostVersion(backend, MINIMUM_LUMIVERSE_VERSION);
-  const tag = hostVersionCheck.needsUpdate ? 'WARN' : 'ok';
-  log.info(
-    `host-version: lumiverse backend=${backend ?? 'unknown'} frontend=${frontend ?? 'unknown'} min=${MINIMUM_LUMIVERSE_VERSION} ${tag}`,
-  );
-  if (hostVersionCheck.needsUpdate) log.warn(hostVersionCheck.message);
-})();
+const hostVersionCheck = checkHostVersion(runtimeVersionInfo.hostVersion, MINIMUM_LUMIVERSE_VERSION);
+const hostVersionTag = hostVersionCheck.needsUpdate ? 'WARN' : 'ok';
+log.info(
+  `host-version: lumiverse=${runtimeVersionInfo.hostVersion} min=${MINIMUM_LUMIVERSE_VERSION} ${hostVersionTag}`,
+);
+if (hostVersionCheck.needsUpdate) log.warn(hostVersionCheck.message);
 
 void initPermissions(log);
 
@@ -1762,7 +1743,7 @@ const importHandlers = createImportHandlers({
   lastSentBgHtmlByChat,
   activeCardByChat,
   lastActiveChatByUser,
-  hostVersionCheckRef: { get current() { return hostVersionCheck; } } as { current: HostVersionCheckResult | null },
+  hostVersionCheck,
   getMissingPermissions,
   permissionPurpose: PERMISSION_PURPOSE,
   listCards: async (uid) => listCards(uid),

@@ -22,23 +22,39 @@ export function compareVersions(a: string, b: string): number {
 
 export interface HostVersionCheckResult {
   readonly needsUpdate: boolean;
-  readonly hostVersion: string | null;
+  readonly hostVersion: string;
   readonly minimum: string;
   readonly message: string;
 }
 
+export interface RuntimeVersionInfo {
+  readonly extensionVersion: string;
+  readonly minimumLumiverseVersion: string;
+  readonly hostVersion: string;
+}
+
+export function readRuntimeVersionInfo(source: {
+  readonly manifest: {
+    readonly version: string;
+    readonly minimum_lumiverse_version?: string;
+  };
+  readonly host: { readonly lumiverseVersion: string };
+}): RuntimeVersionInfo {
+  const minimumLumiverseVersion = source.manifest.minimum_lumiverse_version?.trim();
+  if (!minimumLumiverseVersion) {
+    throw new Error('LumiRealm requires a non-empty spindle.manifest.minimum_lumiverse_version');
+  }
+  return {
+    extensionVersion: source.manifest.version,
+    minimumLumiverseVersion,
+    hostVersion: source.host.lumiverseVersion,
+  };
+}
+
 export function checkHostVersion(
-  hostVersion: string | null,
+  hostVersion: string,
   minimum: string,
 ): HostVersionCheckResult {
-  if (!hostVersion) {
-    return {
-      needsUpdate: false,
-      hostVersion: null,
-      minimum,
-      message: `Lumiverse version could not be determined, skipping minimum-version check (required minimum ${minimum})`,
-    };
-  }
   const cmp = compareVersions(hostVersion, minimum);
   if (cmp >= 0) {
     return {
