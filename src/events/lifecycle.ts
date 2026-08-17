@@ -81,8 +81,6 @@ export interface LifecycleEventHandlerDeps {
     activeCharacterId: string | null,
     userId: string | undefined,
   ) => void;
-  /** Best-effort call to Lumi's ctx.chat.setStyleMode. Feature-detected,
-   *  no-op on hosts that predate the API. */
   readonly setChatStyleMode: (
     chatId: string,
     mode: 'bounded' | 'extension-relaxed',

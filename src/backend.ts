@@ -1213,9 +1213,7 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   send,
   sendSetActiveChat,
   setChatStyleMode: (chatId, mode, userId) => {
-    const setter = (spindle.chat as { setStyleMode?: (chatId: string, mode: 'bounded' | 'extension-relaxed', userId?: string) => Promise<void> }).setStyleMode;
-    if (typeof setter !== 'function') return;
-    setter.call(spindle.chat, chatId, mode, userId).catch((err: unknown) => {
+    spindle.chat.setStyleMode(chatId, mode, userId).catch((err: unknown) => {
       log.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
     });
   },
