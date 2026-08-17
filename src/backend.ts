@@ -1175,7 +1175,7 @@ const messageVarPass = createMessageVarPass({
   errMsg,
 });
 
-// SETTINGS_UPDATED activeChatId fires on chat navigation. Warms the active-card cache and renders bg-html.
+// CHAT_SWITCHED warms the active-card cache and renders bg-html.
 const lifecycleHandlers = createLifecycleEventHandlers({
   captureUserId,
   extractIds,
@@ -1237,6 +1237,7 @@ const lifecycleHandlers = createLifecycleEventHandlers({
 });
 
 spindle.on('SETTINGS_UPDATED', userScoped(lifecycleHandlers.SETTINGS_UPDATED));
+spindle.on('CHAT_SWITCHED', userScoped(lifecycleHandlers.CHAT_SWITCHED));
 spindle.on('PERSONA_CHANGED', userScoped(lifecycleHandlers.PERSONA_CHANGED));
 spindle.on('CHAT_CHANGED', userScoped(lifecycleHandlers.CHAT_CHANGED));
 spindle.on('MESSAGE_SENT', userScoped(lifecycleHandlers.MESSAGE_SENT));
