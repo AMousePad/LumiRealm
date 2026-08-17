@@ -33504,7 +33504,6 @@ function createModuleUploader(deps) {
       assetCount: decoded.assets.length,
       assets: decoded.assets,
       ...decoded.icon ? { icon: decoded.icon } : {},
-      concurrentReads: true,
       readAsset: async (index) => decoded.assets[index]
     }, fileName, userId, t0);
   }
@@ -44474,7 +44473,6 @@ async function openRisumUpload(readChunk) {
     size: cursor.size,
     module: module2,
     assetCount: manifest.length,
-    concurrentReads: false,
     async readAsset(index) {
       if (!Number.isInteger(index) || index < nextAssetIndex) {
         throw new Error(`risum assets must be read in order (requested ${index}, next ${nextAssetIndex})`);

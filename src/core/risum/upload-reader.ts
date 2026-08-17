@@ -22,7 +22,6 @@ export interface RisumUploadSource {
   readonly size: number;
   readonly module: unknown;
   readonly assetCount: number;
-  readonly concurrentReads: false;
   readAsset(index: number): Promise<Uint8Array | undefined>;
   finish(): Promise<number>;
 }
@@ -199,7 +198,6 @@ export async function openRisumUpload(readChunk: ReadChunk): Promise<RisumUpload
     size: cursor.size,
     module,
     assetCount: manifest.length,
-    concurrentReads: false,
     async readAsset(index) {
       if (!Number.isInteger(index) || index < nextAssetIndex) {
         throw new Error(`risum assets must be read in order (requested ${index}, next ${nextAssetIndex})`);

@@ -19,7 +19,6 @@ export interface ModuleUploadSource {
   readonly assetCount: number;
   readonly assets?: readonly Uint8Array[];
   readonly icon?: DecodedRisum['icon'];
-  readonly concurrentReads?: boolean;
   readAsset(index: number): Promise<Uint8Array | undefined>;
   finish?(): Promise<number>;
 }
@@ -120,7 +119,6 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
       assetCount: decoded.assets.length,
       assets: decoded.assets,
       ...(decoded.icon ? { icon: decoded.icon } : {}),
-      concurrentReads: true,
       readAsset: async (index) => decoded.assets[index],
     }, fileName, userId, t0);
   }
