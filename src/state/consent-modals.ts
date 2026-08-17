@@ -86,7 +86,6 @@ export interface ModalConfirmDeps {
 
 export type ModalConfirmOptions = Parameters<SpindleAPI['modal']['confirm']>[0];
 
-// Lumi caps each extension at 2 concurrent modals, two boot-time prompts can race (orphan review, lorebook archive). Serialize per-user.
 export function makeQueueModalConfirm(deps: ModalConfirmDeps): (
   userId: string,
   options: Omit<ModalConfirmOptions, 'userId'>,

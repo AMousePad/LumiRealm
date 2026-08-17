@@ -3,7 +3,6 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 import type { ModuleEnvelope } from './modules-store.js';
 import type { BackendToFrontend } from '../types/messages.js';
 import {
-  hasUserEditedAnyEntry,
   mapLoreBook,
 } from '../core/mappers/lorebook.js';
 import { loreBookSchema, type LoreBook } from '../core/schemas/lorebook.js';
@@ -55,16 +54,6 @@ export interface WorldBookOpsDeps {
 }
 
 export interface WorldBookOps {
-  readonly archiveWorldBookIfEdited: (
-    sourceWbId: string,
-    archiveName: string,
-    userId: string,
-    context: string,
-  ) => Promise<string | null>;
-  readonly archiveModuleWorldBookBeforeMigration: (
-    env: ModuleEnvelope,
-    userId: string,
-  ) => Promise<string | null>;
   readonly syncModuleWorldBook: (
     env: ModuleEnvelope,
     userId: string,
@@ -104,63 +93,6 @@ export interface WorldBookOps {
 
 export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
   const { charactersAttachedTo, send, log, errMsg } = deps;
-
-  async function archiveWorldBookIfEdited(
-    sourceWbId: string,
-    archiveName: string,
-    userId: string,
-    context: string,
-  ): Promise<string | null> {
-    const allEntries: unknown[] = [];
-    let offset = 0;
-    while (true) {
-      const page = await spindle.world_books.entries.list(sourceWbId, { limit: 200, offset, userId });
-      if (page.data.length === 0) break;
-      allEntries.push(...page.data);
-      if (page.data.length < 200) break;
-      offset += 200;
-    }
-    if (allEntries.length === 0) return null;
-    if (!hasUserEditedAnyEntry(allEntries)) {
-      log.info(`archive(${context}): skip,no user edits detected across ${allEntries.length} entries`);
-      return null;
-    }
-    const archive = await spindle.world_books.create({ name: archiveName }, userId);
-    let copied = 0;
-    for (const e of allEntries) {
-      const { id: _id, world_book_id: _wbId, ...rest } = e as Record<string, unknown>;
-      void _id;
-      void _wbId;
-      try {
-        await spindle.world_books.entries.create(archive.id, rest as never, userId);
-        copied++;
-      } catch (err) {
-        log.warn(`archive(${context}): copy entry failed: ${errMsg(err)}`);
-      }
-    }
-    log.info(
-      `archive(${context}): archived=${copied}/${allEntries.length} ` +
-        `wb=${archive.id} name="${archive.name}"`,
-    );
-    return archive.id;
-  }
-
-  async function archiveModuleWorldBookBeforeMigration(
-    env: ModuleEnvelope,
-    userId: string,
-  ): Promise<string | null> {
-    const wbId = env.installed_world_book_id;
-    if (!wbId) return null;
-    const m = env.module as { name?: unknown };
-    const moduleName = typeof m.name === 'string' && m.name.length > 0 ? m.name : env.id;
-    const stamp = new Date().toISOString().slice(0, 10);
-    return archiveWorldBookIfEdited(
-      wbId,
-      `[LumiRealm Backup ${stamp}] Module: ${moduleName}`,
-      userId,
-      `module=${env.id}`,
-    );
-  }
 
   async function deleteModuleWorldBookEverywhere(
     moduleId: string,
@@ -418,8 +350,6 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
   }
 
   return {
-    archiveWorldBookIfEdited,
-    archiveModuleWorldBookBeforeMigration,
     syncModuleWorldBook,
     deleteModuleWorldBookEverywhere,
     addWorldBookToCharacter,

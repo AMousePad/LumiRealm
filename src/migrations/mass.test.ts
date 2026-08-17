@@ -43,7 +43,6 @@ function makeRunner(
       return result;
     },
     emitOperationProgress: () => {},
-    queueModalConfirm: async () => null,
     toastFor: () => {},
     log: { info: () => {}, warn: () => {} },
     errMsg: String,

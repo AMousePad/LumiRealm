@@ -154,7 +154,6 @@ import { createModulePushes } from './state/module-pushes.js';
 import { createOrphanDetectBuilders } from './state/orphan-detect-builders.js';
 import {
   createConsentApi,
-  makeQueueModalConfirm,
   makeDeleteCardByChar,
 } from './state/consent-modals.js';
 import { normalizeSettingsPatch } from './state/settings-store.js';
@@ -432,12 +431,6 @@ function journalStorage(): JournalStorage {
 const consentApi = createConsentApi({ send, log });
 const requestConsent = consentApi.requestConsent;
 const pendingConsents = consentApi.pendingConsents;
-
-const queueModalConfirm = makeQueueModalConfirm({
-  confirmModal: (options) => spindle.modal.confirm(options),
-  log,
-  errMsg,
-});
 
 const deleteCardByChar = makeDeleteCardByChar({
   clearLumirealm: (charId, userId) => clearLumirealm(charactersApi(), charId, userId),
@@ -1370,7 +1363,6 @@ const worldBookOps = createWorldBookOps({
   log,
   errMsg,
 });
-void worldBookOps.archiveWorldBookIfEdited;
 void worldBookOps.deleteModuleWorldBookEverywhere;
 
 const assetTriggerMutate = createAssetTriggerMutate({
@@ -1507,7 +1499,6 @@ const massMigrations = createMassMigrationsRunner({
   runModuleMigration,
   runCharacterMigration,
   emitOperationProgress,
-  queueModalConfirm,
   toastFor,
   log,
   errMsg,

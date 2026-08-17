@@ -20056,20 +20056,6 @@ function computeEntrySourceHashWithFields(entry, hashFields) {
 function computeEntrySourceHash(entry) {
   return computeEntrySourceHashWithFields(entry, ENTRY_HASH_FIELDS);
 }
-function hasUserEditedAnyEntry(entries) {
-  for (const e of entries) {
-    if (!e || typeof e !== "object")
-      continue;
-    const eo = e;
-    const ext = eo["extensions"];
-    const stored = ext && typeof ext === "object" ? ext["_risu_source_hash"] : undefined;
-    if (typeof stored !== "string")
-      continue;
-    if (stored !== computeEntrySourceHash(eo))
-      return true;
-  }
-  return false;
-}
 // src/core/mappers/lorebook.ts
 function buildFolderIndex(entries) {
   const byId = new Map;
@@ -25896,47 +25882,6 @@ function projectModuleLorebookForCreate(rawLorebook, moduleId, worldBookId) {
 }
 function createWorldBookOps(deps) {
   const { charactersAttachedTo, send, log, errMsg: errMsg2 } = deps;
-  async function archiveWorldBookIfEdited(sourceWbId, archiveName, userId, context) {
-    const allEntries = [];
-    let offset = 0;
-    while (true) {
-      const page = await spindle.world_books.entries.list(sourceWbId, { limit: 200, offset, userId });
-      if (page.data.length === 0)
-        break;
-      allEntries.push(...page.data);
-      if (page.data.length < 200)
-        break;
-      offset += 200;
-    }
-    if (allEntries.length === 0)
-      return null;
-    if (!hasUserEditedAnyEntry(allEntries)) {
-      log.info(`archive(${context}): skip,no user edits detected across ${allEntries.length} entries`);
-      return null;
-    }
-    const archive = await spindle.world_books.create({ name: archiveName }, userId);
-    let copied = 0;
-    for (const e of allEntries) {
-      const { id: _id, world_book_id: _wbId, ...rest } = e;
-      try {
-        await spindle.world_books.entries.create(archive.id, rest, userId);
-        copied++;
-      } catch (err) {
-        log.warn(`archive(${context}): copy entry failed: ${errMsg2(err)}`);
-      }
-    }
-    log.info(`archive(${context}): archived=${copied}/${allEntries.length} ` + `wb=${archive.id} name="${archive.name}"`);
-    return archive.id;
-  }
-  async function archiveModuleWorldBookBeforeMigration(env, userId) {
-    const wbId = env.installed_world_book_id;
-    if (!wbId)
-      return null;
-    const m = env.module;
-    const moduleName = typeof m.name === "string" && m.name.length > 0 ? m.name : env.id;
-    const stamp = new Date().toISOString().slice(0, 10);
-    return archiveWorldBookIfEdited(wbId, `[LumiRealm Backup ${stamp}] Module: ${moduleName}`, userId, `module=${env.id}`);
-  }
   async function deleteModuleWorldBookEverywhere(moduleId, worldBookId, userId) {
     const attached = await charactersAttachedTo(moduleId, userId);
     for (const charId of attached) {
@@ -26103,8 +26048,6 @@ function createWorldBookOps(deps) {
     }
   }
   return {
-    archiveWorldBookIfEdited,
-    archiveModuleWorldBookBeforeMigration,
     syncModuleWorldBook,
     deleteModuleWorldBookEverywhere,
     addWorldBookToCharacter,
@@ -41301,8 +41244,6 @@ function migrateRetiredMacroNames(text) {
 }
 
 // src/migrations/mass.ts
-var ARCHIVE_BATCH_DELAY_MS = 2000;
-var MAX_ARCHIVE_LIST = 10;
 function createMassMigrationsRunner(deps) {
   const {
     currentCharacterSchemaVersion,
@@ -41317,7 +41258,6 @@ function createMassMigrationsRunner(deps) {
     runModuleMigration,
     runCharacterMigration,
     emitOperationProgress,
-    queueModalConfirm,
     toastFor,
     log: log8,
     errMsg: errMsg2
@@ -41331,64 +41271,6 @@ function createMassMigrationsRunner(deps) {
   }
   const massModuleMigrationStartedThisBoot = new Set;
   const massCharacterMigrationStartedThisBoot = new Set;
-  const pendingArchivesByUser = new Map;
-  const archiveFlushTimerByUser = new Map;
-  async function flushLorebookMigrationArchives(userId) {
-    const pending4 = pendingArchivesByUser.get(userId);
-    if (!pending4 || pending4.length === 0)
-      return;
-    pendingArchivesByUser.delete(userId);
-    const items = [];
-    for (const p of pending4) {
-      let archiveName = null;
-      try {
-        const wb = await spindle.world_books.get(p.archiveWbId, userId);
-        archiveName = wb?.name ?? null;
-      } catch (err) {
-        log8.warn(`flushLorebookMigrationArchives: world_books.get(${p.archiveWbId}) failed: ${errMsg2(err)}`);
-      }
-      items.push({ subjectLabel: p.subjectLabel, archiveName });
-    }
-    const count = items.length;
-    const listed = items.slice(0, MAX_ARCHIVE_LIST);
-    const overflow = count - listed.length;
-    const bullets = listed.map((i) => i.archiveName ? `\u2022 ${i.archiveName}` : `\u2022 ${i.subjectLabel} (backup)`).join(`
-`);
-    const overflowSuffix = overflow > 0 ? `
-\u2026and ${overflow} more` : "";
-    const title = count === 1 ? "Lorebook updated" : `${count} lorebooks updated`;
-    const message = `${count} lorebook${count === 1 ? " was" : "s were"} updated to apply the latest LumiRealm fixes. ` + `Your manual edits were saved as separate backup lorebooks in the Lorebook tab:
-
-` + `${bullets}${overflowSuffix}
-
-` + `Copy any edits from these backups into the updated lorebooks if you want to keep them.`;
-    const result = await queueModalConfirm(userId, {
-      title,
-      message,
-      variant: "info",
-      confirmLabel: "Got it",
-      cancelLabel: "Dismiss"
-    });
-    if (result === null) {
-      toastFor(userId, "info", message, { title });
-    }
-  }
-  function notifyLorebookMigrationArchive(subjectLabel, archiveWbId, userId) {
-    const list = pendingArchivesByUser.get(userId) ?? [];
-    list.push({ subjectLabel, archiveWbId });
-    pendingArchivesByUser.set(userId, list);
-    const existing = archiveFlushTimerByUser.get(userId);
-    if (existing)
-      clearTimeout(existing);
-    const timer = setTimeout(() => {
-      archiveFlushTimerByUser.delete(userId);
-      flushLorebookMigrationArchives(userId);
-    }, ARCHIVE_BATCH_DELAY_MS);
-    if (typeof timer.unref === "function") {
-      timer.unref();
-    }
-    archiveFlushTimerByUser.set(userId, timer);
-  }
   async function runMassModuleMigrationIfNeeded(userId) {
     if (massModuleMigrationStartedThisBoot.has(userId))
       return;
@@ -41447,12 +41329,6 @@ function createMassMigrationsRunner(deps) {
       log8.warn(`mass-migration(modules): user=${userId} done with failures processed=${processed} failed=${failed} ` + `(sweep marker NOT bumped, will retry next boot)`);
     }
     emitOperationProgress(userId, opId, "done", opTitle, failed === 0 ? `Updated ${processed} module${processed === 1 ? "" : "s"}` : `Updated ${processed - failed}/${processed} (${failed} failed, will retry next start)`, 1);
-    const existingTimer = archiveFlushTimerByUser.get(userId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      archiveFlushTimerByUser.delete(userId);
-    }
-    await flushLorebookMigrationArchives(userId);
   }
   async function runMassCharacterMigrationIfNeeded(userId) {
     if (massCharacterMigrationStartedThisBoot.has(userId))
@@ -41770,9 +41646,7 @@ function createMassMigrationsRunner(deps) {
     runMassModuleMigrationIfNeeded,
     runMassCharacterMigrationIfNeeded,
     runRetiredMacroMigrationIfNeeded,
-    runVarScopeMigrationIfNeeded,
-    notifyLorebookMigrationArchive,
-    flushLorebookMigrationArchives
+    runVarScopeMigrationIfNeeded
   };
 }
 
@@ -44194,22 +44068,6 @@ function createConsentApi(deps) {
   }
   return { requestConsent, pendingConsents };
 }
-function makeQueueModalConfirm(deps) {
-  const { confirmModal, log: log8, errMsg: errMsg2 } = deps;
-  const modalChainByUser = new Map;
-  return (userId, options) => {
-    const run = () => confirmModal({ ...options, userId }).catch((err) => {
-      log8.warn(`queueModalConfirm: modal.confirm threw: ${errMsg2(err)}`);
-      return null;
-    });
-    const prior = modalChainByUser.get(userId) ?? Promise.resolve();
-    const next = prior.then(run, run);
-    modalChainByUser.set(userId, next.catch(() => {
-      return;
-    }));
-    return next;
-  };
-}
 function makeDeleteCardByChar(deps) {
   const {
     clearLumirealm: clearLumirealm2,
@@ -45082,7 +44940,7 @@ async function doGrepItems(spindle2, moduleStorage, req) {
 function isLorebookPath(field) {
   return field === "module.lorebook" || field.startsWith("module.lorebook.") || field.startsWith("module.lorebook[");
 }
-var MODULE_LOREBOOK_REDIRECT = "module.lorebook[] is the frozen import bundle from the .risum upload. The LIVE lorebook for an installed module is its world_book (one wb per module, shared across every character it's attached to). " + "Edits to env.module.lorebook[] don't reach the runtime or the viewer, and get archived + wiped on the next module schema migration. " + "Use the path-based tools instead: list({path: 'wb'}) to find the module's wb (`Module: <name>`), then read/edit on wb/<id>/content or wb/<id>/comment. update_world_book_entry for metadata.";
+var MODULE_LOREBOOK_REDIRECT = "module.lorebook[] is the frozen import bundle from the .risum upload. The LIVE lorebook for an installed module is its world_book (one wb per module, shared across every character it's attached to). " + "Edits to env.module.lorebook[] don't reach the runtime or the viewer. " + "Use the path-based tools instead: list({path: 'wb'}) to find the module's wb (`Module: <name>`), then read/edit on wb/<id>/content or wb/<id>/comment. update_world_book_entry for metadata.";
 async function dispatchModuleSurface(spindle2, moduleStorage, req, onWritten, log8) {
   if (req.surfaceId !== "module_envelope") {
     throw new Error(`unknown surface: ${req.surfaceId}`);
@@ -45460,11 +45318,6 @@ function journalStorage() {
 var consentApi = createConsentApi({ send, log: log8 });
 var requestConsent = consentApi.requestConsent;
 var pendingConsents = consentApi.pendingConsents;
-var queueModalConfirm = makeQueueModalConfirm({
-  confirmModal: (options) => spindle.modal.confirm(options),
-  log: log8,
-  errMsg
-});
 var deleteCardByChar = makeDeleteCardByChar({
   clearLumirealm: (charId, userId) => clearLumirealm(charactersApi(), charId, userId),
   activeCardByChat,
@@ -46224,7 +46077,6 @@ var worldBookOps = createWorldBookOps({
   log: log8,
   errMsg
 });
-worldBookOps.archiveWorldBookIfEdited;
 worldBookOps.deleteModuleWorldBookEverywhere;
 var assetTriggerMutate = createAssetTriggerMutate({
   readLumirealm: (charId, userId) => readLumirealm(charactersApi(), charId, userId),
@@ -46348,7 +46200,6 @@ var massMigrations = createMassMigrationsRunner({
   runModuleMigration,
   runCharacterMigration,
   emitOperationProgress,
-  queueModalConfirm,
   toastFor,
   log: log8,
   errMsg
