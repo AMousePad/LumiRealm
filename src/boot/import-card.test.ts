@@ -4,7 +4,26 @@ import type { UserStorageLike } from '../payload/installer.js';
 import { writeStoredZip } from '../realm/import-formats/zip-writer.js';
 import { createImportCardOrchestrator } from './import-card.js';
 
-function cardBytes(lore: boolean, avatar: boolean): Uint8Array {
+interface UploadItem {
+  readonly data: Uint8Array;
+  readonly filename?: string;
+  readonly owner_character_id?: string;
+}
+
+interface HarnessOptions {
+  readonly worldBook?: boolean;
+  readonly avatar?: boolean;
+  readonly uploadMany?: (
+    items: readonly UploadItem[],
+    call: number,
+  ) => Promise<Array<{ id?: string; error?: string }>>;
+}
+
+function cardBytes(
+  lore: boolean,
+  avatar: boolean,
+  assetSizes: readonly number[] = [],
+): Uint8Array {
   const data: Record<string, unknown> = {
     name: 'Ada',
     description: '',
@@ -38,11 +57,13 @@ function cardBytes(lore: boolean, avatar: boolean): Uint8Array {
     })),
   }];
   if (avatar) entries.push({ name: 'avatar.png', data: Uint8Array.of(1, 2, 3) });
+  for (let index = 0; index < assetSizes.length; index++) {
+    entries.push({ name: `asset-${index}.bin`, data: new Uint8Array(assetSizes[index]!) });
+  }
   return writeStoredZip(entries);
 }
 
-function memoryStorage(): UserStorageLike {
-  const values = new Map<string, unknown>();
+function memoryStorage(values: Map<string, unknown>): UserStorageLike {
   return {
     async getJson<T>(path: string, options?: { fallback?: T }) {
       return (values.has(path) ? values.get(path) : options?.fallback) as T;
@@ -52,11 +73,20 @@ function memoryStorage(): UserStorageLike {
   };
 }
 
-function harness(failures: { worldBook?: boolean; avatar?: boolean } = {}) {
+function harness(options: HarnessOptions = {}) {
   const trace: string[] = [];
   const characterInputs: Record<string, unknown>[] = [];
-  const sent: Array<{ type: string; phase?: string; error?: string }> = [];
+  const characterUpdates: Record<string, unknown>[] = [];
+  const batches: UploadItem[][] = [];
+  const sent: Array<{
+    type: string;
+    phase?: string;
+    message?: string;
+    fraction?: number | null;
+    error?: string;
+  }> = [];
   const warnings: string[] = [];
+  const storageValues = new Map<string, unknown>();
   const worldBookIds = new Map<string, readonly string[]>();
   const spindleMock = {
     characters: {
@@ -66,18 +96,22 @@ function harness(failures: { worldBook?: boolean; avatar?: boolean } = {}) {
         return { id: 'char-1' };
       },
       async get() { return null; },
-      async update() { trace.push('characters.update'); return { id: 'char-1' }; },
+      async update(_id: string, input: Record<string, unknown>) {
+        trace.push('characters.update');
+        characterUpdates.push(input);
+        return { id: 'char-1' };
+      },
       async list() { return { data: [], total: 0 }; },
       async setAvatar() {
         trace.push('characters.setAvatar');
-        if (failures.avatar) throw new Error('avatar failed');
+        if (options.avatar) throw new Error('avatar failed');
         return { id: 'char-1', image_id: 'avatar-1' };
       },
     },
     world_books: {
       async create() {
         trace.push('world_books.create');
-        if (failures.worldBook) throw new Error('world book failed');
+        if (options.worldBook) throw new Error('world book failed');
         return { id: 'wb-1' };
       },
       async update() { trace.push('world_books.update'); return { id: 'wb-1' }; },
@@ -86,10 +120,13 @@ function harness(failures: { worldBook?: boolean; avatar?: boolean } = {}) {
       },
     },
     images: {
-      async upload() { trace.push('images.upload'); return { id: 'single-1' }; },
-      async uploadMany(items: readonly unknown[]) {
+      async uploadMany(items: readonly UploadItem[]) {
         trace.push('images.uploadMany');
-        return items.map((_, index) => ({ id: `asset-${index + 1}` }));
+        batches.push([...items]);
+        const call = batches.length;
+        return options.uploadMany
+          ? options.uploadMany(items, call)
+          : items.map((_, index) => ({ id: `asset-${(call - 1) * 64 + index + 1}` }));
       },
     },
     regex_scripts: {},
@@ -97,7 +134,7 @@ function harness(failures: { worldBook?: boolean; avatar?: boolean } = {}) {
   (globalThis as { spindle?: unknown }).spindle = spindleMock;
   const orchestrator = createImportCardOrchestrator({
     extensionVersion: 'test',
-    userStorage: memoryStorage,
+    userStorage: () => memoryStorage(storageValues),
     requestConsent: async () => ({ confirmed: true }),
     worldBookIdsByCharacter: worldBookIds,
     pendingImportCompletions: new Map(),
@@ -112,7 +149,17 @@ function harness(failures: { worldBook?: boolean; avatar?: boolean } = {}) {
     log: { info: () => {}, warn: () => {}, error: () => {} },
     errMsg: (error) => error instanceof Error ? error.message : String(error),
   });
-  return { orchestrator, trace, characterInputs, sent, warnings, worldBookIds };
+  return {
+    orchestrator,
+    trace,
+    characterInputs,
+    characterUpdates,
+    batches,
+    sent,
+    warnings,
+    storageValues,
+    worldBookIds,
+  };
 }
 
 afterEach(() => {
@@ -166,5 +213,86 @@ describe('card import current APIs', () => {
     ]);
     expect(h.sent.some((message) => message.phase === 'done')).toBe(true);
     expect(h.sent.some((message) => message.phase === 'error')).toBe(false);
+  });
+
+  test('uploads 65 assets in stable 64-item batches with journaled progress', async () => {
+    const h = harness();
+    await h.orchestrator.importCardFromBytes(
+      cardBytes(false, false, Array(65).fill(1)),
+      'card.charx',
+      'user-1',
+    );
+
+    expect(h.batches.map((batch) => batch.length)).toEqual([64, 1]);
+    expect(h.batches.flat().map((item) => item.filename)).toEqual(
+      Array.from({ length: 65 }, (_, index) => `asset-${index}.bin`),
+    );
+    expect(h.batches.flat().every((item) => item.owner_character_id === 'char-1')).toBe(true);
+    expect(h.sent.filter((message) => message.message?.startsWith('Uploading assets (')))
+      .toMatchObject([
+        { message: 'Uploading assets (64/65)…' },
+        { message: 'Uploading assets (65/65)…' },
+      ]);
+    expect(h.storageValues.get('lumirealm/image_journal/char-1.json')).toMatchObject({
+      imageIds: Array.from({ length: 65 }, (_, index) => `asset-${index + 1}`),
+    });
+  });
+
+  test('starts a new batch after the 16 MiB byte boundary', async () => {
+    const h = harness();
+    await h.orchestrator.importCardFromBytes(
+      cardBytes(false, false, [16 * 1024 * 1024, 1]),
+      'card.charx',
+      'user-1',
+    );
+
+    expect(h.batches.map((batch) => batch.map((item) => item.data.byteLength))).toEqual([
+      [16 * 1024 * 1024],
+      [1],
+    ]);
+    expect(h.batches.flat().map((item) => item.filename)).toEqual([
+      'asset-0.bin',
+      'asset-1.bin',
+    ]);
+  });
+
+  test('keeps partial and thrown batch failures nonfatal', async () => {
+    const h = harness({
+      uploadMany: async (items, call) => {
+        if (call === 2) throw new Error('batch failed');
+        return items.map((_, index) => index === 1
+          ? { error: 'item failed' }
+          : { id: `asset-${index + 1}` });
+      },
+    });
+    await h.orchestrator.importCardFromBytes(
+      cardBytes(false, false, Array(65).fill(1)),
+      'card.charx',
+      'user-1',
+    );
+
+    expect(h.batches.map((batch) => batch.length)).toEqual([64, 1]);
+    expect(h.warnings).toEqual([
+      '2 of 65 asset upload(s) failed; the card will work but may render fallback art.',
+    ]);
+    expect(h.sent.filter((message) => message.message?.startsWith('Uploading assets (')))
+      .toMatchObject([
+        { message: 'Uploading assets (64/65)…' },
+        { message: 'Uploading assets (65/65)…' },
+      ]);
+    expect(h.sent.some((message) => message.phase === 'done')).toBe(true);
+    expect(h.sent.some((message) => message.phase === 'error')).toBe(false);
+    const extension = h.characterUpdates.at(-1)?.extensions as {
+      lumirealm?: { source?: { path_to_image_id?: Record<string, string> } };
+    };
+    const pathToImageId = extension.lumirealm?.source?.path_to_image_id;
+    expect(Object.keys(pathToImageId ?? {})).toHaveLength(63);
+    expect(pathToImageId?.['asset-1.bin']).toBeUndefined();
+    expect(pathToImageId?.['asset-64.bin']).toBeUndefined();
+    expect(h.storageValues.get('lumirealm/image_journal/char-1.json')).toMatchObject({
+      imageIds: Array.from({ length: 64 }, (_, index) => index + 1)
+        .filter((id) => id !== 2)
+        .map((id) => `asset-${id}`),
+    });
   });
 });

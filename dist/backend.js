@@ -24565,7 +24565,6 @@ async function importCard(args) {
   }
   progress("uploading_assets", "Uploading assets\u2026", 0.55);
   const tAssets = Date.now();
-  const uploadConcurrency = 12;
   const pathToImageId = {};
   const imageIds = [];
   const journalBuffer = [];
@@ -24597,8 +24596,8 @@ async function importCard(args) {
   const PROGRESS_END = 0.9;
   let processed = 0;
   let assetUploadFailures = 0;
-  const uploadMany = args.spindle.images.uploadMany?.bind(args.spindle.images);
-  if (typeof uploadMany === "function" && totalAssetCount > 0) {
+  const uploadMany = args.spindle.images.uploadMany.bind(args.spindle.images);
+  if (totalAssetCount > 0) {
     logInfo(`(5b) uploading ${totalAssetCount} assets totalBytes=${totalAssetBytes} ` + `via spindle.images.uploadMany (batched)`);
     const BATCH_MAX_ITEMS = 64;
     const BATCH_MAX_BYTES = 16 * 1024 * 1024;
@@ -24651,46 +24650,6 @@ async function importCard(args) {
       const frac = PROGRESS_BASE + (PROGRESS_END - PROGRESS_BASE) * (processed / totalAssetCount);
       progress("uploading_assets", `Uploading assets (${processed}/${totalAssetCount})\u2026`, frac);
     }
-  } else if (totalAssetCount > 0) {
-    logInfo(`(5b) uploading ${totalAssetCount} assets totalBytes=${totalAssetBytes} ` + `concurrency=${uploadConcurrency} via spindle.images.upload (single, fallback)`);
-    const progressEvery = Math.max(1, Math.min(25, Math.floor(totalAssetCount / 20) || 1));
-    let nextIndex = 0;
-    const uploadWorker = async () => {
-      while (true) {
-        const i = nextIndex++;
-        if (i >= totalAssetCount)
-          break;
-        const entry = assetEntries[i];
-        if (!entry)
-          break;
-        const [path, data] = entry;
-        const filename = path.split("/").pop() ?? "asset.bin";
-        try {
-          const result = await args.spindle.images.upload({ data, mime_type: guessMimeType(path), filename, owner_character_id: characterId }, args.userId);
-          if (typeof result?.id !== "string" || result.id.length === 0) {
-            throw new Error("upload returned without an image id");
-          }
-          pathToImageId[path] = result.id;
-          imageIds.push(result.id);
-          journalBuffer.push(result.id);
-        } catch (err) {
-          assetUploadFailures += 1;
-          const msg = err instanceof Error ? err.message : String(err);
-          logWarn(`(5b) upload failed path=${path}: ${msg}`);
-        }
-        processed += 1;
-        if (processed % progressEvery === 0 || processed === totalAssetCount) {
-          flushJournal();
-          const frac = PROGRESS_BASE + (PROGRESS_END - PROGRESS_BASE) * (processed / totalAssetCount);
-          progress("uploading_assets", `Uploading assets (${processed}/${totalAssetCount})\u2026`, frac);
-        }
-      }
-    };
-    const workers = [];
-    for (let w = 0;w < Math.min(uploadConcurrency, totalAssetCount); w++) {
-      workers.push(uploadWorker());
-    }
-    await Promise.all(workers);
   }
   flushJournal();
   await journalChain;
@@ -43116,10 +43075,6 @@ function createImportCardOrchestrator(deps) {
   async function importCardFromBytes(bytes, fileName, userId) {
     const tStart = Date.now();
     log8.info(`importCardFromBytes: start file=${fileName} bytes=${bytes.byteLength} userId=${userId}`);
-    if (!spindle.images?.upload) {
-      throw new Error("spindle.images.upload is unavailable,Lumi 0.9.6+ required.");
-    }
-    const spindleImagesApi = spindle.images;
     const spindleImportApi = {
       characters: {
         create: (input, uid) => {
@@ -43154,10 +43109,7 @@ function createImportCardOrchestrator(deps) {
         }
       },
       images: {
-        upload: (input, uid) => spindleImagesApi.upload(input, uid).then((img) => ({ id: img.id })),
-        ...typeof spindleImagesApi.uploadMany === "function" ? {
-          uploadMany: (items, options) => spindleImagesApi.uploadMany(items, options)
-        } : {}
+        uploadMany: (items, options) => spindle.images.uploadMany(items, options)
       },
       requestConsent: (opts) => requestConsent(opts, userId)
     };
