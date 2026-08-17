@@ -37618,11 +37618,6 @@ function makeSpindleHost(ctx) {
     }, uid);
   }
   async function inject(id, content, opts) {
-    const anySpindle = spindle;
-    if (anySpindle.chats?.inject) {
-      await anySpindle.chats.inject(chatId, id, content, opts, uid);
-      return;
-    }
     const chat = await spindle.chats.get(chatId, uid);
     const meta = chat?.metadata ?? {};
     const pending4 = Array.isArray(meta["_risu_pending_injections"]) ? [...meta["_risu_pending_injections"]] : [];

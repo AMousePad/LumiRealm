@@ -78,13 +78,6 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   }
 
   async function inject(id: string, content: string, opts?: InjectOpts): Promise<void> {
-    const anySpindle = spindle as unknown as {
-      chats?: { inject?: (chatId: string, id: string, content: string, opts?: unknown, uid?: string) => Promise<void> };
-    };
-    if (anySpindle.chats?.inject) {
-      await anySpindle.chats.inject(chatId, id, content, opts, uid);
-      return;
-    }
     const chat = await spindle.chats.get(chatId, uid);
     const meta = (chat?.metadata ?? {}) as Record<string, unknown>;
     const pending = Array.isArray(meta['_risu_pending_injections'])
