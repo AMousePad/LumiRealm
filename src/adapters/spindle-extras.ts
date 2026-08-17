@@ -56,20 +56,3 @@ export function getModalConfirmApi(): ModalConfirmApi | null {
   // Without it the wrapper object becomes the receiver and the modal pipeline silently fails.
   return m?.confirm ? { confirm: m.confirm.bind(m) } : null;
 }
-
-// Connections list with extension-side typing.
-export interface ConnectionDTOLike {
-  readonly id: string;
-  readonly name: string;
-  readonly provider: string;
-  readonly model: string;
-  readonly is_default: boolean;
-}
-export type ConnectionsListFn = (uid?: string) => Promise<readonly ConnectionDTOLike[]>;
-
-export function getConnectionsListFn(): ConnectionsListFn | null {
-  const fn = (spindle as unknown as {
-    connections?: { list?: ConnectionsListFn };
-  }).connections?.list;
-  return fn ?? null;
-}

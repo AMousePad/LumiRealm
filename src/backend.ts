@@ -436,7 +436,13 @@ function makeStateChangedCallback(chatId: string, userId: string | undefined): (
 // so the settings preload + orphan-review prompt fire once per session.
 const capturedUserIds = new Set<string>();
 
-const settingsService = createSettingsService({ userStorage, send, log, errMsg });
+const settingsService = createSettingsService({
+  userStorage,
+  listConnections: (userId) => spindle.connections.list(userId),
+  send,
+  log,
+  errMsg,
+});
 const getSettingsForUser = settingsService.getSettingsForUser;
 const getCachedSettingsSync = settingsService.getCachedSettingsSync;
 const applySettingsPatch = settingsService.applySettingsPatch;

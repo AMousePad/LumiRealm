@@ -8,10 +8,6 @@ import {
   mergeSettings,
   type RisuCompatSettings,
 } from './settings-store.js';
-import {
-  getConnectionsListFn,
-} from '../adapters/spindle-extras.js';
-
 export interface SafeConnectionDTO {
   readonly id: string;
   readonly name: string;
@@ -22,6 +18,7 @@ export interface SafeConnectionDTO {
 
 export interface SettingsServiceDeps {
   readonly userStorage: () => UserStorageLike;
+  readonly listConnections: (userId: string) => Promise<readonly SafeConnectionDTO[]>;
   readonly send: (msg: BackendToFrontend, userId: string | undefined) => void;
   readonly log: { readonly info: (m: string) => void; readonly warn: (m: string) => void };
   readonly errMsg: (e: unknown) => string;
@@ -40,7 +37,7 @@ export interface SettingsService {
 }
 
 export function createSettingsService(deps: SettingsServiceDeps): SettingsService {
-  const { userStorage, send, log, errMsg } = deps;
+  const { userStorage, listConnections, send, log, errMsg } = deps;
   const settingsByUser = new Map<string, RisuCompatSettings>();
   let auxDebugCounter = 0;
 
@@ -112,13 +109,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
   }
 
   async function listConnectionsForUser(userId: string): Promise<readonly SafeConnectionDTO[]> {
-    const listFn = getConnectionsListFn();
-    if (!listFn) {
-      log.warn('listConnectionsForUser: spindle.connections.list not available on this Lumi build');
-      return [];
-    }
     try {
-      const raw = await listFn(userId);
+      const raw = await listConnections(userId);
       return raw.map((c) => ({
         id: c.id,
         name: c.name,
