@@ -126,10 +126,7 @@ import { createOrphanHandlers } from './handlers/orphan.js';
 import { createRepairHandlers } from './handlers/repair.js';
 import { createLifecycleEventHandlers } from './events/lifecycle.js';
 import { createLumiInterceptors } from './interceptors/lumi-hooks.js';
-import {
-  createPromptRegexRunnerClient,
-  isPromptRegexRunnerAvailable,
-} from './interceptors/prompt-regex-runner-client.js';
+import { createPromptRegexRunnerClient } from './interceptors/prompt-regex-runner-client.js';
 import { createReadonlyResolver } from './state/readonly-resolver.js';
 import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
@@ -795,25 +792,14 @@ const PROMPT_REGEX_ENV = (() => {
   return v !== '0' && v !== 'false';
 })();
 
-const PROMPT_REGEX_RUNNER_AVAILABLE = isPromptRegexRunnerAvailable();
-
 // The host-skip side of the apply<=>skip invariant rides spindle.promptRegex.setOwnedChats.
-// A host that exposes backendProcesses but predates that plumbing would never be told to skip,
-// so claiming authority there would double-apply (host pass + inline pass). Require both.
 const PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE = typeof (
   spindle as unknown as { promptRegex?: { setOwnedChats?: unknown } }
 ).promptRegex?.setOwnedChats === 'function';
 
-const PROMPT_REGEX_ACTIVE =
-  PROMPT_REGEX_ENV && PROMPT_REGEX_RUNNER_AVAILABLE && PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE;
+const PROMPT_REGEX_ACTIVE = PROMPT_REGEX_ENV && PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE;
 
-if (PROMPT_REGEX_ENV && !PROMPT_REGEX_RUNNER_AVAILABLE) {
-  log.warn(
-    'Inline prompt regex is enabled (LUMIREALM_PROMPT_REGEX) but spindle.backendProcesses is unavailable ' +
-      'on this host; declining prompt-regex ownership so the host keeps running its own sandboxed pass. ' +
-      'Upgrade Lumiverse to enable inline prompt regex in a killable subprocess.',
-  );
-} else if (PROMPT_REGEX_ENV && !PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE) {
+if (PROMPT_REGEX_ENV && !PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE) {
   log.warn(
     'Inline prompt regex is enabled (LUMIREALM_PROMPT_REGEX) and backendProcesses is available, but ' +
       'spindle.promptRegex.setOwnedChats is missing on this host; declining prompt-regex ownership so the host ' +
