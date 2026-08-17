@@ -39164,9 +39164,19 @@ function createLumiInterceptors(deps) {
           log8.warn(`interceptor.runMessageVarPass threw chat=${chatId}: ${errMsg2(err)}`);
         }
         out = out.map((m) => {
-          if (typeof m.content !== "string" || !hasSetvarFamily(m.content))
-            return m;
-          return { ...m, content: stripSetvarSpans(m.content, () => "").text };
+          if (typeof m.content === "string") {
+            if (!hasSetvarFamily(m.content))
+              return m;
+            return { ...m, content: stripSetvarSpans(m.content, () => "").text };
+          }
+          let changed = false;
+          const content = m.content.map((part) => {
+            if (part.type !== "text" || !hasSetvarFamily(part.text))
+              return part;
+            changed = true;
+            return { ...part, text: stripSetvarSpans(part.text, () => "").text };
+          });
+          return changed ? { ...m, content } : m;
         });
         if (deps.isPromptRegexAuthoritative(chatId)) {
           try {
