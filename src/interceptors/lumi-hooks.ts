@@ -909,11 +909,11 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       const chatId = typeof ctx.chatId === 'string' ? ctx.chatId : null;
       if (!chatId || ctx.dryRun !== false) return contextRaw;
 
-      let active: ActiveCard | null | undefined = activeCardByChat.get(chatId);
       const userId = typeof ctx.userId === 'string' && ctx.userId.length > 0
         ? ctx.userId
-        : active?.ownerUserId;
+        : null;
       if (!userId) return contextRaw;
+      let active: ActiveCard | null | undefined = activeCardByChat.get(chatId);
       if (active && active.ownerUserId !== userId) {
         log.warn(`contextHandler: owner mismatch chat=${chatId} cached=${active.ownerUserId} ctx=${userId}, skipping`);
         return contextRaw;
