@@ -103,39 +103,35 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   flog.info('frontend setup: begin');
   const cleanups: (() => void)[] = [];
 
-  const readiness = ctx as unknown as { deferReady?: () => void; ready?: () => void };
-  const hasReadiness = typeof readiness.deferReady === 'function' && typeof readiness.ready === 'function';
-  if (hasReadiness) readiness.deferReady!();
+  ctx.deferReady();
 
-  const displayRegistered = Boolean(ctx.display);
   const display = ctx.display;
-  if (display) {
-    cleanups.push(display.registerResolver(createDisplayResolver(
-      (chatId, vars) => {
-        // Mirror editDisplay writes into the local snapshot so init-once guards
-        // see their guard var set next render. Without it the guard never engages,
-        // init re-runs every render, and writeback clobbers committed progress.
-        applyVarDelta(chatId, 'local', vars);
-        ctx.sendToBackend({ type: 'display_writeback', chatId, vars });
-      },
-      (effect) => {
-        if (effect.kind === 'set-expression') {
-          display.setExpression(effect);
-          return;
-        }
-        void ctx.chats.updateMessage(
-          effect.chatId,
-          effect.messageId,
-          { content: effect.content },
-        ).catch((err) => {
-          flog.warn(
-            `display action message update failed chat=${effect.chatId} ` +
-              `message=${effect.messageId}: ${String(err)}`,
-          );
-        });
-      },
-    )));
-  }
+  if (!display) throw new Error('LumiRealm requires the current Lumiverse display resolver API');
+  cleanups.push(display.registerResolver(createDisplayResolver(
+    (chatId, vars) => {
+      // Mirror editDisplay writes into the local snapshot so init-once guards
+      // see their guard var set next render. Without it the guard never engages,
+      // init re-runs every render, and writeback clobbers committed progress.
+      applyVarDelta(chatId, 'local', vars);
+      ctx.sendToBackend({ type: 'display_writeback', chatId, vars });
+    },
+    (effect) => {
+      if (effect.kind === 'set-expression') {
+        display.setExpression(effect);
+        return;
+      }
+      void ctx.chats.updateMessage(
+        effect.chatId,
+        effect.messageId,
+        { content: effect.content },
+      ).catch((err) => {
+        flog.warn(
+          `display action message update failed chat=${effect.chatId} ` +
+            `message=${effect.messageId}: ${String(err)}`,
+        );
+      });
+    },
+  )));
   // Ownership is per-character: the host reads character.extensions.lumirealm.display_owner
   // (stamped by writeLumirealm + the boot backfill). display_authority is a separate signal
   // telling the backend to short-circuit ('on') or keep resolving ('shadow'/'off').
@@ -151,10 +147,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const mode: DisplayResolutionMode = m === 'shadow' || m === 'on' ? m : 'off';
     setDisplayResolutionMode(mode);
     sendDisplayAuthority(activeRisuChatId);
-    flog.info(`display resolution mode='${mode}' resolverRegistered=${displayRegistered}`);
-    if (!displayRegistered) {
-      flog.warn('display resolver NOT registered: host ctx.display is undefined — the Lumiverse core frontend lacks the display hook.');
-    }
+    flog.info(`display resolution mode='${mode}'`);
   };
   cleanups.push(() => {
     try { delete (window as unknown as Record<string, unknown>).__lumirealmDisplayMode; } catch { /* */ }
@@ -609,7 +602,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           const ns = msg.snapshot;
           if (prev.userName !== ns.userName || prev.charName !== ns.charName
             || prev.personaText !== ns.personaText || prev.personaImage !== ns.personaImage) {
-            ctx.display?.invalidate(['*']);
+            display.invalidate(['*']);
             return;
           }
           const changed = diffSnapshotVars(prev, msg.snapshot);
@@ -619,11 +612,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             || pc.lastCharMessage !== nc.lastCharMessage) {
             changed.push(MSG_DEP_KEY);
           }
-          if (changed.length > 0) ctx.display?.invalidate(changed);
+          if (changed.length > 0) display.invalidate(changed);
         } else {
           // First snapshot for this chat: the host gates resolver use on
           // ready() (snapshot present), so re-resolve everything now that it is.
-          ctx.display?.invalidate(['*']);
+          display.invalidate(['*']);
         }
       }
       return;
@@ -643,7 +636,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           }
           applyVarDelta(msg.chatId, scope, { ...incoming });
         }
-        if (changed.length > 0) ctx.display?.invalidate(changed);
+        if (changed.length > 0) display.invalidate(changed);
       }
       // fall through to sidebar broadcast
     }
@@ -741,7 +734,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }, HANDSHAKE_RETRY_MS);
   cleanups.push(() => window.clearInterval(retry));
 
-  if (hasReadiness) readiness.ready!();
+  ctx.ready();
   flog.info('frontend setup: done');
   return () => {
     flog.info('frontend teardown');

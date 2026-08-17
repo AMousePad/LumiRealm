@@ -30404,7 +30404,7 @@ function createDisplayResolver(writeback, onEffect) {
         }
         feContent = body;
       } catch (err) {
-        log6.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log6.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
       log6.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
@@ -30442,7 +30442,7 @@ function createDisplayResolver(writeback, onEffect) {
           cacheable[key] = !recorder.volatile;
         }
       } catch (err) {
-        log6.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log6.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
       const mode2 = getDisplayResolutionMode();
@@ -30470,7 +30470,7 @@ function createDisplayResolver(writeback, onEffect) {
       try {
         feContent = await runApply(snap, args, recorder, onEffect);
       } catch (err) {
-        log6.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log6.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
       log6.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} placement=${args.context.isUser ? "user" : "ai"} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
@@ -49445,26 +49445,22 @@ function setup(ctx) {
   hydrateLogStateFromLocalStorage();
   flog3.info("frontend setup: begin");
   const cleanups = [];
-  const readiness = ctx;
-  const hasReadiness = typeof readiness.deferReady === "function" && typeof readiness.ready === "function";
-  if (hasReadiness)
-    readiness.deferReady();
-  const displayRegistered = Boolean(ctx.display);
+  ctx.deferReady();
   const display = ctx.display;
-  if (display) {
-    cleanups.push(display.registerResolver(createDisplayResolver((chatId, vars) => {
-      applyVarDelta(chatId, "local", vars);
-      ctx.sendToBackend({ type: "display_writeback", chatId, vars });
-    }, (effect) => {
-      if (effect.kind === "set-expression") {
-        display.setExpression(effect);
-        return;
-      }
-      ctx.chats.updateMessage(effect.chatId, effect.messageId, { content: effect.content }).catch((err2) => {
-        flog3.warn(`display action message update failed chat=${effect.chatId} ` + `message=${effect.messageId}: ${String(err2)}`);
-      });
-    })));
-  }
+  if (!display)
+    throw new Error("LumiRealm requires the current Lumiverse display resolver API");
+  cleanups.push(display.registerResolver(createDisplayResolver((chatId, vars) => {
+    applyVarDelta(chatId, "local", vars);
+    ctx.sendToBackend({ type: "display_writeback", chatId, vars });
+  }, (effect) => {
+    if (effect.kind === "set-expression") {
+      display.setExpression(effect);
+      return;
+    }
+    ctx.chats.updateMessage(effect.chatId, effect.messageId, { content: effect.content }).catch((err2) => {
+      flog3.warn(`display action message update failed chat=${effect.chatId} ` + `message=${effect.messageId}: ${String(err2)}`);
+    });
+  })));
   const sendDisplayAuthority = (chatId) => {
     if (!chatId)
       return;
@@ -49478,10 +49474,7 @@ function setup(ctx) {
     const mode2 = m === "shadow" || m === "on" ? m : "off";
     setDisplayResolutionMode(mode2);
     sendDisplayAuthority(activeRisuChatId);
-    flog3.info(`display resolution mode='${mode2}' resolverRegistered=${displayRegistered}`);
-    if (!displayRegistered) {
-      flog3.warn("display resolver NOT registered: host ctx.display is undefined — the Lumiverse core frontend lacks the display hook.");
-    }
+    flog3.info(`display resolution mode='${mode2}'`);
   };
   cleanups.push(() => {
     try {
@@ -49911,7 +49904,7 @@ function setup(ctx) {
         if (prev) {
           const ns = msg.snapshot;
           if (prev.userName !== ns.userName || prev.charName !== ns.charName || prev.personaText !== ns.personaText || prev.personaImage !== ns.personaImage) {
-            ctx.display?.invalidate(["*"]);
+            display.invalidate(["*"]);
             return;
           }
           const changed = diffSnapshotVars(prev, msg.snapshot);
@@ -49920,9 +49913,9 @@ function setup(ctx) {
             changed.push(MSG_DEP_KEY);
           }
           if (changed.length > 0)
-            ctx.display?.invalidate(changed);
+            display.invalidate(changed);
         } else {
-          ctx.display?.invalidate(["*"]);
+          display.invalidate(["*"]);
         }
       }
       return;
@@ -49945,7 +49938,7 @@ function setup(ctx) {
           applyVarDelta(msg.chatId, scope, { ...incoming });
         }
         if (changed.length > 0)
-          ctx.display?.invalidate(changed);
+          display.invalidate(changed);
       }
     }
     if (msg.type === "cards_updated") {
@@ -50044,8 +50037,7 @@ function setup(ctx) {
     handshake();
   }, HANDSHAKE_RETRY_MS);
   cleanups.push(() => window.clearInterval(retry));
-  if (hasReadiness)
-    readiness.ready();
+  ctx.ready();
   flog3.info("frontend setup: done");
   return () => {
     flog3.info("frontend teardown");

@@ -388,7 +388,7 @@ export function createDisplayResolver(
         }
         feContent = body;
       } catch (err) {
-        log.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
 
@@ -438,7 +438,7 @@ export function createDisplayResolver(
           cacheable[key] = !recorder.volatile;
         }
       } catch (err) {
-        log.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
 
@@ -471,7 +471,7 @@ export function createDisplayResolver(
       try {
         feContent = await runApply(snap, args, recorder, onEffect);
       } catch (err) {
-        log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Deferring to backend.`);
+        log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
 
