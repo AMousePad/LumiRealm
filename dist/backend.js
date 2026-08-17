@@ -7649,7 +7649,7 @@ Based on: ` + r.LUA_COPYRIGHT;
     }, t.exports.luaX_token2str = M, t.exports.luaX_tokens = S;
   }, function(t, e, n) {
     const { lua: r, lauxlib: a, lualib: u, to_luastring: l } = n(0), { LUA_MULTRET: s, LUA_OK: o, LUA_REGISTRYINDEX: i, LUA_RIDX_MAINTHREAD: c, LUA_TBOOLEAN: _, LUA_TFUNCTION: f, LUA_TLIGHTUSERDATA: p, LUA_TNIL: L, LUA_TNONE: h, LUA_TNUMBER: d, LUA_TSTRING: A, LUA_TTABLE: g, LUA_TTHREAD: T, LUA_TUSERDATA: x, lua_atnativeerror: b, lua_call: O, lua_getfield: k, lua_gettable: v, lua_gettop: E, lua_isnil: U, lua_isproxy: m, lua_newuserdata: N, lua_pcall: R, lua_pop: S, lua_pushboolean: w, lua_pushcfunction: I, lua_pushinteger: y, lua_pushlightuserdata: M, lua_pushliteral: P, lua_pushnil: C, lua_pushnumber: D, lua_pushstring: V, lua_pushvalue: B, lua_rawgeti: G, lua_rawgetp: K, lua_rawsetp: F, lua_rotate: j, lua_setfield: H, lua_settable: X, lua_settop: z, lua_toboolean: Y, lua_tojsstring: J, lua_tonumber: Z, lua_toproxy: q, lua_tothread: W, lua_touserdata: Q, lua_type: $ } = r, { luaL_argerror: tt, luaL_checkany: et, luaL_checkoption: nt, luaL_checkstack: rt, luaL_checkudata: at, luaL_error: ut, luaL_getmetafield: lt, luaL_newlib: st, luaL_newmetatable: ot, luaL_requiref: it, luaL_setfuncs: ct, luaL_setmetatable: _t, luaL_testudata: ft, luaL_tolstring: pt } = a, { luaopen_base: Lt } = u;
-    const ht = typeof window != "undefined" ? window : typeof WorkerGlobalScope != "undefined" && self instanceof WorkerGlobalScope ? self : globalThis;
+    const ht = typeof window != "undefined" ? window : typeof WorkerGlobalScope != "undefined" && self instanceof WorkerGlobalScope ? self : (0, eval)("this");
     let dt, At, gt;
     if (typeof Reflect != "undefined")
       dt = Reflect.apply, At = Reflect.construct, gt = Reflect.deleteProperty;
@@ -7672,7 +7672,7 @@ Based on: ` + r.LUA_COPYRIGHT;
         }
         let r2 = [null];
         return r2.push.apply(r2, n2), new (e2.apply(t3, r2));
-      }, gt = ((t,k)=>{delete t[k]});
+      }, gt = Function("t", "k", "delete t[k]");
     }
     const Tt = String.prototype.concat.bind(""), xt = function(t2) {
       return typeof t2 == "object" ? t2 !== null : typeof t2 == "function";
@@ -7960,7 +7960,7 @@ Based on: ` + r.LUA_COPYRIGHT;
       } }, r2 = function() {
         let t3 = function() {}.bind();
         return delete t3.length, delete t3.name, t3;
-      }, a2 = (()=>()=>void 0), u2 = function() {
+      }, a2 = Function("return ()=>void 0;"), u2 = function() {
         let t3 = a2();
         return delete t3.length, delete t3.name, t3;
       }, s2 = function(a3, l2, s3) {
@@ -10285,7 +10285,7 @@ Based on: ` + r.LUA_COPYRIGHT;
       return pt(t2, It), 1;
     };
   }, function(t, e, n) {
-    const { LUA_DIRSEP: r, LUA_EXEC_DIR: a, LUA_JSPATH_DEFAULT: u, LUA_PATH_DEFAULT: l, LUA_PATH_MARK: s, LUA_PATH_SEP: o } = n(3), { LUA_OK: i, LUA_REGISTRYINDEX: c, LUA_TNIL: _, LUA_TTABLE: f, lua_callk: p, lua_createtable: L, lua_getfield: h, lua_insert: d, lua_isfunction: A, lua_isnil: g, lua_isstring: T, lua_newtable: x, lua_pop: b, lua_pushboolean: O, lua_pushcclosure: k, lua_pushcfunction: v, lua_pushfstring: E, lua_pushglobaltable: U, lua_pushlightuserdata: m, lua_pushliteral: N, lua_pushlstring: R, lua_pushnil: S, lua_pushstring: w, lua_pushvalue: I, lua_rawgeti: y, lua_rawgetp: M, lua_rawseti: P, lua_rawsetp: C, lua_remove: D, lua_setfield: V, lua_setmetatable: B, lua_settop: G, lua_toboolean: K, lua_tostring: F, lua_touserdata: j, lua_upvalueindex: H } = n(2), { LUA_LOADED_TABLE: X, LUA_PRELOAD_TABLE: z, luaL_Buffer: Y, luaL_addvalue: J, luaL_buffinit: Z, luaL_checkstring: q, luaL_error: W, luaL_getsubtable: Q, luaL_gsub: $, luaL_len: tt, luaL_loadfile: et, luaL_newlib: nt, luaL_optstring: rt, luaL_pushresult: at, luaL_setfuncs: ut } = n(7), lt = n(17), { luastring_indexOf: st, to_jsstring: ot, to_luastring: it, to_uristring: ct } = n(5), _t = n(0), ft = typeof window != "undefined" ? window : typeof WorkerGlobalScope != "undefined" && self instanceof WorkerGlobalScope ? self : globalThis, pt = it("__JSLIBS__"), Lt = r, ht = r, dt = it("luaopen_"), At = it("_"), gt = it("\x01");
+    const { LUA_DIRSEP: r, LUA_EXEC_DIR: a, LUA_JSPATH_DEFAULT: u, LUA_PATH_DEFAULT: l, LUA_PATH_MARK: s, LUA_PATH_SEP: o } = n(3), { LUA_OK: i, LUA_REGISTRYINDEX: c, LUA_TNIL: _, LUA_TTABLE: f, lua_callk: p, lua_createtable: L, lua_getfield: h, lua_insert: d, lua_isfunction: A, lua_isnil: g, lua_isstring: T, lua_newtable: x, lua_pop: b, lua_pushboolean: O, lua_pushcclosure: k, lua_pushcfunction: v, lua_pushfstring: E, lua_pushglobaltable: U, lua_pushlightuserdata: m, lua_pushliteral: N, lua_pushlstring: R, lua_pushnil: S, lua_pushstring: w, lua_pushvalue: I, lua_rawgeti: y, lua_rawgetp: M, lua_rawseti: P, lua_rawsetp: C, lua_remove: D, lua_setfield: V, lua_setmetatable: B, lua_settop: G, lua_toboolean: K, lua_tostring: F, lua_touserdata: j, lua_upvalueindex: H } = n(2), { LUA_LOADED_TABLE: X, LUA_PRELOAD_TABLE: z, luaL_Buffer: Y, luaL_addvalue: J, luaL_buffinit: Z, luaL_checkstring: q, luaL_error: W, luaL_getsubtable: Q, luaL_gsub: $, luaL_len: tt, luaL_loadfile: et, luaL_newlib: nt, luaL_optstring: rt, luaL_pushresult: at, luaL_setfuncs: ut } = n(7), lt = n(17), { luastring_indexOf: st, to_jsstring: ot, to_luastring: it, to_uristring: ct } = n(5), _t = n(0), ft = typeof window != "undefined" ? window : typeof WorkerGlobalScope != "undefined" && self instanceof WorkerGlobalScope ? self : (0, eval)("this"), pt = it("__JSLIBS__"), Lt = r, ht = r, dt = it("luaopen_"), At = it("_"), gt = it("\x01");
     let Tt;
     Tt = function(t2, e2, n2) {
       e2 = ct(e2);
@@ -10295,7 +10295,7 @@ Based on: ` + r.LUA_COPYRIGHT;
       let a2, u2 = r2.response;
       /\/\/[#@] sourceURL=/.test(u2) || (u2 += " //# sourceURL=" + e2);
       try {
-        a2 = (()=>{throw new Error("Function-constructor-disabled-in-extension-context")})();
+        a2 = Function("fengari", u2);
       } catch (e3) {
         return w(t2, it(`${e3.name}: ${e3.message}`)), null;
       }
@@ -33606,7 +33606,6 @@ function pairModuleAssetsForUpload(manifest, bytesList, bytesToBase642, mimeFor)
 // src/state/module-upload.ts
 var PROGRESS_BASE = 0.35;
 var PROGRESS_END = 0.92;
-var UPLOAD_CONCURRENCY = 12;
 var BATCH_MAX_ITEMS = 64;
 var BATCH_MAX_BYTES = 16 * 1024 * 1024;
 function createModuleUploader(deps) {
@@ -33714,8 +33713,7 @@ function createModuleUploader(deps) {
           fraction: frac
         }, userId);
       };
-      const uploadMany = deps.uploadImageMany;
-      if (typeof uploadMany === "function" && totalCount > 0) {
+      if (totalCount > 0) {
         deps.log.info(`processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` + `(module=${moduleBody.id}, batched)`);
         let i = 0;
         let deferred;
@@ -33747,7 +33745,7 @@ function createModuleUploader(deps) {
           }
           let results = [];
           try {
-            results = await uploadMany(batchItems, { userId });
+            results = await deps.uploadImageMany(batchItems, { userId });
           } catch (err) {
             const msg = deps.errMsg(err);
             deps.log.warn(`processModuleUpload: uploadMany batch failed (${batchItems.length} items): ${msg}`);
@@ -33767,46 +33765,6 @@ function createModuleUploader(deps) {
           flushJournal();
           emitProgress();
         }
-      } else if (totalCount > 0) {
-        deps.log.info(`processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.upload ` + `(module=${moduleBody.id}, single, fallback)`);
-        const progressEvery = Math.max(1, Math.min(25, Math.floor(totalCount / 20) || 1));
-        let nextIndex = 0;
-        const uploadWorker = async () => {
-          while (true) {
-            const idx = nextIndex++;
-            if (idx >= pending2.length)
-              break;
-            const meta = pending2[idx];
-            const bytes = meta ? await source.readAsset(meta.sourceIndex) : undefined;
-            if (!meta || !bytes)
-              continue;
-            const assetName = meta.path;
-            const sniff = deps.sniffImageMime(bytes);
-            const uploadFilename = sniff ? `${assetName}.${sniff.ext}` : assetName;
-            const uploadMime = sniff?.mime ?? meta.mimeType;
-            try {
-              const result = await deps.uploadImageOne({ data: bytes, mime_type: uploadMime, filename: uploadFilename }, userId);
-              if (typeof result?.id !== "string" || result.id.length === 0) {
-                throw new Error("upload returned without an image id");
-              }
-              recordUploaded(assetName, result.id, sniff?.ext);
-            } catch (err) {
-              assetUploadFailures += 1;
-              deps.log.warn(`processModuleUpload: upload failed name=${assetName}: ${deps.errMsg(err)}`);
-            }
-            processed += 1;
-            if (processed % progressEvery === 0 || processed === totalCount) {
-              flushJournal();
-              emitProgress();
-            }
-          }
-        };
-        const workers = [];
-        const concurrency = source.concurrentReads === false ? 1 : UPLOAD_CONCURRENCY;
-        for (let w = 0;w < Math.min(concurrency, pending2.length); w++) {
-          workers.push(uploadWorker());
-        }
-        await Promise.all(workers);
       }
       flushJournal();
       await journalChain;
@@ -46554,9 +46512,7 @@ var moduleUploader = createModuleUploader({
     }
     return spindle.images.upload(input, userId);
   },
-  ...typeof spindle.images?.uploadMany === "function" ? {
-    uploadImageMany: (items, opts) => spindle.images.uploadMany(items, opts)
-  } : {},
+  uploadImageMany: (items, opts) => spindle.images.uploadMany(items, opts),
   appendToJournal: (uid, moduleId, ids) => appendModuleImageIdsToJournal(journalStorage(), uid, moduleId, ids),
   syncWorldBook: (env, uid) => syncModuleWorldBook(env, uid),
   writeEnvelope: async (uid, env) => {

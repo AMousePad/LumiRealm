@@ -68,7 +68,7 @@ export interface ModuleUploaderDeps {
   readonly guessMimeType: (path: string) => string;
   readonly sniffImageMime: (bytes: Uint8Array) => { ext: string; mime: string } | null;
   readonly uploadImageOne: (input: ImageUploadInput, userId: string) => Promise<{ id?: string } | null>;
-  readonly uploadImageMany?: (
+  readonly uploadImageMany: (
     items: readonly ImageUploadInput[],
     opts: { userId: string },
   ) => Promise<readonly ImageUploadResult[]>;
@@ -88,7 +88,6 @@ export interface ModuleUploader {
 
 const PROGRESS_BASE = 0.35;
 const PROGRESS_END = 0.92;
-const UPLOAD_CONCURRENCY = 12;
 const BATCH_MAX_ITEMS = 64;
 const BATCH_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -251,9 +250,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         }, userId);
       };
 
-      const uploadMany = deps.uploadImageMany;
-
-      if (typeof uploadMany === 'function' && totalCount > 0) {
+      if (totalCount > 0) {
         deps.log.info(
           `processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` +
             `(module=${moduleBody.id}, batched)`,
@@ -289,7 +286,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
           }
           let results: readonly ImageUploadResult[] = [];
           try {
-            results = await uploadMany(batchItems, { userId });
+            results = await deps.uploadImageMany(batchItems, { userId });
           } catch (err) {
             const msg = deps.errMsg(err);
             deps.log.warn(`processModuleUpload: uploadMany batch failed (${batchItems.length} items): ${msg}`);
@@ -309,50 +306,6 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
           flushJournal();
           emitProgress();
         }
-      } else if (totalCount > 0) {
-        deps.log.info(
-          `processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.upload ` +
-            `(module=${moduleBody.id}, single, fallback)`,
-        );
-        const progressEvery = Math.max(1, Math.min(25, Math.floor(totalCount / 20) || 1));
-        let nextIndex = 0;
-        const uploadWorker = async (): Promise<void> => {
-          while (true) {
-            const idx = nextIndex++;
-            if (idx >= pending.length) break;
-            const meta = pending[idx];
-            const bytes = meta ? await source.readAsset(meta.sourceIndex) : undefined;
-            if (!meta || !bytes) continue;
-            const assetName = meta.path;
-            const sniff = deps.sniffImageMime(bytes);
-            const uploadFilename = sniff ? `${assetName}.${sniff.ext}` : assetName;
-            const uploadMime = sniff?.mime ?? meta.mimeType;
-            try {
-              const result = await deps.uploadImageOne(
-                { data: bytes, mime_type: uploadMime, filename: uploadFilename },
-                userId,
-              );
-              if (typeof result?.id !== 'string' || result.id.length === 0) {
-                throw new Error('upload returned without an image id');
-              }
-              recordUploaded(assetName, result.id, sniff?.ext);
-            } catch (err) {
-              assetUploadFailures += 1;
-              deps.log.warn(`processModuleUpload: upload failed name=${assetName}: ${deps.errMsg(err)}`);
-            }
-            processed += 1;
-            if (processed % progressEvery === 0 || processed === totalCount) {
-              flushJournal();
-              emitProgress();
-            }
-          }
-        };
-        const workers: Promise<void>[] = [];
-        const concurrency = source.concurrentReads === false ? 1 : UPLOAD_CONCURRENCY;
-        for (let w = 0; w < Math.min(concurrency, pending.length); w++) {
-          workers.push(uploadWorker());
-        }
-        await Promise.all(workers);
       }
       flushJournal();
       await journalChain;
