@@ -15,6 +15,11 @@ export interface ModuleHandlerDeps {
     fileName: string,
     userId: string,
   ) => Promise<{ envelope: ModuleEnvelope }>;
+  readonly processRisumUpload: (
+    uploadId: string,
+    fileName: string,
+    userId: string,
+  ) => Promise<{ envelope: ModuleEnvelope }>;
   readonly getUpload: (
     uploadId: string,
     userId: string,
@@ -88,12 +93,11 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
   readonly module_artifacts_uninstalled: Handler<'module_artifacts_uninstalled'>;
 } {
   async function finalizeModuleUpload(
-    bytes: Uint8Array,
-    fileName: string,
+    process: () => Promise<{ envelope: ModuleEnvelope }>,
     ctx: { userId: string; send: (msg: import('../types/messages.js').BackendToFrontend, userId: string) => void },
   ): Promise<void> {
     try {
-      const { envelope: env } = await deps.processModuleUpload(bytes, fileName, ctx.userId);
+      const { envelope: env } = await process();
       deps.nudgeGc('module-upload');
       const moduleName = typeof env.module.name === 'string' && env.module.name.length > 0
         ? env.module.name
@@ -117,6 +121,18 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
   return {
     process_module_from_upload: async (msg, ctx) => {
       deps.log.info(`process_module_from_upload: uploadId=${msg.uploadId} file=${msg.fileName} userId=${ctx.userId}`);
+      if (msg.fileName.toLowerCase().endsWith('.risum')) {
+        ctx.send({ type: 'import_progress', phase: 'translating', message: `Translating ${msg.fileName}…`, fraction: 0.3 }, ctx.userId);
+        try {
+          await finalizeModuleUpload(
+            () => deps.processRisumUpload(msg.uploadId, msg.fileName, ctx.userId),
+            ctx,
+          );
+        } finally {
+          await deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => false);
+        }
+        return;
+      }
       let upload: { fileName: string; size: number; data: Uint8Array } | null;
       try {
         upload = await deps.getUpload(msg.uploadId, ctx.userId);
@@ -135,7 +151,10 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       deps.log.info(`process_module_from_upload: got ${upload.data.byteLength} bytes, processing`);
       ctx.send({ type: 'import_progress', phase: 'translating', message: `Translating ${msg.fileName || upload.fileName}…`, fraction: 0.3 }, ctx.userId);
       try {
-        await finalizeModuleUpload(upload.data, msg.fileName || upload.fileName, ctx);
+        await finalizeModuleUpload(
+          () => deps.processModuleUpload(upload.data, msg.fileName || upload.fileName, ctx.userId),
+          ctx,
+        );
       } finally {
         void deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
       }

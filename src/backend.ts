@@ -182,6 +182,7 @@ import { userIdAls, currentUserId } from './interpreter/runtime/als.js';
 import { checkHostVersion, type HostVersionCheckResult } from './util/version-check.js';
 import { decodeModuleCharx } from './core/charx/index.js';
 import { decodeRisum } from './core/risum/index.js';
+import { openRisumUpload, type UploadChunk } from './core/risum/upload-reader.js';
 import { risuModuleSchema } from './core/schemas/module.js';
 import { guessMimeType, sniffImageMime } from './payload/import.js';
 import {
@@ -1349,6 +1350,21 @@ async function processModuleUpload(
   }
 }
 
+async function processRisumUpload(
+  uploadId: string,
+  fileName: string,
+  userId: string,
+): Promise<{ envelope: ModuleEnvelope }> {
+  assetUploadsInFlight++;
+  try {
+    const source = await openRisumUpload((offset) => readUploadChunk(uploadId, offset, userId));
+    log.info(`processModuleUpload: file=${fileName} bytes=${source.size} userId=${userId} mode=chunked`);
+    return await moduleUploader.uploadSource(source, fileName, userId);
+  } finally {
+    assetUploadsInFlight--;
+  }
+}
+
 
 
 
@@ -1689,6 +1705,15 @@ const getUpload = (uploadId: string, uid: string): Promise<{ fileName: string; s
   if (!spindle.uploads?.get) throw new Error('spindle.uploads unavailable; host update required');
   return spindle.uploads.get(uploadId, uid);
 };
+const readUploadChunk = (uploadId: string, offset: number, uid: string): Promise<UploadChunk | null> => {
+  const uploads = spindle.uploads as typeof spindle.uploads & {
+    readChunk?: (uploadId: string, offset: number, userId?: string) => Promise<UploadChunk | null>;
+  };
+  if (typeof uploads?.readChunk !== 'function') {
+    throw new Error('spindle.uploads.readChunk unavailable; host update required');
+  }
+  return uploads.readChunk(uploadId, offset, uid);
+};
 const deleteUpload = (uploadId: string, uid: string): Promise<boolean> => {
   if (!spindle.uploads?.delete) return Promise.resolve(false);
   return spindle.uploads.delete(uploadId, uid);
@@ -1817,6 +1842,7 @@ const moduleHandlers = createModuleHandlers({
     await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, artifacts);
   },
   processModuleUpload,
+  processRisumUpload,
   getUpload,
   deleteUpload,
   nudgeGc,

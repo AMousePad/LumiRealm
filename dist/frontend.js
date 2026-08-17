@@ -37096,6 +37096,30 @@ function planModuleRegexCleanup(rows, moduleId, scripts) {
   };
 }
 
+// src/ui/native-file-picker.ts
+function pickNativeFile(accept) {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept.join(",");
+    input.style.display = "none";
+    document.body.appendChild(input);
+    let settled = false;
+    const done = (file) => {
+      if (settled)
+        return;
+      settled = true;
+      try {
+        input.remove();
+      } catch {}
+      resolve(file);
+    };
+    input.addEventListener("change", () => done(input.files?.item(0) ?? null));
+    input.addEventListener("cancel", () => done(null));
+    input.click();
+  });
+}
+
 // src/ui/drawer.ts
 var ACCEPT_EXTENSIONS = [".charx", ".png", ".json", ".jpg", ".jpeg"];
 var UPLOAD_ENDPOINT = "/api/v1/spindle-uploads";
@@ -37103,7 +37127,7 @@ var UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 var PROCESSING_TIMEOUT_MS = 60000;
 var EXTENSION_IDENTIFIER = "lumirealm";
 function mountCardsPanel(opts) {
-  const { ctx, sendToBackend, log: log8 } = opts;
+  const { sendToBackend, log: log8 } = opts;
   log8.info("cards-panel: mounting");
   const root = opts.root;
   const actionRow = document.createElement("div");
@@ -37130,13 +37154,12 @@ function mountCardsPanel(opts) {
     log8.info("drawer: Import button clicked — opening file picker");
     let file = null;
     try {
-      const [picked] = await ctx.uploads.pickFile({ accept: ACCEPT_EXTENSIONS });
-      if (!picked) {
+      file = await pickNativeFile(ACCEPT_EXTENSIONS);
+      if (!file) {
         log8.info("drawer: picker dismissed without selection");
         return;
       }
-      file = { name: picked.name, bytes: picked.bytes };
-      log8.info(`drawer: picked file=${picked.name} size=${picked.bytes.byteLength} mime=${picked.mimeType}`);
+      log8.info(`drawer: picked file=${file.name} size=${file.size} mime=${file.type}`);
     } catch (err) {
       log8.error("drawer: pickFile threw", err);
       state.notices = [`File picker failed: ${errMsg(err)}`];
@@ -37148,7 +37171,7 @@ function mountCardsPanel(opts) {
     importBtn.disabled = true;
     render();
     const fileName = file.name;
-    const totalBytes = file.bytes.byteLength;
+    const totalBytes = file.size;
     log8.info(`drawer: upload file=${fileName} bytes=${totalBytes}`);
     let cancelled = false;
     opts.onImportStart?.(fileName, () => {
@@ -37162,7 +37185,7 @@ function mountCardsPanel(opts) {
     }, totalBytes);
     state.progress = { phase: "decoding", message: "Starting upload…", fraction: 0 };
     render();
-    const upload = new Upload(new Blob([file.bytes]), {
+    const upload = new Upload(file, {
       endpoint: UPLOAD_ENDPOINT,
       chunkSize: UPLOAD_CHUNK_BYTES,
       retryDelays: [0, 1000, 3000, 5000, 1e4],
@@ -41727,7 +41750,7 @@ filename: ${m.filename}`;
     log8.info("modules-panel: upload clicked");
     let file = null;
     try {
-      file = await pickViaInput();
+      file = await pickNativeFile(ACCEPT_EXTENSIONS2);
     } catch (err) {
       log8.error("modules-panel: file pick failed", err);
       lastError = `File pick failed: ${errMsg(err)}`;
@@ -41740,7 +41763,7 @@ filename: ${m.filename}`;
     }
     lastError = null;
     const fileName = file.name;
-    const totalBytes = file.bytes.byteLength;
+    const totalBytes = file.size;
     setStatus(`Uploading ${fileName}…`);
     uploadBtn.disabled = true;
     log8.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
@@ -41755,12 +41778,16 @@ filename: ${m.filename}`;
       uploadBtn.disabled = false;
       log8.info("modules-panel: upload cancel requested");
     }, totalBytes);
-    const upload = new Upload(new Blob([file.bytes]), {
+    const upload = new Upload(file, {
       endpoint: UPLOAD_ENDPOINT3,
       chunkSize: UPLOAD_CHUNK_BYTES3,
       retryDelays: [0, 1000, 3000, 5000, 1e4],
       removeFingerprintOnSuccess: true,
-      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER3 },
+      metadata: {
+        filename: fileName,
+        extension: EXTENSION_IDENTIFIER3,
+        ...fileName.toLowerCase().endsWith(".risum") ? { spindle_read_mode: "chunked" } : {}
+      },
       onError: (err) => {
         activeTus = null;
         if (cancelled)
@@ -41930,36 +41957,6 @@ filename: ${m.filename}`;
   render();
   log8.info("modules-panel: ready");
   return { handleBackendMessage, destroy };
-}
-function pickViaInput() {
-  return new Promise((resolve, reject) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ACCEPT_EXTENSIONS2.join(",");
-    input.style.display = "none";
-    document.body.appendChild(input);
-    let settled = false;
-    const done = (result, err) => {
-      if (settled)
-        return;
-      settled = true;
-      try {
-        document.body.removeChild(input);
-      } catch {}
-      if (err)
-        reject(err);
-      else
-        resolve(result);
-    };
-    input.addEventListener("change", () => {
-      const file = input.files?.[0];
-      if (!file)
-        return done(null);
-      file.arrayBuffer().then((ab) => done({ name: file.name, bytes: new Uint8Array(ab) }), (err) => done(null, err));
-    });
-    input.addEventListener("cancel", () => done(null));
-    input.click();
-  });
 }
 function pickLorebookFile() {
   return new Promise((resolve, reject) => {
