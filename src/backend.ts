@@ -1687,7 +1687,6 @@ const regexHandlers = createRegexHandlers({ regexImporter });
 
 // tus-uploaded bytes are redeemed by id (spindle.uploads, Lumi 1.1+).
 const getUpload = (uploadId: string, uid: string): Promise<{ fileName: string; size: number; data: Uint8Array } | null> => {
-  if (!spindle.uploads?.get) throw new Error('spindle.uploads unavailable; host update required');
   return spindle.uploads.get(uploadId, uid);
 };
 const readUploadChunk = (uploadId: string, offset: number, uid: string): Promise<UploadChunk | null> => {
@@ -1700,7 +1699,6 @@ const readUploadChunk = (uploadId: string, offset: number, uid: string): Promise
   return uploads.readChunk(uploadId, offset, uid);
 };
 const deleteUpload = (uploadId: string, uid: string): Promise<boolean> => {
-  if (!spindle.uploads?.delete) return Promise.resolve(false);
   return spindle.uploads.delete(uploadId, uid);
 };
 

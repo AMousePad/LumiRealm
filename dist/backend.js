@@ -46623,8 +46623,6 @@ var dispatchHandlers = createDispatchHandlers({
 var lorebookHandlers = createLorebookHandlers({ lorebookImporter });
 var regexHandlers = createRegexHandlers({ regexImporter });
 var getUpload = (uploadId, uid) => {
-  if (!spindle.uploads?.get)
-    throw new Error("spindle.uploads unavailable; host update required");
   return spindle.uploads.get(uploadId, uid);
 };
 var readUploadChunk = (uploadId, offset, uid) => {
@@ -46635,8 +46633,6 @@ var readUploadChunk = (uploadId, offset, uid) => {
   return uploads.readChunk(uploadId, offset, uid);
 };
 var deleteUpload = (uploadId, uid) => {
-  if (!spindle.uploads?.delete)
-    return Promise.resolve(false);
   return spindle.uploads.delete(uploadId, uid);
 };
 var importTextHandlers = createImportTextHandlers({
