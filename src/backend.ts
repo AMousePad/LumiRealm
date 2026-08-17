@@ -1425,7 +1425,6 @@ const refreshAttachedModule = characterModuleAttach.refreshAttachedModule;
 const detachModuleFromAllCharacters = characterModuleAttach.detachModuleFromAllCharacters;
 const invalidateActiveForCharacter = characterModuleAttach.invalidateActiveForCharacter;
 const charactersAttachedTo = characterModuleAttach.charactersAttachedTo;
-const archiveModuleWorldBookBeforeMigration = worldBookOps.archiveModuleWorldBookBeforeMigration;
 const syncModuleWorldBook = worldBookOps.syncModuleWorldBook;
 void worldBookOps.addWorldBookToCharacter;
 void worldBookOps.removeWorldBookFromCharacter;
@@ -1481,12 +1480,8 @@ const migrationsRunner = createMigrationsRunner({
     updateLumirealm(charactersApi(), charId, userId, mutator),
   invalidateActiveForCharacter,
   toastFor,
-  archiveModuleWorldBookBeforeMigration: (env, userId) => archiveModuleWorldBookBeforeMigration(env, userId),
-  syncModuleWorldBook: (env, userId) => syncModuleWorldBook(env, userId),
   charactersAttachedTo: (moduleId, userId) => charactersAttachedTo(moduleId, userId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
-  // Forward-bound: massMigrations supplies the actual archive notifier below, this trampoline calls into it once wired.
-  notifyLorebookMigrationArchive: (label, wbId, uid) => massMigrations.notifyLorebookMigrationArchive(label, wbId, uid),
   log,
   errMsg,
 });

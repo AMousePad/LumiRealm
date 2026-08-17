@@ -58,22 +58,12 @@ export interface MigrationsFactoryDeps {
     message: string,
     options?: { title?: string; duration?: number },
   ) => void;
-  readonly archiveModuleWorldBookBeforeMigration: (
-    env: ModuleEnvelope,
-    userId: string,
-  ) => Promise<string | null>;
-  readonly syncModuleWorldBook: (env: ModuleEnvelope, userId: string) => Promise<string | null>;
   readonly charactersAttachedTo: (moduleId: string, userId: string) => Promise<readonly string[]>;
   readonly refreshAttachedModule: (
     characterId: string,
     env: ModuleEnvelope,
     userId: string,
   ) => Promise<void>;
-  readonly notifyLorebookMigrationArchive: (
-    subjectLabel: string,
-    archiveWbId: string,
-    userId: string,
-  ) => void;
   readonly log: {
     readonly info: (m: string) => void;
     readonly warn: (m: string) => void;
@@ -222,11 +212,8 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
     writeLumirealm,
     invalidateActiveForCharacter,
     toastFor,
-    archiveModuleWorldBookBeforeMigration,
-    syncModuleWorldBook,
     charactersAttachedTo,
     refreshAttachedModule,
-    notifyLorebookMigrationArchive,
     log,
     errMsg,
   } = deps;
@@ -422,7 +409,6 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
     if (!env) return { ok: true };
     const stored = env.translator_schema_version ?? 1;
     if (stored >= currentModuleSchemaVersion) return { ok: true };
-    let archiveWbId: string | null = null;
     const legacyAliases = async (
       mid: string,
       scope: 'character' | 'global',
@@ -460,25 +446,6 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       return aliases;
     };
     const moduleDeps: ModuleMigrationDeps = {
-      syncWorldBook: async (e) => {
-        archiveWbId = await archiveModuleWorldBookBeforeMigration(e, userId);
-        return syncModuleWorldBook(e, userId);
-      },
-      reinstallArtifactsForAttached: async (mid) => {
-        const charIds = await charactersAttachedTo(mid, userId);
-        let count = 0;
-        for (const charId of charIds) {
-          try {
-            await dispatchModuleArtifactInstall(charId, env, userId);
-            count++;
-          } catch (err) {
-            log.warn(
-              `runModuleMigration: reinstall char=${charId} module=${mid} threw: ${errMsg(err)}`,
-            );
-          }
-        }
-        return count;
-      },
       applyModuleRegexReplaceStringTransform: async (mid, transform) => {
         return applyRegexReplaceStringTransform(
           (row) => isModuleRowFor(mid, row),
@@ -640,11 +607,6 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
     if (result.kind === 'migrated') {
       const charIds = await charactersAttachedTo(moduleId, userId);
       for (const charId of charIds) invalidateActiveForCharacter(charId, userId);
-      if (archiveWbId) {
-        const m = env.module as { name?: unknown };
-        const moduleName = typeof m.name === 'string' && m.name.length > 0 ? m.name : env.id;
-        notifyLorebookMigrationArchive(`Module: ${moduleName}`, archiveWbId, userId);
-      }
       return { ok: true };
     }
     if (result.kind === 'failed') return { ok: false };
