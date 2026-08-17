@@ -45765,7 +45765,7 @@ function syncPromptRegexOwnedChats() {
     return;
   promptRegexOwnedSnapshot = next;
   const api = spindle.promptRegex;
-  if (!api?.setOwnedChats)
+  if (typeof api?.setOwnedChats !== "function")
     return;
   try {
     api.setOwnedChats([...owned]);

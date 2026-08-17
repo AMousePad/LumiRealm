@@ -789,9 +789,7 @@ const PROMPT_REGEX_ENV = (() => {
 })();
 
 // The host-skip side of the apply<=>skip invariant rides spindle.promptRegex.setOwnedChats.
-const PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE = typeof (
-  spindle as unknown as { promptRegex?: { setOwnedChats?: unknown } }
-).promptRegex?.setOwnedChats === 'function';
+const PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE = typeof spindle.promptRegex?.setOwnedChats === 'function';
 
 const PROMPT_REGEX_ACTIVE = PROMPT_REGEX_ENV && PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE;
 
@@ -818,8 +816,8 @@ function syncPromptRegexOwnedChats(): void {
   const next = [...owned].sort().join(' ');
   if (next === promptRegexOwnedSnapshot) return;
   promptRegexOwnedSnapshot = next;
-  const api = (spindle as unknown as { promptRegex?: { setOwnedChats?: (ids: string[]) => void } }).promptRegex;
-  if (!api?.setOwnedChats) return;
+  const api = spindle.promptRegex;
+  if (typeof api?.setOwnedChats !== 'function') return;
   try {
     api.setOwnedChats([...owned]);
   } catch (err) {
