@@ -33823,9 +33823,6 @@ function createOrphanOrchestrator(deps) {
   }
   async function scanOrphanedImages(userId) {
     const tStart = Date.now();
-    if (!deps.imagesApi?.list) {
-      throw new Error("spindle.images.list unavailable, Lumi update required for orphan scan.");
-    }
     const live = await buildLiveImageIdSet(deps.buildOrphanDetectDeps(userId));
     const ownedById = new Map;
     let offset = 0;
@@ -45635,7 +45632,7 @@ var buildOrphanDetectDepsExcluding = orphanDetectBuilders.buildOrphanDetectDepsE
 var backfillImageJournalIfMissing = orphanDetectBuilders.backfillImageJournalIfMissing;
 var deleteImageIds = orphanDetectBuilders.deleteImageIds;
 var orphanOrchestrator = createOrphanOrchestrator({
-  imagesApi: spindle.images ? { list: (opts) => spindle.images.list(opts) } : null,
+  imagesApi: spindle.images,
   regexApi: spindle.regex_scripts,
   listLumirealmCharacterIds: async (userId) => {
     const entries = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });

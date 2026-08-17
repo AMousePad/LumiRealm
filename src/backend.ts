@@ -484,9 +484,7 @@ const backfillImageJournalIfMissing = orphanDetectBuilders.backfillImageJournalI
 const deleteImageIds = orphanDetectBuilders.deleteImageIds;
 
 const orphanOrchestrator = createOrphanOrchestrator({
-  imagesApi: spindle.images
-    ? { list: (opts) => spindle.images.list(opts as never) as never }
-    : null,
+  imagesApi: spindle.images,
   regexApi: spindle.regex_scripts,
   listLumirealmCharacterIds: async (userId) => {
     const entries = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
