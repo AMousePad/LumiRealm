@@ -131,6 +131,30 @@ async function applyV16MigrateRegexOwnership(
   };
 }
 
+async function applyV17BackfillRegexFolders(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  if (!deps.applyModuleRegexRowPatch) {
+    throw new Error('applyModuleRegexRowPatch dependency is required');
+  }
+  const name = typeof args.env.module.name === 'string' && args.env.module.name.length > 0
+    ? args.env.module.name
+    : args.env.filename;
+  const folder = `Module: ${name}`;
+  const result = await deps.applyModuleRegexRowPatch(
+    args.env.id,
+    (row) => typeof row['folder'] === 'string' && row['folder'].length > 0
+      ? null
+      : { folder },
+  );
+  if (!result || result.failed > 0) throw new Error('module regex folder backfill did not complete');
+  return {
+    nextEnv: args.env,
+    notes: [`grouped ${result.updated} regex_script(s)`],
+  };
+}
+
 async function applyV11RepairAttachedRegexIdentity(
   args: ModuleMigrationStepArgs,
   deps: ModuleMigrationDeps,
@@ -493,6 +517,12 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
       'Create extension-owned replacements before verified cleanup of attached and global module regex rows.',
     touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
     apply: applyV16MigrateRegexOwnership,
+  },
+  {
+    version: 17,
+    description: 'Group uncategorized module regex rows.',
+    touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
+    apply: applyV17BackfillRegexFolders,
   },
 ];
 

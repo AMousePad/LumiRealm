@@ -307,6 +307,38 @@ async function applyV20RepairRegexOwnershipCleanup(
   };
 }
 
+async function applyV21BackfillRegexFolders(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  if (!deps.applyCharacterRegexRowPatch) {
+    throw new Error('applyCharacterRegexRowPatch dependency is required');
+  }
+  const folderByOrigin = new Map<string, string>();
+  for (const row of args.newBundle.regexScripts) {
+    const meta = row.metadata as { _risu?: { origin?: unknown } } | undefined;
+    const origin = meta?._risu?.origin;
+    if (typeof origin === 'string' && row.folder) folderByOrigin.set(origin, row.folder);
+  }
+  const result = await deps.applyCharacterRegexRowPatch(
+    args.characterId,
+    args.userId,
+    (row) => {
+      if (typeof row['folder'] === 'string' && row['folder'].length > 0) return null;
+      const meta = row['metadata'] as { _risu?: { origin?: unknown } } | undefined;
+      const folder = typeof meta?._risu?.origin === 'string'
+        ? folderByOrigin.get(meta._risu.origin)
+        : undefined;
+      return folder ? { folder } : null;
+    },
+  );
+  if (!result || result.failed > 0) throw new Error('regex folder backfill did not complete');
+  return {
+    nextEnvelope: args.envelope,
+    notes: [`grouped ${result.updated} regex_script(s)`],
+  };
+}
+
 async function applyV6BackfillArrayIndex(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
@@ -834,6 +866,12 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
       'Remove verified legacy card rows after preserving both character and embedded-module regex sources.',
     touches: ['regex_scripts'],
     apply: applyV20RepairRegexOwnershipCleanup,
+  },
+  {
+    version: 21,
+    description: 'Group uncategorized CardX and embedded-module regex rows.',
+    touches: ['regex_scripts'],
+    apply: applyV21BackfillRegexFolders,
   },
 ];
 

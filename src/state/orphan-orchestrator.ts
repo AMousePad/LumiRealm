@@ -1,4 +1,5 @@
 import type { OrphanAssetEntry, RepairScanSummary } from '../types/messages.js';
+import type { SpindleAPI } from 'lumiverse-spindle-types';
 import {
   buildLiveImageIdSet,
   type OrphanDetectDeps,
@@ -42,12 +43,7 @@ export interface ImagesListLike {
   ) => Promise<{ data: readonly SpindleImageDTOLike[]; total: number }>;
 }
 
-export interface RegexScriptsApiLike {
-  readonly list?: (
-    opts: { userId?: string; limit?: number; offset?: number },
-  ) => Promise<{ data: readonly unknown[]; total: number }>;
-  readonly delete?: (id: string, userId?: string) => Promise<boolean>;
-}
+export type RegexScriptsApiLike = Pick<SpindleAPI['regex_scripts'], 'list' | 'delete'>;
 
 export interface JournalFileLike {
   readonly status: 'active' | 'pending_delete';
@@ -56,7 +52,7 @@ export interface JournalFileLike {
 
 export interface OrphanOrchestratorDeps {
   readonly imagesApi: ImagesListLike | null;
-  readonly regexApi: RegexScriptsApiLike | null;
+  readonly regexApi: RegexScriptsApiLike;
   readonly listLumirealmCharacterIds: (userId: string) => Promise<readonly string[]>;
   readonly listModuleIds: (userId: string) => Promise<readonly string[]>;
   readonly characterExists: (userId: string, id: string) => Promise<boolean>;
@@ -222,10 +218,6 @@ export function createOrphanOrchestrator(
   }
 
   async function sweepOrphanModuleRegex(userId: string): Promise<number> {
-    if (!deps.regexApi?.list || !deps.regexApi?.delete) {
-      deps.log.warn(`sweepOrphanModuleRegex: spindle.regex_scripts unavailable, skipping`);
-      return 0;
-    }
     let liveModuleIds: Set<string>;
     try {
       const ids = await deps.listModuleIds(userId);
@@ -273,7 +265,6 @@ export function createOrphanOrchestrator(
   }
 
   async function listStaleModuleRegexIds(userId: string): Promise<readonly string[]> {
-    if (!deps.regexApi?.list) return [];
     let liveModuleIds: Set<string>;
     try {
       liveModuleIds = new Set(await deps.listModuleIds(userId));
@@ -314,7 +305,6 @@ export function createOrphanOrchestrator(
   }
 
   async function listStaleCharRegexIds(userId: string): Promise<readonly string[]> {
-    if (!deps.regexApi?.list) return [];
     let liveCharIds: Set<string>;
     try {
       const ids = await deps.listLumirealmCharacterIds(userId);
@@ -365,7 +355,6 @@ export function createOrphanOrchestrator(
   }
 
   async function deleteRegexIds(userId: string, ids: readonly string[]): Promise<number> {
-    if (!deps.regexApi?.delete) return 0;
     let deleted = 0;
     for (const id of ids) {
       try {
@@ -405,21 +394,19 @@ export function createOrphanOrchestrator(
     const t0 = Date.now();
     let staleModuleRegex = 0;
     try {
-      if (deps.regexApi?.list) {
-        const liveModuleIds = new Set(await deps.listModuleIds(userId));
-        let offset = 0;
-        while (true) {
-          const page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
-          if (!Array.isArray(page.data) || page.data.length === 0) break;
-          for (const r of page.data) {
-            const row = r as { metadata?: { _risu?: { module_id?: unknown } } };
-            const moduleId = row.metadata?._risu?.module_id;
-            if (typeof moduleId !== 'string' || moduleId.length === 0) continue;
-            if (!liveModuleIds.has(moduleId)) staleModuleRegex++;
-          }
-          offset += page.data.length;
-          if (typeof page.total === 'number' && offset >= page.total) break;
+      const liveModuleIds = new Set(await deps.listModuleIds(userId));
+      let offset = 0;
+      while (true) {
+        const page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
+        if (!Array.isArray(page.data) || page.data.length === 0) break;
+        for (const r of page.data) {
+          const row = r as { metadata?: { _risu?: { module_id?: unknown } } };
+          const moduleId = row.metadata?._risu?.module_id;
+          if (typeof moduleId !== 'string' || moduleId.length === 0) continue;
+          if (!liveModuleIds.has(moduleId)) staleModuleRegex++;
         }
+        offset += page.data.length;
+        if (typeof page.total === 'number' && offset >= page.total) break;
       }
     } catch (err) {
       deps.log.warn(`scanRepairTargets: stale module regex count failed: ${deps.errMsg(err)}`);

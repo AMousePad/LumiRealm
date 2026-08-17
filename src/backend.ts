@@ -160,10 +160,7 @@ import {
   makeQueueModalConfirm,
   makeDeleteCardByChar,
 } from './state/consent-modals.js';
-import {
-  getModalConfirmApi,
-  getRegexScriptsApi,
-} from './adapters/spindle-extras.js';
+import { getModalConfirmApi } from './adapters/spindle-extras.js';
 import { normalizeSettingsPatch } from './state/settings-store.js';
 import { consumeOwnChatChange } from './state/own-chat-change.js';
 import { consumeOwnCharacterEdit, expectCharacterEdit } from './state/own-character-edit.js';
@@ -500,7 +497,7 @@ const orphanOrchestrator = createOrphanOrchestrator({
   imagesApi: spindle.images
     ? { list: (opts) => spindle.images.list(opts as never) as never }
     : null,
-  regexApi: getRegexScriptsApi(),
+  regexApi: spindle.regex_scripts,
   listLumirealmCharacterIds: async (userId) => {
     const entries = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
     return entries.filter((e) => e.data !== null).map((e) => e.character.id);
@@ -1008,10 +1005,7 @@ async function listLiveCharacterCrossRuleRules(
   characterId: string,
   userId: string,
 ): Promise<readonly { replace_string: string }[]> {
-  const regexApi = getRegexScriptsApi();
-  if (!regexApi?.list) {
-    throw new Error('spindle.regex_scripts.list is not available on this host');
-  }
+  const regexApi = spindle.regex_scripts;
   const PAGE_SIZE = 200;
   const out: { replace_string: string }[] = [];
   let offset = 0;
@@ -1915,8 +1909,7 @@ const exportHandlers = createExportHandlers({
     };
   },
   listCharacterRegexRows: async (characterId, userId) => {
-    const regexApi = getRegexScriptsApi();
-    if (!regexApi?.list) throw new Error('spindle.regex_scripts.list is not available on this host');
+    const regexApi = spindle.regex_scripts;
     const PAGE_SIZE = 200;
     const out: Record<string, unknown>[] = [];
     let offset = 0;
@@ -1924,7 +1917,7 @@ const exportHandlers = createExportHandlers({
       const page = await regexApi.list({ userId, limit: PAGE_SIZE, offset });
       if (!Array.isArray(page.data) || page.data.length === 0) break;
       for (const r of page.data) {
-        const row = r as Record<string, unknown> & { metadata?: { _risu?: { module_id?: unknown } } };
+        const row = r as unknown as Record<string, unknown> & { metadata?: { _risu?: { module_id?: unknown } } };
         if (row['scope'] !== 'character' || row['scope_id'] !== characterId) continue;
         const mid = row.metadata?._risu?.module_id;
         if (typeof mid === 'string' && mid.length > 0) continue;

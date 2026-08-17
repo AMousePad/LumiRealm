@@ -20,14 +20,12 @@ var __toESM = (mod, isNodeMode, target) => {
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
   const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-  if (mod && typeof mod === "object" || typeof mod === "function") {
-    for (let key of __getOwnPropNames(mod))
-      if (!__hasOwnProp.call(to, key))
-        __defProp(to, key, {
-          get: __accessProp.bind(mod, key),
-          enumerable: true
-        });
-  }
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: __accessProp.bind(mod, key),
+        enumerable: true
+      });
   if (canCache)
     cache.set(mod, to);
   return to;
@@ -4285,7 +4283,7 @@ function normalizeRoleToLumi(r) {
 }
 
 // node_modules/fengari-web/dist/fengari-web.bundle.js
-var require_fengari_web_bundle = __commonJS(function(exports, module) {
+var require_fengari_web_bundle = __commonJS((exports, module) => {
   module.exports = function(t) {
     var e = {};
     function n(r) {
@@ -25039,6 +25037,31 @@ async function applyV20RepairRegexOwnershipCleanup(args, deps) {
     notes: [`verified ownership cleanup for ${stored.length} regex_script(s)`]
   };
 }
+async function applyV21BackfillRegexFolders(args, deps) {
+  if (!deps.applyCharacterRegexRowPatch) {
+    throw new Error("applyCharacterRegexRowPatch dependency is required");
+  }
+  const folderByOrigin = new Map;
+  for (const row of args.newBundle.regexScripts) {
+    const meta = row.metadata;
+    const origin = meta?._risu?.origin;
+    if (typeof origin === "string" && row.folder)
+      folderByOrigin.set(origin, row.folder);
+  }
+  const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
+    if (typeof row["folder"] === "string" && row["folder"].length > 0)
+      return null;
+    const meta = row["metadata"];
+    const folder = typeof meta?._risu?.origin === "string" ? folderByOrigin.get(meta._risu.origin) : undefined;
+    return folder ? { folder } : null;
+  });
+  if (!result || result.failed > 0)
+    throw new Error("regex folder backfill did not complete");
+  return {
+    nextEnvelope: args.envelope,
+    notes: [`grouped ${result.updated} regex_script(s)`]
+  };
+}
 async function applyV6BackfillArrayIndex(args, deps) {
   const indexBySourceHash = new Map;
   for (const e of args.newBundle.worldBookEntries) {
@@ -25448,6 +25471,12 @@ var CHARACTER_MIGRATIONS = [
     description: "Remove verified legacy card rows after preserving both character and embedded-module regex sources.",
     touches: ["regex_scripts"],
     apply: applyV20RepairRegexOwnershipCleanup
+  },
+  {
+    version: 21,
+    description: "Group uncategorized CardX and embedded-module regex rows.",
+    touches: ["regex_scripts"],
+    apply: applyV21BackfillRegexFolders
   }
 ];
 var CURRENT_CHARACTER_SCHEMA_VERSION = CHARACTER_MIGRATIONS.length > 0 ? Math.max(...CHARACTER_MIGRATIONS.map((m) => m.version)) : 1;
@@ -26119,6 +26148,20 @@ async function applyV16MigrateRegexOwnership(args, deps) {
     notes: [`migrated ownership for ${refreshed} module attachment(s)`]
   };
 }
+async function applyV17BackfillRegexFolders(args, deps) {
+  if (!deps.applyModuleRegexRowPatch) {
+    throw new Error("applyModuleRegexRowPatch dependency is required");
+  }
+  const name = typeof args.env.module.name === "string" && args.env.module.name.length > 0 ? args.env.module.name : args.env.filename;
+  const folder = `Module: ${name}`;
+  const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => typeof row["folder"] === "string" && row["folder"].length > 0 ? null : { folder });
+  if (!result || result.failed > 0)
+    throw new Error("module regex folder backfill did not complete");
+  return {
+    nextEnv: args.env,
+    notes: [`grouped ${result.updated} regex_script(s)`]
+  };
+}
 async function applyV11RepairAttachedRegexIdentity(args, deps) {
   const result = await deps.repairRegexBindingsForAttached(args.env.id);
   return {
@@ -26411,6 +26454,12 @@ var MODULE_MIGRATIONS = [
     description: "Create extension-owned replacements before verified cleanup of attached and global module regex rows.",
     touches: ["regex_scripts_attached_chars", "regex_scripts_global"],
     apply: applyV16MigrateRegexOwnership
+  },
+  {
+    version: 17,
+    description: "Group uncategorized module regex rows.",
+    touches: ["regex_scripts_attached_chars", "regex_scripts_global"],
+    apply: applyV17BackfillRegexFolders
   }
 ];
 var CURRENT_MODULE_SCHEMA_VERSION = MODULE_MIGRATIONS.length > 0 ? Math.max(...MODULE_MIGRATIONS.map((m) => m.version)) : 4;
@@ -29544,393 +29593,393 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
 var fengari = __toESM(require_fengari_web_bundle(), 1);
 
 // src/interpreter/lua-json.lua
-var lua_json_default = `--
--- json.lua
---
--- Copyright (c) 2020 rxi
---
--- Permission is hereby granted, free of charge, to any person obtaining a copy of
--- this software and associated documentation files (the "Software"), to deal in
--- the Software without restriction, including without limitation the rights to
--- use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
--- of the Software, and to permit persons to whom the Software is furnished to do
--- so, subject to the following conditions:
---
--- The above copyright notice and this permission notice shall be included in all
--- copies or substantial portions of the Software.
---
--- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
--- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
--- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
--- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
--- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
--- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
--- SOFTWARE.
---
-
-local json = { _version = "0.1.2" }
-
--------------------------------------------------------------------------------
--- Encode
--------------------------------------------------------------------------------
-
-local encode
-
-local escape_char_map = {
-  [ "\\\\" ] = "\\\\",
-  [ "\\"" ] = "\\"",
-  [ "\\b" ] = "b",
-  [ "\\f" ] = "f",
-  [ "\\n" ] = "n",
-  [ "\\r" ] = "r",
-  [ "\\t" ] = "t",
-}
-
-local escape_char_map_inv = { [ "/" ] = "/" }
-for k, v in pairs(escape_char_map) do
-  escape_char_map_inv[v] = k
-end
-
-
-local function escape_char(c)
-  return "\\\\" .. (escape_char_map[c] or string.format("u%04x", c:byte()))
-end
-
-
-local function encode_nil(val)
-  return "null"
-end
-
-
-local function encode_table(val, stack)
-  local res = {}
-  stack = stack or {}
-
-  -- Circular reference?
-  if stack[val] then error("circular reference") end
-
-  stack[val] = true
-
-  if rawget(val, 1) ~= nil or next(val) == nil then
-    -- Treat as array -- check keys are valid and it is not sparse
-    local n = 0
-    for k in pairs(val) do
-      if type(k) ~= "number" then
-        error("invalid table: mixed or invalid key types")
-      end
-      n = n + 1
-    end
-    if n ~= #val then
-      error("invalid table: sparse array")
-    end
-    -- Encode
-    for i, v in ipairs(val) do
-      table.insert(res, encode(v, stack))
-    end
-    stack[val] = nil
-    return "[" .. table.concat(res, ",") .. "]"
-
-  else
-    -- Treat as an object
-    for k, v in pairs(val) do
-      if type(k) ~= "string" then
-        error("invalid table: mixed or invalid key types")
-      end
-      table.insert(res, encode(k, stack) .. ":" .. encode(v, stack))
-    end
-    stack[val] = nil
-    return "{" .. table.concat(res, ",") .. "}"
-  end
-end
-
-
-local function encode_string(val)
-  return '"' .. val:gsub('[%z\\1-\\31\\\\"]', escape_char) .. '"'
-end
-
-
-local function encode_number(val)
-  -- Check for NaN, -inf and inf
-  if val ~= val or val <= -math.huge or val >= math.huge then
-    error("unexpected number value '" .. tostring(val) .. "'")
-  end
-  return string.format("%.14g", val)
-end
-
-
-local type_func_map = {
-  [ "nil"     ] = encode_nil,
-  [ "table"   ] = encode_table,
-  [ "string"  ] = encode_string,
-  [ "number"  ] = encode_number,
-  [ "boolean" ] = tostring,
-}
-
-
-encode = function(val, stack)
-  local t = type(val)
-  local f = type_func_map[t]
-  if f then
-    return f(val, stack)
-  end
-  error("unexpected type '" .. t .. "'")
-end
-
-
-function json.encode(val)
-  return ( encode(val) )
-end
-
-
--------------------------------------------------------------------------------
--- Decode
--------------------------------------------------------------------------------
-
-local parse
-
-local function create_set(...)
-  local res = {}
-  for i = 1, select("#", ...) do
-    res[ select(i, ...) ] = true
-  end
-  return res
-end
-
-local space_chars   = create_set(" ", "\\t", "\\r", "\\n")
-local delim_chars   = create_set(" ", "\\t", "\\r", "\\n", "]", "}", ",")
-local escape_chars  = create_set("\\\\", "/", '"', "b", "f", "n", "r", "t", "u")
-local literals      = create_set("true", "false", "null")
-
-local literal_map = {
-  [ "true"  ] = true,
-  [ "false" ] = false,
-  [ "null"  ] = nil,
-}
-
-
-local function next_char(str, idx, set, negate)
-  for i = idx, #str do
-    if set[str:sub(i, i)] ~= negate then
-      return i
-    end
-  end
-  return #str + 1
-end
-
-
-local function decode_error(str, idx, msg)
-  local line_count = 1
-  local col_count = 1
-  for i = 1, idx - 1 do
-    col_count = col_count + 1
-    if str:sub(i, i) == "\\n" then
-      line_count = line_count + 1
-      col_count = 1
-    end
-  end
-  error( string.format("%s at line %d col %d", msg, line_count, col_count) )
-end
-
-
-local function codepoint_to_utf8(n)
-  -- http://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=iws-appendixa
-  local f = math.floor
-  if n <= 0x7f then
-    return string.char(n)
-  elseif n <= 0x7ff then
-    return string.char(f(n / 64) + 192, n % 64 + 128)
-  elseif n <= 0xffff then
-    return string.char(f(n / 4096) + 224, f(n % 4096 / 64) + 128, n % 64 + 128)
-  elseif n <= 0x10ffff then
-    return string.char(f(n / 262144) + 240, f(n % 262144 / 4096) + 128,
-                       f(n % 4096 / 64) + 128, n % 64 + 128)
-  end
-  error( string.format("invalid unicode codepoint '%x'", n) )
-end
-
-
-local function parse_unicode_escape(s)
-  local n1 = tonumber( s:sub(1, 4),  16 )
-  local n2 = tonumber( s:sub(7, 10), 16 )
-   -- Surrogate pair?
-  if n2 then
-    return codepoint_to_utf8((n1 - 0xd800) * 0x400 + (n2 - 0xdc00) + 0x10000)
-  else
-    return codepoint_to_utf8(n1)
-  end
-end
-
-
-local function parse_string(str, i)
-  local res = ""
-  local j = i + 1
-  local k = j
-
-  while j <= #str do
-    local x = str:byte(j)
-
-    if x < 32 then
-      decode_error(str, j, "control character in string")
-
-    elseif x == 92 then -- \`\\\`: Escape
-      res = res .. str:sub(k, j - 1)
-      j = j + 1
-      local c = str:sub(j, j)
-      if c == "u" then
-        local hex = str:match("^[dD][89aAbB]%x%x\\\\u%x%x%x%x", j + 1)
-                 or str:match("^%x%x%x%x", j + 1)
-                 or decode_error(str, j - 1, "invalid unicode escape in string")
-        res = res .. parse_unicode_escape(hex)
-        j = j + #hex
-      else
-        if not escape_chars[c] then
-          decode_error(str, j - 1, "invalid escape char '" .. c .. "' in string")
-        end
-        res = res .. escape_char_map_inv[c]
-      end
-      k = j + 1
-
-    elseif x == 34 then -- \`"\`: End of string
-      res = res .. str:sub(k, j - 1)
-      return res, j + 1
-    end
-
-    j = j + 1
-  end
-
-  decode_error(str, i, "expected closing quote for string")
-end
-
-
-local function parse_number(str, i)
-  local x = next_char(str, i, delim_chars)
-  local s = str:sub(i, x - 1)
-  local n = tonumber(s)
-  if not n then
-    decode_error(str, i, "invalid number '" .. s .. "'")
-  end
-  return n, x
-end
-
-
-local function parse_literal(str, i)
-  local x = next_char(str, i, delim_chars)
-  local word = str:sub(i, x - 1)
-  if not literals[word] then
-    decode_error(str, i, "invalid literal '" .. word .. "'")
-  end
-  return literal_map[word], x
-end
-
-
-local function parse_array(str, i)
-  local res = {}
-  local n = 1
-  i = i + 1
-  while 1 do
-    local x
-    i = next_char(str, i, space_chars, true)
-    -- Empty / end of array?
-    if str:sub(i, i) == "]" then
-      i = i + 1
-      break
-    end
-    -- Read token
-    x, i = parse(str, i)
-    res[n] = x
-    n = n + 1
-    -- Next token
-    i = next_char(str, i, space_chars, true)
-    local chr = str:sub(i, i)
-    i = i + 1
-    if chr == "]" then break end
-    if chr ~= "," then decode_error(str, i, "expected ']' or ','") end
-  end
-  return res, i
-end
-
-
-local function parse_object(str, i)
-  local res = {}
-  i = i + 1
-  while 1 do
-    local key, val
-    i = next_char(str, i, space_chars, true)
-    -- Empty / end of object?
-    if str:sub(i, i) == "}" then
-      i = i + 1
-      break
-    end
-    -- Read key
-    if str:sub(i, i) ~= '"' then
-      decode_error(str, i, "expected string for key")
-    end
-    key, i = parse(str, i)
-    -- Read ':' delimiter
-    i = next_char(str, i, space_chars, true)
-    if str:sub(i, i) ~= ":" then
-      decode_error(str, i, "expected ':' after key")
-    end
-    i = next_char(str, i + 1, space_chars, true)
-    -- Read value
-    val, i = parse(str, i)
-    -- Set
-    res[key] = val
-    -- Next token
-    i = next_char(str, i, space_chars, true)
-    local chr = str:sub(i, i)
-    i = i + 1
-    if chr == "}" then break end
-    if chr ~= "," then decode_error(str, i, "expected '}' or ','") end
-  end
-  return res, i
-end
-
-
-local char_func_map = {
-  [ '"' ] = parse_string,
-  [ "0" ] = parse_number,
-  [ "1" ] = parse_number,
-  [ "2" ] = parse_number,
-  [ "3" ] = parse_number,
-  [ "4" ] = parse_number,
-  [ "5" ] = parse_number,
-  [ "6" ] = parse_number,
-  [ "7" ] = parse_number,
-  [ "8" ] = parse_number,
-  [ "9" ] = parse_number,
-  [ "-" ] = parse_number,
-  [ "t" ] = parse_literal,
-  [ "f" ] = parse_literal,
-  [ "n" ] = parse_literal,
-  [ "[" ] = parse_array,
-  [ "{" ] = parse_object,
-}
-
-
-parse = function(str, idx)
-  local chr = str:sub(idx, idx)
-  local f = char_func_map[chr]
-  if f then
-    return f(str, idx)
-  end
-  decode_error(str, idx, "unexpected character '" .. chr .. "'")
-end
-
-
-function json.decode(str)
-  if type(str) ~= "string" then
-    error("expected argument of type string, got " .. type(str))
-  end
-  local res, idx = parse(str, next_char(str, 1, space_chars, true))
-  idx = next_char(str, idx, space_chars, true)
-  if idx <= #str then
-    decode_error(str, idx, "trailing garbage")
-  end
-  return res
-end
-
-
+var lua_json_default = `--\r
+-- json.lua\r
+--\r
+-- Copyright (c) 2020 rxi\r
+--\r
+-- Permission is hereby granted, free of charge, to any person obtaining a copy of\r
+-- this software and associated documentation files (the "Software"), to deal in\r
+-- the Software without restriction, including without limitation the rights to\r
+-- use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies\r
+-- of the Software, and to permit persons to whom the Software is furnished to do\r
+-- so, subject to the following conditions:\r
+--\r
+-- The above copyright notice and this permission notice shall be included in all\r
+-- copies or substantial portions of the Software.\r
+--\r
+-- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\r
+-- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\r
+-- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\r
+-- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\r
+-- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\r
+-- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\r
+-- SOFTWARE.\r
+--\r
+\r
+local json = { _version = "0.1.2" }\r
+\r
+-------------------------------------------------------------------------------\r
+-- Encode\r
+-------------------------------------------------------------------------------\r
+\r
+local encode\r
+\r
+local escape_char_map = {\r
+  [ "\\\\" ] = "\\\\",\r
+  [ "\\"" ] = "\\"",\r
+  [ "\\b" ] = "b",\r
+  [ "\\f" ] = "f",\r
+  [ "\\n" ] = "n",\r
+  [ "\\r" ] = "r",\r
+  [ "\\t" ] = "t",\r
+}\r
+\r
+local escape_char_map_inv = { [ "/" ] = "/" }\r
+for k, v in pairs(escape_char_map) do\r
+  escape_char_map_inv[v] = k\r
+end\r
+\r
+\r
+local function escape_char(c)\r
+  return "\\\\" .. (escape_char_map[c] or string.format("u%04x", c:byte()))\r
+end\r
+\r
+\r
+local function encode_nil(val)\r
+  return "null"\r
+end\r
+\r
+\r
+local function encode_table(val, stack)\r
+  local res = {}\r
+  stack = stack or {}\r
+\r
+  -- Circular reference?\r
+  if stack[val] then error("circular reference") end\r
+\r
+  stack[val] = true\r
+\r
+  if rawget(val, 1) ~= nil or next(val) == nil then\r
+    -- Treat as array -- check keys are valid and it is not sparse\r
+    local n = 0\r
+    for k in pairs(val) do\r
+      if type(k) ~= "number" then\r
+        error("invalid table: mixed or invalid key types")\r
+      end\r
+      n = n + 1\r
+    end\r
+    if n ~= #val then\r
+      error("invalid table: sparse array")\r
+    end\r
+    -- Encode\r
+    for i, v in ipairs(val) do\r
+      table.insert(res, encode(v, stack))\r
+    end\r
+    stack[val] = nil\r
+    return "[" .. table.concat(res, ",") .. "]"\r
+\r
+  else\r
+    -- Treat as an object\r
+    for k, v in pairs(val) do\r
+      if type(k) ~= "string" then\r
+        error("invalid table: mixed or invalid key types")\r
+      end\r
+      table.insert(res, encode(k, stack) .. ":" .. encode(v, stack))\r
+    end\r
+    stack[val] = nil\r
+    return "{" .. table.concat(res, ",") .. "}"\r
+  end\r
+end\r
+\r
+\r
+local function encode_string(val)\r
+  return '"' .. val:gsub('[%z\\1-\\31\\\\"]', escape_char) .. '"'\r
+end\r
+\r
+\r
+local function encode_number(val)\r
+  -- Check for NaN, -inf and inf\r
+  if val ~= val or val <= -math.huge or val >= math.huge then\r
+    error("unexpected number value '" .. tostring(val) .. "'")\r
+  end\r
+  return string.format("%.14g", val)\r
+end\r
+\r
+\r
+local type_func_map = {\r
+  [ "nil"     ] = encode_nil,\r
+  [ "table"   ] = encode_table,\r
+  [ "string"  ] = encode_string,\r
+  [ "number"  ] = encode_number,\r
+  [ "boolean" ] = tostring,\r
+}\r
+\r
+\r
+encode = function(val, stack)\r
+  local t = type(val)\r
+  local f = type_func_map[t]\r
+  if f then\r
+    return f(val, stack)\r
+  end\r
+  error("unexpected type '" .. t .. "'")\r
+end\r
+\r
+\r
+function json.encode(val)\r
+  return ( encode(val) )\r
+end\r
+\r
+\r
+-------------------------------------------------------------------------------\r
+-- Decode\r
+-------------------------------------------------------------------------------\r
+\r
+local parse\r
+\r
+local function create_set(...)\r
+  local res = {}\r
+  for i = 1, select("#", ...) do\r
+    res[ select(i, ...) ] = true\r
+  end\r
+  return res\r
+end\r
+\r
+local space_chars   = create_set(" ", "\\t", "\\r", "\\n")\r
+local delim_chars   = create_set(" ", "\\t", "\\r", "\\n", "]", "}", ",")\r
+local escape_chars  = create_set("\\\\", "/", '"', "b", "f", "n", "r", "t", "u")\r
+local literals      = create_set("true", "false", "null")\r
+\r
+local literal_map = {\r
+  [ "true"  ] = true,\r
+  [ "false" ] = false,\r
+  [ "null"  ] = nil,\r
+}\r
+\r
+\r
+local function next_char(str, idx, set, negate)\r
+  for i = idx, #str do\r
+    if set[str:sub(i, i)] ~= negate then\r
+      return i\r
+    end\r
+  end\r
+  return #str + 1\r
+end\r
+\r
+\r
+local function decode_error(str, idx, msg)\r
+  local line_count = 1\r
+  local col_count = 1\r
+  for i = 1, idx - 1 do\r
+    col_count = col_count + 1\r
+    if str:sub(i, i) == "\\n" then\r
+      line_count = line_count + 1\r
+      col_count = 1\r
+    end\r
+  end\r
+  error( string.format("%s at line %d col %d", msg, line_count, col_count) )\r
+end\r
+\r
+\r
+local function codepoint_to_utf8(n)\r
+  -- http://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=iws-appendixa\r
+  local f = math.floor\r
+  if n <= 0x7f then\r
+    return string.char(n)\r
+  elseif n <= 0x7ff then\r
+    return string.char(f(n / 64) + 192, n % 64 + 128)\r
+  elseif n <= 0xffff then\r
+    return string.char(f(n / 4096) + 224, f(n % 4096 / 64) + 128, n % 64 + 128)\r
+  elseif n <= 0x10ffff then\r
+    return string.char(f(n / 262144) + 240, f(n % 262144 / 4096) + 128,\r
+                       f(n % 4096 / 64) + 128, n % 64 + 128)\r
+  end\r
+  error( string.format("invalid unicode codepoint '%x'", n) )\r
+end\r
+\r
+\r
+local function parse_unicode_escape(s)\r
+  local n1 = tonumber( s:sub(1, 4),  16 )\r
+  local n2 = tonumber( s:sub(7, 10), 16 )\r
+   -- Surrogate pair?\r
+  if n2 then\r
+    return codepoint_to_utf8((n1 - 0xd800) * 0x400 + (n2 - 0xdc00) + 0x10000)\r
+  else\r
+    return codepoint_to_utf8(n1)\r
+  end\r
+end\r
+\r
+\r
+local function parse_string(str, i)\r
+  local res = ""\r
+  local j = i + 1\r
+  local k = j\r
+\r
+  while j <= #str do\r
+    local x = str:byte(j)\r
+\r
+    if x < 32 then\r
+      decode_error(str, j, "control character in string")\r
+\r
+    elseif x == 92 then -- \`\\\`: Escape\r
+      res = res .. str:sub(k, j - 1)\r
+      j = j + 1\r
+      local c = str:sub(j, j)\r
+      if c == "u" then\r
+        local hex = str:match("^[dD][89aAbB]%x%x\\\\u%x%x%x%x", j + 1)\r
+                 or str:match("^%x%x%x%x", j + 1)\r
+                 or decode_error(str, j - 1, "invalid unicode escape in string")\r
+        res = res .. parse_unicode_escape(hex)\r
+        j = j + #hex\r
+      else\r
+        if not escape_chars[c] then\r
+          decode_error(str, j - 1, "invalid escape char '" .. c .. "' in string")\r
+        end\r
+        res = res .. escape_char_map_inv[c]\r
+      end\r
+      k = j + 1\r
+\r
+    elseif x == 34 then -- \`"\`: End of string\r
+      res = res .. str:sub(k, j - 1)\r
+      return res, j + 1\r
+    end\r
+\r
+    j = j + 1\r
+  end\r
+\r
+  decode_error(str, i, "expected closing quote for string")\r
+end\r
+\r
+\r
+local function parse_number(str, i)\r
+  local x = next_char(str, i, delim_chars)\r
+  local s = str:sub(i, x - 1)\r
+  local n = tonumber(s)\r
+  if not n then\r
+    decode_error(str, i, "invalid number '" .. s .. "'")\r
+  end\r
+  return n, x\r
+end\r
+\r
+\r
+local function parse_literal(str, i)\r
+  local x = next_char(str, i, delim_chars)\r
+  local word = str:sub(i, x - 1)\r
+  if not literals[word] then\r
+    decode_error(str, i, "invalid literal '" .. word .. "'")\r
+  end\r
+  return literal_map[word], x\r
+end\r
+\r
+\r
+local function parse_array(str, i)\r
+  local res = {}\r
+  local n = 1\r
+  i = i + 1\r
+  while 1 do\r
+    local x\r
+    i = next_char(str, i, space_chars, true)\r
+    -- Empty / end of array?\r
+    if str:sub(i, i) == "]" then\r
+      i = i + 1\r
+      break\r
+    end\r
+    -- Read token\r
+    x, i = parse(str, i)\r
+    res[n] = x\r
+    n = n + 1\r
+    -- Next token\r
+    i = next_char(str, i, space_chars, true)\r
+    local chr = str:sub(i, i)\r
+    i = i + 1\r
+    if chr == "]" then break end\r
+    if chr ~= "," then decode_error(str, i, "expected ']' or ','") end\r
+  end\r
+  return res, i\r
+end\r
+\r
+\r
+local function parse_object(str, i)\r
+  local res = {}\r
+  i = i + 1\r
+  while 1 do\r
+    local key, val\r
+    i = next_char(str, i, space_chars, true)\r
+    -- Empty / end of object?\r
+    if str:sub(i, i) == "}" then\r
+      i = i + 1\r
+      break\r
+    end\r
+    -- Read key\r
+    if str:sub(i, i) ~= '"' then\r
+      decode_error(str, i, "expected string for key")\r
+    end\r
+    key, i = parse(str, i)\r
+    -- Read ':' delimiter\r
+    i = next_char(str, i, space_chars, true)\r
+    if str:sub(i, i) ~= ":" then\r
+      decode_error(str, i, "expected ':' after key")\r
+    end\r
+    i = next_char(str, i + 1, space_chars, true)\r
+    -- Read value\r
+    val, i = parse(str, i)\r
+    -- Set\r
+    res[key] = val\r
+    -- Next token\r
+    i = next_char(str, i, space_chars, true)\r
+    local chr = str:sub(i, i)\r
+    i = i + 1\r
+    if chr == "}" then break end\r
+    if chr ~= "," then decode_error(str, i, "expected '}' or ','") end\r
+  end\r
+  return res, i\r
+end\r
+\r
+\r
+local char_func_map = {\r
+  [ '"' ] = parse_string,\r
+  [ "0" ] = parse_number,\r
+  [ "1" ] = parse_number,\r
+  [ "2" ] = parse_number,\r
+  [ "3" ] = parse_number,\r
+  [ "4" ] = parse_number,\r
+  [ "5" ] = parse_number,\r
+  [ "6" ] = parse_number,\r
+  [ "7" ] = parse_number,\r
+  [ "8" ] = parse_number,\r
+  [ "9" ] = parse_number,\r
+  [ "-" ] = parse_number,\r
+  [ "t" ] = parse_literal,\r
+  [ "f" ] = parse_literal,\r
+  [ "n" ] = parse_literal,\r
+  [ "[" ] = parse_array,\r
+  [ "{" ] = parse_object,\r
+}\r
+\r
+\r
+parse = function(str, idx)\r
+  local chr = str:sub(idx, idx)\r
+  local f = char_func_map[chr]\r
+  if f then\r
+    return f(str, idx)\r
+  end\r
+  decode_error(str, idx, "unexpected character '" .. chr .. "'")\r
+end\r
+\r
+\r
+function json.decode(str)\r
+  if type(str) ~= "string" then\r
+    error("expected argument of type string, got " .. type(str))\r
+  end\r
+  local res, idx = parse(str, next_char(str, 1, space_chars, true))\r
+  idx = next_char(str, idx, space_chars, true)\r
+  if idx <= #str then\r
+    decode_error(str, idx, "trailing garbage")\r
+  end\r
+  return res\r
+end\r
+\r
+\r
 return json`;
 
 // src/util/perf.ts
@@ -33890,10 +33939,6 @@ function createOrphanOrchestrator(deps) {
     };
   }
   async function sweepOrphanModuleRegex(userId) {
-    if (!deps.regexApi?.list || !deps.regexApi?.delete) {
-      deps.log.warn(`sweepOrphanModuleRegex: spindle.regex_scripts unavailable, skipping`);
-      return 0;
-    }
     let liveModuleIds;
     try {
       const ids = await deps.listModuleIds(userId);
@@ -33946,8 +33991,6 @@ function createOrphanOrchestrator(deps) {
     return deleted;
   }
   async function listStaleModuleRegexIds(userId) {
-    if (!deps.regexApi?.list)
-      return [];
     let liveModuleIds;
     try {
       liveModuleIds = new Set(await deps.listModuleIds(userId));
@@ -33983,8 +34026,6 @@ function createOrphanOrchestrator(deps) {
     return orphanIds;
   }
   async function listStaleCharRegexIds(userId) {
-    if (!deps.regexApi?.list)
-      return [];
     let liveCharIds;
     try {
       const ids = await deps.listLumirealmCharacterIds(userId);
@@ -34033,8 +34074,6 @@ function createOrphanOrchestrator(deps) {
     return orphanIds;
   }
   async function deleteRegexIds(userId, ids) {
-    if (!deps.regexApi?.delete)
-      return 0;
     let deleted = 0;
     for (const id of ids) {
       try {
@@ -34073,25 +34112,23 @@ function createOrphanOrchestrator(deps) {
     const t0 = Date.now();
     let staleModuleRegex = 0;
     try {
-      if (deps.regexApi?.list) {
-        const liveModuleIds = new Set(await deps.listModuleIds(userId));
-        let offset = 0;
-        while (true) {
-          const page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
-          if (!Array.isArray(page.data) || page.data.length === 0)
-            break;
-          for (const r of page.data) {
-            const row = r;
-            const moduleId = row.metadata?._risu?.module_id;
-            if (typeof moduleId !== "string" || moduleId.length === 0)
-              continue;
-            if (!liveModuleIds.has(moduleId))
-              staleModuleRegex++;
-          }
-          offset += page.data.length;
-          if (typeof page.total === "number" && offset >= page.total)
-            break;
+      const liveModuleIds = new Set(await deps.listModuleIds(userId));
+      let offset = 0;
+      while (true) {
+        const page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
+        if (!Array.isArray(page.data) || page.data.length === 0)
+          break;
+        for (const r of page.data) {
+          const row = r;
+          const moduleId = row.metadata?._risu?.module_id;
+          if (typeof moduleId !== "string" || moduleId.length === 0)
+            continue;
+          if (!liveModuleIds.has(moduleId))
+            staleModuleRegex++;
         }
+        offset += page.data.length;
+        if (typeof page.total === "number" && offset >= page.total)
+          break;
       }
     } catch (err) {
       deps.log.warn(`scanRepairTargets: stale module regex count failed: ${deps.errMsg(err)}`);
@@ -38170,20 +38207,6 @@ function getModalConfirmApi() {
   const m = spindle.modal;
   return m?.confirm ? { confirm: m.confirm.bind(m) } : null;
 }
-function getRegexScriptsApi() {
-  const api = spindle.regex_scripts;
-  if (!api?.list || !api?.delete)
-    return null;
-  const out = {
-    list: api.list.bind(api),
-    delete: api.delete.bind(api)
-  };
-  if (api.update)
-    out.update = api.update.bind(api);
-  if (api.getActive)
-    out.getActive = api.getActive.bind(api);
-  return out;
-}
 function getConnectionsListFn() {
   const fn = spindle.connections?.list;
   return fn ?? null;
@@ -38903,59 +38926,20 @@ function rowToPromptScript(r) {
     ...metadata?.["repeat_raw_match"] === true ? { repeatRawMatch: true } : {}
   };
 }
-async function listPromptRegexScope(regexApi, userId, scope, scopeId) {
-  const PAGE_SIZE2 = 200;
+async function listLivePromptRegexScripts(characterId, chatId, userId) {
+  const rows = await spindle.regex_scripts.getActive({
+    target: "prompt",
+    characterId,
+    chatId,
+    userId
+  });
   const out = [];
-  let offset = 0;
-  while (true) {
-    const page = await regexApi.list({
-      userId,
-      limit: PAGE_SIZE2,
-      offset,
-      scope,
-      ...scopeId !== undefined ? { scopeId } : {},
-      target: "prompt"
-    });
-    if (!Array.isArray(page.data) || page.data.length === 0)
-      break;
-    for (const r of page.data) {
-      const row = r;
-      if (row.scope !== scope)
-        continue;
-      if (scopeId !== undefined && row.scope_id !== scopeId)
-        continue;
-      if (row.disabled === true)
-        continue;
-      const mapped = rowToPromptScript(r);
-      if (mapped)
-        out.push(mapped);
-    }
-    offset += page.data.length;
-    if (typeof page.total === "number" && offset >= page.total)
-      break;
+  for (const row of rows) {
+    const mapped = rowToPromptScript(row);
+    if (mapped)
+      out.push(mapped);
   }
   return out;
-}
-async function listLivePromptRegexScripts(characterId, chatId, userId) {
-  const regexApi = getRegexScriptsApi();
-  if (!regexApi?.list) {
-    throw new Error("spindle.regex_scripts.list is not available on this host");
-  }
-  if (regexApi.getActive) {
-    const rows = await regexApi.getActive({ target: "prompt", characterId, chatId, userId });
-    const out = [];
-    for (const r of rows) {
-      const mapped = rowToPromptScript(r);
-      if (mapped)
-        out.push(mapped);
-    }
-    return out;
-  }
-  return [
-    ...await listPromptRegexScope(regexApi, userId, "global", undefined),
-    ...await listPromptRegexScope(regexApi, userId, "character", characterId),
-    ...await listPromptRegexScope(regexApi, userId, "chat", chatId)
-  ];
 }
 
 // src/interceptors/lumi-hooks.ts
@@ -40874,9 +40858,7 @@ function moduleOwnershipPrefix(moduleId, scopeId) {
   return `lr_module_${stableIdToken(moduleId)}_${stableIdToken(scopeId)}`;
 }
 async function applyRegexReplaceStringTransform(predicate, userId, transform, log8, errMsg2) {
-  const api = getRegexScriptsApi();
-  if (!api?.list || !api.update)
-    return null;
+  const api = spindle.regex_scripts;
   const PAGE_SIZE2 = 200;
   let scanned = 0;
   let updated = 0;
@@ -40913,9 +40895,7 @@ async function applyRegexReplaceStringTransform(predicate, userId, transform, lo
   return { scanned, updated, failed };
 }
 async function applyRegexRowPatch(predicate, userId, patch, log8, errMsg2) {
-  const api = getRegexScriptsApi();
-  if (!api?.list || !api.update)
-    return null;
+  const api = spindle.regex_scripts;
   const PAGE_SIZE2 = 200;
   let scanned = 0;
   let updated = 0;
@@ -41137,9 +41117,7 @@ function createMigrationsRunner(deps) {
     let archiveWbId = null;
     const legacyAliases = async (mid, scope, scopeId) => {
       const aliases = new Map;
-      const api = getRegexScriptsApi();
-      if (!api?.list)
-        return aliases;
+      const api = spindle.regex_scripts;
       let offset = 0;
       while (true) {
         const page = await api.list({
@@ -41246,32 +41224,29 @@ function createMigrationsRunner(deps) {
       },
       repairRegexBindingsForAttached: async (mid) => {
         const charIds = await charactersAttachedTo(mid, userId);
-        const regexApi = getRegexScriptsApi();
+        const regexApi = spindle.regex_scripts;
         const module = env.module;
         const moduleName = typeof module.name === "string" && module.name.length > 0 ? module.name : env.id;
         const projected = projectModuleRegexEntries(mid, moduleName, null, module.regex, () => "");
         let repaired = 0;
         let refreshed = 0;
         for (const charId of charIds) {
-          let recovery = null;
-          if (regexApi?.list) {
-            const liveRows = [];
-            let offset = 0;
-            while (true) {
-              const page = await regexApi.list({
-                userId,
-                scope: "character",
-                scopeId: charId,
-                limit: 200,
-                offset
-              });
-              liveRows.push(...page.data.filter((row) => !!row && typeof row === "object"));
-              offset += page.data.length;
-              if (page.data.length < 200 || offset >= page.total)
-                break;
-            }
-            recovery = recoverModuleRegexScriptIds(mid, projected, liveRows);
+          const liveRows = [];
+          let offset = 0;
+          while (true) {
+            const page = await regexApi.list({
+              userId,
+              scope: "character",
+              scopeId: charId,
+              limit: 200,
+              offset
+            });
+            liveRows.push(...page.data);
+            offset += page.data.length;
+            if (page.data.length < 200 || offset >= page.total)
+              break;
           }
+          const recovery = recoverModuleRegexScriptIds(mid, projected, liveRows);
           if (recovery?.exact) {
             const recoveredIds = recovery.ids;
             const updated = await deps.updateLumirealm(charId, userId, (current) => {
@@ -45855,7 +45830,7 @@ var backfillImageJournalIfMissing = orphanDetectBuilders.backfillImageJournalIfM
 var deleteImageIds = orphanDetectBuilders.deleteImageIds;
 var orphanOrchestrator = createOrphanOrchestrator({
   imagesApi: spindle.images ? { list: (opts) => spindle.images.list(opts) } : null,
-  regexApi: getRegexScriptsApi(),
+  regexApi: spindle.regex_scripts,
   listLumirealmCharacterIds: async (userId) => {
     const entries = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
     return entries.filter((e) => e.data !== null).map((e) => e.character.id);
@@ -46237,10 +46212,7 @@ var readonlyResolver = createReadonlyResolver({
 var resolveReadonly = readonlyResolver.resolve;
 var resolveReadonlyMany = readonlyResolver.resolveMany;
 async function listLiveCharacterCrossRuleRules(characterId, userId) {
-  const regexApi = getRegexScriptsApi();
-  if (!regexApi?.list) {
-    throw new Error("spindle.regex_scripts.list is not available on this host");
-  }
+  const regexApi = spindle.regex_scripts;
   const PAGE_SIZE2 = 200;
   const out = [];
   let offset = 0;
@@ -47052,9 +47024,7 @@ var exportHandlers = createExportHandlers({
     };
   },
   listCharacterRegexRows: async (characterId, userId) => {
-    const regexApi = getRegexScriptsApi();
-    if (!regexApi?.list)
-      throw new Error("spindle.regex_scripts.list is not available on this host");
+    const regexApi = spindle.regex_scripts;
     const PAGE_SIZE2 = 200;
     const out = [];
     let offset = 0;
