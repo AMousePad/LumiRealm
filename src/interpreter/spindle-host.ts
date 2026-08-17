@@ -3,6 +3,10 @@
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type {
+  WorldBookEntryDTO,
+  WorldBookEntryUpdateDTO,
+} from 'lumiverse-spindle-types';
+import type {
   HostApi,
   HostMessage,
   HostCharacter,
@@ -118,25 +122,6 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   }
 
   const anySpindle = spindle as unknown as {
-    // Real Spindle surface is `world_books` (snake_case DTOs); the host-facing
-    // `worldInfo` adapter below maps it to the camelCase HostWorldInfoEntry that
-    // runtime consumers expect. Was previously read as a non-existent
-    // `spindle.worldInfo`, so the Lua lorebook path silently no-op'd.
-    world_books?: {
-      entries: {
-        list: (
-          worldBookId: string,
-          opts?: { limit?: number; offset?: number; userId?: string },
-        ) => Promise<{ data: readonly Record<string, unknown>[]; total: number }>;
-        create: (worldBookId: string, input: Record<string, unknown>, uid?: string) => Promise<Record<string, unknown>>;
-        update: (entryId: string, patch: Record<string, unknown>, uid?: string) => Promise<Record<string, unknown>>;
-        delete: (entryId: string, uid?: string) => Promise<void>;
-      };
-    };
-    personas?: {
-      getActive: (uid?: string) => Promise<HostPersona | null>;
-      update: (id: string, patch: Partial<HostPersona>, uid?: string) => Promise<void>;
-    };
     toast?: {
       info: (msg: string, opts?: { title?: string; duration?: number; userId?: string }) => void;
       success: (msg: string, opts?: { title?: string; duration?: number; userId?: string }) => void;
@@ -152,7 +137,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     sendToFrontend?: (msg: unknown, targetUserId?: string) => void;
   };
 
-  const dtoToHostEntry = (r: Record<string, unknown>): HostWorldInfoEntry => {
+  const dtoToHostEntry = (r: WorldBookEntryDTO): HostWorldInfoEntry => {
     const e: Record<string, unknown> = { ...r, id: typeof r.id === 'string' ? r.id : '' };
     if (typeof r.world_book_id === 'string') e.worldBookId = r.world_book_id;
     if (Array.isArray(r.key)) e.key = r.key as readonly string[];
@@ -164,8 +149,8 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     if (typeof r.constant === 'boolean') e.constant = r.constant;
     return e as HostWorldInfoEntry;
   };
-  const hostPatchToDto = (p: Partial<HostWorldInfoEntry>): Record<string, unknown> => {
-    const out: Record<string, unknown> = {};
+  const hostPatchToDto = (p: Partial<HostWorldInfoEntry>): WorldBookEntryUpdateDTO => {
+    const out: WorldBookEntryUpdateDTO = {};
     if (p.key !== undefined) out.key = Array.isArray(p.key) ? p.key : [p.key];
     if (p.content !== undefined) out.content = p.content;
     if (p.comment !== undefined) out.comment = p.comment;
@@ -174,41 +159,30 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     if (p.constant !== undefined) out.constant = p.constant;
     return out;
   };
-  const worldInfo = anySpindle.world_books
-    ? {
-        entries: {
-          list: async (bookId: string, opts?: { limit?: number }): Promise<{ data: readonly HostWorldInfoEntry[] }> => {
-            const res = await anySpindle.world_books!.entries.list(bookId, { ...opts, ...(uid ? { userId: uid } : {}) });
-            return { data: (res?.data ?? []).map(dtoToHostEntry) };
-          },
-          create: async (bookId: string, entry: Partial<HostWorldInfoEntry>): Promise<HostWorldInfoEntry> =>
-            dtoToHostEntry(await anySpindle.world_books!.entries.create(bookId, hostPatchToDto(entry), uid)),
-          update: async (id: string, patch: Partial<HostWorldInfoEntry>): Promise<HostWorldInfoEntry> =>
-            dtoToHostEntry(await anySpindle.world_books!.entries.update(id, hostPatchToDto(patch), uid)),
-          delete: (id: string) => anySpindle.world_books!.entries.delete(id, uid),
-        },
-      }
-    : undefined;
+  const worldInfo: NonNullable<HostApi['worldInfo']> = {
+    entries: {
+      list: async (bookId: string, opts?: { limit?: number }): Promise<{ data: readonly HostWorldInfoEntry[] }> => {
+        const res = await spindle.world_books.entries.list(bookId, { ...opts, ...(uid ? { userId: uid } : {}) });
+        return { data: res.data.map(dtoToHostEntry) };
+      },
+      create: async (bookId: string, entry: Partial<HostWorldInfoEntry>): Promise<HostWorldInfoEntry> =>
+        dtoToHostEntry(await spindle.world_books.entries.create(bookId, hostPatchToDto(entry), uid)),
+      update: async (id: string, patch: Partial<HostWorldInfoEntry>): Promise<HostWorldInfoEntry> =>
+        dtoToHostEntry(await spindle.world_books.entries.update(id, hostPatchToDto(patch), uid)),
+      delete: async (id: string): Promise<void> => { await spindle.world_books.entries.delete(id, uid); },
+    },
+  };
 
-  const personas = anySpindle.personas
-    ? {
-        getActive: async (): Promise<HostPersona | null> => {
-          const p = await anySpindle.personas!.getActive(uid) as Record<string, unknown> | null;
-          if (!p) return null;
-          const rawId = p['id'];
-          if (typeof rawId !== 'string') return null;
-          const rawImageId = p['image_id'];
-          const rawDesc = p['description'];
-          return {
-            ...p,
-            id: rawId,
-            description: typeof rawDesc === 'string' ? rawDesc : undefined,
-            imageId: typeof rawImageId === 'string' && rawImageId.length > 0 ? rawImageId : null,
-          } as HostPersona;
-        },
-        update: (id: string, patch: Partial<HostPersona>) => anySpindle.personas!.update(id, patch, uid),
-      }
-    : undefined;
+  const personas: NonNullable<HostApi['personas']> = {
+    getActive: async (): Promise<HostPersona | null> => {
+      const p = await spindle.personas.getActive(uid);
+      if (!p) return null;
+      return { ...p, imageId: p.image_id || null };
+    },
+    update: async (id: string, patch: Partial<HostPersona>): Promise<void> => {
+      await spindle.personas.update(id, patch, uid);
+    },
+  };
 
   const host: HostApi = {
     chat: {
@@ -225,6 +199,8 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       get: charGet,
       update: charUpdate,
     },
+    worldInfo,
+    personas,
     ui: {
       toast: (msg: string, kind?: 'info' | 'error' | 'warning' | 'success') => {
         const t = anySpindle.toast;
@@ -304,9 +280,6 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       },
     },
   };
-  if (worldInfo) (host as { worldInfo?: typeof worldInfo }).worldInfo = worldInfo;
-  if (personas) (host as { personas?: typeof personas }).personas = personas;
-
   const generateApi = (anySpindle as {
     generate?: {
       raw?: (input: {
