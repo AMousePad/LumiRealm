@@ -38202,10 +38202,6 @@ function getModalConfirmApi() {
   const m = spindle.modal;
   return m?.confirm ? { confirm: m.confirm.bind(m) } : null;
 }
-function getConnectionsListFn() {
-  const fn = spindle.connections?.list;
-  return fn ?? null;
-}
 
 // src/core/charx/module.ts
 init_base64();
@@ -42975,7 +42971,7 @@ async function assembleDisplaySnapshot(deps, active, chatId, userId, vars) {
 
 // src/state/settings-service.ts
 function createSettingsService(deps) {
-  const { userStorage, send, log: log8, errMsg: errMsg2 } = deps;
+  const { userStorage, listConnections, send, log: log8, errMsg: errMsg2 } = deps;
   const settingsByUser = new Map;
   let auxDebugCounter = 0;
   async function getSettingsForUser(userId) {
@@ -43030,13 +43026,8 @@ function createSettingsService(deps) {
     };
   }
   async function listConnectionsForUser(userId) {
-    const listFn = getConnectionsListFn();
-    if (!listFn) {
-      log8.warn("listConnectionsForUser: spindle.connections.list not available on this Lumi build");
-      return [];
-    }
     try {
-      const raw = await listFn(userId);
+      const raw = await listConnections(userId);
       return raw.map((c) => ({
         id: c.id,
         name: c.name,
@@ -45722,7 +45713,13 @@ function makeStateChangedCallback(chatId, userId) {
   return () => scheduleStateChangedRefresh2(chatId, userId);
 }
 var capturedUserIds = new Set;
-var settingsService = createSettingsService({ userStorage, send, log: log8, errMsg });
+var settingsService = createSettingsService({
+  userStorage,
+  listConnections: (userId) => spindle.connections.list(userId),
+  send,
+  log: log8,
+  errMsg
+});
 var getSettingsForUser = settingsService.getSettingsForUser;
 var getCachedSettingsSync = settingsService.getCachedSettingsSync;
 var applySettingsPatch = settingsService.applySettingsPatch;
