@@ -1222,7 +1222,43 @@ export function mountSettingsPanel(
   sendToBackend({ type: 'request_settings' });
   sendToBackend({ type: 'request_connections_list' });
 
+  async function deleteRepairRegexRows(
+    msg: Extract<BackendToFrontend, { type: 'delete_repair_regex_rows' }>,
+  ): Promise<void> {
+    let deleted = 0;
+    let ok = false;
+    try {
+      const response = await fetch('/api/v1/regex-scripts/bulk-delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ids: msg.ids }),
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error(`bulk-delete HTTP ${response.status}`);
+      const body = await response.json() as { count?: unknown };
+      const count = body.count;
+      if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
+        throw new Error('bulk-delete returned an invalid count');
+      }
+      deleted = count;
+      ok = true;
+      log.info(`settings-tab: repair regex cleanup deleted=${deleted}/${msg.ids.length}`);
+    } catch (error) {
+      log.warn(`settings-tab: repair regex cleanup failed: ${String(error)}`);
+    }
+    sendToBackend({
+      type: 'repair_regex_rows_deleted',
+      requestId: msg.requestId,
+      deleted,
+      ok,
+    });
+  }
+
   function handleBackendMessage(msg: BackendToFrontend): void {
+    if (msg.type === 'delete_repair_regex_rows') {
+      void deleteRepairRegexRows(msg);
+      return;
+    }
     if (msg.type === 'settings_pushed') {
       const setSamplers = Object.entries(msg.settings.auxSamplers)
         .filter(([, v]) => v !== null)

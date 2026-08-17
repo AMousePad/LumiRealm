@@ -50,7 +50,11 @@ import { parseDirectLorebook } from './payload/lorebook-direct-import.js';
 import { parseDirectRegex } from './payload/regex-direct-import.js';
 import { mapRegex } from './core/mappers/regex.js';
 import { createRegexImporter } from './state/regex-import.js';
-import { completeRegexInstall } from './migrations/install-coordinator.js';
+import {
+  awaitRegexDelete,
+  completeRegexDelete,
+  completeRegexInstall,
+} from './migrations/install-coordinator.js';
 import { mapLoreBook } from './core/mappers/lorebook.js';
 import { setActiveAssetIndexes, clearActiveAssetIndexes } from './interpreter/asset-cache.js';
 import {
@@ -551,10 +555,20 @@ const orphanOrchestrator = createOrphanOrchestrator({
 
 const detectDeletedWhileOff = (userId: string) => orphanOrchestrator.detectDeletedWhileOff(userId);
 const scanOrphanedImages = (userId: string) => orphanOrchestrator.scanOrphanedImages(userId);
-const sweepOrphanModuleRegex = (userId: string) => orphanOrchestrator.sweepOrphanModuleRegex(userId);
+const listStaleModuleRegexIds = (userId: string) => orphanOrchestrator.listStaleModuleRegexIds(userId);
 const listStaleCharRegexIds = (userId: string) => orphanOrchestrator.listStaleCharRegexIds(userId);
-const deleteRegexIds = (userId: string, ids: readonly string[]) => orphanOrchestrator.deleteRegexIds(userId, ids);
 const clearDeadJournals = (userId: string) => orphanOrchestrator.clearDeadJournals(userId);
+
+const deleteRepairRegexRows = async (userId: string, ids: readonly string[]): Promise<number> => {
+  if (ids.length === 0) return 0;
+  const result = await awaitRegexDelete(userId, (requestId) => {
+    send({ type: 'delete_repair_regex_rows', requestId, ids }, userId);
+  });
+  if (!result.ok) {
+    throw new Error('frontend regex cleanup did not complete');
+  }
+  return result.deleted;
+};
 
 const captureUserId = makeCaptureUserId({
   capturedUserIds,
@@ -1615,9 +1629,9 @@ const repairOrchestrator = createRepairOrchestrator({
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
   translatorMigrationChecked,
+  listStaleModuleRegexIds,
   listStaleCharRegexIds,
-  deleteRegexIds,
-  sweepOrphanModuleRegex,
+  deleteRegexRows: deleteRepairRegexRows,
   clearDeadJournals,
   send,
   emitOperationProgress,
@@ -1968,6 +1982,12 @@ const handlerRegistry: HandlerRegistry = {
       cleanupCompleted: msg.cleanupCompleted,
     });
   },
+  repair_regex_rows_deleted: async (msg, ctx) => {
+    completeRegexDelete(msg.requestId, ctx.userId, {
+      ok: msg.ok,
+      deleted: msg.deleted,
+    });
+  },
   display_authority: async (msg) => {
     if (msg.authoritative) feDisplayShadowOptOut.delete(msg.chatId);
     else feDisplayShadowOptOut.add(msg.chatId);
@@ -2001,4 +2021,3 @@ spindle.onFrontendMessage(userScoped(async (raw, userId) => {
     send({ type: 'error', message }, userId);
   }
 }));
-

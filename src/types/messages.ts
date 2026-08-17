@@ -360,6 +360,12 @@ export type FrontendToBackend =
       cleanupCompleted: boolean;
     }
   | {
+      type: 'repair_regex_rows_deleted';
+      requestId: string;
+      deleted: number;
+      ok: boolean;
+    }
+  | {
       type: 'module_artifacts_uninstalled';
       /** `null` = global scope. */
       characterId: string | null;
@@ -761,6 +767,11 @@ export type BackendToFrontend =
       error?: string;
     }
   | {
+      type: 'delete_repair_regex_rows';
+      requestId: string;
+      ids: readonly string[];
+    }
+  | {
       type: 'log_state_pushed';
       enabled: boolean;
       includeChatData: boolean;
@@ -1041,4 +1052,3 @@ export interface AttachedModuleSummary {
   /** Browser-translated cache (target language). Display-only. */
   readonly translatedName?: string;
 }
-
