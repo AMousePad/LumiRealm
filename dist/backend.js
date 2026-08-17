@@ -45766,15 +45766,12 @@ function send(msg, userId) {
   spindle.sendToFrontend(msg, userId);
 }
 function toastFor(userId, kind, message, options) {
-  const t = spindle.toast;
-  if (!t)
-    return;
   if (userId === undefined) {
     log8.warn(`toastFor(broadcast): no userId for kind=${kind}, fanning out to all users`);
-    t[kind](message, options ?? {});
+    spindle.toast[kind](message, options ?? {});
     return;
   }
-  t[kind](message, { ...options ?? {}, userId });
+  spindle.toast[kind](message, { ...options ?? {}, userId });
 }
 var logStateLoadedFor = new Set;
 async function ensureLogStateLoaded(userId) {

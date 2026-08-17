@@ -679,16 +679,12 @@ function toastFor(
   message: string,
   options?: { title?: string; duration?: number },
 ): void {
-  const t = spindle.toast as unknown as
-    | Record<typeof kind, (m: string, o: { title?: string; duration?: number; userId?: string }) => void>
-    | undefined;
-  if (!t) return;
   if (userId === undefined) {
     log.warn(`toastFor(broadcast): no userId for kind=${kind}, fanning out to all users`);
-    t[kind](message, options ?? {});
+    spindle.toast[kind](message, options ?? {});
     return;
   }
-  t[kind](message, { ...(options ?? {}), userId });
+  spindle.toast[kind](message, { ...(options ?? {}), userId });
 }
 
 
