@@ -51,7 +51,7 @@ export interface JournalFileLike {
 }
 
 export interface OrphanOrchestratorDeps {
-  readonly imagesApi: ImagesListLike | null;
+  readonly imagesApi: ImagesListLike;
   readonly regexApi: RegexScriptsApiLike;
   readonly listLumirealmCharacterIds: (userId: string) => Promise<readonly string[]>;
   readonly listModuleIds: (userId: string) => Promise<readonly string[]>;
@@ -136,9 +136,6 @@ export function createOrphanOrchestrator(
 
   async function scanOrphanedImages(userId: string): Promise<OrphanScanReport> {
     const tStart = Date.now();
-    if (!deps.imagesApi?.list) {
-      throw new Error('spindle.images.list unavailable, Lumi update required for orphan scan.');
-    }
     const live = await buildLiveImageIdSet(deps.buildOrphanDetectDeps(userId));
     const ownedById = new Map<string, SpindleImageDTOLike>();
     let offset = 0;
