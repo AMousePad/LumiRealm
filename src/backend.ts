@@ -160,7 +160,6 @@ import {
   makeQueueModalConfirm,
   makeDeleteCardByChar,
 } from './state/consent-modals.js';
-import { getModalConfirmApi } from './adapters/spindle-extras.js';
 import { normalizeSettingsPatch } from './state/settings-store.js';
 import { consumeOwnChatChange } from './state/own-chat-change.js';
 import { consumeOwnCharacterEdit, expectCharacterEdit } from './state/own-character-edit.js';
@@ -466,7 +465,11 @@ const consentApi = createConsentApi({ send, log });
 const requestConsent = consentApi.requestConsent;
 const pendingConsents = consentApi.pendingConsents;
 
-const queueModalConfirm = makeQueueModalConfirm({ getModalConfirmApi, log, errMsg });
+const queueModalConfirm = makeQueueModalConfirm({
+  confirmModal: (options) => spindle.modal.confirm(options),
+  log,
+  errMsg,
+});
 
 const deleteCardByChar = makeDeleteCardByChar({
   clearLumirealm: (charId, userId) => clearLumirealm(charactersApi(), charId, userId),

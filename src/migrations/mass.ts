@@ -2,7 +2,7 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ModuleEnvelope, ModuleIndexEntry, UserStorageLike as ModuleStorageLike } from '../state/modules-store.js';
-import type { ModalConfirmOptions } from '../adapters/spindle-extras.js';
+import type { ModalConfirmOptions } from '../state/consent-modals.js';
 import {
   readMigrationState,
   writeMigrationState,

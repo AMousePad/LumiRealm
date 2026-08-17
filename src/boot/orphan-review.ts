@@ -1,5 +1,5 @@
 import type { BackendToFrontend } from '../types/messages.js';
-import type { ModalConfirmOptions } from '../adapters/spindle-extras.js';
+import type { ModalConfirmOptions } from '../state/consent-modals.js';
 import type { JournalStorage } from '../state/image-journal.js';
 
 export interface PromptOrphanReviewDeps {
@@ -82,9 +82,8 @@ export function makePromptOrphanReviewIfAny(
     });
     let result: { confirmed: boolean } | null = queued;
     if (queued === null) {
-      log.warn(`orphan-review: spindle.modal.confirm unavailable, falling back to toast`);
+      log.warn(`orphan-review: spindle.modal.confirm failed, falling back to toast`);
     }
-    // Toast fallback when modal API is unavailable, the journal still gets cleared and the user can scan manually via Settings then Cleanup.
     if (result === null) {
       try {
         toastFor(userId, 'warning',

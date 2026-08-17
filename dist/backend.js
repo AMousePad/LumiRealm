@@ -38198,10 +38198,6 @@ function getPreAssemblyContractVersion() {
   const contracts = spindle.contracts;
   return typeof contracts?.["preAssemblyGenerationContext"] === "number" ? contracts["preAssemblyGenerationContext"] : 0;
 }
-function getModalConfirmApi() {
-  const m = spindle.modal;
-  return m?.confirm ? { confirm: m.confirm.bind(m) } : null;
-}
 
 // src/core/charx/module.ts
 init_base64();
@@ -44445,13 +44441,10 @@ function createConsentApi(deps) {
   return { requestConsent, pendingConsents };
 }
 function makeQueueModalConfirm(deps) {
-  const { getModalConfirmApi: getModalConfirmApi2, log: log8, errMsg: errMsg2 } = deps;
+  const { confirmModal, log: log8, errMsg: errMsg2 } = deps;
   const modalChainByUser = new Map;
   return (userId, options) => {
-    const modalApi = getModalConfirmApi2();
-    if (!modalApi)
-      return Promise.resolve(null);
-    const run = () => modalApi.confirm({ ...options, userId }).catch((err) => {
+    const run = () => confirmModal({ ...options, userId }).catch((err) => {
       log8.warn(`queueModalConfirm: modal.confirm threw: ${errMsg2(err)}`);
       return null;
     });
@@ -45735,7 +45728,11 @@ function journalStorage() {
 var consentApi = createConsentApi({ send, log: log8 });
 var requestConsent = consentApi.requestConsent;
 var pendingConsents = consentApi.pendingConsents;
-var queueModalConfirm = makeQueueModalConfirm({ getModalConfirmApi, log: log8, errMsg });
+var queueModalConfirm = makeQueueModalConfirm({
+  confirmModal: (options) => spindle.modal.confirm(options),
+  log: log8,
+  errMsg
+});
 var deleteCardByChar = makeDeleteCardByChar({
   clearLumirealm: (charId, userId) => clearLumirealm(charactersApi(), charId, userId),
   activeCardByChat,

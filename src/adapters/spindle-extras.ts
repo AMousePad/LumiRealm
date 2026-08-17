@@ -36,23 +36,3 @@ export function getPreAssemblyContractVersion(): number {
     ? contracts['preAssemblyGenerationContext']
     : 0;
 }
-
-// Modal confirm dialog. Optional on older Lumi builds.
-export interface ModalConfirmOptions {
-  title: string;
-  message: string;
-  variant?: 'info' | 'warning' | 'danger' | 'success';
-  confirmLabel?: string;
-  cancelLabel?: string;
-  userId?: string;
-}
-export interface ModalConfirmApi {
-  readonly confirm: (options: ModalConfirmOptions) => Promise<{ confirmed: boolean }>;
-}
-
-export function getModalConfirmApi(): ModalConfirmApi | null {
-  const m = (spindle as unknown as { modal?: { confirm?: ModalConfirmApi['confirm'] } }).modal;
-  // .bind(m) preserves `this` for hosts whose modal.confirm references private state (queue, decorators).
-  // Without it the wrapper object becomes the receiver and the modal pipeline silently fails.
-  return m?.confirm ? { confirm: m.confirm.bind(m) } : null;
-}
