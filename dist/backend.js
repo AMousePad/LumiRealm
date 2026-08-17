@@ -24477,7 +24477,7 @@ async function importCard(args) {
     logInfo(`(3.5) consent granted; flag set on user_overrides`);
   }
   let worldBookId = null;
-  if (bundle.worldBookEntries.length > 0 && args.spindle.world_books) {
+  if (bundle.worldBookEntries.length > 0) {
     progress("creating_character", `Creating world book with ${bundle.worldBookEntries.length} entries\u2026`, 0.3);
     const tBook = Date.now();
     try {
@@ -24498,7 +24498,7 @@ async function importCard(args) {
       warnings.push(`Failed to create world book: ${msg}. Lorebook entries skipped.`);
     }
   } else {
-    logInfo(`(4a) world_books: ${bundle.worldBookEntries.length === 0 ? "no entries" : "spindle.world_books unavailable"}`);
+    logInfo(`(4a) world_books: no entries`);
   }
   progress("creating_character", `Creating character "${bundle.character.name}"\u2026`, 0.4);
   const tChar = Date.now();
@@ -24522,7 +24522,7 @@ async function importCard(args) {
   const created = await args.spindle.characters.create(characterInput, args.userId);
   const characterId = created.id;
   logInfo(`(4b) spindle.characters.create -> id=${characterId} in ${Date.now() - tChar}ms`);
-  if (worldBookId && args.spindle.world_books) {
+  if (worldBookId) {
     try {
       await args.spindle.world_books.update(worldBookId, {
         metadata: {
@@ -24537,35 +24537,31 @@ async function importCard(args) {
     }
   }
   let avatarImageId = null;
-  if (args.spindle.characters.setAvatar) {
-    const preferred = bundle.preferredAvatar;
-    const avatar = preferred ? { path: preferred.filename, data: preferred.data, filename: preferred.filename, mime: preferred.mime } : (() => {
-      const picked = pickAvatar(bundle.assets);
-      return picked ? { path: picked.path, data: picked.data, filename: picked.path.split("/").pop() ?? "avatar.png", mime: guessMimeType(picked.path) } : null;
-    })();
-    if (avatar) {
-      const tAvatar = Date.now();
-      try {
-        logInfo(`(5a) setAvatar source=${preferred ? "preferred" : "asset-scan"} path=${avatar.path} bytes=${avatar.data.byteLength} mime=${avatar.mime}`);
-        const avatarResult = await args.spindle.characters.setAvatar(characterId, {
-          data: avatar.data,
-          filename: avatar.filename,
-          mime_type: avatar.mime
-        }, args.userId);
-        if (typeof avatarResult.image_id === "string" && avatarResult.image_id.length > 0) {
-          avatarImageId = avatarResult.image_id;
-        }
-        logInfo(`(5a) setAvatar done in ${Date.now() - tAvatar}ms image_id=${avatarImageId ?? "<none>"}`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logWarn(`(5a) setAvatar failed: ${msg}`);
-        warnings.push(`Failed to set character avatar: ${msg}`);
+  const preferred = bundle.preferredAvatar;
+  const avatar = preferred ? { path: preferred.filename, data: preferred.data, filename: preferred.filename, mime: preferred.mime } : (() => {
+    const picked = pickAvatar(bundle.assets);
+    return picked ? { path: picked.path, data: picked.data, filename: picked.path.split("/").pop() ?? "avatar.png", mime: guessMimeType(picked.path) } : null;
+  })();
+  if (avatar) {
+    const tAvatar = Date.now();
+    try {
+      logInfo(`(5a) setAvatar source=${preferred ? "preferred" : "asset-scan"} path=${avatar.path} bytes=${avatar.data.byteLength} mime=${avatar.mime}`);
+      const avatarResult = await args.spindle.characters.setAvatar(characterId, {
+        data: avatar.data,
+        filename: avatar.filename,
+        mime_type: avatar.mime
+      }, args.userId);
+      if (typeof avatarResult.image_id === "string" && avatarResult.image_id.length > 0) {
+        avatarImageId = avatarResult.image_id;
       }
-    } else {
-      logInfo(`(5a) setAvatar: no avatar candidate (no preferred avatar, no image in assets)`);
+      logInfo(`(5a) setAvatar done in ${Date.now() - tAvatar}ms image_id=${avatarImageId ?? "<none>"}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logWarn(`(5a) setAvatar failed: ${msg}`);
+      warnings.push(`Failed to set character avatar: ${msg}`);
     }
   } else {
-    logInfo(`(5a) setAvatar: API unavailable (spindle-types < 0.4.31) \u2014 skipping`);
+    logInfo(`(5a) setAvatar: no avatar candidate (no preferred avatar, no image in assets)`);
   }
   progress("uploading_assets", "Uploading assets\u2026", 0.55);
   const tAssets = Date.now();
@@ -24708,7 +24704,7 @@ async function importCard(args) {
   }, pathToImageId, avatarImageId);
   const assetIndex = builtIndexes.assetIndex;
   const emotionIndex = builtIndexes.emotionIndex;
-  if (worldBookId && args.spindle.world_books) {
+  if (worldBookId) {
     progress("uploading_assets", `Uploading ${bundle.worldBookEntries.length} world-info entries\u2026`, 0.6);
     const tEntries = Date.now();
     const entries = bundle.worldBookEntries;
@@ -43120,7 +43116,6 @@ function createImportCardOrchestrator(deps) {
   async function importCardFromBytes(bytes, fileName, userId) {
     const tStart = Date.now();
     log8.info(`importCardFromBytes: start file=${fileName} bytes=${bytes.byteLength} userId=${userId}`);
-    const hasSetAvatar = typeof spindle.characters.setAvatar === "function";
     if (!spindle.images?.upload) {
       throw new Error("spindle.images.upload is unavailable,Lumi 0.9.6+ required.");
     }
@@ -43137,17 +43132,15 @@ function createImportCardOrchestrator(deps) {
         get: (characterId, uid) => spindle.characters.get(characterId, uid),
         update: (characterId, input, uid) => spindle.characters.update(characterId, input, uid),
         list: (options) => spindle.characters.list(options),
-        ...hasSetAvatar ? {
-          setAvatar: (characterId, avatar, uid) => {
-            log8.info(`spindle.characters.setAvatar characterId=${characterId} filename=${avatar.filename ?? "?"} bytes=${avatar.data.byteLength}`);
-            return spindle.characters.setAvatar(characterId, avatar, uid).then((c) => ({
-              id: c.id,
-              image_id: typeof c.image_id === "string" ? c.image_id : null
-            }));
-          }
-        } : {}
+        setAvatar: (characterId, avatar, uid) => {
+          log8.info(`spindle.characters.setAvatar characterId=${characterId} filename=${avatar.filename ?? "?"} bytes=${avatar.data.byteLength}`);
+          return spindle.characters.setAvatar(characterId, avatar, uid).then((c) => ({
+            id: c.id,
+            image_id: typeof c.image_id === "string" ? c.image_id : null
+          }));
+        }
       },
-      world_books: spindle.world_books ? {
+      world_books: {
         create: (input, uid) => {
           log8.info(`spindle.world_books.create name=${input.name ?? "?"}`);
           return spindle.world_books.create(input, uid).then((w) => {
@@ -43159,7 +43152,7 @@ function createImportCardOrchestrator(deps) {
         entries: {
           create: (bookId, input, uid) => spindle.world_books.entries.create(bookId, input, uid).then((e) => ({ id: e.id }))
         }
-      } : undefined,
+      },
       images: {
         upload: (input, uid) => spindleImagesApi.upload(input, uid).then((img) => ({ id: img.id })),
         ...typeof spindleImagesApi.uploadMany === "function" ? {
@@ -43168,8 +43161,6 @@ function createImportCardOrchestrator(deps) {
       },
       requestConsent: (opts) => requestConsent(opts, userId)
     };
-    if (!spindle.world_books)
-      log8.warn(`spindle.world_books unavailable, lorebook entries will be skipped`);
     enterAssetUpload();
     try {
       const result = await importCard({
