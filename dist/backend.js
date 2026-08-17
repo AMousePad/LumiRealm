@@ -26090,22 +26090,15 @@ function createWorldBookOps(deps) {
 // src/migrations/module.ts
 async function applyV5RefreshAttachedRegex(args, deps) {
   const notes = [];
-  if (deps.refreshArtifactsForAttached) {
-    try {
-      const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
-      notes.push(`refreshed ${refreshed} attached char(s)`);
-    } catch (err) {
-      deps.log.warn(`migrate-module(${args.env.id}) v5: refreshArtifactsForAttached threw: ` + (err instanceof Error ? err.message : String(err)));
-    }
-  } else {
-    notes.push("refreshArtifactsForAttached dep missing, skipping refresh");
+  try {
+    const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
+    notes.push(`refreshed ${refreshed} attached char(s)`);
+  } catch (err) {
+    deps.log.warn(`migrate-module(${args.env.id}) v5: refreshArtifactsForAttached threw: ` + (err instanceof Error ? err.message : String(err)));
   }
   return { nextEnv: args.env, notes };
 }
 async function applyV16MigrateRegexOwnership(args, deps) {
-  if (!deps.refreshArtifactsForAttached) {
-    throw new Error("refreshArtifactsForAttached dependency is required");
-  }
   const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
   return {
     nextEnv: args.env,
@@ -26113,13 +26106,10 @@ async function applyV16MigrateRegexOwnership(args, deps) {
   };
 }
 async function applyV17BackfillRegexFolders(args, deps) {
-  if (!deps.applyModuleRegexRowPatch) {
-    throw new Error("applyModuleRegexRowPatch dependency is required");
-  }
   const name = typeof args.env.module.name === "string" && args.env.module.name.length > 0 ? args.env.module.name : args.env.filename;
   const folder = `Module: ${name}`;
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => typeof row["folder"] === "string" && row["folder"].length > 0 ? null : { folder });
-  if (!result || result.failed > 0)
+  if (result.failed > 0)
     throw new Error("module regex folder backfill did not complete");
   return {
     nextEnv: args.env,
@@ -26137,15 +26127,7 @@ async function applyV11RepairAttachedRegexIdentity(args, deps) {
   };
 }
 async function applyV6StripStylePrefixInPlace(args, deps) {
-  if (!deps.applyModuleRegexReplaceStringTransform) {
-    deps.log.warn(`migrate-module(${args.env.id}) v6: regex_scripts.update unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`);
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexReplaceStringTransform(args.env.id, unprefixCssInStyleBlocks);
-  if (result === null) {
-    deps.log.warn(`migrate-module(${args.env.id}) v6: transform dep returned null, falling back to wholesale refresh`);
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   return {
     nextEnv: args.env,
     notes: [
@@ -26156,10 +26138,6 @@ async function applyV6StripStylePrefixInPlace(args, deps) {
   };
 }
 async function applyV7FixPhaseMapPlacement(args, deps) {
-  if (!deps.applyModuleRegexRowPatch) {
-    deps.log.warn(`migrate-module(${args.env.id}) v7: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`);
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
     const meta = row["metadata"];
     const phase = meta?._risu?.source_type;
@@ -26196,10 +26174,6 @@ async function applyV7FixPhaseMapPlacement(args, deps) {
     }
     return null;
   });
-  if (result === null) {
-    deps.log.warn(`migrate-module(${args.env.id}) v7: row-patch returned null, falling back to wholesale refresh`);
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   return {
     nextEnv: args.env,
     notes: [
@@ -26210,10 +26184,6 @@ async function applyV7FixPhaseMapPlacement(args, deps) {
   };
 }
 async function applyV8FixEscapedPerMessageGate(args, deps) {
-  if (!deps.applyModuleRegexRowPatch) {
-    deps.log.warn(`migrate-module(${args.env.id}) v8: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`);
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
     if (row["substitute_macros"] !== "escaped")
       return null;
@@ -26224,10 +26194,6 @@ async function applyV8FixEscapedPerMessageGate(args, deps) {
       return null;
     return { substitute_macros: "after" };
   });
-  if (result === null) {
-    deps.log.warn(`migrate-module(${args.env.id}) v8: row-patch returned null, falling back to wholesale refresh`);
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   return {
     nextEnv: args.env,
     notes: [
@@ -26304,10 +26270,6 @@ async function applyV10ExcludeGreetingPerEntry(args, deps) {
   };
 }
 async function applyV12NormalizeDisplayRows(args, deps) {
-  if (!deps.applyModuleRegexRowPatch) {
-    deps.log.warn(`migrate-module(${args.env.id}) v12: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`);
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
     if (row["target"] !== "display")
       return null;
@@ -26317,10 +26279,6 @@ async function applyV12NormalizeDisplayRows(args, deps) {
     const normalized = normalizeModuleDisplayReplaceString(replaceString);
     return normalized === replaceString ? null : { replace_string: normalized };
   });
-  if (result === null) {
-    deps.log.warn(`migrate-module(${args.env.id}) v12: row-patch returned null, falling back to wholesale refresh`);
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   return {
     nextEnv: args.env,
     notes: [
@@ -26331,9 +26289,6 @@ async function applyV12NormalizeDisplayRows(args, deps) {
   };
 }
 async function applyV14UseFindMacroMode(args, deps) {
-  if (!deps.applyModuleRegexRowPatch) {
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
     if (row["substitute_macros"] !== "none")
       return null;
@@ -26341,8 +26296,6 @@ async function applyV14UseFindMacroMode(args, deps) {
     const actions = metadata?._risu?.flag_actions;
     return Array.isArray(actions) && actions.includes("cbs") ? { substitute_macros: "find" } : null;
   });
-  if (result === null)
-    return applyV5RefreshAttachedRegex(args, deps);
   return {
     nextEnv: args.env,
     notes: [

@@ -23,20 +23,20 @@ export interface ModuleMigrationDeps {
   reinstallArtifactsForAttached: (moduleId: string) => Promise<number>;
   // Replacement-first refresh for every attached character. Stale rows are
   // removed only after the new projection is verified live.
-  refreshArtifactsForAttached?: (moduleId: string) => Promise<number>;
+  refreshArtifactsForAttached: (moduleId: string) => Promise<number>;
   repairRegexBindingsForAttached: (
     moduleId: string,
   ) => Promise<{ repaired: number; refreshed: number }>;
   // In-place patches per row, scoped to rows whose metadata._risu.module_id
-  // matches. Returns null when host lacks regex_scripts.update.
-  applyModuleRegexReplaceStringTransform?: (
+  // matches.
+  applyModuleRegexReplaceStringTransform: (
     moduleId: string,
     transform: (replaceString: string) => string,
-  ) => Promise<{ scanned: number; updated: number; failed: number } | null>;
-  applyModuleRegexRowPatch?: (
+  ) => Promise<{ scanned: number; updated: number; failed: number }>;
+  applyModuleRegexRowPatch: (
     moduleId: string,
     patch: (row: Readonly<Record<string, unknown>>) => Record<string, unknown> | null,
-  ) => Promise<{ scanned: number; updated: number; failed: number } | null>;
+  ) => Promise<{ scanned: number; updated: number; failed: number }>;
   listWorldBookEntries: (
     worldBookId: string,
   ) => Promise<readonly LiveModuleWorldBookEntry[]>;
@@ -101,18 +101,14 @@ async function applyV5RefreshAttachedRegex(
   deps: ModuleMigrationDeps,
 ): Promise<ModuleMigrationStepResult> {
   const notes: string[] = [];
-  if (deps.refreshArtifactsForAttached) {
-    try {
-      const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
-      notes.push(`refreshed ${refreshed} attached char(s)`);
-    } catch (err) {
-      deps.log.warn(
-        `migrate-module(${args.env.id}) v5: refreshArtifactsForAttached threw: ` +
-          (err instanceof Error ? err.message : String(err)),
-      );
-    }
-  } else {
-    notes.push('refreshArtifactsForAttached dep missing, skipping refresh');
+  try {
+    const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
+    notes.push(`refreshed ${refreshed} attached char(s)`);
+  } catch (err) {
+    deps.log.warn(
+      `migrate-module(${args.env.id}) v5: refreshArtifactsForAttached threw: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
   }
   return { nextEnv: args.env, notes };
 }
@@ -121,9 +117,6 @@ async function applyV16MigrateRegexOwnership(
   args: ModuleMigrationStepArgs,
   deps: ModuleMigrationDeps,
 ): Promise<ModuleMigrationStepResult> {
-  if (!deps.refreshArtifactsForAttached) {
-    throw new Error('refreshArtifactsForAttached dependency is required');
-  }
   const refreshed = await deps.refreshArtifactsForAttached(args.env.id);
   return {
     nextEnv: args.env,
@@ -135,9 +128,6 @@ async function applyV17BackfillRegexFolders(
   args: ModuleMigrationStepArgs,
   deps: ModuleMigrationDeps,
 ): Promise<ModuleMigrationStepResult> {
-  if (!deps.applyModuleRegexRowPatch) {
-    throw new Error('applyModuleRegexRowPatch dependency is required');
-  }
   const name = typeof args.env.module.name === 'string' && args.env.module.name.length > 0
     ? args.env.module.name
     : args.env.filename;
@@ -148,7 +138,7 @@ async function applyV17BackfillRegexFolders(
       ? null
       : { folder },
   );
-  if (!result || result.failed > 0) throw new Error('module regex folder backfill did not complete');
+  if (result.failed > 0) throw new Error('module regex folder backfill did not complete');
   return {
     nextEnv: args.env,
     notes: [`grouped ${result.updated} regex_script(s)`],
@@ -174,24 +164,11 @@ async function applyV6StripStylePrefixInPlace(
   deps: ModuleMigrationDeps,
 ): Promise<ModuleMigrationStepResult> {
   // Preserves user disable + edits by patching only replace_string on rows
-  // where the transform actually changes the content. Falls back to wholesale
-  // refresh on hosts that don't expose regex_scripts.update.
-  if (!deps.applyModuleRegexReplaceStringTransform) {
-    deps.log.warn(
-      `migrate-module(${args.env.id}) v6: regex_scripts.update unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`,
-    );
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
+  // where the transform actually changes the content.
   const result = await deps.applyModuleRegexReplaceStringTransform(
     args.env.id,
     unprefixCssInStyleBlocks,
   );
-  if (result === null) {
-    deps.log.warn(
-      `migrate-module(${args.env.id}) v6: transform dep returned null, falling back to wholesale refresh`,
-    );
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   return {
     nextEnv: args.env,
     notes: [
@@ -210,12 +187,6 @@ async function applyV7FixPhaseMapPlacement(
   // disable (no Lumi translation pipeline). editdisplay: add user_input
   // placement (the pre-fix module mapping was ai_output-only, but Risu runs
   // editdisplay on every rendered message regardless of role).
-  if (!deps.applyModuleRegexRowPatch) {
-    deps.log.warn(
-      `migrate-module(${args.env.id}) v7: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`,
-    );
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
     const meta = row['metadata'] as { _risu?: { source_type?: unknown } } | undefined;
     const phase = meta?._risu?.source_type;
@@ -246,12 +217,6 @@ async function applyV7FixPhaseMapPlacement(
     }
     return null;
   });
-  if (result === null) {
-    deps.log.warn(
-      `migrate-module(${args.env.id}) v7: row-patch returned null, falling back to wholesale refresh`,
-    );
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   return {
     nextEnv: args.env,
     notes: [
@@ -270,12 +235,6 @@ async function applyV8FixEscapedPerMessageGate(
   // replace_string carries a per-message {{chat_index}} gate render flakily
   // ('escaped' pre-resolves chat-wide). Re-route only those to 'after', in
   // place, so user disable + edits survive.
-  if (!deps.applyModuleRegexRowPatch) {
-    deps.log.warn(
-      `migrate-module(${args.env.id}) v8: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`,
-    );
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
     if (row['substitute_macros'] !== 'escaped') return null;
     const rs = row['replace_string'];
@@ -283,12 +242,6 @@ async function applyV8FixEscapedPerMessageGate(
     if (!replaceStringHasPerMessageMacro(rs)) return null;
     return { substitute_macros: 'after' };
   });
-  if (result === null) {
-    deps.log.warn(
-      `migrate-module(${args.env.id}) v8: row-patch returned null, falling back to wholesale refresh`,
-    );
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   return {
     nextEnv: args.env,
     notes: [
@@ -379,12 +332,6 @@ async function applyV12NormalizeDisplayRows(
   args: ModuleMigrationStepArgs,
   deps: ModuleMigrationDeps,
 ): Promise<ModuleMigrationStepResult> {
-  if (!deps.applyModuleRegexRowPatch) {
-    deps.log.warn(
-      `migrate-module(${args.env.id}) v12: row-patch unavailable, falling back to wholesale refresh (user disable/edit state will be lost)`,
-    );
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
     if (row['target'] !== 'display') return null;
     const replaceString = row['replace_string'];
@@ -394,12 +341,6 @@ async function applyV12NormalizeDisplayRows(
       ? null
       : { replace_string: normalized };
   });
-  if (result === null) {
-    deps.log.warn(
-      `migrate-module(${args.env.id}) v12: row-patch returned null, falling back to wholesale refresh`,
-    );
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   return {
     nextEnv: args.env,
     notes: [
@@ -414,9 +355,6 @@ async function applyV14UseFindMacroMode(
   args: ModuleMigrationStepArgs,
   deps: ModuleMigrationDeps,
 ): Promise<ModuleMigrationStepResult> {
-  if (!deps.applyModuleRegexRowPatch) {
-    return applyV5RefreshAttachedRegex(args, deps);
-  }
   const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
     if (row['substitute_macros'] !== 'none') return null;
     const metadata = row['metadata'] as {
@@ -427,7 +365,6 @@ async function applyV14UseFindMacroMode(
       ? { substitute_macros: 'find' }
       : null;
   });
-  if (result === null) return applyV5RefreshAttachedRegex(args, deps);
   return {
     nextEnv: args.env,
     notes: [
