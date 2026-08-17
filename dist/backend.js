@@ -42756,10 +42756,9 @@ function buildDisplayChatStateFromView(view) {
   };
 }
 async function fetchHostLorebook(bookIds, userId) {
-  const wb = spindle.world_books;
-  if (!wb || bookIds.length === 0)
+  if (bookIds.length === 0)
     return [];
-  const lists = await Promise.allSettled(bookIds.map((bid) => wb.entries.list(bid, { limit: 1000, userId }).then((res) => ({ bid, res }))));
+  const lists = await Promise.allSettled(bookIds.map((bid) => spindle.world_books.entries.list(bid, { limit: 1000, userId }).then((res) => ({ bid, res }))));
   const out = [];
   for (const r of lists) {
     if (r.status !== "fulfilled" || !Array.isArray(r.value.res?.data))
