@@ -1768,7 +1768,7 @@ const importHandlers = createImportHandlers({
   },
   deleteCardByChar: (cid, uid, mode) => deleteCardByChar(cid, uid, mode),
   emitOperationProgress,
-  notifyHostVersionOutdated: (msg, uid) => spindle.sendToFrontend(msg as never, uid),
+  notifyHostVersionOutdated: (msg, uid) => spindle.sendToFrontend(msg, uid),
   notifyMissingPermissions: (msg, uid) => spindle.sendToFrontend(msg as never, uid),
   log,
   errMsg,
