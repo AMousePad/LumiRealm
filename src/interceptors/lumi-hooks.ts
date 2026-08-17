@@ -50,15 +50,11 @@ import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import { makeDispatcherScriptNS } from '../interpreter/dispatcher.js';
 import { runRequestTriggerChain } from '../interpreter/request-trigger-runner.js';
 import {
-  getRegisterMacroInterceptor,
-  getRegisterMessageContentProcessor,
-  getRegisterInterceptor,
-  getRegisterWorldInfoInterceptor,
-  getRegisterContextHandler,
   getPreAssemblyContractVersion,
   type GenerationContextShape,
   type LlmMessage,
   type InterceptorContext,
+  type RegisterInterceptor,
 } from '../adapters/spindle-extras.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 import type { InjectAtPlan } from '../payload/lorebook-decorator-runtime.js';
@@ -180,16 +176,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
   }
 
   function registerMacroInterceptor(): void {
-    const register = getRegisterMacroInterceptor();
-    const registerMessageContentProcessor = getRegisterMessageContentProcessor();
-    if (typeof register !== 'function') {
-      throw new Error(
-        'LumiRealm requires Lumiverse macroInterceptor support; update Lumiverse before loading this extension',
-      );
-    }
-    const mcpRenderAvailable = typeof registerMessageContentProcessor === 'function';
-
-    register((ctx) => withMaybeUser(ctx.userId, async () => {
+    spindle.registerMacroInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
       const callId = ++diagInterceptorCall;
       const t0 = Date.now();
       const chatId = typeof ctx.env.chat?.id === 'string' ? (ctx.env.chat.id as string) : null;
@@ -237,17 +224,14 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
 
       const micDynForKey = (ctx.env as { dynamicMacros?: Record<string, string> }).dynamicMacros;
       const micCtxKey = `${micDynForKey?.chat_index ?? ''}|${micDynForKey?.role ?? ''}`;
-      const cacheable = !(ctx.commit === false && !mcpRenderAvailable);
-      if (cacheable) {
-        const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
-        if (hit !== null) {
-          maybeEmitMicCacheStats();
-          log.trace(
-            `macroInterceptor.exit #${callId} path=cache_hit elapsed=${Date.now() - t0}ms ` +
-              `tmpl_len=${ctx.template.length} out_len=${hit.result.length}`,
-          );
-          return { text: hit.result, touchedVars: hit.touchedVars, volatile: hit.volatile };
-        }
+      const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
+      if (hit !== null) {
+        maybeEmitMicCacheStats();
+        log.trace(
+          `macroInterceptor.exit #${callId} path=cache_hit elapsed=${Date.now() - t0}ms ` +
+            `tmpl_len=${ctx.template.length} out_len=${hit.result.length}`,
+        );
+        return { text: hit.result, touchedVars: hit.touchedVars, volatile: hit.volatile };
       }
 
       const charCard = ctx.env.character as {
@@ -370,67 +354,18 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       const resolvedMarker = /★[A-Z_]+★|###[A-Z_]+###/.exec(resolved)?.[0] ?? null;
       const stillHasRaw = resolved.includes('{{');
 
-      // editDisplay fallback for Lumi builds without the render MCP origin (the load-bearing path on Lumi 0.9.6+).
-      // DO NOT widen this gate, every commit:false template flowing through here (bg-html, 88KB CSS bundles) feeds 16+ Lua VMs, ~12s per chat-open on listenEdit-heavy cards.
-      if (!ctx.commit && !mcpRenderAvailable) {
-        const triggers = active.card.risuPayload.triggers as ReadonlyArray<{
-          effect?: ReadonlyArray<{ type?: string }>;
-        }>;
-        const luaScripts = active.card.risuPayload.lua_scripts;
-        const hasLuaTrigger = triggers.some(
-          (t) => t.effect?.[0]?.type === 'triggerlua',
-        );
-        if (hasLuaTrigger && ctx.userId !== undefined) {
-          const editChain = triggers.map((t, i) => ({
-            source: t,
-            luaCode: luaScripts[i] ?? '',
-          }));
-          try {
-            const editApi = makeSpindleHost({
-              chatId,
-              characterId: active.card.character_id,
-              userId: ctx.userId,
-            });
-            const editScriptNS = makeDispatcherScriptNS();
-            resolved = await runListenEditChain(
-              editChain,
-              'editDisplay',
-              resolved,
-              { index: typeof envChat.lastMessageId === 'number' ? envChat.lastMessageId : -1 },
-              editApi,
-              { characterId: active.card.character_id },
-              editScriptNS,
-              {
-                chatId,
-                characterId: active.card.character_id,
-                resolveTemplate: (text: string) => deps.resolveReadonly(text, chatId, active.card.character_id, ctx.userId, { cbsContext: true }),
-              },
-            );
-            recorder.volatile = true;
-          } catch (err) {
-            log.warn(`macroInterceptor: listenEdit chain threw: ${errMsg(err)}. Continuing with pre-hook resolved.`);
-          }
-        }
-
-        // @@emo and @@repeat_back fire from the render MCP origin and runBinding,output. Skip them here so setExpression doesn't over-trigger.
-      }
-
       const touchedVars = [...recorder.touched];
       if (resolved === ctx.template) {
-        if (cacheable) {
-          cacheMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey, resolved, touchedVars, recorder.volatile);
-          maybeEmitMicCacheStats();
-        }
+        cacheMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey, resolved, touchedVars, recorder.volatile);
+        maybeEmitMicCacheStats();
         log.trace(
           `macroInterceptor.exit #${callId} path=unchanged_passthrough elapsed=${Date.now() - t0}ms ` +
             `tmpl_len=${ctx.template.length} marker=${resolvedMarker ?? 'none'}`,
         );
         return { text: resolved, touchedVars, volatile: recorder.volatile };
       }
-      if (cacheable) {
-        cacheMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey, resolved, touchedVars, recorder.volatile);
-        maybeEmitMicCacheStats();
-      }
+      cacheMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey, resolved, touchedVars, recorder.volatile);
+      maybeEmitMicCacheStats();
       // Doc-boundary normalize is NOT applied here. macroInterceptor fires for both replace_string and find_regex, and wrapping a find_regex would break compilation.
       log.trace(
         `macroInterceptor.exit #${callId} path=resolved elapsed=${Date.now() - t0}ms ` +
@@ -455,13 +390,8 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
     log.info('macroInterceptor: registered at priority=100');
   }
 
-  function registerMessageContentProcessorIfAvailable(): void {
-    const registerMessageContentProcessor = getRegisterMessageContentProcessor();
-    if (typeof registerMessageContentProcessor !== 'function') {
-      log.info('messageContentProcessor: not available on this Lumi build, falling back to reactive MESSAGE_EDITED resolve');
-      return;
-    }
-    registerMessageContentProcessor((ctx) => withMaybeUser(ctx.userId, async () => {
+  function registerMessageContentProcessor(): void {
+    spindle.registerMessageContentProcessor((ctx) => withMaybeUser(ctx.userId, async () => {
       // Gate only on "is this a Risu-imported chat?". Risu's semantic runs the pipeline always, with `resolved === ctx.content` as the short-circuit.
       const tStart = Date.now();
       const seq = ++mcpEnterSeq;
@@ -726,14 +656,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
     log.info('messageContentProcessor: registered');
   }
 
-  function registerInterceptorIfAvailable(): void {
-    const registerInterceptor = getRegisterInterceptor();
-    if (typeof registerInterceptor !== 'function') {
-      log.info('interceptor: not available on this Lumi build, listenEdit editInput/editRequest will not fire');
-      return;
-    }
-
-    registerInterceptor(async (messages, contextRaw) => {
+  function registerInterceptor(): void {
+    const register = spindle.registerInterceptor as unknown as RegisterInterceptor;
+    register(async (messages, contextRaw) => {
       const ctx = (contextRaw ?? {}) as InterceptorContext;
       const chatId = typeof ctx.chatId === 'string' ? ctx.chatId : null;
       if (!chatId) return messages;
@@ -980,14 +905,13 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
   }
 
   function registerContextHandler(): void {
-    const register = getRegisterContextHandler();
     const contractVersion = getPreAssemblyContractVersion();
-    if (typeof register !== 'function' || contractVersion < 1) {
+    if (contractVersion < 1) {
       log.error(`contextHandler: host preAssemblyGenerationContext contract=${contractVersion}, need >=1. Update Lumiverse. Risu input/start triggers and stopSending will NOT fire.`);
       return;
     }
 
-    register(async (contextRaw) => {
+    spindle.registerContextHandler(async (contextRaw) => {
       const ctx = (contextRaw ?? {}) as GenerationContextShape;
       const chatId = typeof ctx.chatId === 'string' ? ctx.chatId : null;
       if (!chatId || ctx.dryRun !== false) return contextRaw;
@@ -1027,14 +951,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
     log.info('contextHandler: registered (input + start, pre-assembly, 30s budget)');
   }
 
-  function registerWorldInfoInterceptorIfAvailable(): void {
-    const registerWorldInfoInterceptor = getRegisterWorldInfoInterceptor();
-    if (!registerWorldInfoInterceptor) {
-      log.info('worldInfoInterceptor: not available on this Lumi build, Tier 2 lorebook decorators will not gate');
-      return;
-    }
+  function registerWorldInfoInterceptor(): void {
     log.info(`[decorators] registerWorldInfoInterceptor wired at boot`);
-    registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
+    spindle.registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
       const hasDecoratorEntries = ctx.entries.some((e) => {
         const stash = e.extensions?.['_risu_decorators'];
         return Array.isArray(stash) && stash.length > 0;
@@ -1265,9 +1184,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
   return {
     registerAll(): void {
       registerMacroInterceptor();
-      registerMessageContentProcessorIfAvailable();
-      registerInterceptorIfAvailable();
-      registerWorldInfoInterceptorIfAvailable();
+      registerMessageContentProcessor();
+      registerInterceptor();
+      registerWorldInfoInterceptor();
       registerContextHandler();
     },
   };
