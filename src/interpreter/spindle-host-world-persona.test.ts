@@ -49,6 +49,7 @@ function harness(options: {
   };
   const activePersona = options.activePersona === undefined ? persona() : options.activePersona;
   (globalThis as { spindle?: unknown }).spindle = {
+    generate: { raw: async () => ({ content: '' }) },
     world_books: {
       entries: {
         async list(...args: unknown[]) {

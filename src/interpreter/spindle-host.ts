@@ -280,169 +280,133 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       },
     },
   };
-  const generateApi = (anySpindle as {
-    generate?: {
-      raw?: (input: {
-        type: 'raw' | 'quiet' | 'batch';
-        messages?: readonly { role: string; content: string }[];
-        connection_id?: string;
-        provider?: string;
-        model?: string;
-        parameters?: Record<string, unknown>;
-        userId?: string;
-      }) => Promise<unknown>;
-    };
-  }).generate;
-  type ConnectionDTO = {
-    id: string; name: string; provider: string; model: string;
-    is_default: boolean; has_api_key: boolean;
+  type RawGenerationInput = {
+    type: 'raw' | 'quiet' | 'batch';
+    messages?: readonly { role: string; content: string }[];
+    connection_id?: string;
+    provider?: string;
+    model?: string;
+    parameters?: Record<string, unknown>;
+    userId?: string;
   };
-  const connectionsApi = (anySpindle as {
-    connections?: {
-      list?: (uid?: string) => Promise<readonly ConnectionDTO[]>;
-      get?: (id: string, uid?: string) => Promise<ConnectionDTO | null>;
-    };
-  }).connections;
-  if (generateApi?.raw) {
-    // spindle.generate.raw requires connection_id and model at top level; resolve before dispatch.
-    type Resolution =
-      | { ok: true; value: { id: string; model: string | undefined; provider: string } }
-      | { ok: false; error: string };
+  const rawGenerate = spindle.generate.raw as unknown as (input: RawGenerationInput) => Promise<unknown>;
+  // spindle.generate.raw requires connection_id and model at top level; resolve before dispatch.
+  type Resolution =
+    | { ok: true; value: { id: string; model: string | undefined; provider: string } }
+    | { ok: false; error: string };
 
-    async function resolveConnection(explicitId: string | undefined): Promise<Resolution> {
-      if (!connectionsApi) {
-        return { ok: false, error: 'spindle.connections API not available on this Lumi build' };
-      }
-      try {
-        if (explicitId) {
-          if (!connectionsApi.get) {
-            return { ok: false, error: 'spindle.connections.get not available on this Lumi build' };
-          }
-          const conn = await connectionsApi.get(explicitId, uid);
-          if (!conn) {
-            return {
-              ok: false,
-              error: `Connection profile "${explicitId.slice(0, 8)}…" not found. Pick a different one in Risu Settings → Auxiliary Model.`,
-            };
-          }
-          return {
-            ok: true,
-            value: { id: conn.id, model: conn.model || undefined, provider: conn.provider || '' },
-          };
-        }
-        if (!connectionsApi.list) {
-          return { ok: false, error: 'spindle.connections.list not available on this Lumi build' };
-        }
-        const list = await connectionsApi.list(uid);
-        if (!list || list.length === 0) {
+  async function resolveConnection(explicitId: string | undefined): Promise<Resolution> {
+    try {
+      if (explicitId) {
+        const conn = await spindle.connections.get(explicitId, uid);
+        if (!conn) {
           return {
             ok: false,
-            error: 'No connection profiles configured. Set up a connection in Lumiverse Settings → Connections, then pick it (or mark it default).',
+            error: `Connection profile "${explicitId.slice(0, 8)}…" not found. Pick a different one in Risu Settings → Auxiliary Model.`,
           };
         }
-        const conn = list.find((c) => c.is_default) ?? list[0]!;
         return {
           ok: true,
           value: { id: conn.id, model: conn.model || undefined, provider: conn.provider || '' },
         };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: `Connection resolution failed: ${msg}` };
       }
-    }
-    (host as { llm?: HostApi['llm'] }).llm = {
-      async generate(req): Promise<{ content: string }> {
-        const resolution = await resolveConnection(req.connectionId);
-        if (!resolution.ok) {
-          log.warn(resolution.error);
-          throw new Error(resolution.error);
-        }
-        const resolved = resolution.value;
-        const effectiveModel = req.model || resolved.model || '';
-        const provider = req.provider || resolved.provider;
-        const parameters = filterSamplerParamsForProvider(
-          { ...(req.parameters ?? {}), ...(effectiveModel ? { model: effectiveModel } : {}) },
-          provider,
-        );
-        // Coerce Risu role aliases ('sys' / 'bot' / 'char') to OpenAI shape.
-        const messages = req.messages.map((m) => ({
-          role:
-            m.role === 'sys' ? 'system'
-            : m.role === 'bot' || m.role === 'char' ? 'assistant'
-            : (m.role === 'system' || m.role === 'user' || m.role === 'assistant') ? m.role
-            : 'user',
-          content: m.content,
-        }));
-        // Prefill-compatibility (opt-in per channel via Settings → Aux/Sub):
-        // models that reject an assistant-ending conversation get the trailing
-        // assistant prefill folded into a user instruction that preserves the
-        // steer ("Begin your response with: …").
-        const toUserInstruction = (
-          msgs: readonly { role: string; content: string }[],
-        ): { role: string; content: string }[] => {
-          const last = msgs[msgs.length - 1];
-          if (!last || last.role !== 'assistant') return [...msgs];
-          const instruction = `Begin your response with:\n${last.content}`;
-          const head = msgs.slice(0, -1);
-          const prev = head[head.length - 1];
-          // Avoid two consecutive user messages (Anthropic rejects them):
-          // fold the instruction into the preceding user turn when present.
-          if (prev && prev.role === 'user') {
-            return [
-              ...head.slice(0, -1),
-              { role: 'user', content: `${prev.content}\n\n${instruction}` },
-            ];
-          }
-          return [...head, { role: 'user', content: instruction }];
+      const list = await spindle.connections.list(uid);
+      if (list.length === 0) {
+        return {
+          ok: false,
+          error: 'No connection profiles configured. Set up a connection in Lumiverse Settings → Connections, then pick it (or mark it default).',
         };
-        const buildInput = (
-          msgs: readonly { role: string; content: string }[],
-        ): {
-          type: 'raw' | 'quiet' | 'batch';
-          messages: readonly { role: string; content: string }[];
-          connection_id: string;
-          provider?: string;
-          model?: string;
-          parameters?: Record<string, unknown>;
-          userId?: string;
-        } => ({
-          type: 'raw',
-          messages: msgs,
-          connection_id: resolved.id,
-          ...(provider ? { provider } : {}),
-          ...(effectiveModel ? { model: effectiveModel } : {}),
-          ...(Object.keys(parameters).length > 0 ? { parameters } : {}),
-          ...(uid !== undefined ? { userId: uid } : {}),
-        });
-        log.info(
-          `dispatching connection_id=${resolved.id.slice(0, 8)}… ` +
-            `model="${effectiveModel || '<connection-default>'}" ` +
-            `provider="${provider || '<connection-default>'}" ` +
-            `msgs=${messages.length} params=[${Object.keys(parameters).join(',')}]`,
-        );
-        const finalMessages = req.prefillCompat ? toUserInstruction(messages) : messages;
-        const result = await generateApi.raw!(buildInput(finalMessages));
-        const r = result as { content?: unknown } | undefined;
-        return { content: typeof r?.content === 'string' ? r.content : '' };
-      },
-      ...(connectionsApi?.list
-        ? {
-            async listConnections(): Promise<readonly {
-              id: string; name: string; provider: string; model: string; is_default: boolean;
-            }[]> {
-              const list = await connectionsApi.list!(uid);
-              return list.map((c) => ({
-                id: c.id,
-                name: c.name,
-                provider: c.provider,
-                model: c.model,
-                is_default: c.is_default,
-              }));
-            },
-          }
-        : {}),
-    };
+      }
+      const conn = list.find((c) => c.is_default) ?? list[0]!;
+      return {
+        ok: true,
+        value: { id: conn.id, model: conn.model || undefined, provider: conn.provider || '' },
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: `Connection resolution failed: ${msg}` };
+    }
   }
+  (host as { llm: NonNullable<HostApi['llm']> }).llm = {
+    async generate(req): Promise<{ content: string }> {
+      const resolution = await resolveConnection(req.connectionId);
+      if (!resolution.ok) {
+        log.warn(resolution.error);
+        throw new Error(resolution.error);
+      }
+      const resolved = resolution.value;
+      const effectiveModel = req.model || resolved.model || '';
+      const provider = req.provider || resolved.provider;
+      const parameters = filterSamplerParamsForProvider(
+        { ...(req.parameters ?? {}), ...(effectiveModel ? { model: effectiveModel } : {}) },
+        provider,
+      );
+      // Coerce Risu role aliases ('sys' / 'bot' / 'char') to OpenAI shape.
+      const messages = req.messages.map((m) => ({
+        role:
+          m.role === 'sys' ? 'system'
+          : m.role === 'bot' || m.role === 'char' ? 'assistant'
+          : (m.role === 'system' || m.role === 'user' || m.role === 'assistant') ? m.role
+          : 'user',
+        content: m.content,
+      }));
+      // Prefill-compatibility (opt-in per channel via Settings → Aux/Sub):
+      // models that reject an assistant-ending conversation get the trailing
+      // assistant prefill folded into a user instruction that preserves the
+      // steer ("Begin your response with: …").
+      const toUserInstruction = (
+        msgs: readonly { role: string; content: string }[],
+      ): { role: string; content: string }[] => {
+        const last = msgs[msgs.length - 1];
+        if (!last || last.role !== 'assistant') return [...msgs];
+        const instruction = `Begin your response with:\n${last.content}`;
+        const head = msgs.slice(0, -1);
+        const prev = head[head.length - 1];
+        // Avoid two consecutive user messages (Anthropic rejects them):
+        // fold the instruction into the preceding user turn when present.
+        if (prev && prev.role === 'user') {
+          return [
+            ...head.slice(0, -1),
+            { role: 'user', content: `${prev.content}\n\n${instruction}` },
+          ];
+        }
+        return [...head, { role: 'user', content: instruction }];
+      };
+      const buildInput = (
+        msgs: readonly { role: string; content: string }[],
+      ): RawGenerationInput & { connection_id: string } => ({
+        type: 'raw',
+        messages: msgs,
+        connection_id: resolved.id,
+        ...(provider ? { provider } : {}),
+        ...(effectiveModel ? { model: effectiveModel } : {}),
+        ...(Object.keys(parameters).length > 0 ? { parameters } : {}),
+        ...(uid !== undefined ? { userId: uid } : {}),
+      });
+      log.info(
+        `dispatching connection_id=${resolved.id.slice(0, 8)}… ` +
+          `model="${effectiveModel || '<connection-default>'}" ` +
+          `provider="${provider || '<connection-default>'}" ` +
+          `msgs=${messages.length} params=[${Object.keys(parameters).join(',')}]`,
+      );
+      const finalMessages = req.prefillCompat ? toUserInstruction(messages) : messages;
+      const result = await rawGenerate(buildInput(finalMessages));
+      const r = result as { content?: unknown } | undefined;
+      return { content: typeof r?.content === 'string' ? r.content : '' };
+    },
+    async listConnections(): Promise<readonly {
+      id: string; name: string; provider: string; model: string; is_default: boolean;
+    }[]> {
+      const list = await spindle.connections.list(uid);
+      return list.map((c) => ({
+        id: c.id,
+        name: c.name,
+        provider: c.provider,
+        model: c.model,
+        is_default: c.is_default,
+      }));
+    },
+  };
 
   const tokensApi = (anySpindle as {
     tokens?: {
