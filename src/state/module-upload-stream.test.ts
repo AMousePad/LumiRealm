@@ -128,4 +128,19 @@ describe('ModuleUploader.uploadSource', () => {
     expect(journaled).toEqual([]);
     expect(warns.filter((message) => message.includes('upload failed name='))).toHaveLength(2);
   });
+
+  test('uploads and journals the module icon through the single-image API', async () => {
+    const { value, journaled, uploadedOne } = uploader(moduleBody([]));
+
+    const result = await value.uploadSource({
+      module: {},
+      assetCount: 0,
+      icon: { data: Uint8Array.of(1), ext: 'png' },
+      async readAsset() { return undefined; },
+    }, 'module.risum', 'user-1');
+
+    expect(result.envelope.module.icon).toBe('one-1');
+    expect(uploadedOne()).toBe(1);
+    expect(journaled).toEqual([['one-1']]);
+  });
 });

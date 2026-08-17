@@ -1332,12 +1332,7 @@ const moduleUploader = createModuleUploader({
   pairAssets: pairModuleAssetsForUpload,
   guessMimeType,
   sniffImageMime,
-  uploadImageOne: (input, userId) => {
-    if (!spindle.images?.upload) {
-      throw new Error('spindle.images.upload is unavailable,Lumi 0.9.6+ required.');
-    }
-    return spindle.images.upload(input, userId);
-  },
+  uploadImageOne: (input, userId) => spindle.images.upload(input, userId),
   uploadImageMany: (items, opts) => spindle.images.uploadMany(items as never, opts),
   appendToJournal: (uid, moduleId, ids) =>
     appendModuleImageIdsToJournal(journalStorage(), uid, moduleId, ids),
