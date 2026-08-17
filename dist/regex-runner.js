@@ -10593,12 +10593,10 @@ async function applyPromptRegexToArray(messages, prebuilt, scripts) {
         messages[i] = { ...msg, content: next };
         changed = true;
       }
-    } else if (Array.isArray(msg.content)) {
-      const parts = msg.content;
+    } else {
       let partsChanged = false;
-      const nextParts = parts.map((rawPart) => {
-        const part = rawPart;
-        if (part?.type === "text" && typeof part.text === "string") {
+      const nextParts = msg.content.map((part) => {
+        if (part.type === "text") {
           const next = applyRegexScriptsCore(part.text, scripts, {
             placement,
             depth,
@@ -10611,7 +10609,7 @@ async function applyPromptRegexToArray(messages, prebuilt, scripts) {
             return { ...part, text: next };
           }
         }
-        return rawPart;
+        return part;
       });
       if (partsChanged) {
         messages[i] = { ...msg, content: nextParts };

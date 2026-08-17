@@ -282,12 +282,10 @@ export async function applyPromptRegexToArray(
         messages[i] = { ...msg, content: next };
         changed = true;
       }
-    } else if (Array.isArray((msg as { content?: unknown }).content)) {
-      const parts = (msg as unknown as { content: readonly unknown[] }).content;
+    } else {
       let partsChanged = false;
-      const nextParts = parts.map((rawPart) => {
-        const part = rawPart as { type?: unknown; text?: unknown };
-        if (part?.type === 'text' && typeof part.text === 'string') {
+      const nextParts = msg.content.map((part) => {
+        if (part.type === 'text') {
           const next = applyRegexScriptsCore(part.text, scripts, {
             placement,
             depth,
@@ -300,10 +298,10 @@ export async function applyPromptRegexToArray(
             return { ...part, text: next };
           }
         }
-        return rawPart;
+        return part;
       });
       if (partsChanged) {
-        messages[i] = { ...(msg as object), content: nextParts } as unknown as LlmMessage;
+        messages[i] = { ...msg, content: nextParts };
         changed = true;
       }
     }

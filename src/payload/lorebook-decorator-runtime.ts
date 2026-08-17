@@ -1,3 +1,5 @@
+import { mergeLlmText, projectLlmText } from '../util/llm-message-content.js';
+
 // Tier 2 + Tier 3 lorebook decorator runtime. Tier 2 are pre-activation gates
 // (is_greeting, activate_only_after/every, keep/dont_activate_after_match,
 // exclude_keys/_all). Tier 3 covers cross-entry merge (inject_lore), slot
@@ -727,10 +729,7 @@ export function runWorldInfoInterceptor(
 
 // ─── Tier 3 inject_at apply (post-assembly) ──────────────────────────────────
 
-export interface ApplyInjectAtMessage {
-  readonly role: 'system' | 'user' | 'assistant';
-  readonly content: string;
-}
+export type ApplyInjectAtMessage = import('lumiverse-spindle-types').LlmMessageDTO;
 
 export interface ApplyInjectAtResult {
   readonly messages: readonly ApplyInjectAtMessage[];
@@ -794,7 +793,7 @@ export function applyInjectAtToMessages(
     for (let i = 0; i < out.length; i++) {
       const m = out[i];
       if (!m || m.role !== 'system') continue;
-      if (m.content.includes(anchor)) { targetIdx = i; break; }
+      if (projectLlmText(m.content).includes(anchor)) { targetIdx = i; break; }
     }
 
     // Anchor known but not present, synthesize as unknown-loc.
@@ -805,7 +804,8 @@ export function applyInjectAtToMessages(
       continue;
     }
 
-    const before = out[targetIdx]!.content;
+    const target = out[targetIdx]!;
+    const before = projectLlmText(target.content);
     let after: string;
     let isFallbackAppend = false;
     switch (plan.operation) {
@@ -834,7 +834,7 @@ export function applyInjectAtToMessages(
       }
     }
     if (after !== before) {
-      out[targetIdx] = { ...out[targetIdx]!, content: after };
+      out[targetIdx] = { ...target, content: mergeLlmText(target.content, after) };
       mutationCount += 1;
       if (isFallbackAppend) {
         fallbackAppendCount += 1;

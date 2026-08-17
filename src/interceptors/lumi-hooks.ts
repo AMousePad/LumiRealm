@@ -49,11 +49,10 @@ import { userIdAls } from '../interpreter/runtime/als.js';
 import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import { makeDispatcherScriptNS } from '../interpreter/dispatcher.js';
 import { runRequestTriggerChain } from '../interpreter/request-trigger-runner.js';
+import { mergeLlmText, projectLlmText } from '../util/llm-message-content.js';
 import {
   type GenerationContextShape,
   type LlmMessage,
-  type InterceptorContext,
-  type RegisterInterceptor,
 } from '../adapters/spindle-extras.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 import type { InjectAtPlan } from '../payload/lorebook-decorator-runtime.js';
@@ -66,7 +65,6 @@ import type { RunnerDispatchResult } from './prompt-regex-runner-client.js';
 
 export interface CreateLumiInterceptorsDeps {
   readonly activeCardByChat: Map<string, ActiveCard>;
-  readonly lastActiveChatByUser: Map<string, string>;
   readonly captureUserId: (userId: string | undefined, where: string) => void;
   readonly isFeDisplayAuthoritative: (chatId: string) => boolean;
   readonly isPromptRegexAuthoritative: (chatId: string) => boolean;
@@ -136,7 +134,7 @@ function cardDisablesRecursiveWorldInfo(active: ActiveCard): boolean {
 }
 
 export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiInterceptors {
-  const { log, errMsg, activeCardByChat, lastActiveChatByUser } = deps;
+  const { log, errMsg, activeCardByChat } = deps;
 
   let diagInterceptorCall = 0;
   let mcpInFlight = 0;
@@ -656,45 +654,34 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
   }
 
   function registerInterceptor(): void {
-    const register = spindle.registerInterceptor as unknown as RegisterInterceptor;
-    register(async (messages, contextRaw) => {
-      const ctx = (contextRaw ?? {}) as InterceptorContext;
-      const chatId = typeof ctx.chatId === 'string' ? ctx.chatId : null;
-      if (!chatId) return messages;
-      // Lumi's interceptor ctx omits userId, so attribute via the chat-to-owner stamp from activeCardByChat (populated at chat-open).
-      let activeCandidate: ActiveCard | null | undefined = activeCardByChat.get(chatId);
-      let userId: string | undefined = activeCandidate?.ownerUserId;
-      if (!activeCandidate) {
-        // Cold-cache fallback: Lumi fires this only for the user's active chat, so lastActiveChatByUser holds the mapping.
-        for (const [uid, lastChat] of lastActiveChatByUser) {
-          if (lastChat === chatId) { userId = uid; break; }
-        }
-        if (!userId) {
-          if (deps.isPromptRegexAuthoritative(chatId)) {
-            log.error(
-              `interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but userId is unattributable — shipping an UN-REGEX'd prompt.`,
-            );
-          }
-          return messages;
-        }
-        activeCandidate = await deps.ensureActiveCardForChat(chatId, null, userId);
-        if (!activeCandidate) {
-          if (deps.isPromptRegexAuthoritative(chatId)) {
-            log.error(
-              `interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but no active card resolved — shipping an UN-REGEX'd prompt.`,
-            );
-          }
-          return messages;
-        }
+    spindle.registerInterceptor(async (messages, ctx) => {
+      const { chatId, userId } = ctx;
+      const cached = activeCardByChat.get(chatId);
+      if (cached && cached.ownerUserId !== userId) {
+        log.warn(
+          `interceptor: owner mismatch chat=${chatId} cached=${cached.ownerUserId} ctx=${userId}, skipping`,
+        );
+        return messages;
       }
-      const active: ActiveCard = activeCandidate;
-      const resolvedUserId = userId!;
+      const active = cached ?? await deps.ensureActiveCardForChat(
+        chatId,
+        ctx.characterId,
+        userId,
+      );
+      if (!active) {
+        if (deps.isPromptRegexAuthoritative(chatId)) {
+          log.error(
+            `interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but no active card resolved — shipping an UN-REGEX'd prompt.`,
+          );
+        }
+        return messages;
+      }
 
-      return userIdAls.run(resolvedUserId, async () => {
+      return userIdAls.run(userId, async () => {
         let out: LlmMessage[] = messages;
 
         try {
-          await deps.runMessageVarPass(chatId, active.card.character_id, resolvedUserId);
+          await deps.runMessageVarPass(chatId, active.card.character_id, userId);
         } catch (err) {
           log.warn(`interceptor.runMessageVarPass threw chat=${chatId}: ${errMsg(err)}`);
         }
@@ -703,7 +690,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           return { ...m, content: stripSetvarSpans(m.content, () => '').text };
         });
 
-        if (deps.isPromptRegexAuthoritative(chatId) && userId !== undefined) {
+        if (deps.isPromptRegexAuthoritative(chatId)) {
           try {
             const scripts = await listLivePromptRegexScripts(active.card.character_id, chatId, userId);
             if (scripts.length > 0) {
@@ -718,7 +705,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
                   log,
                   errMsg,
                 },
-                typeof ctx.personaId === 'string' ? ctx.personaId : undefined,
+                ctx.personaId ?? undefined,
               );
               const target = out === messages ? out.slice() : out;
               const result = await deps.dispatchPromptRegex(prebuilt, scripts, target, userId);
@@ -824,7 +811,8 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             if (out[i]?.role === 'user') { userIdx = i; break; }
           }
           if (userIdx >= 0) {
-            const orig = out[userIdx]!.content;
+            const originalContent = out[userIdx]!.content;
+            const orig = projectLlmText(originalContent);
             try {
               const mutated = await runListenEditChain<string>(
                 editChain,
@@ -846,7 +834,10 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
                     `before_len=${orig.length} after_len=${mutated.length}`,
                 );
                 out = out.slice();
-                out[userIdx] = { ...out[userIdx]!, content: mutated };
+                out[userIdx] = {
+                  ...out[userIdx]!,
+                  content: mergeLlmText(originalContent, mutated),
+                };
               }
             } catch (err) {
               log.warn(`interceptor.editInput threw: ${errMsg(err)}. Continuing with original.`);
@@ -860,7 +851,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
               editChain,
               'editRequest',
               out,
-              { generationType: ctx.generationType ?? 'normal' },
+              { generationType: ctx.generationType },
               editApi,
               { characterId: active.card.character_id, content: '' },
               editScriptNS,

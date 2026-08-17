@@ -17223,6 +17223,33 @@ var init_scanner = __esm(() => {
   init_cbs();
 });
 
+// src/util/llm-message-content.ts
+function projectLlmText(content) {
+  if (typeof content === "string")
+    return content;
+  return content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
+}
+function mergeLlmText(content, text) {
+  if (typeof content === "string")
+    return text;
+  if (projectLlmText(content) === text)
+    return content;
+  const parts = [];
+  let foundText = false;
+  for (const part of content) {
+    if (part.type !== "text") {
+      parts.push(part);
+    } else if (!foundText) {
+      if (text.length > 0)
+        parts.push({ ...part, text });
+      foundText = true;
+    }
+  }
+  if (!foundText && text.length > 0)
+    parts.unshift({ type: "text", text });
+  return parts;
+}
+
 // src/payload/lorebook-decorator-runtime.ts
 var exports_lorebook_decorator_runtime = {};
 __export(exports_lorebook_decorator_runtime, {
@@ -17739,7 +17766,7 @@ ${plan.content}`;
       const m = out[i];
       if (!m || m.role !== "system")
         continue;
-      if (m.content.includes(anchor)) {
+      if (projectLlmText(m.content).includes(anchor)) {
         targetIdx = i;
         break;
       }
@@ -17751,7 +17778,8 @@ ${plan.content}` });
       perPlan.push({ entryId: plan.entryId, outcome: "synthesized:anchor_missing" });
       continue;
     }
-    const before = out[targetIdx].content;
+    const target = out[targetIdx];
+    const before = projectLlmText(target.content);
     let after;
     let isFallbackAppend = false;
     switch (plan.operation) {
@@ -17776,7 +17804,7 @@ ${plan.content}` });
       }
     }
     if (after !== before) {
-      out[targetIdx] = { ...out[targetIdx], content: after };
+      out[targetIdx] = { ...target, content: mergeLlmText(target.content, after) };
       mutationCount += 1;
       if (isFallbackAppend) {
         fallbackAppendCount += 1;
@@ -37889,7 +37917,6 @@ ${instruction}` }
   };
   return host;
 }
-
 // src/interpreter/restricted-trigger.ts
 var SAFE_EFFECT_TYPES = [
   "v2SetVar",
@@ -37984,7 +38011,10 @@ async function runRequestTriggerChain(messages, opts) {
     characterId: opts.characterId,
     binding: "request",
     displayMode: true,
-    requestData: messages.map(({ role, content }) => ({ role, content }))
+    requestData: messages.map(({ role, content }) => ({
+      role,
+      content: projectLlmText(content)
+    }))
   });
   try {
     for (const trigger of triggers2) {
@@ -38000,13 +38030,12 @@ async function runRequestTriggerChain(messages, opts) {
     return messages.map((message, index) => ({
       ...message,
       role: state[index].role,
-      content: state[index].content
+      content: mergeLlmText(message.content, state[index].content)
     }));
   } finally {
     await runtime2.flush();
   }
 }
-
 // src/core/charx/module.ts
 init_base64();
 function record2(value) {
@@ -38751,7 +38780,7 @@ function cardDisablesRecursiveWorldInfo(active) {
   return characterBook["recursive_scanning"] === false;
 }
 function createLumiInterceptors(deps) {
-  const { log: log8, errMsg: errMsg2, activeCardByChat, lastActiveChatByUser } = deps;
+  const { log: log8, errMsg: errMsg2, activeCardByChat } = deps;
   let diagInterceptorCall = 0;
   let mcpInFlight = 0;
   let mcpEnterSeq = 0;
@@ -39122,41 +39151,24 @@ function createLumiInterceptors(deps) {
     log8.info("messageContentProcessor: registered");
   }
   function registerInterceptor() {
-    const register13 = spindle.registerInterceptor;
-    register13(async (messages, contextRaw) => {
-      const ctx = contextRaw ?? {};
-      const chatId = typeof ctx.chatId === "string" ? ctx.chatId : null;
-      if (!chatId)
+    spindle.registerInterceptor(async (messages, ctx) => {
+      const { chatId, userId } = ctx;
+      const cached = activeCardByChat.get(chatId);
+      if (cached && cached.ownerUserId !== userId) {
+        log8.warn(`interceptor: owner mismatch chat=${chatId} cached=${cached.ownerUserId} ctx=${userId}, skipping`);
         return messages;
-      let activeCandidate = activeCardByChat.get(chatId);
-      let userId = activeCandidate?.ownerUserId;
-      if (!activeCandidate) {
-        for (const [uid, lastChat] of lastActiveChatByUser) {
-          if (lastChat === chatId) {
-            userId = uid;
-            break;
-          }
-        }
-        if (!userId) {
-          if (deps.isPromptRegexAuthoritative(chatId)) {
-            log8.error(`interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but userId is unattributable \u2014 shipping an UN-REGEX'd prompt.`);
-          }
-          return messages;
-        }
-        activeCandidate = await deps.ensureActiveCardForChat(chatId, null, userId);
-        if (!activeCandidate) {
-          if (deps.isPromptRegexAuthoritative(chatId)) {
-            log8.error(`interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but no active card resolved \u2014 shipping an UN-REGEX'd prompt.`);
-          }
-          return messages;
-        }
       }
-      const active = activeCandidate;
-      const resolvedUserId = userId;
-      return userIdAls.run(resolvedUserId, async () => {
+      const active = cached ?? await deps.ensureActiveCardForChat(chatId, ctx.characterId, userId);
+      if (!active) {
+        if (deps.isPromptRegexAuthoritative(chatId)) {
+          log8.error(`interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but no active card resolved \u2014 shipping an UN-REGEX'd prompt.`);
+        }
+        return messages;
+      }
+      return userIdAls.run(userId, async () => {
         let out = messages;
         try {
-          await deps.runMessageVarPass(chatId, active.card.character_id, resolvedUserId);
+          await deps.runMessageVarPass(chatId, active.card.character_id, userId);
         } catch (err) {
           log8.warn(`interceptor.runMessageVarPass threw chat=${chatId}: ${errMsg2(err)}`);
         }
@@ -39165,7 +39177,7 @@ function createLumiInterceptors(deps) {
             return m;
           return { ...m, content: stripSetvarSpans(m.content, () => "").text };
         });
-        if (deps.isPromptRegexAuthoritative(chatId) && userId !== undefined) {
+        if (deps.isPromptRegexAuthoritative(chatId)) {
           try {
             const scripts = await listLivePromptRegexScripts(active.card.character_id, chatId, userId);
             if (scripts.length > 0) {
@@ -39175,7 +39187,7 @@ function createLumiInterceptors(deps) {
                 modulesByNamespaceFromCard: deps.modulesByNamespaceFromCard,
                 log: log8,
                 errMsg: errMsg2
-              }, typeof ctx.personaId === "string" ? ctx.personaId : undefined);
+              }, ctx.personaId ?? undefined);
               const target = out === messages ? out.slice() : out;
               const result = await deps.dispatchPromptRegex(prebuilt, scripts, target, userId);
               if (result.ok && result.changed) {
@@ -39255,7 +39267,8 @@ function createLumiInterceptors(deps) {
             }
           }
           if (userIdx >= 0) {
-            const orig = out[userIdx].content;
+            const originalContent = out[userIdx].content;
+            const orig = projectLlmText(originalContent);
             try {
               const mutated = await runListenEditChain(editChain, "editInput", orig, { index: userIdx - 1 }, editApi, { characterId: active.card.character_id, content: orig }, editScriptNS, {
                 chatId,
@@ -39265,7 +39278,10 @@ function createLumiInterceptors(deps) {
               if (mutated !== orig) {
                 log8.info(`interceptor.editInput: chat=${chatId} userIdx=${userIdx} before_len=${orig.length} after_len=${mutated.length}`);
                 out = out.slice();
-                out[userIdx] = { ...out[userIdx], content: mutated };
+                out[userIdx] = {
+                  ...out[userIdx],
+                  content: mergeLlmText(originalContent, mutated)
+                };
               }
             } catch (err) {
               log8.warn(`interceptor.editInput threw: ${errMsg2(err)}. Continuing with original.`);
@@ -39274,7 +39290,7 @@ function createLumiInterceptors(deps) {
         }
         if (hasLuaTrigger) {
           try {
-            const mutated = await runListenEditChain(editChain, "editRequest", out, { generationType: ctx.generationType ?? "normal" }, editApi, { characterId: active.card.character_id, content: "" }, editScriptNS, {
+            const mutated = await runListenEditChain(editChain, "editRequest", out, { generationType: ctx.generationType }, editApi, { characterId: active.card.character_id, content: "" }, editScriptNS, {
               chatId,
               characterId: active.card.character_id,
               resolveTemplate: (text) => deps.resolveReadonly(text, chatId, active.card.character_id, userId, { cbsContext: true })
@@ -46007,7 +46023,6 @@ var dispatchButtonClick = triggerDispatcher.dispatchButtonClick;
 var feDisplayShadowOptOut = new Set;
 createLumiInterceptors({
   activeCardByChat,
-  lastActiveChatByUser,
   captureUserId,
   isFeDisplayAuthoritative: (chatId) => FE_DISPLAY_ENABLED && !feDisplayShadowOptOut.has(chatId),
   isPromptRegexAuthoritative: (chatId) => PROMPT_REGEX_ACTIVE && isPromptRegexOwnedChat(chatId),
