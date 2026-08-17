@@ -35921,8 +35921,7 @@ function createImportHandlers(deps) {
           deps.notifyHostVersionOutdated({
             type: "notify_host_version_outdated",
             hostVersion: hostVersionCheck.hostVersion,
-            minimum: hostVersionCheck.minimum,
-            message: hostVersionCheck.message
+            minimum: hostVersionCheck.minimum
           }, ctx.userId);
         }
         const missingPerms = deps.getMissingPermissions();

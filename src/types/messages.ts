@@ -475,9 +475,8 @@ export type BackendToFrontend =
   // FE shows a one-time-per-mount modal nag.
   | {
       type: 'notify_host_version_outdated';
-      hostVersion: string | null;
+      hostVersion: string;
       minimum: string;
-      message: string;
     }
   // Manifest declares required permissions the host has not granted.
   // FE shows a one-time-per-mount modal nag.

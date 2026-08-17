@@ -48,16 +48,12 @@ export function setupHostVersionModal(opts: {
     detail.appendChild(document.createTextNode('Required: Lumiverse '));
     detail.appendChild(minSpan);
     detail.appendChild(document.createTextNode(' or newer. '));
-    if (msg.hostVersion) {
-      detail.appendChild(document.createTextNode('This host is running '));
-      const hostSpan = document.createElement('span');
-      hostSpan.className = 'lr-alert-card-name';
-      hostSpan.textContent = msg.hostVersion;
-      detail.appendChild(hostSpan);
-      detail.appendChild(document.createTextNode('.'));
-    } else {
-      detail.appendChild(document.createTextNode('Host version unknown.'));
-    }
+    detail.appendChild(document.createTextNode('This host is running '));
+    const hostSpan = document.createElement('span');
+    hostSpan.className = 'lr-alert-card-name';
+    hostSpan.textContent = msg.hostVersion;
+    detail.appendChild(hostSpan);
+    detail.appendChild(document.createTextNode('.'));
     root.appendChild(detail);
 
     const guidance = document.createElement('p');

@@ -1,4 +1,4 @@
-import type { CardSummary } from '../types/messages.js';
+import type { BackendToFrontend, CardSummary } from '../types/messages.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { HostVersionCheckResult } from '../util/version-check.js';
 import type { Handler } from './types.js';
@@ -64,7 +64,10 @@ export interface ImportHandlerDeps {
     fraction: number | null,
     error?: string,
   ) => void;
-  readonly notifyHostVersionOutdated: (msg: unknown, userId: string) => void;
+  readonly notifyHostVersionOutdated: (
+    msg: Extract<BackendToFrontend, { type: 'notify_host_version_outdated' }>,
+    userId: string,
+  ) => void;
   readonly notifyMissingPermissions: (msg: unknown, userId: string) => void;
   readonly log: { readonly info: (m: string) => void; readonly warn: (m: string) => void; readonly error: (m: string) => void };
   readonly errMsg: (e: unknown) => string;
@@ -95,7 +98,6 @@ export function createImportHandlers(deps: ImportHandlerDeps): {
             type: 'notify_host_version_outdated',
             hostVersion: hostVersionCheck.hostVersion,
             minimum: hostVersionCheck.minimum,
-            message: hostVersionCheck.message,
           }, ctx.userId);
         }
         const missingPerms = deps.getMissingPermissions();

@@ -90,6 +90,7 @@ const cases: readonly {
   setup: ModalSetup;
   message: BackendToFrontend;
   expected: SpindleModalOptions;
+  expectedText?: string;
 }[] = [
   {
     setup: setupAlertModal,
@@ -117,9 +118,9 @@ const cases: readonly {
       type: 'notify_host_version_outdated',
       hostVersion: '1.0.0',
       minimum: '1.1.5',
-      message: 'Update',
     },
     expected: { title: 'Update Lumiverse', width: 460 },
+    expectedText: 'Required: Lumiverse 1.1.5 or newer. This host is running 1.0.0.',
   },
 ];
 
@@ -132,6 +133,7 @@ describe('modal host contract', () => {
       expect(host.options).toEqual([item.expected]);
       expect(host.handles).toHaveLength(1);
       expect(host.handles[0]!.root.childElementCount).toBeGreaterThan(0);
+      if (item.expectedText) expect(host.handles[0]!.root.textContent).toContain(item.expectedText);
       controller.destroy();
     }
     await Promise.resolve();
