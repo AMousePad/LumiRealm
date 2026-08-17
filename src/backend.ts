@@ -1329,12 +1329,7 @@ const moduleUploader = createModuleUploader({
     }
     return spindle.images.upload(input, userId);
   },
-  ...(typeof spindle.images?.uploadMany === 'function'
-    ? {
-        uploadImageMany: (items, opts) =>
-          spindle.images.uploadMany(items as never, opts),
-      }
-    : {}),
+  uploadImageMany: (items, opts) => spindle.images.uploadMany(items as never, opts),
   appendToJournal: (uid, moduleId, ids) =>
     appendModuleImageIdsToJournal(journalStorage(), uid, moduleId, ids),
   syncWorldBook: (env, uid) => syncModuleWorldBook(env, uid),
