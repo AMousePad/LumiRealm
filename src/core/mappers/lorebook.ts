@@ -10,7 +10,6 @@ import {
 export {
   ENTRY_HASH_FIELDS,
   computeEntrySourceHash,
-  hasUserEditedAnyEntry,
 } from "./lorebook-hash.js";
 import { computeEntrySourceHash } from "./lorebook-hash.js";
 

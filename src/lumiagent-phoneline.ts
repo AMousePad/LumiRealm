@@ -812,7 +812,7 @@ function isLorebookPath(field: string): boolean {
 
 const MODULE_LOREBOOK_REDIRECT =
   "module.lorebook[] is the frozen import bundle from the .risum upload. The LIVE lorebook for an installed module is its world_book (one wb per module, shared across every character it's attached to). " +
-  "Edits to env.module.lorebook[] don't reach the runtime or the viewer, and get archived + wiped on the next module schema migration. " +
+  "Edits to env.module.lorebook[] don't reach the runtime or the viewer. " +
   "Use the path-based tools instead: list({path: 'wb'}) to find the module's wb (`Module: <name>`), then read/edit on wb/<id>/content or wb/<id>/comment. update_world_book_entry for metadata.";
 
 async function dispatchModuleSurface(

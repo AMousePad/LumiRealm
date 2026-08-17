@@ -2,7 +2,6 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ModuleEnvelope, ModuleIndexEntry, UserStorageLike as ModuleStorageLike } from '../state/modules-store.js';
-import type { ModalConfirmOptions } from '../state/consent-modals.js';
 import {
   readMigrationState,
   writeMigrationState,
@@ -10,14 +9,6 @@ import {
 import { migrateRetiredMacroNames } from './retired-macro.js';
 
 type OperationPhase = 'started' | 'progress' | 'done' | 'error';
-
-interface PendingArchiveNotification {
-  readonly subjectLabel: string;
-  readonly archiveWbId: string;
-}
-
-const ARCHIVE_BATCH_DELAY_MS = 2000;
-const MAX_ARCHIVE_LIST = 10;
 
 export interface MassMigrationsDeps {
   readonly currentCharacterSchemaVersion: number;
@@ -55,10 +46,6 @@ export interface MassMigrationsDeps {
     fraction: number | null,
     error?: string,
   ) => void;
-  readonly queueModalConfirm: (
-    userId: string,
-    options: Omit<ModalConfirmOptions, 'userId'>,
-  ) => Promise<{ confirmed: boolean } | null>;
   readonly toastFor: (
     userId: string | undefined,
     kind: 'success' | 'warning' | 'error' | 'info',
@@ -77,12 +64,6 @@ export interface MassMigrationsRunner {
   readonly runMassCharacterMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runRetiredMacroMigrationIfNeeded: (userId: string) => Promise<void>;
   readonly runVarScopeMigrationIfNeeded: (userId: string) => Promise<void>;
-  readonly notifyLorebookMigrationArchive: (
-    subjectLabel: string,
-    archiveWbId: string,
-    userId: string,
-  ) => void;
-  readonly flushLorebookMigrationArchives: (userId: string) => Promise<void>;
 }
 
 export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrationsRunner {
@@ -99,7 +80,6 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     runModuleMigration,
     runCharacterMigration,
     emitOperationProgress,
-    queueModalConfirm,
     toastFor,
     log,
     errMsg,
@@ -117,69 +97,6 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
 
   const massModuleMigrationStartedThisBoot = new Set<string>();
   const massCharacterMigrationStartedThisBoot = new Set<string>();
-
-  const pendingArchivesByUser = new Map<string, PendingArchiveNotification[]>();
-  const archiveFlushTimerByUser = new Map<string, ReturnType<typeof setTimeout>>();
-
-  async function flushLorebookMigrationArchives(userId: string): Promise<void> {
-    const pending = pendingArchivesByUser.get(userId);
-    if (!pending || pending.length === 0) return;
-    pendingArchivesByUser.delete(userId);
-    const items: { subjectLabel: string; archiveName: string | null }[] = [];
-    for (const p of pending) {
-      let archiveName: string | null = null;
-      try {
-        const wb = await spindle.world_books.get(p.archiveWbId, userId);
-        archiveName = (wb as { name?: string })?.name ?? null;
-      } catch (err) {
-        log.warn(`flushLorebookMigrationArchives: world_books.get(${p.archiveWbId}) failed: ${errMsg(err)}`);
-      }
-      items.push({ subjectLabel: p.subjectLabel, archiveName });
-    }
-    const count = items.length;
-    const listed = items.slice(0, MAX_ARCHIVE_LIST);
-    const overflow = count - listed.length;
-    const bullets = listed
-      .map((i) => i.archiveName ? `• ${i.archiveName}` : `• ${i.subjectLabel} (backup)`)
-      .join('\n');
-    const overflowSuffix = overflow > 0 ? `\n…and ${overflow} more` : '';
-    const title = count === 1 ? 'Lorebook updated' : `${count} lorebooks updated`;
-    const message =
-      `${count} lorebook${count === 1 ? ' was' : 's were'} updated to apply the latest LumiRealm fixes. ` +
-      `Your manual edits were saved as separate backup lorebooks in the Lorebook tab:\n\n` +
-      `${bullets}${overflowSuffix}\n\n` +
-      `Copy any edits from these backups into the updated lorebooks if you want to keep them.`;
-    const result = await queueModalConfirm(userId, {
-      title,
-      message,
-      variant: 'info',
-      confirmLabel: 'Got it',
-      cancelLabel: 'Dismiss',
-    });
-    if (result === null) {
-      toastFor(userId, 'info', message, { title });
-    }
-  }
-
-  function notifyLorebookMigrationArchive(
-    subjectLabel: string,
-    archiveWbId: string,
-    userId: string,
-  ): void {
-    const list = pendingArchivesByUser.get(userId) ?? [];
-    list.push({ subjectLabel, archiveWbId });
-    pendingArchivesByUser.set(userId, list);
-    const existing = archiveFlushTimerByUser.get(userId);
-    if (existing) clearTimeout(existing);
-    const timer = setTimeout(() => {
-      archiveFlushTimerByUser.delete(userId);
-      void flushLorebookMigrationArchives(userId);
-    }, ARCHIVE_BATCH_DELAY_MS);
-    if (typeof (timer as { unref?: () => void }).unref === 'function') {
-      (timer as { unref: () => void }).unref();
-    }
-    archiveFlushTimerByUser.set(userId, timer);
-  }
 
   async function runMassModuleMigrationIfNeeded(userId: string): Promise<void> {
     if (massModuleMigrationStartedThisBoot.has(userId)) return;
@@ -261,12 +178,6 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
         : `Updated ${processed - failed}/${processed} (${failed} failed, will retry next start)`,
       1,
     );
-    const existingTimer = archiveFlushTimerByUser.get(userId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      archiveFlushTimerByUser.delete(userId);
-    }
-    await flushLorebookMigrationArchives(userId);
     void moduleStorage;
   }
 
@@ -651,7 +562,5 @@ export function createMassMigrationsRunner(deps: MassMigrationsDeps): MassMigrat
     runMassCharacterMigrationIfNeeded,
     runRetiredMacroMigrationIfNeeded,
     runVarScopeMigrationIfNeeded,
-    notifyLorebookMigrationArchive,
-    flushLorebookMigrationArchives,
   };
 }

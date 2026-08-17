@@ -67,19 +67,3 @@ export function computeEntrySourceHashWithFields(
 export function computeEntrySourceHash(entry: Record<string, unknown>): string {
   return computeEntrySourceHashWithFields(entry, ENTRY_HASH_FIELDS);
 }
-
-// Missing hash is treated as "not edited" so migrations against pre-stamping
-// data silently overwrite. Going forward all entries carry the hash.
-export function hasUserEditedAnyEntry(entries: readonly unknown[]): boolean {
-  for (const e of entries) {
-    if (!e || typeof e !== 'object') continue;
-    const eo = e as Record<string, unknown>;
-    const ext = eo['extensions'];
-    const stored = ext && typeof ext === 'object'
-      ? (ext as Record<string, unknown>)['_risu_source_hash']
-      : undefined;
-    if (typeof stored !== 'string') continue;
-    if (stored !== computeEntrySourceHash(eo)) return true;
-  }
-  return false;
-}
