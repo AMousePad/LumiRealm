@@ -28,6 +28,10 @@ const TRANSLATOR_VERSION = "0.1.0"; // M17-lite
 
 const RISU_SPEC_VERSION = "risu-1";
 
+function regexFolder(label: string, name: string): string {
+  return `${label} — ${name}`.slice(0, 80);
+}
+
 export type TranslateMode = "full" | "walking-skeleton" | "diagnostic";
 
 export interface TranslateCharxOptions {
@@ -180,6 +184,7 @@ export function translateFromCharxBundle(
   let moduleCjs = false;
   let backgroundEmbedding = false;
   let mcp = false;
+  let moduleName: string | null = null;
   if (bundle.moduleEnvelope) {
     try {
       const parsed = parseRisuModule(bundle.moduleEnvelope.module);
@@ -189,6 +194,7 @@ export function translateFromCharxBundle(
       moduleLorebook = (parsed.module.lorebook ?? []) as readonly LoreBook[];
       moduleRegexScripts = (parsed.module.regex ?? []) as readonly CustomScript[];
       moduleTriggerScripts = (parsed.module.trigger ?? []) as readonly TriggerScript[];
+      moduleName = parsed.module.name;
       moduleRegexCount = parsed.module.regex?.length ?? 0;
       moduleTriggerCount = parsed.module.trigger?.length ?? 0;
       moduleCjs = typeof parsed.module.cjs === "string" && parsed.module.cjs.length > 0;
@@ -274,12 +280,20 @@ export function translateFromCharxBundle(
   );
   const charRegexOut = wantRegex
     ? mapRegex(charRegexScripts, {
-        characterId: charMap.character.id, now, uuid, origin: "character",
+        characterId: charMap.character.id,
+        now,
+        uuid,
+        origin: "character",
+        folder: regexFolder("CardX", charMap.character.name),
       })
     : { rows: [] as LumiRegexScript[], skipped: [] as AtAtAction[], issues: [] as { path: string; message: string }[] };
   const moduleRegexOut = wantRegex
     ? mapRegex(moduleRegexScripts, {
-        characterId: charMap.character.id, now, uuid, origin: "module",
+        characterId: charMap.character.id,
+        now,
+        uuid,
+        origin: "module",
+        folder: regexFolder("Module", moduleName ?? charMap.character.name),
       })
     : { rows: [] as LumiRegexScript[], skipped: [] as AtAtAction[], issues: [] as { path: string; message: string }[] };
   const regexScriptsRaw: readonly LumiRegexScript[] = [...charRegexOut.rows, ...moduleRegexOut.rows];
@@ -666,4 +680,3 @@ function detectMacrosInText(c: { description: string; personality: string; scena
   }
   return false;
 }
-
