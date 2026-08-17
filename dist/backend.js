@@ -37765,36 +37765,30 @@ function makeSpindleHost(ctx) {
       out.constant = p.constant;
     return out;
   };
-  const worldInfo = anySpindle.world_books ? {
+  const worldInfo = {
     entries: {
       list: async (bookId, opts) => {
-        const res = await anySpindle.world_books.entries.list(bookId, { ...opts, ...uid ? { userId: uid } : {} });
-        return { data: (res?.data ?? []).map(dtoToHostEntry) };
+        const res = await spindle.world_books.entries.list(bookId, { ...opts, ...uid ? { userId: uid } : {} });
+        return { data: res.data.map(dtoToHostEntry) };
       },
-      create: async (bookId, entry) => dtoToHostEntry(await anySpindle.world_books.entries.create(bookId, hostPatchToDto(entry), uid)),
-      update: async (id, patch) => dtoToHostEntry(await anySpindle.world_books.entries.update(id, hostPatchToDto(patch), uid)),
-      delete: (id) => anySpindle.world_books.entries.delete(id, uid)
+      create: async (bookId, entry) => dtoToHostEntry(await spindle.world_books.entries.create(bookId, hostPatchToDto(entry), uid)),
+      update: async (id, patch) => dtoToHostEntry(await spindle.world_books.entries.update(id, hostPatchToDto(patch), uid)),
+      delete: async (id) => {
+        await spindle.world_books.entries.delete(id, uid);
+      }
     }
-  } : undefined;
-  const personas = anySpindle.personas ? {
+  };
+  const personas = {
     getActive: async () => {
-      const p = await anySpindle.personas.getActive(uid);
+      const p = await spindle.personas.getActive(uid);
       if (!p)
         return null;
-      const rawId = p["id"];
-      if (typeof rawId !== "string")
-        return null;
-      const rawImageId = p["image_id"];
-      const rawDesc = p["description"];
-      return {
-        ...p,
-        id: rawId,
-        description: typeof rawDesc === "string" ? rawDesc : undefined,
-        imageId: typeof rawImageId === "string" && rawImageId.length > 0 ? rawImageId : null
-      };
+      return { ...p, imageId: p.image_id || null };
     },
-    update: (id, patch) => anySpindle.personas.update(id, patch, uid)
-  } : undefined;
+    update: async (id, patch) => {
+      await spindle.personas.update(id, patch, uid);
+    }
+  };
   const host = {
     chat: {
       getChatId: () => chatId,
@@ -37810,6 +37804,8 @@ function makeSpindleHost(ctx) {
       get: charGet,
       update: charUpdate
     },
+    worldInfo,
+    personas,
     ui: {
       toast: (msg, kind) => {
         const t = anySpindle.toast;
@@ -37899,10 +37895,6 @@ function makeSpindleHost(ctx) {
       }
     }
   };
-  if (worldInfo)
-    host.worldInfo = worldInfo;
-  if (personas)
-    host.personas = personas;
   const generateApi = anySpindle.generate;
   const connectionsApi = anySpindle.connections;
   if (generateApi?.raw) {
