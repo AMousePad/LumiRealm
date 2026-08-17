@@ -173,4 +173,56 @@ describe('createLumiInterceptors registration', () => {
     )).toBe(foreignMessages);
     expect(ensureCalls).toHaveLength(1);
   });
+
+  test('strips multipart text setvars without replacing media or metadata', async () => {
+    let interceptor: InterceptorHandler | null = null;
+    (globalThis as { spindle?: unknown }).spindle = {
+      registerMacroInterceptor() {},
+      registerMessageContentProcessor() {},
+      registerInterceptor(handler: InterceptorHandler) { interceptor = handler; },
+      registerWorldInfoInterceptor() {},
+      registerContextHandler() {},
+      generate: { raw: async () => ({ content: '' }) },
+    };
+    const activeCardByChat = new Map([['chat', {
+      ownerUserId: 'user',
+      card: {
+        character_id: 'character',
+        risuPayload: { triggers: [], lua_scripts: [], extra: {} },
+      },
+    } as unknown as ActiveCard]]);
+    createLumiInterceptors({
+      activeCardByChat,
+      isPromptRegexAuthoritative: () => false,
+      runMessageVarPass: async () => {},
+      log: { info() {}, warn() {}, error() {}, trace() {}, debug() {} },
+    } as unknown as CreateLumiInterceptorsDeps).registerAll();
+
+    const keptText = { type: 'text', text: 'before', cache_control: { type: 'ephemeral' } } as const;
+    const image = { type: 'image', data: 'image-data', mime_type: 'image/png' } as const;
+    const strippedText = {
+      type: 'text',
+      text: 'Hello {{setvar::hp::100}}world',
+      cache_control: { type: 'ephemeral' },
+    } as const;
+    const message = {
+      role: 'user',
+      content: [keptText, image, strippedText],
+      reasoning_content: 'reasoning',
+      sourceMessageId: 'source',
+    } satisfies LlmMessageDTO;
+    const result = await interceptor!([message], {
+      userId: 'user',
+      chatId: 'chat',
+      generationType: 'normal',
+      personaId: null,
+      characterId: 'character',
+    } as InterceptorContextDTO) as LlmMessageDTO[];
+    const parts = result[0]!.content as Exclude<LlmMessageDTO['content'], string>;
+
+    expect(result[0]).toEqual({ ...message, content: [keptText, image, { ...strippedText, text: 'Hello world' }] });
+    expect(parts[0]).toBe(keptText);
+    expect(parts[1]).toBe(image);
+    expect(parts[2]!.cache_control).toBe(strippedText.cache_control);
+  });
 });
