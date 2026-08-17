@@ -88,7 +88,7 @@ export async function preloadForListenEditChain(
     loadVars(api, chatId),
     loadGlobalVars(api),
     api.chat.getMessages(),
-    characterId && api.characters?.get
+    characterId
       ? api.characters.get(characterId)
       : Promise.resolve(null),
   ]);

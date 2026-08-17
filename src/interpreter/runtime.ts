@@ -378,7 +378,7 @@ export async function makeRisuTriggerRuntime(
   } else {
     try {
       const cid = characterId || (data && (data as { characterId?: string }).characterId);
-      if (cid && api.characters && typeof api.characters.get === 'function') {
+      if (cid) {
         const _tCharStart = Date.now();
         const char = await api.characters.get(cid);
         _tCharGet = Date.now() - _tCharStart;
