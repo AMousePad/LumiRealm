@@ -39618,15 +39618,6 @@ var PROMPT_REGEX_TIMEOUT_MS = (() => {
 })();
 var STARTUP_TIMEOUT_MS = 1e4;
 var HEARTBEAT_TIMEOUT_MS = 45000;
-function getBackendProcessesApi() {
-  const api = spindle.backendProcesses;
-  if (!api || typeof api.spawn !== "function" || typeof api.onMessage !== "function")
-    return null;
-  return api;
-}
-function isPromptRegexRunnerAvailable() {
-  return getBackendProcessesApi() !== null;
-}
 function createPromptRegexRunnerClient(deps) {
   const { log: log8, errMsg: errMsg2 } = deps;
   const pending4 = new Map;
@@ -39679,9 +39670,7 @@ function createPromptRegexRunnerClient(deps) {
       log8.warn("prompt-regex runner: no userId, cannot spawn managed process; shipping prompt without inline regex");
       return null;
     }
-    const api = getBackendProcessesApi();
-    if (!api)
-      return null;
+    const api = spindle.backendProcesses;
     wireListeners(api);
     spawnInFlight = (async () => {
       try {
@@ -45862,12 +45851,9 @@ var PROMPT_REGEX_ENV = (() => {
   const v = globalThis.Bun?.env?.LUMIREALM_PROMPT_REGEX;
   return v !== "0" && v !== "false";
 })();
-var PROMPT_REGEX_RUNNER_AVAILABLE = isPromptRegexRunnerAvailable();
 var PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE = typeof spindle.promptRegex?.setOwnedChats === "function";
-var PROMPT_REGEX_ACTIVE = PROMPT_REGEX_ENV && PROMPT_REGEX_RUNNER_AVAILABLE && PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE;
-if (PROMPT_REGEX_ENV && !PROMPT_REGEX_RUNNER_AVAILABLE) {
-  log8.warn("Inline prompt regex is enabled (LUMIREALM_PROMPT_REGEX) but spindle.backendProcesses is unavailable " + "on this host; declining prompt-regex ownership so the host keeps running its own sandboxed pass. " + "Upgrade Lumiverse to enable inline prompt regex in a killable subprocess.");
-} else if (PROMPT_REGEX_ENV && !PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE) {
+var PROMPT_REGEX_ACTIVE = PROMPT_REGEX_ENV && PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE;
+if (PROMPT_REGEX_ENV && !PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE) {
   log8.warn("Inline prompt regex is enabled (LUMIREALM_PROMPT_REGEX) and backendProcesses is available, but " + "spindle.promptRegex.setOwnedChats is missing on this host; declining prompt-regex ownership so the host " + "keeps its own pass (a host that cannot be told to skip would otherwise double-apply). Upgrade Lumiverse to " + "enable inline prompt regex.");
 }
 var promptRegexRunnerClient = PROMPT_REGEX_ACTIVE ? createPromptRegexRunnerClient({ log: log8, errMsg }) : null;

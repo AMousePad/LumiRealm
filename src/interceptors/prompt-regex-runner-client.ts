@@ -4,6 +4,7 @@ import type { RegexCoreScript } from '../display/regex-core.js';
 import type { PrebuiltPipelineInput } from './prompt-regex-apply.js';
 import type { LlmMessage } from '../adapters/spindle-extras.js';
 import type { RegexRunnerReply } from '../regex-runner.js';
+import type { BackendProcessHandle } from 'lumiverse-spindle-types';
 
 const RUNNER_ENTRY = 'dist/regex-runner.js';
 const RUNNER_KIND = 'lumirealm-prompt-regex';
@@ -23,26 +24,6 @@ const STARTUP_TIMEOUT_MS = 10_000;
 // dispatch timeout (it measures from the last heartbeat, ~one interval early).
 const HEARTBEAT_TIMEOUT_MS = 45_000;
 
-interface BackendProcessHandleLike {
-  readonly processId: string;
-  send(payload: unknown): void;
-  stop(options?: { userId?: string; reason?: string }): Promise<void>;
-}
-
-interface BackendProcessesApiLike {
-  spawn(options: {
-    entry: string;
-    kind?: string;
-    key?: string;
-    startupTimeoutMs?: number;
-    heartbeatTimeoutMs?: number;
-    replaceExisting?: boolean;
-    userId?: string;
-  }): Promise<BackendProcessHandleLike>;
-  onMessage(handler: (event: { processId: string; payload: unknown; userId: string }) => void): () => void;
-  onLifecycle(handler: (event: { processId: string; state: string }) => void): () => void;
-}
-
 export interface RunnerClientDeps {
   readonly log: {
     readonly info: (m: string) => void;
@@ -58,16 +39,6 @@ export interface RunnerDispatchResult {
   readonly messages: LlmMessage[];
 }
 
-function getBackendProcessesApi(): BackendProcessesApiLike | null {
-  const api = (spindle as unknown as { backendProcesses?: BackendProcessesApiLike }).backendProcesses;
-  if (!api || typeof api.spawn !== 'function' || typeof api.onMessage !== 'function') return null;
-  return api;
-}
-
-export function isPromptRegexRunnerAvailable(): boolean {
-  return getBackendProcessesApi() !== null;
-}
-
 export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
   const { log, errMsg } = deps;
 
@@ -77,9 +48,9 @@ export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
   };
   const pending = new Map<string, Pending>();
 
-  let handle: BackendProcessHandleLike | null = null;
+  let handle: BackendProcessHandle | null = null;
   let handleProcessId: string | null = null;
-  let spawnInFlight: Promise<BackendProcessHandleLike | null> | null = null;
+  let spawnInFlight: Promise<BackendProcessHandle | null> | null = null;
   let listenersWired = false;
   let requestSeq = 0;
 
@@ -91,7 +62,7 @@ export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
     pending.clear();
   }
 
-  function wireListeners(api: BackendProcessesApiLike): void {
+  function wireListeners(api: typeof spindle.backendProcesses): void {
     if (listenersWired) return;
     listenersWired = true;
     api.onMessage((event) => {
@@ -120,15 +91,14 @@ export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
     });
   }
 
-  async function ensureHandle(userId: string | undefined): Promise<BackendProcessHandleLike | null> {
+  async function ensureHandle(userId: string | undefined): Promise<BackendProcessHandle | null> {
     if (handle !== null) return handle;
     if (spawnInFlight !== null) return spawnInFlight;
     if (userId === undefined) {
       log.warn('prompt-regex runner: no userId, cannot spawn managed process; shipping prompt without inline regex');
       return null;
     }
-    const api = getBackendProcessesApi();
-    if (!api) return null;
+    const api = spindle.backendProcesses;
     wireListeners(api);
     spawnInFlight = (async () => {
       try {
