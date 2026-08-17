@@ -92,14 +92,12 @@ export function makeChatApi(
       ? location as 'start' | 'historyend' | 'promptend' : 'promptend';
     state.additionalSysPrompt[loc] += toStr(value) + '\n\n';
     try {
-      if (api.chat.inject) {
-        state.loopCounter.value += 1;
-        await api.chat.inject(
-          'risu-sys-' + loc + '-' + state.loopCounter.value,
-          toStr(value),
-          { mode: 'context', position: loc, role: 'system' },
-        );
-      }
+      state.loopCounter.value += 1;
+      await api.chat.inject(
+        'risu-sys-' + loc + '-' + state.loopCounter.value,
+        toStr(value),
+        { mode: 'context', position: loc, role: 'system' },
+      );
     } catch { /* */ }
   }
 

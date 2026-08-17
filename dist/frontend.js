@@ -23845,10 +23845,8 @@ function makeChatApi(api, state, notifyStateChanged) {
 
 `;
     try {
-      if (api.chat.inject) {
-        state.loopCounter.value += 1;
-        await api.chat.inject("risu-sys-" + loc + "-" + state.loopCounter.value, toStr(value), { mode: "context", position: loc, role: "system" });
-      }
+      state.loopCounter.value += 1;
+      await api.chat.inject("risu-sys-" + loc + "-" + state.loopCounter.value, toStr(value), { mode: "context", position: loc, role: "system" });
     } catch {}
   }
   async function command(value) {
@@ -24877,9 +24875,7 @@ async function makeRisuRegexRuntime(api, data, scriptNs, opts = {}) {
   }
   async function inject(content) {
     try {
-      if (api.chat.inject) {
-        await api.chat.inject("risu-inject-" + Math.random().toString(36).slice(2, 8), toStr(content), { mode: "context", role: "system" });
-      }
+      await api.chat.inject("risu-inject-" + Math.random().toString(36).slice(2, 8), toStr(content), { mode: "context", role: "system" });
     } catch {}
   }
   async function repeatBack(regex, mode2) {
@@ -25053,7 +25049,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   } else {
     try {
       const cid = characterId || data && data.characterId;
-      if (cid && api.characters && typeof api.characters.get === "function") {
+      if (cid) {
         const _tCharStart = Date.now();
         const char = await api.characters.get(cid);
         _tCharGet = Date.now() - _tCharStart;
@@ -26029,7 +26025,7 @@ async function preloadForListenEditChain(api, chatId, characterId) {
     loadVars(api, chatId),
     loadGlobalVars(api),
     api.chat.getMessages(),
-    characterId && api.characters?.get ? api.characters.get(characterId) : Promise.resolve(null)
+    characterId ? api.characters.get(characterId) : Promise.resolve(null)
   ]);
   const tParallel = Date.now() - t0;
   let varsCache;

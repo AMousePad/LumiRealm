@@ -46,13 +46,11 @@ export async function makeRisuRegexRuntime(
 
   async function inject(content: unknown): Promise<void> {
     try {
-      if (api.chat.inject) {
-        await api.chat.inject(
-          'risu-inject-' + Math.random().toString(36).slice(2, 8),
-          toStr(content),
-          { mode: 'context', role: 'system' },
-        );
-      }
+      await api.chat.inject(
+        'risu-inject-' + Math.random().toString(36).slice(2, 8),
+        toStr(content),
+        { mode: 'context', role: 'system' },
+      );
     } catch { /* */ }
   }
 
