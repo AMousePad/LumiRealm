@@ -68,7 +68,6 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
     const tStart = Date.now();
     log.info(`importCardFromBytes: start file=${fileName} bytes=${bytes.byteLength} userId=${userId}`);
 
-    const hasSetAvatar = typeof (spindle.characters as { setAvatar?: unknown }).setAvatar === 'function';
     if (!spindle.images?.upload) {
       throw new Error(
         'spindle.images.upload is unavailable,Lumi 0.9.6+ required.',
@@ -93,41 +92,29 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
             data: readonly unknown[];
             total: number;
           }>,
-        ...(hasSetAvatar
-          ? {
-              setAvatar: (characterId, avatar, uid) => {
-                log.info(`spindle.characters.setAvatar characterId=${characterId} filename=${avatar.filename ?? '?'} bytes=${avatar.data.byteLength}`);
-                return (spindle.characters as unknown as {
-                  setAvatar(
-                    id: string,
-                    avatar: { data: Uint8Array; filename?: string; mime_type?: string },
-                    userId?: string,
-                  ): Promise<{ id: string; image_id?: string | null }>;
-                }).setAvatar(characterId, avatar, uid).then((c) => ({
-                  id: c.id,
-                  image_id: typeof c.image_id === 'string' ? c.image_id : null,
-                }));
-              },
-            }
-          : {}),
+        setAvatar: (characterId, avatar, uid) => {
+          log.info(`spindle.characters.setAvatar characterId=${characterId} filename=${avatar.filename ?? '?'} bytes=${avatar.data.byteLength}`);
+          return spindle.characters.setAvatar(characterId, avatar, uid).then((c) => ({
+            id: c.id,
+            image_id: typeof c.image_id === 'string' ? c.image_id : null,
+          }));
+        },
       },
-      world_books: spindle.world_books
-        ? {
-            create: (input, uid) => {
-              log.info(`spindle.world_books.create name=${(input as { name?: string }).name ?? '?'}`);
-              return spindle.world_books.create(input as never, uid).then((w) => {
-                log.info(`spindle.world_books.create -> id=${w.id}`);
-                return { id: w.id };
-              });
-            },
-            update: (bookId, input, uid) =>
-              spindle.world_books.update(bookId, input as never, uid),
-            entries: {
-              create: (bookId, input, uid) =>
-                spindle.world_books.entries.create(bookId, input as never, uid).then((e) => ({ id: e.id })),
-            },
-          }
-        : undefined,
+      world_books: {
+        create: (input, uid) => {
+          log.info(`spindle.world_books.create name=${(input as { name?: string }).name ?? '?'}`);
+          return spindle.world_books.create(input as never, uid).then((w) => {
+            log.info(`spindle.world_books.create -> id=${w.id}`);
+            return { id: w.id };
+          });
+        },
+        update: (bookId, input, uid) =>
+          spindle.world_books.update(bookId, input as never, uid),
+        entries: {
+          create: (bookId, input, uid) =>
+            spindle.world_books.entries.create(bookId, input as never, uid).then((e) => ({ id: e.id })),
+        },
+      },
       images: {
         upload: (input, uid) =>
           spindleImagesApi.upload(input, uid).then((img) => ({ id: img.id })),
@@ -140,8 +127,6 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
       },
       requestConsent: (opts) => requestConsent(opts, userId),
     };
-    if (!spindle.world_books) log.warn(`spindle.world_books unavailable, lorebook entries will be skipped`);
-
     enterAssetUpload();
     try {
       const result = await importCard({
