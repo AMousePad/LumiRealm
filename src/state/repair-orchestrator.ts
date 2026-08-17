@@ -56,9 +56,9 @@ export interface RepairOrchestratorDeps {
     userId: string,
   ) => Promise<void>;
   readonly translatorMigrationChecked: Set<string>;
+  readonly listStaleModuleRegexIds: (userId: string) => Promise<readonly string[]>;
   readonly listStaleCharRegexIds: (userId: string) => Promise<readonly string[]>;
-  readonly deleteRegexIds: (userId: string, ids: readonly string[]) => Promise<number>;
-  readonly sweepOrphanModuleRegex: (userId: string) => Promise<number>;
+  readonly deleteRegexRows: (userId: string, ids: readonly string[]) => Promise<number>;
   readonly clearDeadJournals: (userId: string) => Promise<number>;
   readonly send: (msg: BackendToFrontend, userId: string | undefined) => void;
   readonly emitOperationProgress: (
@@ -102,9 +102,9 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
     readModuleEnvelope,
     refreshAttachedModule,
     translatorMigrationChecked,
+    listStaleModuleRegexIds,
     listStaleCharRegexIds,
-    deleteRegexIds,
-    sweepOrphanModuleRegex,
+    deleteRegexRows,
     clearDeadJournals,
     send,
     emitOperationProgress,
@@ -264,7 +264,7 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
       try {
         emitOperationProgress(userId, opId, 'progress', opTitle, 'Sweeping stale character regex…', 0.05);
         const ids = await listStaleCharRegexIds(userId);
-        staleCharRegexDeleted = await deleteRegexIds(userId, ids);
+        staleCharRegexDeleted = await deleteRegexRows(userId, ids);
         log.info(`applyRepair: deleted ${staleCharRegexDeleted}/${ids.length} stale char regex`);
       } catch (err) {
         log.warn(`applyRepair: stale char regex sweep failed: ${errMsg(err)}`);
@@ -273,7 +273,8 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
     if (options.applyStaleModuleRegex) {
       try {
         emitOperationProgress(userId, opId, 'progress', opTitle, 'Sweeping stale module regex…', 0.15);
-        staleModuleRegexDeleted = await sweepOrphanModuleRegex(userId);
+        const ids = await listStaleModuleRegexIds(userId);
+        staleModuleRegexDeleted = await deleteRegexRows(userId, ids);
       } catch (err) {
         log.warn(`applyRepair: stale module regex sweep failed: ${errMsg(err)}`);
       }

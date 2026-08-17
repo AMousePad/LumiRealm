@@ -84,6 +84,7 @@ export interface OrphanOrchestrator {
   detectDeletedWhileOff(userId: string): Promise<DeletedWhileOffReport>;
   scanOrphanedImages(userId: string): Promise<OrphanScanReport>;
   sweepOrphanModuleRegex(userId: string): Promise<number>;
+  listStaleModuleRegexIds(userId: string): Promise<readonly string[]>;
   listStaleCharRegexIds(userId: string): Promise<readonly string[]>;
   deleteRegexIds(userId: string, ids: readonly string[]): Promise<number>;
   clearDeadJournals(userId: string): Promise<number>;
@@ -271,6 +272,47 @@ export function createOrphanOrchestrator(
     return deleted;
   }
 
+  async function listStaleModuleRegexIds(userId: string): Promise<readonly string[]> {
+    if (!deps.regexApi?.list) return [];
+    let liveModuleIds: Set<string>;
+    try {
+      liveModuleIds = new Set(await deps.listModuleIds(userId));
+    } catch (err) {
+      deps.log.warn(`listStaleModuleRegexIds: listModules failed: ${deps.errMsg(err)}`);
+      return [];
+    }
+    const orphanIds: string[] = [];
+    let offset = 0;
+    while (true) {
+      let page: { data: readonly unknown[]; total: number };
+      try {
+        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
+      } catch (err) {
+        deps.log.warn(`listStaleModuleRegexIds: regex_scripts.list offset=${offset} failed: ${deps.errMsg(err)}`);
+        break;
+      }
+      if (!Array.isArray(page.data) || page.data.length === 0) break;
+      for (const raw of page.data) {
+        const row = raw as {
+          id?: unknown;
+          metadata?: { _risu?: { module_id?: unknown; source_row_index?: unknown } };
+        };
+        const moduleId = row.metadata?._risu?.module_id;
+        const sourceRowIndex = row.metadata?._risu?.source_row_index;
+        if (
+          typeof row.id !== 'string'
+          || typeof moduleId !== 'string'
+          || moduleId.length === 0
+          || !Number.isInteger(sourceRowIndex)
+        ) continue;
+        if (!liveModuleIds.has(moduleId)) orphanIds.push(row.id);
+      }
+      offset += page.data.length;
+      if (typeof page.total === 'number' && offset >= page.total) break;
+    }
+    return orphanIds;
+  }
+
   async function listStaleCharRegexIds(userId: string): Promise<readonly string[]> {
     if (!deps.regexApi?.list) return [];
     let liveCharIds: Set<string>;
@@ -298,13 +340,15 @@ export function createOrphanOrchestrator(
           scope?: unknown;
           scope_id?: unknown;
           character_id?: unknown;
-          metadata?: { _risu?: { module_id?: unknown } };
+          metadata?: { _risu?: { module_id?: unknown; origin?: unknown } };
         };
         if (typeof row.id !== 'string') continue;
         if (row.scope !== 'character') continue;
         const risu = row.metadata?._risu;
         if (!risu || typeof risu !== 'object') continue;
         if (typeof (risu as { module_id?: unknown }).module_id === 'string') continue;
+        const origin = (risu as { origin?: unknown }).origin;
+        if (origin !== 'character' && origin !== 'module') continue;
         const charId = typeof row.scope_id === 'string'
           ? row.scope_id
           : typeof row.character_id === 'string'
@@ -412,6 +456,7 @@ export function createOrphanOrchestrator(
     detectDeletedWhileOff,
     scanOrphanedImages,
     sweepOrphanModuleRegex,
+    listStaleModuleRegexIds,
     listStaleCharRegexIds,
     deleteRegexIds,
     clearDeadJournals,
