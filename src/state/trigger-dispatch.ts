@@ -317,7 +317,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           entry: triggerName,
           args: [effectiveTriggerId],
         });
-        await (runtime as unknown as { flush?: () => Promise<void> }).flush?.();
+        await runtime.flush();
       } catch (err) {
         log.error(`dispatchManualTrigger: Lua failed triggerName=${triggerName}: ${errMsg(err)}`);
       }
@@ -424,7 +424,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           entry: 'onButtonClick',
           args: [effectiveId, btn],
         });
-        await (runtime as unknown as { flush?: () => Promise<void> }).flush?.();
+        await runtime.flush();
       } catch (err) {
         log.error(`dispatchButtonClick: Lua failed btn="${btn}": ${errMsg(err)}`);
       }
