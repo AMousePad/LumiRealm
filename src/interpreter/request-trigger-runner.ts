@@ -1,5 +1,6 @@
 import type { TriggerScript } from '../core/schemas/triggerscript.js';
 import type { LlmMessage } from '../adapters/spindle-extras.js';
+import { mergeLlmText, projectLlmText } from '../util/llm-message-content.js';
 import { makeDispatcherScriptNS } from './dispatcher.js';
 import type { HostApi } from './host.js';
 import { selectRestrictedTriggers } from './restricted-trigger.js';
@@ -45,7 +46,10 @@ export async function runRequestTriggerChain(
       characterId: opts.characterId,
       binding: 'request',
       displayMode: true,
-      requestData: messages.map(({ role, content }) => ({ role, content })),
+      requestData: messages.map(({ role, content }) => ({
+        role,
+        content: projectLlmText(content),
+      })),
     },
   );
 
@@ -66,7 +70,7 @@ export async function runRequestTriggerChain(
     return messages.map((message, index) => ({
       ...message,
       role: state[index]!.role as LlmMessage['role'],
-      content: state[index]!.content,
+      content: mergeLlmText(message.content, state[index]!.content),
     }));
   } finally {
     await runtime.flush();

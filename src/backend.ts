@@ -1095,7 +1095,6 @@ const feDisplayShadowOptOut = new Set<string>();
 
 createLumiInterceptors({
   activeCardByChat,
-  lastActiveChatByUser,
   captureUserId,
   isFeDisplayAuthoritative: (chatId) => FE_DISPLAY_ENABLED && !feDisplayShadowOptOut.has(chatId),
   isPromptRegexAuthoritative: (chatId: string) => PROMPT_REGEX_ACTIVE && isPromptRegexOwnedChat(chatId),
