@@ -266,17 +266,7 @@ export interface SpindleImportApi {
     cancelLabel: string;
   }): Promise<{ confirmed: boolean }>;
   images: {
-    upload(
-      input: {
-        data: Uint8Array;
-        mime_type?: string;
-        filename?: string;
-        owner_character_id?: string;
-        owner_chat_id?: string;
-      },
-      userId?: string,
-    ): Promise<{ id: string }>;
-    uploadMany?(
+    uploadMany(
       items: ReadonlyArray<{
         data: Uint8Array;
         mime_type?: string;
@@ -540,7 +530,6 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
 
   progress('uploading_assets', 'Uploading assets…', 0.55);
   const tAssets = Date.now();
-  const uploadConcurrency = 12;
   const pathToImageId: Record<string, string> = {};
   const imageIds: string[] = [];
   const journalBuffer: string[] = [];
@@ -572,9 +561,9 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   let processed = 0;
   let assetUploadFailures = 0;
 
-  const uploadMany = args.spindle.images.uploadMany?.bind(args.spindle.images);
+  const uploadMany = args.spindle.images.uploadMany.bind(args.spindle.images);
 
-  if (typeof uploadMany === 'function' && totalAssetCount > 0) {
+  if (totalAssetCount > 0) {
     logInfo(
       `(5b) uploading ${totalAssetCount} assets totalBytes=${totalAssetBytes} ` +
         `via spindle.images.uploadMany (batched)`,
@@ -634,50 +623,6 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
       const frac = PROGRESS_BASE + (PROGRESS_END - PROGRESS_BASE) * (processed / totalAssetCount);
       progress('uploading_assets', `Uploading assets (${processed}/${totalAssetCount})…`, frac);
     }
-  } else if (totalAssetCount > 0) {
-    logInfo(
-      `(5b) uploading ${totalAssetCount} assets totalBytes=${totalAssetBytes} ` +
-        `concurrency=${uploadConcurrency} via spindle.images.upload (single, fallback)`,
-    );
-    const progressEvery = Math.max(1, Math.min(25, Math.floor(totalAssetCount / 20) || 1));
-    let nextIndex = 0;
-    const uploadWorker = async (): Promise<void> => {
-      while (true) {
-        const i = nextIndex++;
-        if (i >= totalAssetCount) break;
-        const entry = assetEntries[i];
-        if (!entry) break;
-        const [path, data] = entry;
-        const filename = path.split('/').pop() ?? 'asset.bin';
-        try {
-          const result = await args.spindle.images.upload(
-            { data, mime_type: guessMimeType(path), filename, owner_character_id: characterId },
-            args.userId,
-          );
-          if (typeof result?.id !== 'string' || result.id.length === 0) {
-            throw new Error('upload returned without an image id');
-          }
-          pathToImageId[path] = result.id;
-          imageIds.push(result.id);
-          journalBuffer.push(result.id);
-        } catch (err) {
-          assetUploadFailures += 1;
-          const msg = err instanceof Error ? err.message : String(err);
-          logWarn(`(5b) upload failed path=${path}: ${msg}`);
-        }
-        processed += 1;
-        if (processed % progressEvery === 0 || processed === totalAssetCount) {
-          flushJournal();
-          const frac = PROGRESS_BASE + (PROGRESS_END - PROGRESS_BASE) * (processed / totalAssetCount);
-          progress('uploading_assets', `Uploading assets (${processed}/${totalAssetCount})…`, frac);
-        }
-      }
-    };
-    const workers: Promise<void>[] = [];
-    for (let w = 0; w < Math.min(uploadConcurrency, totalAssetCount); w++) {
-      workers.push(uploadWorker());
-    }
-    await Promise.all(workers);
   }
   flushJournal();
   await journalChain;

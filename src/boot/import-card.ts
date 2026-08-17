@@ -68,12 +68,6 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
     const tStart = Date.now();
     log.info(`importCardFromBytes: start file=${fileName} bytes=${bytes.byteLength} userId=${userId}`);
 
-    if (!spindle.images?.upload) {
-      throw new Error(
-        'spindle.images.upload is unavailable,Lumi 0.9.6+ required.',
-      );
-    }
-    const spindleImagesApi = spindle.images;
     const spindleImportApi: SpindleImportApi = {
       characters: {
         create: (input, uid) => {
@@ -116,14 +110,8 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
         },
       },
       images: {
-        upload: (input, uid) =>
-          spindleImagesApi.upload(input, uid).then((img) => ({ id: img.id })),
-        ...(typeof spindleImagesApi.uploadMany === 'function'
-          ? {
-              uploadMany: (items, options) =>
-                spindleImagesApi.uploadMany(items as never, options),
-            }
-          : {}),
+        uploadMany: (items, options) =>
+          spindle.images.uploadMany(items as never, options),
       },
       requestConsent: (opts) => requestConsent(opts, userId),
     };
