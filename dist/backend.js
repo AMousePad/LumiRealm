@@ -37689,9 +37689,9 @@ function makeSpindleHost(ctx) {
     }, uid);
   }
   async function inject(id, content, opts) {
-    const anySpindle2 = spindle;
-    if (anySpindle2.chats?.inject) {
-      await anySpindle2.chats.inject(chatId, id, content, opts, uid);
+    const anySpindle = spindle;
+    if (anySpindle.chats?.inject) {
+      await anySpindle.chats.inject(chatId, id, content, opts, uid);
       return;
     }
     const chat = await spindle.chats.get(chatId, uid);
@@ -37728,7 +37728,6 @@ function makeSpindleHost(ctx) {
     expectCharacterEdit(id);
     await spindle.characters.update(id, p, uid);
   }
-  const anySpindle = spindle;
   const dtoToHostEntry = (r) => {
     const e = { ...r, id: typeof r.id === "string" ? r.id : "" };
     if (typeof r.world_book_id === "string")
@@ -37808,13 +37807,11 @@ function makeSpindleHost(ctx) {
     personas,
     ui: {
       toast: (msg, kind) => {
-        const t = anySpindle.toast;
-        if (!t)
-          return;
         if (userId === undefined) {
           log7.warn(`toast: no userId in dispatch ctx, skipping (would broadcast)`);
           return;
         }
+        const t = spindle.toast;
         const opts = { userId };
         const k = kind ?? "info";
         if (k === "error")
@@ -37827,11 +37824,8 @@ function makeSpindleHost(ctx) {
           t.info(msg, opts);
       },
       prompt: async (message, defaultValue) => {
-        const p = anySpindle.prompt;
-        if (!p?.input)
-          return null;
         try {
-          const res = await p.input({
+          const res = await spindle.prompt.input({
             title: message.slice(0, 80),
             ...message.length > 80 ? { message } : {},
             ...defaultValue !== undefined ? { defaultValue } : {},
@@ -37843,11 +37837,8 @@ function makeSpindleHost(ctx) {
         }
       },
       confirm: async (message) => {
-        const m = anySpindle.modal;
-        if (!m?.confirm)
-          return false;
         try {
-          const res = await m.confirm({
+          const res = await spindle.modal.confirm({
             title: "Confirm",
             message,
             ...userId !== undefined ? { userId } : {}
@@ -37858,33 +37849,26 @@ function makeSpindleHost(ctx) {
         }
       },
       alert: async (message, kind) => {
-        const sf = anySpindle.sendToFrontend;
-        if (typeof sf !== "function" || userId === undefined) {
-          if (userId === undefined)
-            log7.warn(`alert: no userId in dispatch ctx, skipping (would broadcast)`);
-          else {
-            const t = anySpindle.toast;
-            t?.info?.(message, { userId });
-          }
+        if (userId === undefined) {
+          log7.warn(`alert: no userId in dispatch ctx, skipping (would broadcast)`);
           return;
         }
         const requestId = globalThis.crypto?.randomUUID?.() ?? `alert-${Date.now()}-${Math.random()}`;
         const wireKind = kind === "error" ? "error" : "info";
         try {
-          sf({ type: "request_alert", requestId, message, kind: wireKind }, userId);
+          spindle.sendToFrontend({ type: "request_alert", requestId, message, kind: wireKind }, userId);
           await awaitAlertDismissal(requestId, userId);
         } catch {}
       },
       pick: async (title, options) => {
-        const sf = anySpindle.sendToFrontend;
-        if (typeof sf !== "function" || options.length === 0 || userId === undefined) {
-          log7.warn(`pick: no sendToFrontend or empty options (n=${options.length}) or no userId, returning null`);
+        if (options.length === 0 || userId === undefined) {
+          log7.warn(`pick: empty options (n=${options.length}) or no userId, returning null`);
           return null;
         }
         const requestId = globalThis.crypto?.randomUUID?.() ?? `pick-${Date.now()}-${Math.random()}`;
         log7.info(`pick: requestId=${requestId} title=${JSON.stringify(title.slice(0, 80))} options=${options.length}`);
         try {
-          sf({ type: "request_pick", requestId, title, options }, userId);
+          spindle.sendToFrontend({ type: "request_pick", requestId, title, options }, userId);
           const v = await awaitPickResolution(requestId, userId);
           log7.info(`pick: requestId=${requestId} resolved value=${JSON.stringify(v)}`);
           return v;
@@ -37987,20 +37971,17 @@ ${instruction}` }
       }));
     }
   };
-  const tokensApi = anySpindle.tokens;
-  if (tokensApi?.countText) {
-    host.tokens = {
-      async count(text) {
-        try {
-          const r = await tokensApi.countText(text, uid !== undefined ? { userId: uid } : undefined);
-          const n = r.total_tokens;
-          return typeof n === "number" && Number.isFinite(n) ? n : Math.ceil(text.length / 4);
-        } catch {
-          return Math.ceil(text.length / 4);
-        }
+  host.tokens = {
+    async count(text) {
+      try {
+        const r = await spindle.tokens.countText(text, uid !== undefined ? { userId: uid } : undefined);
+        const n = r.total_tokens;
+        return typeof n === "number" && Number.isFinite(n) ? n : Math.ceil(text.length / 4);
+      } catch {
+        return Math.ceil(text.length / 4);
       }
-    };
-  }
+    }
+  };
   return host;
 }
 

@@ -121,22 +121,6 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     await spindle.characters.update(id, p, uid);
   }
 
-  const anySpindle = spindle as unknown as {
-    toast?: {
-      info: (msg: string, opts?: { title?: string; duration?: number; userId?: string }) => void;
-      success: (msg: string, opts?: { title?: string; duration?: number; userId?: string }) => void;
-      warning: (msg: string, opts?: { title?: string; duration?: number; userId?: string }) => void;
-      error: (msg: string, opts?: { title?: string; duration?: number; userId?: string }) => void;
-    };
-    prompt?: {
-      input: (o: { title: string; message?: string; placeholder?: string; defaultValue?: string; multiline?: boolean; userId?: string }) => Promise<{ value: string | null; cancelled: boolean }>;
-    };
-    modal?: {
-      confirm: (o: { title: string; message: string; variant?: string; confirmLabel?: string; cancelLabel?: string; userId?: string }) => Promise<{ confirmed: boolean }>;
-    };
-    sendToFrontend?: (msg: unknown, targetUserId?: string) => void;
-  };
-
   const dtoToHostEntry = (r: WorldBookEntryDTO): HostWorldInfoEntry => {
     const e: Record<string, unknown> = { ...r, id: typeof r.id === 'string' ? r.id : '' };
     if (typeof r.world_book_id === 'string') e.worldBookId = r.world_book_id;
@@ -203,12 +187,11 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     personas,
     ui: {
       toast: (msg: string, kind?: 'info' | 'error' | 'warning' | 'success') => {
-        const t = anySpindle.toast;
-        if (!t) return;
         if (userId === undefined) {
           log.warn(`toast: no userId in dispatch ctx, skipping (would broadcast)`);
           return;
         }
+        const t = spindle.toast;
         const opts = { userId };
         const k = kind ?? 'info';
         if (k === 'error') t.error(msg, opts);
@@ -217,10 +200,8 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
         else t.info(msg, opts);
       },
       prompt: async (message: string, defaultValue?: string): Promise<string | null> => {
-        const p = anySpindle.prompt;
-        if (!p?.input) return null;
         try {
-          const res = await p.input({
+          const res = await spindle.prompt.input({
             title: message.slice(0, 80),
             ...(message.length > 80 ? { message } : {}),
             ...(defaultValue !== undefined ? { defaultValue } : {}),
@@ -230,10 +211,8 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
         } catch { return null; }
       },
       confirm: async (message: string): Promise<boolean> => {
-        const m = anySpindle.modal;
-        if (!m?.confirm) return false;
         try {
-          const res = await m.confirm({
+          const res = await spindle.modal.confirm({
             title: 'Confirm',
             message,
             ...(userId !== undefined ? { userId } : {}),
@@ -244,32 +223,26 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       // Risu alertNormal/alertError port: FE owns the modal, BE awaits
       // `alert_dismissed`.
       alert: async (message: string, kind?: 'info' | 'error' | 'warning' | 'success'): Promise<void> => {
-        const sf = anySpindle.sendToFrontend;
-        if (typeof sf !== 'function' || userId === undefined) {
-          if (userId === undefined) log.warn(`alert: no userId in dispatch ctx, skipping (would broadcast)`);
-          else {
-            const t = anySpindle.toast;
-            t?.info?.(message, { userId });
-          }
+        if (userId === undefined) {
+          log.warn(`alert: no userId in dispatch ctx, skipping (would broadcast)`);
           return;
         }
         const requestId = (globalThis.crypto?.randomUUID?.() ?? `alert-${Date.now()}-${Math.random()}`);
         const wireKind: 'info' | 'error' = kind === 'error' ? 'error' : 'info';
         try {
-          sf({ type: 'request_alert', requestId, message, kind: wireKind }, userId);
+          spindle.sendToFrontend({ type: 'request_alert', requestId, message, kind: wireKind }, userId);
           await awaitAlertDismissal(requestId, userId);
         } catch { /* swallow */ }
       },
       pick: async (title: string, options: readonly string[]): Promise<string | null> => {
-        const sf = anySpindle.sendToFrontend;
-        if (typeof sf !== 'function' || options.length === 0 || userId === undefined) {
-          log.warn(`pick: no sendToFrontend or empty options (n=${options.length}) or no userId, returning null`);
+        if (options.length === 0 || userId === undefined) {
+          log.warn(`pick: empty options (n=${options.length}) or no userId, returning null`);
           return null;
         }
         const requestId = (globalThis.crypto?.randomUUID?.() ?? `pick-${Date.now()}-${Math.random()}`);
         log.info(`pick: requestId=${requestId} title=${JSON.stringify(title.slice(0, 80))} options=${options.length}`);
         try {
-          sf({ type: 'request_pick', requestId, title, options }, userId);
+          spindle.sendToFrontend({ type: 'request_pick', requestId, title, options }, userId);
           const v = await awaitPickResolution(requestId, userId);
           log.info(`pick: requestId=${requestId} resolved value=${JSON.stringify(v)}`);
           return v;
@@ -408,24 +381,17 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     },
   };
 
-  const tokensApi = (anySpindle as {
-    tokens?: {
-      countText?: (text: string, options?: unknown) => Promise<{ total_tokens?: number }>;
-    };
-  }).tokens;
-  if (tokensApi?.countText) {
-    (host as { tokens?: HostApi['tokens'] }).tokens = {
-      async count(text: string): Promise<number> {
-        try {
-          const r = await tokensApi.countText!(text, uid !== undefined ? { userId: uid } : undefined);
-          const n = (r as { total_tokens?: number }).total_tokens;
-          return typeof n === 'number' && Number.isFinite(n) ? n : Math.ceil(text.length / 4);
-        } catch {
-          return Math.ceil(text.length / 4);
-        }
-      },
-    };
-  }
+  (host as { tokens: NonNullable<HostApi['tokens']> }).tokens = {
+    async count(text: string): Promise<number> {
+      try {
+        const r = await spindle.tokens.countText(text, uid !== undefined ? { userId: uid } : undefined);
+        const n = r.total_tokens;
+        return typeof n === 'number' && Number.isFinite(n) ? n : Math.ceil(text.length / 4);
+      } catch {
+        return Math.ceil(text.length / 4);
+      }
+    },
+  };
 
   void characterId; // surfaced via ctx for future expansion
   return host;
