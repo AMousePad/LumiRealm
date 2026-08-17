@@ -95,13 +95,11 @@ function harness(options: HarnessOptions = {}) {
         characterInputs.push(input);
         return { id: 'char-1' };
       },
-      async get() { return null; },
       async update(_id: string, input: Record<string, unknown>) {
         trace.push('characters.update');
         characterUpdates.push(input);
         return { id: 'char-1' };
       },
-      async list() { return { data: [], total: 0 }; },
       async setAvatar() {
         trace.push('characters.setAvatar');
         if (options.avatar) throw new Error('avatar failed');

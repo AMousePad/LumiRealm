@@ -42942,9 +42942,7 @@ function createImportCardOrchestrator(deps) {
             return { id: c.id };
           });
         },
-        get: (characterId, uid) => spindle.characters.get(characterId, uid),
         update: (characterId, input, uid) => spindle.characters.update(characterId, input, uid),
-        list: (options) => spindle.characters.list(options),
         setAvatar: (characterId, avatar, uid) => {
           log8.info(`spindle.characters.setAvatar characterId=${characterId} filename=${avatar.filename ?? "?"} bytes=${avatar.data.byteLength}`);
           return spindle.characters.setAvatar(characterId, avatar, uid).then((c) => ({
