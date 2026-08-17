@@ -50,7 +50,6 @@ import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import { makeDispatcherScriptNS } from '../interpreter/dispatcher.js';
 import { runRequestTriggerChain } from '../interpreter/request-trigger-runner.js';
 import {
-  getPreAssemblyContractVersion,
   type GenerationContextShape,
   type LlmMessage,
   type InterceptorContext,
@@ -905,12 +904,6 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
   }
 
   function registerContextHandler(): void {
-    const contractVersion = getPreAssemblyContractVersion();
-    if (contractVersion < 1) {
-      log.error(`contextHandler: host preAssemblyGenerationContext contract=${contractVersion}, need >=1. Update Lumiverse. Risu input/start triggers and stopSending will NOT fire.`);
-      return;
-    }
-
     spindle.registerContextHandler(async (contextRaw) => {
       const ctx = (contextRaw ?? {}) as GenerationContextShape;
       const chatId = typeof ctx.chatId === 'string' ? ctx.chatId : null;

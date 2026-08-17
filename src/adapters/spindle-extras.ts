@@ -1,5 +1,3 @@
-declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
-
 // Prompt-assembly interceptor (editInput / editRequest hook chain entry).
 export interface InterceptorContext {
   chatId?: string;
@@ -27,12 +25,4 @@ export interface GenerationContextShape {
   userId?: string;
   dryRun?: boolean;
   cancelGeneration?: boolean;
-}
-export function getPreAssemblyContractVersion(): number {
-  const contracts = (spindle as unknown as {
-    contracts?: Readonly<Record<string, number>>;
-  }).contracts;
-  return typeof contracts?.['preAssemblyGenerationContext'] === 'number'
-    ? contracts['preAssemblyGenerationContext']
-    : 0;
 }
