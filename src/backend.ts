@@ -242,16 +242,6 @@ const log = {
     if (logStore.shouldEmit('trace')) spindle.log.info(`[lumirealm] ${msg}`);
     logStore.push('trace', 'backend', msg, logUid());
   },
-  /** @deprecated Alias for `debug`. */
-  verbose(msg: string): void {
-    if (logStore.shouldEmit('debug')) spindle.log.info(`[lumirealm] ${msg}`);
-    logStore.push('debug', 'backend', msg, logUid());
-  },
-  /** @deprecated Alias for `info`. */
-  always(msg: string): void {
-    if (logStore.shouldEmit('info')) spindle.log.info(`[lumirealm] ${msg}`);
-    logStore.push('info', 'backend', msg, logUid());
-  },
 };
 
 log.info(`backend boot: version=${EXTENSION_VERSION} features=[lorebook-cache,worldbook-events]`);
