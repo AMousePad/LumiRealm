@@ -57,7 +57,6 @@ describe('ModuleUploader.uploadSource', () => {
     await value.uploadSource({
       module: {},
       assetCount: 3,
-      concurrentReads: false,
       async readAsset(index) {
         indexes.push(index);
         active++;
@@ -83,7 +82,6 @@ describe('ModuleUploader.uploadSource', () => {
     await value.uploadSource({
       module: {},
       assetCount: assets.length,
-      concurrentReads: false,
       async readAsset(index) {
         indexes.push(index);
         return assets[index];
