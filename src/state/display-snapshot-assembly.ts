@@ -118,25 +118,15 @@ async function fetchHostLorebook(
   bookIds: readonly string[],
   userId: string,
 ): Promise<HostWorldInfoEntry[]> {
-  const wb = (spindle as unknown as {
-    world_books?: {
-      entries: {
-        list: (
-          id: string,
-          opts?: { limit?: number; userId?: string },
-        ) => Promise<{ data: readonly Record<string, unknown>[] }>;
-      };
-    };
-  }).world_books;
-  if (!wb || bookIds.length === 0) return [];
+  if (bookIds.length === 0) return [];
   const lists = await Promise.allSettled(
-    bookIds.map((bid) => wb.entries.list(bid, { limit: 1000, userId }).then((res) => ({ bid, res }))),
+    bookIds.map((bid) => spindle.world_books.entries.list(bid, { limit: 1000, userId }).then((res) => ({ bid, res }))),
   );
   const out: HostWorldInfoEntry[] = [];
   for (const r of lists) {
     if (r.status !== 'fulfilled' || !Array.isArray(r.value.res?.data)) continue;
     for (const dto of r.value.res.data) {
-      const e = dtoToHostEntry(dto);
+      const e = dtoToHostEntry(dto as unknown as Record<string, unknown>);
       out.push({ ...e, worldBookId: (e.worldBookId as string | undefined) || r.value.bid });
     }
   }
