@@ -23,8 +23,6 @@ function step(version: number) {
 
 function makeDeps(overrides: Partial<ModuleMigrationDeps> = {}): ModuleMigrationDeps {
   return {
-    syncWorldBook: async () => null,
-    reinstallArtifactsForAttached: async () => 0,
     refreshArtifactsForAttached: async () => 0,
     repairRegexBindingsForAttached: async () => ({ repaired: 0, refreshed: 0 }),
     applyModuleRegexReplaceStringTransform: async () => ({ scanned: 0, updated: 0, failed: 0 }),

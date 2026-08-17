@@ -40699,11 +40699,8 @@ function createMigrationsRunner(deps) {
     writeLumirealm: writeLumirealm2,
     invalidateActiveForCharacter,
     toastFor,
-    archiveModuleWorldBookBeforeMigration,
-    syncModuleWorldBook,
     charactersAttachedTo,
     refreshAttachedModule,
-    notifyLorebookMigrationArchive,
     log: log8,
     errMsg: errMsg2
   } = deps;
@@ -40855,7 +40852,6 @@ function createMigrationsRunner(deps) {
     const stored = env.translator_schema_version ?? 1;
     if (stored >= currentModuleSchemaVersion)
       return { ok: true };
-    let archiveWbId = null;
     const legacyAliases = async (mid, scope, scopeId) => {
       const aliases = new Map;
       const api = spindle.regex_scripts;
@@ -40886,23 +40882,6 @@ function createMigrationsRunner(deps) {
       return aliases;
     };
     const moduleDeps = {
-      syncWorldBook: async (e) => {
-        archiveWbId = await archiveModuleWorldBookBeforeMigration(e, userId);
-        return syncModuleWorldBook(e, userId);
-      },
-      reinstallArtifactsForAttached: async (mid) => {
-        const charIds = await charactersAttachedTo(mid, userId);
-        let count = 0;
-        for (const charId of charIds) {
-          try {
-            await dispatchModuleArtifactInstall(charId, env, userId);
-            count++;
-          } catch (err) {
-            log8.warn(`runModuleMigration: reinstall char=${charId} module=${mid} threw: ${errMsg2(err)}`);
-          }
-        }
-        return count;
-      },
       applyModuleRegexReplaceStringTransform: async (mid, transform) => {
         return applyRegexReplaceStringTransform((row) => isModuleRowFor(mid, row), userId, transform, log8, errMsg2);
       },
@@ -41025,11 +41004,6 @@ function createMigrationsRunner(deps) {
       const charIds = await charactersAttachedTo(moduleId, userId);
       for (const charId of charIds)
         invalidateActiveForCharacter(charId, userId);
-      if (archiveWbId) {
-        const m = env.module;
-        const moduleName = typeof m.name === "string" && m.name.length > 0 ? m.name : env.id;
-        notifyLorebookMigrationArchive(`Module: ${moduleName}`, archiveWbId, userId);
-      }
       return { ok: true };
     }
     if (result.kind === "failed")
@@ -46308,7 +46282,6 @@ var refreshAttachedModule = characterModuleAttach.refreshAttachedModule;
 var detachModuleFromAllCharacters = characterModuleAttach.detachModuleFromAllCharacters;
 var invalidateActiveForCharacter = characterModuleAttach.invalidateActiveForCharacter;
 var charactersAttachedTo = characterModuleAttach.charactersAttachedTo;
-var archiveModuleWorldBookBeforeMigration = worldBookOps.archiveModuleWorldBookBeforeMigration;
 var syncModuleWorldBook = worldBookOps.syncModuleWorldBook;
 worldBookOps.addWorldBookToCharacter;
 worldBookOps.removeWorldBookFromCharacter;
@@ -46351,11 +46324,8 @@ var migrationsRunner = createMigrationsRunner({
   updateLumirealm: (charId, userId, mutator) => updateLumirealm(charactersApi(), charId, userId, mutator),
   invalidateActiveForCharacter,
   toastFor,
-  archiveModuleWorldBookBeforeMigration: (env, userId) => archiveModuleWorldBookBeforeMigration(env, userId),
-  syncModuleWorldBook: (env, userId) => syncModuleWorldBook(env, userId),
   charactersAttachedTo: (moduleId, userId) => charactersAttachedTo(moduleId, userId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
-  notifyLorebookMigrationArchive: (label, wbId, uid) => massMigrations.notifyLorebookMigrationArchive(label, wbId, uid),
   log: log8,
   errMsg
 });

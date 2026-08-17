@@ -18,9 +18,6 @@ export interface LiveModuleWorldBookEntry {
 }
 
 export interface ModuleMigrationDeps {
-  // syncWorldBook re-runs lorebook projection and rewrites the world_book in place.
-  syncWorldBook: (env: ModuleEnvelope) => Promise<string | null>;
-  reinstallArtifactsForAttached: (moduleId: string) => Promise<number>;
   // Replacement-first refresh for every attached character. Stale rows are
   // removed only after the new projection is verified live.
   refreshArtifactsForAttached: (moduleId: string) => Promise<number>;
