@@ -40230,7 +40230,7 @@ function createTriggerDispatcher(deps) {
           entry: triggerName,
           args: [effectiveTriggerId]
         });
-        await runtime2.flush?.();
+        await runtime2.flush();
       } catch (err) {
         log8.error(`dispatchManualTrigger: Lua failed triggerName=${triggerName}: ${errMsg2(err)}`);
       }
@@ -40319,7 +40319,7 @@ function createTriggerDispatcher(deps) {
           entry: "onButtonClick",
           args: [effectiveId, btn]
         });
-        await runtime2.flush?.();
+        await runtime2.flush();
       } catch (err) {
         log8.error(`dispatchButtonClick: Lua failed btn="${btn}": ${errMsg2(err)}`);
       }
