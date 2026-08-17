@@ -24993,9 +24993,6 @@ async function applyV20RepairRegexOwnershipCleanup(args, deps) {
   };
 }
 async function applyV21BackfillRegexFolders(args, deps) {
-  if (!deps.applyCharacterRegexRowPatch) {
-    throw new Error("applyCharacterRegexRowPatch dependency is required");
-  }
   const folderByOrigin = new Map;
   for (const row of args.newBundle.regexScripts) {
     const meta = row.metadata;
@@ -25010,7 +25007,7 @@ async function applyV21BackfillRegexFolders(args, deps) {
     const folder = typeof meta?._risu?.origin === "string" ? folderByOrigin.get(meta._risu.origin) : undefined;
     return folder ? { folder } : null;
   });
-  if (!result || result.failed > 0)
+  if (result.failed > 0)
     throw new Error("regex folder backfill did not complete");
   return {
     nextEnvelope: args.envelope,
@@ -25018,9 +25015,6 @@ async function applyV21BackfillRegexFolders(args, deps) {
   };
 }
 async function applyV22CorrectCardRegexFolder(args, deps) {
-  if (!deps.applyCharacterRegexRowPatch) {
-    throw new Error("applyCharacterRegexRowPatch dependency is required");
-  }
   const sourceModule = args.envelope.source?.module;
   const legacyName = typeof sourceModule?.name === "string" ? sourceModule.name : args.newBundle.character.name;
   const legacySidecarFolder = `Module \u2014 ${legacyName}`.slice(0, 80);
@@ -25033,7 +25027,7 @@ async function applyV22CorrectCardRegexFolder(args, deps) {
     const generatedFolder = origin === "character" ? legacyCardFolder : origin === "module" ? legacySidecarFolder : null;
     return generatedFolder === null || typeof risu?.module_id === "string" || risu?.imported_regex === true || row["folder"] !== generatedFolder ? null : { folder: desiredFolder };
   });
-  if (!result || result.failed > 0)
+  if (result.failed > 0)
     throw new Error("card regex folder correction did not complete");
   return {
     nextEnvelope: args.envelope,
@@ -25041,9 +25035,6 @@ async function applyV22CorrectCardRegexFolder(args, deps) {
   };
 }
 async function applyV23CorrectCharXSpelling(args, deps) {
-  if (!deps.applyCharacterRegexRowPatch) {
-    throw new Error("applyCharacterRegexRowPatch dependency is required");
-  }
   const oldFolder = `CardX \u2014 ${args.newBundle.character.name}`.slice(0, 80);
   const desiredFolder = `CharX \u2014 ${args.newBundle.character.name}`.slice(0, 80);
   const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
@@ -25051,7 +25042,7 @@ async function applyV23CorrectCharXSpelling(args, deps) {
     const risu = meta?._risu;
     return risu?.origin !== "character" && risu?.origin !== "module" || typeof risu?.module_id === "string" || risu?.imported_regex === true || row["folder"] !== oldFolder ? null : { folder: desiredFolder };
   });
-  if (!result || result.failed > 0)
+  if (result.failed > 0)
     throw new Error("CharX regex folder correction did not complete");
   return {
     nextEnvelope: args.envelope,
@@ -25132,15 +25123,7 @@ async function applyV6BackfillArrayIndex(args, deps) {
   };
 }
 async function applyV9StripStylePrefixInPlace(args, deps) {
-  if (!deps.applyCharacterRegexReplaceStringTransform) {
-    deps.log.warn(`migrate(${args.characterId}) v9: regex_scripts.update unavailable, falling back to wholesale reinstall (user disable/edit state will be lost)`);
-    return applyV7ReinstallRegex(args, deps);
-  }
   const result = await deps.applyCharacterRegexReplaceStringTransform(args.characterId, args.userId, unprefixCssInStyleBlocks);
-  if (result === null) {
-    deps.log.warn(`migrate(${args.characterId}) v9: transform dep returned null, falling back to wholesale reinstall`);
-    return applyV7ReinstallRegex(args, deps);
-  }
   return {
     nextEnvelope: args.envelope,
     notes: [
@@ -25151,10 +25134,6 @@ async function applyV9StripStylePrefixInPlace(args, deps) {
   };
 }
 async function applyV11FixPhaseMapPlacement(args, deps) {
-  if (!deps.applyCharacterRegexRowPatch) {
-    deps.log.warn(`migrate(${args.characterId}) v11: regex_scripts row-patch unavailable, falling back to wholesale reinstall (user disable/edit state will be lost)`);
-    return applyV7ReinstallRegex(args, deps);
-  }
   const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
     const meta = row["metadata"];
     const phase = meta?._risu?.phase;
@@ -25182,10 +25161,6 @@ async function applyV11FixPhaseMapPlacement(args, deps) {
     }
     return null;
   });
-  if (result === null) {
-    deps.log.warn(`migrate(${args.characterId}) v11: row-patch dep returned null, falling back to wholesale reinstall`);
-    return applyV7ReinstallRegex(args, deps);
-  }
   return {
     nextEnvelope: args.envelope,
     notes: [
@@ -25240,13 +25215,7 @@ async function applyV8RetranslateUserBgHtml(args, deps) {
   };
 }
 async function applyV12RecoverMissingRegex(args, deps) {
-  if (!deps.applyCharacterRegexReplaceStringTransform) {
-    return applyV7ReinstallRegex(args, deps);
-  }
   const probe = await deps.applyCharacterRegexReplaceStringTransform(args.characterId, args.userId, (s) => s);
-  if (probe === null) {
-    return applyV7ReinstallRegex(args, deps);
-  }
   if (probe.scanned === 0) {
     deps.log.warn(`migrate(${args.characterId}) v12: 0 Risu regex rows present, reinstalling from translator output`);
     const res = await applyV7ReinstallRegex(args, deps);
@@ -25258,10 +25227,6 @@ async function applyV12RecoverMissingRegex(args, deps) {
   };
 }
 async function applyV13FixEscapedPerMessageGate(args, deps) {
-  if (!deps.applyCharacterRegexRowPatch) {
-    deps.log.warn(`migrate(${args.characterId}) v13: regex_scripts row-patch unavailable, falling back to wholesale reinstall (user disable/edit state will be lost)`);
-    return applyV7ReinstallRegex(args, deps);
-  }
   const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
     if (row["substitute_macros"] !== "escaped")
       return null;
@@ -25272,10 +25237,6 @@ async function applyV13FixEscapedPerMessageGate(args, deps) {
       return null;
     return { substitute_macros: "after" };
   });
-  if (result === null) {
-    deps.log.warn(`migrate(${args.characterId}) v13: row-patch dep returned null, falling back to wholesale reinstall`);
-    return applyV7ReinstallRegex(args, deps);
-  }
   return {
     nextEnvelope: args.envelope,
     notes: [
@@ -25351,9 +25312,6 @@ async function applyV15ExcludeGreetingPerEntry(args, deps) {
   };
 }
 async function applyV17UseFindMacroMode(args, deps) {
-  if (!deps.applyCharacterRegexRowPatch) {
-    return applyV7ReinstallRegex(args, deps);
-  }
   const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
     if (row["substitute_macros"] !== "none")
       return null;
@@ -25361,8 +25319,6 @@ async function applyV17UseFindMacroMode(args, deps) {
     const actions = metadata?._risu?.flag_actions;
     return Array.isArray(actions) && actions.includes("cbs") ? { substitute_macros: "find" } : null;
   });
-  if (result === null)
-    return applyV7ReinstallRegex(args, deps);
   return {
     nextEnvelope: args.envelope,
     notes: [

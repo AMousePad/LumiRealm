@@ -120,7 +120,7 @@ async function applyRegexReplaceStringTransform(
   transform: (replace_string: string) => string,
   log: { warn: (s: string) => void },
   errMsg: (e: unknown) => string,
-): Promise<{ scanned: number; updated: number; failed: number } | null> {
+): Promise<{ scanned: number; updated: number; failed: number }> {
   const api = spindle.regex_scripts;
   const PAGE_SIZE = 200;
   let scanned = 0;
@@ -162,7 +162,7 @@ async function applyRegexRowPatch(
   patch: (row: Readonly<Record<string, unknown>>) => Record<string, unknown> | null,
   log: { warn: (s: string) => void },
   errMsg: (e: unknown) => string,
-): Promise<{ scanned: number; updated: number; failed: number } | null> {
+): Promise<{ scanned: number; updated: number; failed: number }> {
   const api = spindle.regex_scripts;
   const PAGE_SIZE = 200;
   let scanned = 0;
