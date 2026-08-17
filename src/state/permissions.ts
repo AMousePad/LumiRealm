@@ -50,18 +50,8 @@ function computeMissing(): readonly string[] {
 }
 
 export async function initPermissions(log: PermLog): Promise<void> {
-  const api = (spindle as unknown as { permissions?: unknown }).permissions as
-    | {
-        getGranted?: () => Promise<string[]>;
-        onChanged?: (h: (detail: { permission: string; granted: boolean; allGranted: string[] }) => void) => () => void;
-      }
-    | undefined;
-  if (!api?.getGranted) {
-    log.warn('permissions.init: spindle.permissions API unavailable on this host');
-    return;
-  }
   try {
-    const list = await api.getGranted();
+    const list = await spindle.permissions.getGranted();
     for (const p of list) granted.add(p);
     loaded = true;
     const initialMissing = computeMissing();
@@ -80,25 +70,23 @@ export async function initPermissions(log: PermLog): Promise<void> {
     log.warn(`permissions.init: getGranted failed: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
-  if (api.onChanged) {
-    try {
-      api.onChanged((detail) => {
-        granted.clear();
-        for (const p of detail.allGranted) granted.add(p);
-        const missing = computeMissing();
-        log.info(
-          `permissions.changed: ${detail.permission}=${detail.granted ? 'granted' : 'revoked'} ` +
-            `granted=[${detail.allGranted.join(',')}] missing=[${missing.join(',')}]`,
-        );
-        for (const fn of missingChangeListeners) {
-          try { fn(missing); } catch (err) {
-            log.warn(`permissions.changed: listener threw: ${err instanceof Error ? err.message : String(err)}`);
-          }
+  try {
+    spindle.permissions.onChanged((detail) => {
+      granted.clear();
+      for (const p of detail.allGranted) granted.add(p);
+      const missing = computeMissing();
+      log.info(
+        `permissions.changed: ${detail.permission}=${detail.granted ? 'granted' : 'revoked'} ` +
+          `granted=[${detail.allGranted.join(',')}] missing=[${missing.join(',')}]`,
+      );
+      for (const fn of missingChangeListeners) {
+        try { fn(missing); } catch (err) {
+          log.warn(`permissions.changed: listener threw: ${err instanceof Error ? err.message : String(err)}`);
         }
-      });
-    } catch (err) {
-      log.warn(`permissions.init: onChanged subscribe failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+      }
+    });
+  } catch (err) {
+    log.warn(`permissions.init: onChanged subscribe failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

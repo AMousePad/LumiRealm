@@ -32570,13 +32570,8 @@ function computeMissing() {
   return REQUIRED_PERMISSIONS.filter((p) => !granted.has(p));
 }
 async function initPermissions(log2) {
-  const api = spindle.permissions;
-  if (!api?.getGranted) {
-    log2.warn("permissions.init: spindle.permissions API unavailable on this host");
-    return;
-  }
   try {
-    const list = await api.getGranted();
+    const list = await spindle.permissions.getGranted();
     for (const p of list)
       granted.add(p);
     loaded = true;
@@ -32593,25 +32588,23 @@ async function initPermissions(log2) {
     log2.warn(`permissions.init: getGranted failed: ${err instanceof Error ? err.message : String(err)}`);
     return;
   }
-  if (api.onChanged) {
-    try {
-      api.onChanged((detail) => {
-        granted.clear();
-        for (const p of detail.allGranted)
-          granted.add(p);
-        const missing = computeMissing();
-        log2.info(`permissions.changed: ${detail.permission}=${detail.granted ? "granted" : "revoked"} ` + `granted=[${detail.allGranted.join(",")}] missing=[${missing.join(",")}]`);
-        for (const fn of missingChangeListeners) {
-          try {
-            fn(missing);
-          } catch (err) {
-            log2.warn(`permissions.changed: listener threw: ${err instanceof Error ? err.message : String(err)}`);
-          }
+  try {
+    spindle.permissions.onChanged((detail) => {
+      granted.clear();
+      for (const p of detail.allGranted)
+        granted.add(p);
+      const missing = computeMissing();
+      log2.info(`permissions.changed: ${detail.permission}=${detail.granted ? "granted" : "revoked"} ` + `granted=[${detail.allGranted.join(",")}] missing=[${missing.join(",")}]`);
+      for (const fn of missingChangeListeners) {
+        try {
+          fn(missing);
+        } catch (err) {
+          log2.warn(`permissions.changed: listener threw: ${err instanceof Error ? err.message : String(err)}`);
         }
-      });
-    } catch (err) {
-      log2.warn(`permissions.init: onChanged subscribe failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+      }
+    });
+  } catch (err) {
+    log2.warn(`permissions.init: onChanged subscribe failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 function getMissingPermissions() {
