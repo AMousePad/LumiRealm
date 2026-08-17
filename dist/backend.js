@@ -38194,25 +38194,9 @@ async function runRequestTriggerChain(messages, opts) {
 }
 
 // src/adapters/spindle-extras.ts
-function getRegisterMessageContentProcessor() {
-  return spindle.registerMessageContentProcessor;
-}
-function getRegisterMacroInterceptor() {
-  return spindle.registerMacroInterceptor;
-}
-function getRegisterInterceptor() {
-  return spindle.registerInterceptor;
-}
-function getRegisterContextHandler() {
-  return spindle.registerContextHandler;
-}
 function getPreAssemblyContractVersion() {
   const contracts = spindle.contracts;
   return typeof contracts?.["preAssemblyGenerationContext"] === "number" ? contracts["preAssemblyGenerationContext"] : 0;
-}
-function getRegisterWorldInfoInterceptor() {
-  const fn = spindle.registerWorldInfoInterceptor;
-  return typeof fn === "function" ? spindle.registerWorldInfoInterceptor.bind(spindle) : null;
 }
 function getModalConfirmApi() {
   const m = spindle.modal;
@@ -39001,13 +38985,7 @@ function createLumiInterceptors(deps) {
     log8.info(`[macro-interceptor-cache] size=${stats.size} hits=${stats.hits} misses=${stats.misses} ratio=${ratio}%`);
   }
   function registerMacroInterceptor() {
-    const register13 = getRegisterMacroInterceptor();
-    const registerMessageContentProcessor = getRegisterMessageContentProcessor();
-    if (typeof register13 !== "function") {
-      throw new Error("LumiRealm requires Lumiverse macroInterceptor support; update Lumiverse before loading this extension");
-    }
-    const mcpRenderAvailable = typeof registerMessageContentProcessor === "function";
-    register13((ctx) => withMaybeUser(ctx.userId, async () => {
+    spindle.registerMacroInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
       const callId = ++diagInterceptorCall;
       const t0 = Date.now();
       const chatId = typeof ctx.env.chat?.id === "string" ? ctx.env.chat.id : null;
@@ -39038,14 +39016,11 @@ function createLumiInterceptors(deps) {
       }
       const micDynForKey = ctx.env.dynamicMacros;
       const micCtxKey = `${micDynForKey?.chat_index ?? ""}|${micDynForKey?.role ?? ""}`;
-      const cacheable = !(ctx.commit === false && !mcpRenderAvailable);
-      if (cacheable) {
-        const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
-        if (hit !== null) {
-          maybeEmitMicCacheStats();
-          log8.trace(`macroInterceptor.exit #${callId} path=cache_hit elapsed=${Date.now() - t0}ms ` + `tmpl_len=${ctx.template.length} out_len=${hit.result.length}`);
-          return { text: hit.result, touchedVars: hit.touchedVars, volatile: hit.volatile };
-        }
+      const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
+      if (hit !== null) {
+        maybeEmitMicCacheStats();
+        log8.trace(`macroInterceptor.exit #${callId} path=cache_hit elapsed=${Date.now() - t0}ms ` + `tmpl_len=${ctx.template.length} out_len=${hit.result.length}`);
+        return { text: hit.result, touchedVars: hit.touchedVars, volatile: hit.volatile };
       }
       const charCard = ctx.env.character;
       const envChat = ctx.env.chat;
@@ -39129,46 +39104,15 @@ function createLumiInterceptors(deps) {
         perfRecord("cbs.runPipeline", Date.now() - __ppT0);
       const resolvedMarker = /\u2605[A-Z_]+\u2605|###[A-Z_]+###/.exec(resolved)?.[0] ?? null;
       const stillHasRaw = resolved.includes("{{");
-      if (!ctx.commit && !mcpRenderAvailable) {
-        const triggers2 = active.card.risuPayload.triggers;
-        const luaScripts = active.card.risuPayload.lua_scripts;
-        const hasLuaTrigger = triggers2.some((t) => t.effect?.[0]?.type === "triggerlua");
-        if (hasLuaTrigger && ctx.userId !== undefined) {
-          const editChain = triggers2.map((t, i) => ({
-            source: t,
-            luaCode: luaScripts[i] ?? ""
-          }));
-          try {
-            const editApi = makeSpindleHost({
-              chatId,
-              characterId: active.card.character_id,
-              userId: ctx.userId
-            });
-            const editScriptNS = makeDispatcherScriptNS();
-            resolved = await runListenEditChain(editChain, "editDisplay", resolved, { index: typeof envChat.lastMessageId === "number" ? envChat.lastMessageId : -1 }, editApi, { characterId: active.card.character_id }, editScriptNS, {
-              chatId,
-              characterId: active.card.character_id,
-              resolveTemplate: (text) => deps.resolveReadonly(text, chatId, active.card.character_id, ctx.userId, { cbsContext: true })
-            });
-            recorder.volatile = true;
-          } catch (err) {
-            log8.warn(`macroInterceptor: listenEdit chain threw: ${errMsg2(err)}. Continuing with pre-hook resolved.`);
-          }
-        }
-      }
       const touchedVars = [...recorder.touched];
       if (resolved === ctx.template) {
-        if (cacheable) {
-          cacheMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey, resolved, touchedVars, recorder.volatile);
-          maybeEmitMicCacheStats();
-        }
+        cacheMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey, resolved, touchedVars, recorder.volatile);
+        maybeEmitMicCacheStats();
         log8.trace(`macroInterceptor.exit #${callId} path=unchanged_passthrough elapsed=${Date.now() - t0}ms ` + `tmpl_len=${ctx.template.length} marker=${resolvedMarker ?? "none"}`);
         return { text: resolved, touchedVars, volatile: recorder.volatile };
       }
-      if (cacheable) {
-        cacheMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey, resolved, touchedVars, recorder.volatile);
-        maybeEmitMicCacheStats();
-      }
+      cacheMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey, resolved, touchedVars, recorder.volatile);
+      maybeEmitMicCacheStats();
       log8.trace(`macroInterceptor.exit #${callId} path=resolved elapsed=${Date.now() - t0}ms ` + `in_len=${ctx.template.length} out_len=${resolved.length} ` + `marker=${resolvedMarker ?? "none"} still_has_raw_cbs=${stillHasRaw} ` + `out_head=${JSON.stringify(resolved.slice(0, 120))}`);
       if (resolved.length > 200) {
         const panelMatches = resolved.match(/<div[^>]*class="[^"]*(?:sys-backdrop|sys-panel|status-?panel)[^"]*"/g);
@@ -39180,13 +39124,8 @@ function createLumiInterceptors(deps) {
     }), 100);
     log8.info("macroInterceptor: registered at priority=100");
   }
-  function registerMessageContentProcessorIfAvailable() {
-    const registerMessageContentProcessor = getRegisterMessageContentProcessor();
-    if (typeof registerMessageContentProcessor !== "function") {
-      log8.info("messageContentProcessor: not available on this Lumi build, falling back to reactive MESSAGE_EDITED resolve");
-      return;
-    }
-    registerMessageContentProcessor((ctx) => withMaybeUser(ctx.userId, async () => {
+  function registerMessageContentProcessor() {
+    spindle.registerMessageContentProcessor((ctx) => withMaybeUser(ctx.userId, async () => {
       const tStart = Date.now();
       const seq = ++mcpEnterSeq;
       const enteredAt = ++mcpInFlight;
@@ -39382,13 +39321,9 @@ function createLumiInterceptors(deps) {
     }), 100);
     log8.info("messageContentProcessor: registered");
   }
-  function registerInterceptorIfAvailable() {
-    const registerInterceptor = getRegisterInterceptor();
-    if (typeof registerInterceptor !== "function") {
-      log8.info("interceptor: not available on this Lumi build, listenEdit editInput/editRequest will not fire");
-      return;
-    }
-    registerInterceptor(async (messages, contextRaw) => {
+  function registerInterceptor() {
+    const register13 = spindle.registerInterceptor;
+    register13(async (messages, contextRaw) => {
       const ctx = contextRaw ?? {};
       const chatId = typeof ctx.chatId === "string" ? ctx.chatId : null;
       if (!chatId)
@@ -39570,13 +39505,12 @@ function createLumiInterceptors(deps) {
     log8.info("interceptor: registered (editInput + editRequest)");
   }
   function registerContextHandler() {
-    const register13 = getRegisterContextHandler();
     const contractVersion = getPreAssemblyContractVersion();
-    if (typeof register13 !== "function" || contractVersion < 1) {
+    if (contractVersion < 1) {
       log8.error(`contextHandler: host preAssemblyGenerationContext contract=${contractVersion}, need >=1. Update Lumiverse. Risu input/start triggers and stopSending will NOT fire.`);
       return;
     }
-    register13(async (contextRaw) => {
+    spindle.registerContextHandler(async (contextRaw) => {
       const ctx = contextRaw ?? {};
       const chatId = typeof ctx.chatId === "string" ? ctx.chatId : null;
       if (!chatId || ctx.dryRun !== false)
@@ -39612,14 +39546,9 @@ function createLumiInterceptors(deps) {
     }, 100, { timeoutMs: 30000 });
     log8.info("contextHandler: registered (input + start, pre-assembly, 30s budget)");
   }
-  function registerWorldInfoInterceptorIfAvailable() {
-    const registerWorldInfoInterceptor = getRegisterWorldInfoInterceptor();
-    if (!registerWorldInfoInterceptor) {
-      log8.info("worldInfoInterceptor: not available on this Lumi build, Tier 2 lorebook decorators will not gate");
-      return;
-    }
+  function registerWorldInfoInterceptor() {
     log8.info(`[decorators] registerWorldInfoInterceptor wired at boot`);
-    registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
+    spindle.registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
       const hasDecoratorEntries = ctx.entries.some((e) => {
         const stash = e.extensions?.["_risu_decorators"];
         return Array.isArray(stash) && stash.length > 0;
@@ -39772,9 +39701,9 @@ function createLumiInterceptors(deps) {
   return {
     registerAll() {
       registerMacroInterceptor();
-      registerMessageContentProcessorIfAvailable();
-      registerInterceptorIfAvailable();
-      registerWorldInfoInterceptorIfAvailable();
+      registerMessageContentProcessor();
+      registerInterceptor();
+      registerWorldInfoInterceptor();
       registerContextHandler();
     }
   };
