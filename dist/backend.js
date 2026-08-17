@@ -38098,12 +38098,6 @@ async function runRequestTriggerChain(messages, opts) {
   }
 }
 
-// src/adapters/spindle-extras.ts
-function getPreAssemblyContractVersion() {
-  const contracts = spindle.contracts;
-  return typeof contracts?.["preAssemblyGenerationContext"] === "number" ? contracts["preAssemblyGenerationContext"] : 0;
-}
-
 // src/core/charx/module.ts
 init_base64();
 function record2(value) {
@@ -39402,11 +39396,6 @@ function createLumiInterceptors(deps) {
     log8.info("interceptor: registered (editInput + editRequest)");
   }
   function registerContextHandler() {
-    const contractVersion = getPreAssemblyContractVersion();
-    if (contractVersion < 1) {
-      log8.error(`contextHandler: host preAssemblyGenerationContext contract=${contractVersion}, need >=1. Update Lumiverse. Risu input/start triggers and stopSending will NOT fire.`);
-      return;
-    }
     spindle.registerContextHandler(async (contextRaw) => {
       const ctx = contextRaw ?? {};
       const chatId = typeof ctx.chatId === "string" ? ctx.chatId : null;
