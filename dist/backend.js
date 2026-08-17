@@ -45340,16 +45340,6 @@ var log8 = {
     if (logStore.shouldEmit("trace"))
       spindle.log.info(`[lumirealm] ${msg}`);
     logStore.push("trace", "backend", msg, logUid());
-  },
-  verbose(msg) {
-    if (logStore.shouldEmit("debug"))
-      spindle.log.info(`[lumirealm] ${msg}`);
-    logStore.push("debug", "backend", msg, logUid());
-  },
-  always(msg) {
-    if (logStore.shouldEmit("info"))
-      spindle.log.info(`[lumirealm] ${msg}`);
-    logStore.push("info", "backend", msg, logUid());
   }
 };
 log8.info(`backend boot: version=${EXTENSION_VERSION} features=[lorebook-cache,worldbook-events]`);
