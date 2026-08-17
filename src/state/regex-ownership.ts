@@ -5,12 +5,7 @@ import type { PendingRegexScriptMsg } from '../types/messages.js';
 type RegexApi = Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'>;
 
 type MutableRegexInput = Parameters<RegexApi['create']>[0];
-
-interface ListedRegex {
-  readonly id: string;
-  readonly script_id: string;
-  readonly can_mutate?: boolean;
-}
+type ListedRegex = Awaited<ReturnType<RegexApi['list']>>['data'][number];
 
 export interface RegexOwnershipResult {
   readonly scripts: readonly PendingRegexScriptMsg[];
@@ -44,7 +39,7 @@ async function listScope(
       offset,
       userId,
     });
-    for (const row of page.data as readonly ListedRegex[]) {
+    for (const row of page.data) {
       if (row.script_id) rows.set(row.script_id, row);
     }
     if (page.data.length < 200) break;
@@ -120,11 +115,7 @@ export async function ensureRegexOwnership(
     try {
       const createdRow = await api.create(createInput(script), userId);
       created++;
-      existingById.set(script.script_id, {
-        id: createdRow.id,
-        script_id: script.script_id,
-        can_mutate: true,
-      });
+      existingById.set(script.script_id, createdRow);
     } catch {
       failed++;
     }
