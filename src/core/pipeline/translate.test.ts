@@ -12,7 +12,7 @@ const displayScript = (comment: string) => ({
 });
 
 describe('translateFromStoredSource regex folders', () => {
-  test('keeps CardX and embedded-module regexes in distinct folders', () => {
+  test('groups card fields and the embedded Risu sidecar under the CharX folder', () => {
     const bundle = translateFromStoredSource({
       card: {
         spec: 'chara_card_v3',
@@ -39,8 +39,8 @@ describe('translateFromStoredSource regex folders', () => {
     ]));
 
     expect(foldersByOrigin).toEqual({
-      character: 'CardX — Ada',
-      module: 'Module — Ada Rules',
+      character: 'CharX — Ada',
+      module: 'CharX — Ada',
     });
   });
 });

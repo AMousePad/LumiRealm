@@ -284,7 +284,7 @@ export function translateFromCharxBundle(
         now,
         uuid,
         origin: "character",
-        folder: regexFolder("CardX", charMap.character.name),
+        folder: regexFolder("CharX", charMap.character.name),
       })
     : { rows: [] as LumiRegexScript[], skipped: [] as AtAtAction[], issues: [] as { path: string; message: string }[] };
   const moduleRegexOut = wantRegex
@@ -293,7 +293,10 @@ export function translateFromCharxBundle(
         now,
         uuid,
         origin: "module",
-        folder: regexFolder("Module", moduleName ?? charMap.character.name),
+        // Risu stores a card's own regexes in its embedded module.risum
+        // sidecar. They are still card-owned; attached modules use the
+        // separate module-artifact install path and carry a module_id.
+        folder: regexFolder("CharX", charMap.character.name),
       })
     : { rows: [] as LumiRegexScript[], skipped: [] as AtAtAction[], issues: [] as { path: string; message: string }[] };
   const regexScriptsRaw: readonly LumiRegexScript[] = [...charRegexOut.rows, ...moduleRegexOut.rows];
