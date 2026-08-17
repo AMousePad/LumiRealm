@@ -8,6 +8,7 @@ import {
   planModuleRegexCleanup,
   type RegexCleanupRow,
 } from '../state/regex-cleanup.js';
+import { pickNativeFile } from './native-file-picker.js';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
@@ -53,7 +54,7 @@ export interface MountCardsPanelOptions {
 }
 
 export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
-  const { ctx, sendToBackend, log } = opts;
+  const { sendToBackend, log } = opts;
   log.info('cards-panel: mounting');
 
   const root = opts.root;
@@ -82,15 +83,14 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   async function onImportClicked(): Promise<void> {
     if (importBtn.disabled) return;
     log.info('drawer: Import button clicked — opening file picker');
-    let file: { name: string; bytes: Uint8Array } | null = null;
+    let file: File | null = null;
     try {
-      const [picked] = await ctx.uploads.pickFile({ accept: ACCEPT_EXTENSIONS });
-      if (!picked) {
+      file = await pickNativeFile(ACCEPT_EXTENSIONS);
+      if (!file) {
         log.info('drawer: picker dismissed without selection');
         return;
       }
-      file = { name: picked.name, bytes: picked.bytes };
-      log.info(`drawer: picked file=${picked.name} size=${picked.bytes.byteLength} mime=${picked.mimeType}`);
+      log.info(`drawer: picked file=${file.name} size=${file.size} mime=${file.type}`);
     } catch (err) {
       log.error('drawer: pickFile threw', err);
       state.notices = [`File picker failed: ${errMsg(err)}`];
@@ -104,7 +104,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     render();
 
     const fileName = file.name;
-    const totalBytes = file.bytes.byteLength;
+    const totalBytes = file.size;
     log.info(`drawer: upload file=${fileName} bytes=${totalBytes}`);
 
     let cancelled = false;
@@ -118,7 +118,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     state.progress = { phase: 'decoding', message: 'Starting upload…', fraction: 0 };
     render();
 
-    const upload = new tus.Upload(new Blob([file.bytes as BlobPart]), {
+    const upload = new tus.Upload(file, {
       endpoint: UPLOAD_ENDPOINT,
       chunkSize: UPLOAD_CHUNK_BYTES,
       retryDelays: [0, 1000, 3000, 5000, 10000],

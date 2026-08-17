@@ -25,9 +25,9 @@ export interface DecodeOptions {
   readonly strictJson?: boolean;
 }
 
-const DEFAULT_MAX_PAYLOAD_BYTES = 1 * 1024 * 1024 * 1024;
-const DEFAULT_MAX_ASSET_BYTES = 256 * 1024 * 1024;
-const DEFAULT_MAX_ASSET_COUNT = 262144;
+export const DEFAULT_MAX_PAYLOAD_BYTES = 1 * 1024 * 1024 * 1024;
+export const DEFAULT_MAX_ASSET_BYTES = 256 * 1024 * 1024;
+export const DEFAULT_MAX_ASSET_COUNT = 262144;
 
 class Cursor {
   private offset = 0;

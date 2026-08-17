@@ -14,6 +14,7 @@ import { createSearchableSelect, type SearchableSelectHandle } from './searchabl
 import { renderDescription } from '../realm/markdown.js';
 import { sendImportText } from './import-text-upload.js';
 import * as tus from 'tus-js-client';
+import { pickNativeFile } from './native-file-picker.js';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
@@ -938,9 +939,9 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   async function onUploadClicked(): Promise<void> {
     if (uploadBtn.disabled) return;
     log.info('modules-panel: upload clicked');
-    let file: { name: string; bytes: Uint8Array } | null = null;
+    let file: File | null = null;
     try {
-      file = await pickViaInput();
+      file = await pickNativeFile(ACCEPT_EXTENSIONS);
     } catch (err) {
       log.error('modules-panel: file pick failed', err);
       lastError = `File pick failed: ${errMsg(err)}`;
@@ -954,7 +955,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
     lastError = null;
     const fileName = file.name;
-    const totalBytes = file.bytes.byteLength;
+    const totalBytes = file.size;
     setStatus(`Uploading ${fileName}…`);
     uploadBtn.disabled = true;
     log.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
@@ -968,12 +969,18 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       log.info('modules-panel: upload cancel requested');
     }, totalBytes);
 
-    const upload = new tus.Upload(new Blob([file.bytes as BlobPart]), {
+    const upload = new tus.Upload(file, {
       endpoint: UPLOAD_ENDPOINT,
       chunkSize: UPLOAD_CHUNK_BYTES,
       retryDelays: [0, 1000, 3000, 5000, 10000],
       removeFingerprintOnSuccess: true,
-      metadata: { filename: fileName, extension: EXTENSION_IDENTIFIER },
+      metadata: {
+        filename: fileName,
+        extension: EXTENSION_IDENTIFIER,
+        ...(fileName.toLowerCase().endsWith('.risum')
+          ? { spindle_read_mode: 'chunked' }
+          : {}),
+      },
       onError: (err) => {
         activeTus = null;
         if (cancelled) return;
@@ -1143,34 +1150,6 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   return { handleBackendMessage, destroy };
 }
 
-
-function pickViaInput(): Promise<{ name: string; bytes: Uint8Array } | null> {
-  return new Promise((resolve, reject) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = ACCEPT_EXTENSIONS.join(',');
-    input.style.display = 'none';
-    document.body.appendChild(input);
-    let settled = false;
-    const done = (result: { name: string; bytes: Uint8Array } | null, err?: Error): void => {
-      if (settled) return;
-      settled = true;
-      try { document.body.removeChild(input); } catch { /* */ }
-      if (err) reject(err);
-      else resolve(result);
-    };
-    input.addEventListener('change', () => {
-      const file = input.files?.[0];
-      if (!file) return done(null);
-      file.arrayBuffer().then(
-        (ab) => done({ name: file.name, bytes: new Uint8Array(ab) }),
-        (err) => done(null, err as Error),
-      );
-    });
-    input.addEventListener('cancel', () => done(null));
-    input.click();
-  });
-}
 
 function pickLorebookFile(): Promise<File | null> {
   return new Promise((resolve, reject) => {

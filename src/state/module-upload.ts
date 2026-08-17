@@ -14,6 +14,16 @@ export interface DecodedRisum {
   };
 }
 
+export interface ModuleUploadSource {
+  readonly module: unknown;
+  readonly assetCount: number;
+  readonly assets?: readonly Uint8Array[];
+  readonly icon?: DecodedRisum['icon'];
+  readonly concurrentReads?: boolean;
+  readAsset(index: number): Promise<Uint8Array | undefined>;
+  finish?(): Promise<number>;
+}
+
 export interface SchemaParseSuccess {
   readonly success: true;
   readonly data: RisuModule;
@@ -73,6 +83,7 @@ export interface ModuleUploaderDeps {
 
 export interface ModuleUploader {
   upload(bytes: Uint8Array, fileName: string, userId: string): Promise<{ envelope: ModuleEnvelope }>;
+  uploadSource(source: ModuleUploadSource, fileName: string, userId: string): Promise<{ envelope: ModuleEnvelope }>;
 }
 
 const PROGRESS_BASE = 0.35;
@@ -105,7 +116,23 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         `assets=${decoded.assets.length} icon=${decoded.icon ? 'yes' : 'no'} ` +
         `elapsed=${Date.now() - tDecodeStart}ms`,
     );
-    const parsed = deps.parseSchema(decoded.module);
+    return uploadSource({
+      module: decoded.module,
+      assetCount: decoded.assets.length,
+      assets: decoded.assets,
+      ...(decoded.icon ? { icon: decoded.icon } : {}),
+      concurrentReads: true,
+      readAsset: async (index) => decoded.assets[index],
+    }, fileName, userId, t0);
+  }
+
+  async function uploadSource(
+    source: ModuleUploadSource,
+    fileName: string,
+    userId: string,
+    t0 = Date.now(),
+  ): Promise<{ envelope: ModuleEnvelope }> {
+    const parsed = deps.parseSchema(source.module);
     if (!parsed.success) {
       throw new Error(
         `decoded module failed schema validation,${parsed.error.issues
@@ -163,17 +190,19 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
 
     const moduleAssetIndex: Record<string, { imageId: string; ext?: string }> = {};
     let assetUploadFailures = 0;
-    if (decoded.assets.length > 0) {
+    if (source.assetCount > 0) {
       const moduleAssets = (moduleBody.assets ?? []) as readonly (readonly [string, string, string])[];
-      const pending = deps.pairAssets(
-        moduleAssets,
-        decoded.assets,
-        () => '',
-        deps.guessMimeType,
-      );
-      if (pending.length < decoded.assets.length) {
+      const pending = source.assets
+        ? deps.pairAssets(moduleAssets, source.assets, () => '', deps.guessMimeType)
+        : moduleAssets.slice(0, source.assetCount).flatMap((triple, sourceIndex) => {
+            const path = Array.isArray(triple) && typeof triple[0] === 'string' ? triple[0] : '';
+            return path.length > 0
+              ? [{ path, base64: '', mimeType: deps.guessMimeType(path), sourceIndex }]
+              : [];
+          });
+      if (pending.length < source.assetCount) {
         deps.log.warn(
-          `processModuleUpload: ${decoded.assets.length - pending.length} asset(s) ` +
+          `processModuleUpload: ${source.assetCount - pending.length} asset(s) ` +
             `couldn't be paired with a module.assets[] name, dropped. ` +
             `(decoded.assets index out of bounds vs module.assets list.)`,
         );
@@ -230,6 +259,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
             `(module=${moduleBody.id}, batched)`,
         );
         let i = 0;
+        let deferred: { sourceIndex: number; bytes: Uint8Array } | undefined;
         while (i < pending.length) {
           const batchItems: ImageUploadInput[] = [];
           const batchAssetNames: string[] = [];
@@ -237,9 +267,17 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
           let batchBytes = 0;
           while (i < pending.length && batchItems.length < BATCH_MAX_ITEMS) {
             const meta = pending[i];
-            const bytes = meta ? decoded.assets[meta.sourceIndex] : undefined;
+            const bytes = meta
+              ? deferred?.sourceIndex === meta.sourceIndex
+                ? deferred.bytes
+                : await source.readAsset(meta.sourceIndex)
+              : undefined;
             if (!meta || !bytes) { i += 1; continue; }
-            if (batchItems.length > 0 && batchBytes + bytes.byteLength > BATCH_MAX_BYTES) break;
+            if (batchItems.length > 0 && batchBytes + bytes.byteLength > BATCH_MAX_BYTES) {
+              deferred = { sourceIndex: meta.sourceIndex, bytes };
+              break;
+            }
+            deferred = undefined;
             const sniff = deps.sniffImageMime(bytes);
             const uploadFilename = sniff ? `${meta.path}.${sniff.ext}` : meta.path;
             const uploadMime = sniff?.mime ?? meta.mimeType;
@@ -283,7 +321,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
             const idx = nextIndex++;
             if (idx >= pending.length) break;
             const meta = pending[idx];
-            const bytes = meta ? decoded.assets[meta.sourceIndex] : undefined;
+            const bytes = meta ? await source.readAsset(meta.sourceIndex) : undefined;
             if (!meta || !bytes) continue;
             const assetName = meta.path;
             const sniff = deps.sniffImageMime(bytes);
@@ -310,7 +348,8 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
           }
         };
         const workers: Promise<void>[] = [];
-        for (let w = 0; w < Math.min(UPLOAD_CONCURRENCY, pending.length); w++) {
+        const concurrency = source.concurrentReads === false ? 1 : UPLOAD_CONCURRENCY;
+        for (let w = 0; w < Math.min(concurrency, pending.length); w++) {
           workers.push(uploadWorker());
         }
         await Promise.all(workers);
@@ -323,17 +362,19 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
       );
     }
 
-    if (decoded.icon) {
-      const declaredExt = /^[a-z0-9]{1,10}$/i.test(decoded.icon.ext)
-        ? decoded.icon.ext.toLowerCase()
+    const actualAssetCount = await source.finish?.() ?? source.assetCount;
+
+    if (source.icon) {
+      const declaredExt = /^[a-z0-9]{1,10}$/i.test(source.icon.ext)
+        ? source.icon.ext.toLowerCase()
         : '';
-      const sniff = deps.sniffImageMime(decoded.icon.data);
+      const sniff = deps.sniffImageMime(source.icon.data);
       const ext = sniff?.ext ?? declaredExt;
       const filename = ext ? `module-icon.${ext}` : 'module-icon';
       try {
         const result = await deps.uploadImageOne(
           {
-            data: decoded.icon.data,
+            data: source.icon.data,
             mime_type: sniff?.mime ?? deps.guessMimeType(filename),
             filename,
           },
@@ -389,7 +430,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         `lore=${(moduleBody.lorebook ?? []).length} ` +
         `regex=${(moduleBody.regex ?? []).length} ` +
         `triggers=${(moduleBody.trigger ?? []).length} ` +
-        `assets=${decoded.assets.length} ` +
+        `assets=${actualAssetCount} ` +
         `icon=${moduleBody.icon ? 'yes' : 'no'} ` +
         `assetUploadFailures=${assetUploadFailures} ` +
         `wb=${envelope.installed_world_book_id ?? '-'} ` +
@@ -398,5 +439,5 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
     return { envelope };
   }
 
-  return { upload };
+  return { upload, uploadSource };
 }

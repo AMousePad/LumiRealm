@@ -43,8 +43,15 @@ export function encodeRPack(data: Uint8Array): Uint8Array {
 }
 
 export function decodeRPack(data: Uint8Array): Uint8Array {
-  const { decode } = loadMaps();
   const out = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i++) out[i] = decode[data[i]!]!;
+  decodeRPackInto(data, out);
   return out;
+}
+
+export function decodeRPackInto(data: Uint8Array, out: Uint8Array, offset = 0): void {
+  if (!Number.isInteger(offset) || offset < 0 || offset + data.length > out.length) {
+    throw new RangeError('RPack decode destination is too small');
+  }
+  const { decode } = loadMaps();
+  for (let i = 0; i < data.length; i++) out[offset + i] = decode[data[i]!]!;
 }

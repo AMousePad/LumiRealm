@@ -18556,11 +18556,17 @@ function encodeRPack(data) {
   return out;
 }
 function decodeRPack(data) {
-  const { decode } = loadMaps();
   const out = new Uint8Array(data.length);
-  for (let i = 0;i < data.length; i++)
-    out[i] = decode[data[i]];
+  decodeRPackInto(data, out);
   return out;
+}
+function decodeRPackInto(data, out, offset = 0) {
+  if (!Number.isInteger(offset) || offset < 0 || offset + data.length > out.length) {
+    throw new RangeError("RPack decode destination is too small");
+  }
+  const { decode } = loadMaps();
+  for (let i = 0;i < data.length; i++)
+    out[offset + i] = decode[data[i]];
 }
 
 // src/core/risum/codec.ts
@@ -33478,7 +33484,17 @@ function createModuleUploader(deps) {
     const decoded = isCharx ? deps.decodeCharx(bytesIn) : deps.decodeRisum(bytesIn);
     bytesIn = new Uint8Array(0);
     deps.log.info(`processModuleUpload: decode ${isCharx ? "CharX" : "RisuM"} done ` + `assets=${decoded.assets.length} icon=${decoded.icon ? "yes" : "no"} ` + `elapsed=${Date.now() - tDecodeStart}ms`);
-    const parsed = deps.parseSchema(decoded.module);
+    return uploadSource({
+      module: decoded.module,
+      assetCount: decoded.assets.length,
+      assets: decoded.assets,
+      ...decoded.icon ? { icon: decoded.icon } : {},
+      concurrentReads: true,
+      readAsset: async (index) => decoded.assets[index]
+    }, fileName, userId, t0);
+  }
+  async function uploadSource(source, fileName, userId, t0 = Date.now()) {
+    const parsed = deps.parseSchema(source.module);
     if (!parsed.success) {
       throw new Error(`decoded module failed schema validation,${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     }
@@ -33516,11 +33532,14 @@ function createModuleUploader(deps) {
     }
     const moduleAssetIndex = {};
     let assetUploadFailures = 0;
-    if (decoded.assets.length > 0) {
+    if (source.assetCount > 0) {
       const moduleAssets = moduleBody.assets ?? [];
-      const pending2 = deps.pairAssets(moduleAssets, decoded.assets, () => "", deps.guessMimeType);
-      if (pending2.length < decoded.assets.length) {
-        deps.log.warn(`processModuleUpload: ${decoded.assets.length - pending2.length} asset(s) ` + `couldn't be paired with a module.assets[] name, dropped. ` + `(decoded.assets index out of bounds vs module.assets list.)`);
+      const pending2 = source.assets ? deps.pairAssets(moduleAssets, source.assets, () => "", deps.guessMimeType) : moduleAssets.slice(0, source.assetCount).flatMap((triple, sourceIndex) => {
+        const path = Array.isArray(triple) && typeof triple[0] === "string" ? triple[0] : "";
+        return path.length > 0 ? [{ path, base64: "", mimeType: deps.guessMimeType(path), sourceIndex }] : [];
+      });
+      if (pending2.length < source.assetCount) {
+        deps.log.warn(`processModuleUpload: ${source.assetCount - pending2.length} asset(s) ` + `couldn't be paired with a module.assets[] name, dropped. ` + `(decoded.assets index out of bounds vs module.assets list.)`);
       }
       const tUpload = Date.now();
       const totalCount = pending2.length;
@@ -33564,6 +33583,7 @@ function createModuleUploader(deps) {
       if (typeof uploadMany === "function" && totalCount > 0) {
         deps.log.info(`processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` + `(module=${moduleBody.id}, batched)`);
         let i = 0;
+        let deferred;
         while (i < pending2.length) {
           const batchItems = [];
           const batchAssetNames = [];
@@ -33571,13 +33591,16 @@ function createModuleUploader(deps) {
           let batchBytes = 0;
           while (i < pending2.length && batchItems.length < BATCH_MAX_ITEMS) {
             const meta = pending2[i];
-            const bytes = meta ? decoded.assets[meta.sourceIndex] : undefined;
+            const bytes = meta ? deferred?.sourceIndex === meta.sourceIndex ? deferred.bytes : await source.readAsset(meta.sourceIndex) : undefined;
             if (!meta || !bytes) {
               i += 1;
               continue;
             }
-            if (batchItems.length > 0 && batchBytes + bytes.byteLength > BATCH_MAX_BYTES)
+            if (batchItems.length > 0 && batchBytes + bytes.byteLength > BATCH_MAX_BYTES) {
+              deferred = { sourceIndex: meta.sourceIndex, bytes };
               break;
+            }
+            deferred = undefined;
             const sniff = deps.sniffImageMime(bytes);
             const uploadFilename = sniff ? `${meta.path}.${sniff.ext}` : meta.path;
             const uploadMime = sniff?.mime ?? meta.mimeType;
@@ -33619,7 +33642,7 @@ function createModuleUploader(deps) {
             if (idx >= pending2.length)
               break;
             const meta = pending2[idx];
-            const bytes = meta ? decoded.assets[meta.sourceIndex] : undefined;
+            const bytes = meta ? await source.readAsset(meta.sourceIndex) : undefined;
             if (!meta || !bytes)
               continue;
             const assetName = meta.path;
@@ -33644,7 +33667,8 @@ function createModuleUploader(deps) {
           }
         };
         const workers = [];
-        for (let w = 0;w < Math.min(UPLOAD_CONCURRENCY, pending2.length); w++) {
+        const concurrency = source.concurrentReads === false ? 1 : UPLOAD_CONCURRENCY;
+        for (let w = 0;w < Math.min(concurrency, pending2.length); w++) {
           workers.push(uploadWorker());
         }
         await Promise.all(workers);
@@ -33653,14 +33677,15 @@ function createModuleUploader(deps) {
       await journalChain;
       deps.log.info(`processModuleUpload: uploaded ${Object.keys(moduleAssetIndex).length}/${pending2.length} ` + `failed=${assetUploadFailures} elapsed=${Date.now() - tUpload}ms`);
     }
-    if (decoded.icon) {
-      const declaredExt = /^[a-z0-9]{1,10}$/i.test(decoded.icon.ext) ? decoded.icon.ext.toLowerCase() : "";
-      const sniff = deps.sniffImageMime(decoded.icon.data);
+    const actualAssetCount = await source.finish?.() ?? source.assetCount;
+    if (source.icon) {
+      const declaredExt = /^[a-z0-9]{1,10}$/i.test(source.icon.ext) ? source.icon.ext.toLowerCase() : "";
+      const sniff = deps.sniffImageMime(source.icon.data);
       const ext = sniff?.ext ?? declaredExt;
       const filename = ext ? `module-icon.${ext}` : "module-icon";
       try {
         const result = await deps.uploadImageOne({
-          data: decoded.icon.data,
+          data: source.icon.data,
           mime_type: sniff?.mime ?? deps.guessMimeType(filename),
           filename
         }, userId);
@@ -33702,10 +33727,10 @@ function createModuleUploader(deps) {
       ...wbId ? { installed_world_book_id: wbId } : {}
     };
     await deps.writeEnvelope(userId, envelope);
-    deps.log.info(`processModuleUpload: ok id=${envelope.id} name=${moduleBody.name} ` + `lore=${(moduleBody.lorebook ?? []).length} ` + `regex=${(moduleBody.regex ?? []).length} ` + `triggers=${(moduleBody.trigger ?? []).length} ` + `assets=${decoded.assets.length} ` + `icon=${moduleBody.icon ? "yes" : "no"} ` + `assetUploadFailures=${assetUploadFailures} ` + `wb=${envelope.installed_world_book_id ?? "-"} ` + `elapsed=${Date.now() - t0}ms`);
+    deps.log.info(`processModuleUpload: ok id=${envelope.id} name=${moduleBody.name} ` + `lore=${(moduleBody.lorebook ?? []).length} ` + `regex=${(moduleBody.regex ?? []).length} ` + `triggers=${(moduleBody.trigger ?? []).length} ` + `assets=${actualAssetCount} ` + `icon=${moduleBody.icon ? "yes" : "no"} ` + `assetUploadFailures=${assetUploadFailures} ` + `wb=${envelope.installed_world_book_id ?? "-"} ` + `elapsed=${Date.now() - t0}ms`);
     return { envelope };
   }
-  return { upload };
+  return { upload, uploadSource };
 }
 
 // src/state/orphan-orchestrator.ts
@@ -34565,9 +34590,9 @@ function createViewerHandlers(deps) {
 
 // src/handlers/module.ts
 function createModuleHandlers(deps) {
-  async function finalizeModuleUpload(bytes, fileName, ctx) {
+  async function finalizeModuleUpload(process2, ctx) {
     try {
-      const { envelope: env } = await deps.processModuleUpload(bytes, fileName, ctx.userId);
+      const { envelope: env } = await process2();
       deps.nudgeGc("module-upload");
       const moduleName = typeof env.module.name === "string" && env.module.name.length > 0 ? env.module.name : env.id;
       ctx.send({ type: "import_progress", phase: "saving_payload", message: `Saved ${moduleName}`, fraction: 0.95 }, ctx.userId);
@@ -34588,6 +34613,15 @@ function createModuleHandlers(deps) {
   return {
     process_module_from_upload: async (msg, ctx) => {
       deps.log.info(`process_module_from_upload: uploadId=${msg.uploadId} file=${msg.fileName} userId=${ctx.userId}`);
+      if (msg.fileName.toLowerCase().endsWith(".risum")) {
+        ctx.send({ type: "import_progress", phase: "translating", message: `Translating ${msg.fileName}\u2026`, fraction: 0.3 }, ctx.userId);
+        try {
+          await finalizeModuleUpload(() => deps.processRisumUpload(msg.uploadId, msg.fileName, ctx.userId), ctx);
+        } finally {
+          await deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => false);
+        }
+        return;
+      }
       let upload;
       try {
         upload = await deps.getUpload(msg.uploadId, ctx.userId);
@@ -34606,7 +34640,7 @@ function createModuleHandlers(deps) {
       deps.log.info(`process_module_from_upload: got ${upload.data.byteLength} bytes, processing`);
       ctx.send({ type: "import_progress", phase: "translating", message: `Translating ${msg.fileName || upload.fileName}\u2026`, fraction: 0.3 }, ctx.userId);
       try {
-        await finalizeModuleUpload(upload.data, msg.fileName || upload.fileName, ctx);
+        await finalizeModuleUpload(() => deps.processModuleUpload(upload.data, msg.fileName || upload.fileName, ctx.userId), ctx);
       } finally {
         deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
       }
@@ -44564,6 +44598,179 @@ function checkHostVersion(hostVersion, minimum) {
     message: `LumiRealm requires Lumiverse ${minimum} or newer, but this host is running ${hostVersion}. ` + `Some features may fail or behave unexpectedly. Update Lumiverse for the intended experience.`
   };
 }
+// src/core/risum/upload-reader.ts
+class UploadCursor {
+  readChunk;
+  position = 0;
+  cached;
+  constructor(readChunk, first) {
+    this.readChunk = readChunk;
+    this.cached = first;
+  }
+  static async open(readChunk) {
+    const first = await readChunk(0);
+    if (!first)
+      throw new Error("upload not found or expired");
+    if (first.offset !== 0 || !Number.isSafeInteger(first.size) || first.size < 0 || first.data.length > first.size || first.size > 0 && first.data.length === 0) {
+      throw new Error("upload returned invalid metadata");
+    }
+    return new UploadCursor(readChunk, first);
+  }
+  get size() {
+    return this.cached.size;
+  }
+  get pos() {
+    return this.position;
+  }
+  async readU8(label) {
+    const out = new Uint8Array(1);
+    await this.copyInto(out, 0, 1, false, label);
+    return out[0];
+  }
+  async readU32LE(label) {
+    const out = new Uint8Array(4);
+    await this.copyInto(out, 0, 4, false, label);
+    return (out[0] | out[1] << 8 | out[2] << 16 | out[3] << 24) >>> 0;
+  }
+  async readRPack(length, label) {
+    const out = new Uint8Array(length);
+    await this.copyInto(out, 0, length, true, label);
+    return out;
+  }
+  async skip(length, label) {
+    this.requireAvailable(length, label);
+    this.position += length;
+  }
+  async copyInto(out, outOffset, length, decode, label) {
+    this.requireAvailable(length, label);
+    let remaining = length;
+    while (remaining > 0) {
+      await this.ensureChunk();
+      const inOffset = this.position - this.cached.offset;
+      const take = Math.min(remaining, this.cached.data.length - inOffset);
+      const source = this.cached.data.subarray(inOffset, inOffset + take);
+      if (decode)
+        decodeRPackInto(source, out, outOffset);
+      else
+        out.set(source, outOffset);
+      this.position += take;
+      outOffset += take;
+      remaining -= take;
+    }
+  }
+  requireAvailable(length, label) {
+    if (!Number.isSafeInteger(length) || length < 0 || this.position + length > this.size) {
+      throw new TranslationError("risum/truncated", `${label}: need ${length} bytes at offset ${this.position}, only ${this.size - this.position} remain`);
+    }
+  }
+  async ensureChunk() {
+    const end = this.cached.offset + this.cached.data.length;
+    if (this.position >= this.cached.offset && this.position < end)
+      return;
+    const next = await this.readChunk(this.position);
+    if (!next)
+      throw new Error("upload not found or expired");
+    if (next.offset !== this.position || next.size !== this.size || next.data.length === 0 || next.offset + next.data.length > next.size) {
+      throw new Error(`upload returned invalid chunk at offset ${this.position}`);
+    }
+    this.cached = next;
+  }
+}
+function isPlainObject2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+async function openRisumUpload(readChunk) {
+  const cursor = await UploadCursor.open(readChunk);
+  const magic = await cursor.readU8("magic");
+  if (magic !== RISUM_MAGIC) {
+    throw new TranslationError("risum/bad_magic", `expected magic 0x${RISUM_MAGIC.toString(16)}, got 0x${magic.toString(16)}`);
+  }
+  const version = await cursor.readU8("version");
+  if (version !== RISUM_VERSION) {
+    throw new TranslationError("risum/unsupported_version", `unsupported risum version ${version}`);
+  }
+  const payloadLength = await cursor.readU32LE("payload_length");
+  if (payloadLength > DEFAULT_MAX_PAYLOAD_BYTES) {
+    throw new TranslationError("risum/payload_too_large", `payload is ${payloadLength} bytes, exceeds limit ${DEFAULT_MAX_PAYLOAD_BYTES}`);
+  }
+  const payloadBytes = await cursor.readRPack(payloadLength, "payload");
+  let payloadText;
+  try {
+    payloadText = new TextDecoder("utf-8", { fatal: true }).decode(payloadBytes);
+  } catch (cause) {
+    throw new TranslationError("risum/invalid_utf8", "RPack-decoded payload is not valid UTF-8", { cause });
+  }
+  let wrapper;
+  try {
+    wrapper = JSON.parse(payloadText);
+  } catch (cause) {
+    throw new TranslationError("risum/invalid_json", "RPack-decoded payload is not valid JSON", { cause });
+  }
+  if (!isPlainObject2(wrapper) || wrapper.type !== "risuModule" || !isPlainObject2(wrapper.module)) {
+    throw new TranslationError("risum/bad_wrapper", "payload is not a risuModule wrapper");
+  }
+  const module2 = wrapper.module;
+  const manifest = Array.isArray(module2.assets) ? module2.assets : [];
+  let nextAssetIndex = 0;
+  let ended = false;
+  const readHeader = async () => {
+    if (cursor.pos === cursor.size) {
+      ended = true;
+      return null;
+    }
+    const mark = await cursor.readU8(`asset[${nextAssetIndex}].mark`);
+    if (mark === RISUM_MARK_END) {
+      ended = true;
+      if (cursor.pos !== cursor.size) {
+        throw new TranslationError("risum/trailing_bytes", `${cursor.size - cursor.pos} unexpected bytes after end-of-file marker`);
+      }
+      return null;
+    }
+    if (mark !== RISUM_MARK_ASSET) {
+      throw new TranslationError("risum/bad_mark", `asset[${nextAssetIndex}]: expected mark 0x00 or 0x01, got 0x${mark.toString(16)}`);
+    }
+    if (nextAssetIndex >= DEFAULT_MAX_ASSET_COUNT) {
+      throw new TranslationError("risum/too_many_assets", `asset count exceeds limit ${DEFAULT_MAX_ASSET_COUNT}`);
+    }
+    const length = await cursor.readU32LE(`asset[${nextAssetIndex}].length`);
+    if (length > DEFAULT_MAX_ASSET_BYTES) {
+      throw new TranslationError("risum/asset_too_large", `asset[${nextAssetIndex}] is ${length} bytes, exceeds limit ${DEFAULT_MAX_ASSET_BYTES}`);
+    }
+    return length;
+  };
+  return {
+    size: cursor.size,
+    module: module2,
+    assetCount: manifest.length,
+    concurrentReads: false,
+    async readAsset(index) {
+      if (!Number.isInteger(index) || index < nextAssetIndex) {
+        throw new Error(`risum assets must be read in order (requested ${index}, next ${nextAssetIndex})`);
+      }
+      while (!ended && nextAssetIndex <= index) {
+        const length = await readHeader();
+        if (length === null)
+          return;
+        const current = nextAssetIndex++;
+        if (current === index)
+          return cursor.readRPack(length, `asset[${current}].data`);
+        await cursor.skip(length, `asset[${current}].data`);
+      }
+      return;
+    },
+    async finish() {
+      while (!ended) {
+        const length = await readHeader();
+        if (length === null)
+          break;
+        const current = nextAssetIndex++;
+        await cursor.skip(length, `asset[${current}].data`);
+      }
+      return nextAssetIndex;
+    }
+  };
+}
+
 // src/lumiagent-phoneline.ts
 var EXCLUDE_FROM_SEARCH = [
   "lumirealm.source",
@@ -46258,6 +46465,16 @@ async function processModuleUpload(bytesIn, fileName, userId) {
     assetUploadsInFlight--;
   }
 }
+async function processRisumUpload(uploadId, fileName, userId) {
+  assetUploadsInFlight++;
+  try {
+    const source = await openRisumUpload((offset) => readUploadChunk(uploadId, offset, userId));
+    log8.info(`processModuleUpload: file=${fileName} bytes=${source.size} userId=${userId} mode=chunked`);
+    return await moduleUploader.uploadSource(source, fileName, userId);
+  } finally {
+    assetUploadsInFlight--;
+  }
+}
 var modulePushes = createModulePushes({
   translateLang: TRANSLATE_TARGET_LANG,
   readGlobalModuleIds: (userId) => readGlobalModuleIds(moduleStorage(), userId),
@@ -46559,6 +46776,13 @@ var getUpload = (uploadId, uid) => {
     throw new Error("spindle.uploads unavailable; host update required");
   return spindle.uploads.get(uploadId, uid);
 };
+var readUploadChunk = (uploadId, offset, uid) => {
+  const uploads = spindle.uploads;
+  if (typeof uploads?.readChunk !== "function") {
+    throw new Error("spindle.uploads.readChunk unavailable; host update required");
+  }
+  return uploads.readChunk(uploadId, offset, uid);
+};
 var deleteUpload = (uploadId, uid) => {
   if (!spindle.uploads?.delete)
     return Promise.resolve(false);
@@ -46687,6 +46911,7 @@ var moduleHandlers = createModuleHandlers({
     await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, artifacts);
   },
   processModuleUpload,
+  processRisumUpload,
   getUpload,
   deleteUpload,
   nudgeGc,
