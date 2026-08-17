@@ -88,6 +88,13 @@ describe('createLumiInterceptors registration', () => {
     expect(bindings).toEqual([]);
 
     activeCardByChat.set('chat-1', { ownerUserId: 'user-1' } as never);
+    const missingUser = { chatId: 'chat-1', generationType: 'normal', dryRun: false };
+    expect(await contextHandler!(missingUser)).toBe(missingUser);
+    const emptyUser = { ...missingUser, userId: '' };
+    expect(await contextHandler!(emptyUser)).toBe(emptyUser);
+    const wrongUser = { ...missingUser, userId: 'user-2' };
+    expect(await contextHandler!(wrongUser)).toBe(wrongUser);
+    expect(bindings).toEqual([]);
     const live = { chatId: 'chat-1', userId: 'user-1', generationType: 'normal', dryRun: false };
     expect(await contextHandler!(live)).toEqual({ ...live, cancelGeneration: true });
     expect(bindings).toEqual(['input', 'start']);

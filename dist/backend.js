@@ -39327,10 +39327,10 @@ function createLumiInterceptors(deps) {
       const chatId = typeof ctx.chatId === "string" ? ctx.chatId : null;
       if (!chatId || ctx.dryRun !== false)
         return contextRaw;
-      let active = activeCardByChat.get(chatId);
-      const userId = typeof ctx.userId === "string" && ctx.userId.length > 0 ? ctx.userId : active?.ownerUserId;
+      const userId = typeof ctx.userId === "string" && ctx.userId.length > 0 ? ctx.userId : null;
       if (!userId)
         return contextRaw;
+      let active = activeCardByChat.get(chatId);
       if (active && active.ownerUserId !== userId) {
         log8.warn(`contextHandler: owner mismatch chat=${chatId} cached=${active.ownerUserId} ctx=${userId}, skipping`);
         return contextRaw;
