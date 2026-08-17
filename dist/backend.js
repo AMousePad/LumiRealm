@@ -23420,14 +23420,14 @@ function translateFromCharxBundle(bundle, opts = {}) {
     now,
     uuid,
     origin: "character",
-    folder: regexFolder("CardX", charMap.character.name)
+    folder: regexFolder("CharX", charMap.character.name)
   }) : { rows: [], skipped: [], issues: [] };
   const moduleRegexOut = wantRegex ? mapRegex(moduleRegexScripts, {
     characterId: charMap.character.id,
     now,
     uuid,
     origin: "module",
-    folder: regexFolder("Module", moduleName ?? charMap.character.name)
+    folder: regexFolder("CharX", charMap.character.name)
   }) : { rows: [], skipped: [], issues: [] };
   const regexScriptsRaw = [...charRegexOut.rows, ...moduleRegexOut.rows];
   for (const iss of charRegexOut.issues)
@@ -25062,6 +25062,47 @@ async function applyV21BackfillRegexFolders(args, deps) {
     notes: [`grouped ${result.updated} regex_script(s)`]
   };
 }
+async function applyV22CorrectCardRegexFolder(args, deps) {
+  if (!deps.applyCharacterRegexRowPatch) {
+    throw new Error("applyCharacterRegexRowPatch dependency is required");
+  }
+  const sourceModule = args.envelope.source?.module;
+  const legacyName = typeof sourceModule?.name === "string" ? sourceModule.name : args.newBundle.character.name;
+  const legacySidecarFolder = `Module \u2014 ${legacyName}`.slice(0, 80);
+  const legacyCardFolder = `CardX \u2014 ${args.newBundle.character.name}`.slice(0, 80);
+  const desiredFolder = `CharX \u2014 ${args.newBundle.character.name}`.slice(0, 80);
+  const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
+    const meta = row["metadata"];
+    const risu = meta?._risu;
+    const origin = risu?.origin;
+    const generatedFolder = origin === "character" ? legacyCardFolder : origin === "module" ? legacySidecarFolder : null;
+    return generatedFolder === null || typeof risu?.module_id === "string" || risu?.imported_regex === true || row["folder"] !== generatedFolder ? null : { folder: desiredFolder };
+  });
+  if (!result || result.failed > 0)
+    throw new Error("card regex folder correction did not complete");
+  return {
+    nextEnvelope: args.envelope,
+    notes: [`corrected ${result.updated} card-sidecar regex folder(s)`]
+  };
+}
+async function applyV23CorrectCharXSpelling(args, deps) {
+  if (!deps.applyCharacterRegexRowPatch) {
+    throw new Error("applyCharacterRegexRowPatch dependency is required");
+  }
+  const oldFolder = `CardX \u2014 ${args.newBundle.character.name}`.slice(0, 80);
+  const desiredFolder = `CharX \u2014 ${args.newBundle.character.name}`.slice(0, 80);
+  const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
+    const meta = row["metadata"];
+    const risu = meta?._risu;
+    return risu?.origin !== "character" && risu?.origin !== "module" || typeof risu?.module_id === "string" || risu?.imported_regex === true || row["folder"] !== oldFolder ? null : { folder: desiredFolder };
+  });
+  if (!result || result.failed > 0)
+    throw new Error("CharX regex folder correction did not complete");
+  return {
+    nextEnvelope: args.envelope,
+    notes: [`corrected ${result.updated} CharX regex folder spelling(s)`]
+  };
+}
 async function applyV6BackfillArrayIndex(args, deps) {
   const indexBySourceHash = new Map;
   for (const e of args.newBundle.worldBookEntries) {
@@ -25474,9 +25515,21 @@ var CHARACTER_MIGRATIONS = [
   },
   {
     version: 21,
-    description: "Group uncategorized CardX and embedded-module regex rows.",
+    description: "Group uncategorized CharX and embedded-sidecar regex rows.",
     touches: ["regex_scripts"],
     apply: applyV21BackfillRegexFolders
+  },
+  {
+    version: 22,
+    description: "Label card regex rows as CharX rather than CardX or attached-module rows.",
+    touches: ["regex_scripts"],
+    apply: applyV22CorrectCardRegexFolder
+  },
+  {
+    version: 23,
+    description: "Correct the generated CardX folder spelling to CharX.",
+    touches: ["regex_scripts"],
+    apply: applyV23CorrectCharXSpelling
   }
 ];
 var CURRENT_CHARACTER_SCHEMA_VERSION = CHARACTER_MIGRATIONS.length > 0 ? Math.max(...CHARACTER_MIGRATIONS.map((m) => m.version)) : 1;
