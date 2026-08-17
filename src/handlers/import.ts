@@ -17,7 +17,7 @@ export interface ImportHandlerDeps {
   readonly lastSentBgHtmlByChat: Map<string, string>;
   readonly activeCardByChat: Map<string, ActiveCard>;
   readonly lastActiveChatByUser: Map<string, string>;
-  readonly hostVersionCheckRef: { current: HostVersionCheckResult | null };
+  readonly hostVersionCheck: HostVersionCheckResult;
   readonly getMissingPermissions: () => readonly string[];
   readonly permissionPurpose: Readonly<Record<string, string>>;
   readonly listCards: (userId: string) => Promise<readonly CardSummary[]>;
@@ -89,8 +89,8 @@ export function createImportHandlers(deps: ImportHandlerDeps): {
       }
       if (ctx.userId) getCardsInFlight.add(ctx.userId);
       try {
-        const hostVersionCheck = deps.hostVersionCheckRef.current;
-        if (hostVersionCheck?.needsUpdate) {
+        const hostVersionCheck = deps.hostVersionCheck;
+        if (hostVersionCheck.needsUpdate) {
           deps.notifyHostVersionOutdated({
             type: 'notify_host_version_outdated',
             hostVersion: hostVersionCheck.hostVersion,
