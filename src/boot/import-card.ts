@@ -77,15 +77,8 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
             return { id: c.id };
           });
         },
-        get: (characterId, uid) => spindle.characters.get(characterId, uid),
         update: (characterId, input, uid) =>
           spindle.characters.update(characterId, input as never, uid),
-        // characters.list is options-bag for userId, not positional. The importer doesn't actually call list, this stub is kept to satisfy the SpindleImportApi shape.
-        list: (options) =>
-          spindle.characters.list(options) as unknown as Promise<{
-            data: readonly unknown[];
-            total: number;
-          }>,
         setAvatar: (characterId, avatar, uid) => {
           log.info(`spindle.characters.setAvatar characterId=${characterId} filename=${avatar.filename ?? '?'} bytes=${avatar.data.byteLength}`);
           return spindle.characters.setAvatar(characterId, avatar, uid).then((c) => ({

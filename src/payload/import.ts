@@ -248,9 +248,7 @@ export interface SpindleImportApi {
       avatar: { data: Uint8Array; filename?: string; mime_type?: string },
       userId?: string,
     ): Promise<{ id: string; image_id: string | null }>;
-    get(characterId: string, userId?: string): Promise<unknown>;
     update(characterId: string, input: Record<string, unknown>, userId?: string): Promise<unknown>;
-    list(options?: { limit?: number; offset?: number; userId?: string }): Promise<{ data: readonly unknown[]; total: number }>;
   };
   world_books: {
     create(input: Record<string, unknown>, userId?: string): Promise<{ id: string }>;
@@ -816,7 +814,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
     basePayload,
     args.extensionVersion,
     storedRegexScripts,
-    assetIndex,    // populated above via spindle.images.upload
+    assetIndex,
     emotionIndex,  // populated alongside (last-wins per emotion name)
     Date.now(),
     userOverrides,
