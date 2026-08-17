@@ -60,20 +60,19 @@ export interface MigrationDeps {
     userId: string,
   ) => Promise<void>;
   // Walks Lumi's regex_scripts for character scope, applies transform per row's
-  // replace_string, updates only rows where the result differs. Returns null if
-  // the host lacks the update API (caller should fall back).
-  applyCharacterRegexReplaceStringTransform?: (
+  // replace_string, updates only rows where the result differs.
+  applyCharacterRegexReplaceStringTransform: (
     characterId: string,
     userId: string,
     transform: (replaceString: string) => string,
-  ) => Promise<{ scanned: number; updated: number; failed: number } | null>;
+  ) => Promise<{ scanned: number; updated: number; failed: number }>;
   // Multi-field patch over character-scoped Risu rows. `patch` returns the
   // partial fields to update, or null to skip the row.
-  applyCharacterRegexRowPatch?: (
+  applyCharacterRegexRowPatch: (
     characterId: string,
     userId: string,
     patch: (row: Readonly<Record<string, unknown>>) => Record<string, unknown> | null,
-  ) => Promise<{ scanned: number; updated: number; failed: number } | null>;
+  ) => Promise<{ scanned: number; updated: number; failed: number }>;
   log: {
     info: (s: string) => void;
     warn: (s: string) => void;
@@ -311,9 +310,6 @@ async function applyV21BackfillRegexFolders(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
-  if (!deps.applyCharacterRegexRowPatch) {
-    throw new Error('applyCharacterRegexRowPatch dependency is required');
-  }
   const folderByOrigin = new Map<string, string>();
   for (const row of args.newBundle.regexScripts) {
     const meta = row.metadata as { _risu?: { origin?: unknown } } | undefined;
@@ -332,7 +328,7 @@ async function applyV21BackfillRegexFolders(
       return folder ? { folder } : null;
     },
   );
-  if (!result || result.failed > 0) throw new Error('regex folder backfill did not complete');
+  if (result.failed > 0) throw new Error('regex folder backfill did not complete');
   return {
     nextEnvelope: args.envelope,
     notes: [`grouped ${result.updated} regex_script(s)`],
@@ -343,9 +339,6 @@ async function applyV22CorrectCardRegexFolder(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
-  if (!deps.applyCharacterRegexRowPatch) {
-    throw new Error('applyCharacterRegexRowPatch dependency is required');
-  }
   const sourceModule = args.envelope.source?.module as { name?: unknown } | null | undefined;
   const legacyName = typeof sourceModule?.name === 'string'
     ? sourceModule.name
@@ -373,7 +366,7 @@ async function applyV22CorrectCardRegexFolder(
       ) ? null : { folder: desiredFolder };
     },
   );
-  if (!result || result.failed > 0) throw new Error('card regex folder correction did not complete');
+  if (result.failed > 0) throw new Error('card regex folder correction did not complete');
   return {
     nextEnvelope: args.envelope,
     notes: [`corrected ${result.updated} card-sidecar regex folder(s)`],
@@ -384,9 +377,6 @@ async function applyV23CorrectCharXSpelling(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
-  if (!deps.applyCharacterRegexRowPatch) {
-    throw new Error('applyCharacterRegexRowPatch dependency is required');
-  }
   const oldFolder = `CardX — ${args.newBundle.character.name}`.slice(0, 80);
   const desiredFolder = `CharX — ${args.newBundle.character.name}`.slice(0, 80);
   const result = await deps.applyCharacterRegexRowPatch(
@@ -405,7 +395,7 @@ async function applyV23CorrectCharXSpelling(
       ) ? null : { folder: desiredFolder };
     },
   );
-  if (!result || result.failed > 0) throw new Error('CharX regex folder correction did not complete');
+  if (result.failed > 0) throw new Error('CharX regex folder correction did not complete');
   return {
     nextEnvelope: args.envelope,
     notes: [`corrected ${result.updated} CharX regex folder spelling(s)`],
@@ -506,25 +496,12 @@ async function applyV9StripStylePrefixInPlace(
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
   // Preserves user disable + edits by patching only replace_string on rules
-  // where the transform actually changes the content. Falls back to wholesale
-  // reinstall on hosts that don't expose regex_scripts.update.
-  if (!deps.applyCharacterRegexReplaceStringTransform) {
-    deps.log.warn(
-      `migrate(${args.characterId}) v9: regex_scripts.update unavailable, falling back to wholesale reinstall (user disable/edit state will be lost)`,
-    );
-    return applyV7ReinstallRegex(args, deps);
-  }
+  // where the transform actually changes the content.
   const result = await deps.applyCharacterRegexReplaceStringTransform(
     args.characterId,
     args.userId,
     unprefixCssInStyleBlocks,
   );
-  if (result === null) {
-    deps.log.warn(
-      `migrate(${args.characterId}) v9: transform dep returned null, falling back to wholesale reinstall`,
-    );
-    return applyV7ReinstallRegex(args, deps);
-  }
   return {
     nextEnvelope: args.envelope,
     notes: [
@@ -541,12 +518,6 @@ async function applyV11FixPhaseMapPlacement(
 ): Promise<CharacterMigrationStepResult> {
   // editprocess: drop world_info (Risu chat-history-only scope). edittrans:
   // disable (no Lumi translation pipeline).
-  if (!deps.applyCharacterRegexRowPatch) {
-    deps.log.warn(
-      `migrate(${args.characterId}) v11: regex_scripts row-patch unavailable, falling back to wholesale reinstall (user disable/edit state will be lost)`,
-    );
-    return applyV7ReinstallRegex(args, deps);
-  }
   const result = await deps.applyCharacterRegexRowPatch(
     args.characterId,
     args.userId,
@@ -574,12 +545,6 @@ async function applyV11FixPhaseMapPlacement(
       return null;
     },
   );
-  if (result === null) {
-    deps.log.warn(
-      `migrate(${args.characterId}) v11: row-patch dep returned null, falling back to wholesale reinstall`,
-    );
-    return applyV7ReinstallRegex(args, deps);
-  }
   return {
     nextEnvelope: args.envelope,
     notes: [
@@ -650,17 +615,11 @@ async function applyV12RecoverMissingRegex(
   // the version was still stamped and the card could remain without live rows.
   // This historical recovery step is idempotent and reinstalls only an empty
   // rowset; current installs use an acknowledged, verified handoff.
-  if (!deps.applyCharacterRegexReplaceStringTransform) {
-    return applyV7ReinstallRegex(args, deps);
-  }
   const probe = await deps.applyCharacterRegexReplaceStringTransform(
     args.characterId,
     args.userId,
     (s) => s,
   );
-  if (probe === null) {
-    return applyV7ReinstallRegex(args, deps);
-  }
   if (probe.scanned === 0) {
     deps.log.warn(
       `migrate(${args.characterId}) v12: 0 Risu regex rows present, reinstalling from translator output`,
@@ -682,12 +641,6 @@ async function applyV13FixEscapedPerMessageGate(
   // carries a per-message {{chat_index}} gate render flakily ('escaped'
   // pre-resolves chat-wide). Re-route only those to 'after', in place, so
   // user disable + edits survive.
-  if (!deps.applyCharacterRegexRowPatch) {
-    deps.log.warn(
-      `migrate(${args.characterId}) v13: regex_scripts row-patch unavailable, falling back to wholesale reinstall (user disable/edit state will be lost)`,
-    );
-    return applyV7ReinstallRegex(args, deps);
-  }
   const result = await deps.applyCharacterRegexRowPatch(
     args.characterId,
     args.userId,
@@ -699,12 +652,6 @@ async function applyV13FixEscapedPerMessageGate(
       return { substitute_macros: 'after' };
     },
   );
-  if (result === null) {
-    deps.log.warn(
-      `migrate(${args.characterId}) v13: row-patch dep returned null, falling back to wholesale reinstall`,
-    );
-    return applyV7ReinstallRegex(args, deps);
-  }
   return {
     nextEnvelope: args.envelope,
     notes: [
@@ -798,9 +745,6 @@ async function applyV17UseFindMacroMode(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
-  if (!deps.applyCharacterRegexRowPatch) {
-    return applyV7ReinstallRegex(args, deps);
-  }
   const result = await deps.applyCharacterRegexRowPatch(
     args.characterId,
     args.userId,
@@ -815,7 +759,6 @@ async function applyV17UseFindMacroMode(
         : null;
     },
   );
-  if (result === null) return applyV7ReinstallRegex(args, deps);
   return {
     nextEnvelope: args.envelope,
     notes: [
