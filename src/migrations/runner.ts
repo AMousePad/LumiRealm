@@ -13,7 +13,6 @@ import {
   type ModuleMigrationDeps,
 } from './module.js';
 import { markLegacyReimportWarned } from '../state/legacy-reimport-warnings.js';
-import { getRegexScriptsApi } from '../adapters/spindle-extras.js';
 import {
   projectModuleRegexEntries,
   recoverModuleRegexScriptIds,
@@ -122,8 +121,7 @@ async function applyRegexReplaceStringTransform(
   log: { warn: (s: string) => void },
   errMsg: (e: unknown) => string,
 ): Promise<{ scanned: number; updated: number; failed: number } | null> {
-  const api = getRegexScriptsApi();
-  if (!api?.list || !api.update) return null;
+  const api = spindle.regex_scripts;
   const PAGE_SIZE = 200;
   let scanned = 0;
   let updated = 0;
@@ -133,7 +131,7 @@ async function applyRegexReplaceStringTransform(
     const page = await api.list({ userId, limit: PAGE_SIZE, offset });
     if (!Array.isArray(page.data) || page.data.length === 0) break;
     for (const r of page.data) {
-      const row = r as Record<string, unknown>;
+      const row = r as unknown as Record<string, unknown>;
       if (!predicate(row)) continue;
       scanned += 1;
       const id = typeof row['id'] === 'string' ? (row['id'] as string) : null;
@@ -157,7 +155,7 @@ async function applyRegexReplaceStringTransform(
   return { scanned, updated, failed };
 }
 
-// Generic multi-field row patch. Returns null when host lacks the update API.
+// Generic multi-field row patch.
 async function applyRegexRowPatch(
   predicate: (row: Record<string, unknown>) => boolean,
   userId: string,
@@ -165,8 +163,7 @@ async function applyRegexRowPatch(
   log: { warn: (s: string) => void },
   errMsg: (e: unknown) => string,
 ): Promise<{ scanned: number; updated: number; failed: number } | null> {
-  const api = getRegexScriptsApi();
-  if (!api?.list || !api.update) return null;
+  const api = spindle.regex_scripts;
   const PAGE_SIZE = 200;
   let scanned = 0;
   let updated = 0;
@@ -176,7 +173,7 @@ async function applyRegexRowPatch(
     const page = await api.list({ userId, limit: PAGE_SIZE, offset });
     if (!Array.isArray(page.data) || page.data.length === 0) break;
     for (const r of page.data) {
-      const row = r as Record<string, unknown>;
+      const row = r as unknown as Record<string, unknown>;
       if (!predicate(row)) continue;
       scanned += 1;
       const id = typeof row['id'] === 'string' ? (row['id'] as string) : null;
@@ -432,8 +429,7 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       scopeId: string | null,
     ): Promise<Map<number, string>> => {
       const aliases = new Map<number, string>();
-      const api = getRegexScriptsApi();
-      if (!api?.list) return aliases;
+      const api = spindle.regex_scripts;
       let offset = 0;
       while (true) {
         const page = await api.list({
@@ -572,7 +568,7 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       },
       repairRegexBindingsForAttached: async (mid) => {
         const charIds = await charactersAttachedTo(mid, userId);
-        const regexApi = getRegexScriptsApi();
+        const regexApi = spindle.regex_scripts;
         const module = env.module as {
           name?: unknown;
           regex?: readonly unknown[];
@@ -592,29 +588,21 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
         let refreshed = 0;
 
         for (const charId of charIds) {
-          let recovery: ReturnType<typeof recoverModuleRegexScriptIds> | null = null;
-          if (regexApi?.list) {
-            const liveRows: Record<string, unknown>[] = [];
-            let offset = 0;
-            while (true) {
-              const page = await regexApi.list({
-                userId,
-                scope: 'character',
-                scopeId: charId,
-                limit: 200,
-                offset,
-              });
-              liveRows.push(
-                ...page.data.filter(
-                  (row): row is Record<string, unknown> =>
-                    !!row && typeof row === 'object',
-                ),
-              );
-              offset += page.data.length;
-              if (page.data.length < 200 || offset >= page.total) break;
-            }
-            recovery = recoverModuleRegexScriptIds(mid, projected, liveRows);
+          const liveRows: Record<string, unknown>[] = [];
+          let offset = 0;
+          while (true) {
+            const page = await regexApi.list({
+              userId,
+              scope: 'character',
+              scopeId: charId,
+              limit: 200,
+              offset,
+            });
+            liveRows.push(...page.data as unknown as Record<string, unknown>[]);
+            offset += page.data.length;
+            if (page.data.length < 200 || offset >= page.total) break;
           }
+          const recovery = recoverModuleRegexScriptIds(mid, projected, liveRows);
 
           if (recovery?.exact) {
             const recoveredIds = recovery.ids;

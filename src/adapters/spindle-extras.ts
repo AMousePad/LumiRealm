@@ -158,54 +158,6 @@ export function getModalConfirmApi(): ModalConfirmApi | null {
   return m?.confirm ? { confirm: m.confirm.bind(m) } : null;
 }
 
-// Regex scripts list/delete/update. Optional. update is gated separately so the
-// list/delete-only legacy adapter shape keeps working on older Lumi builds.
-export interface RegexScriptsApi {
-  readonly list: (
-    opts: {
-      userId?: string;
-      limit?: number;
-      offset?: number;
-      scope?: 'global' | 'character' | 'chat';
-      scopeId?: string;
-      target?: 'prompt' | 'response' | 'display';
-    },
-  ) => Promise<{ data: readonly unknown[]; total: number }>;
-  readonly delete: (id: string, userId?: string) => Promise<boolean>;
-  readonly update?: (
-    id: string,
-    input: { replace_string?: string },
-    userId?: string,
-  ) => Promise<unknown>;
-  readonly getActive?: (
-    opts: {
-      target: 'prompt' | 'response' | 'display';
-      characterId?: string;
-      chatId?: string;
-      userId?: string;
-    },
-  ) => Promise<readonly unknown[]>;
-}
-
-export function getRegexScriptsApi(): RegexScriptsApi | null {
-  const api = (spindle as unknown as {
-    regex_scripts?: {
-      list?: RegexScriptsApi['list'];
-      delete?: RegexScriptsApi['delete'];
-      update?: RegexScriptsApi['update'];
-      getActive?: RegexScriptsApi['getActive'];
-    };
-  }).regex_scripts;
-  if (!api?.list || !api?.delete) return null;
-  const out: RegexScriptsApi = {
-    list: api.list.bind(api),
-    delete: api.delete.bind(api),
-  };
-  if (api.update) (out as { update?: RegexScriptsApi['update'] }).update = api.update.bind(api);
-  if (api.getActive) (out as { getActive?: RegexScriptsApi['getActive'] }).getActive = api.getActive.bind(api);
-  return out;
-}
-
 // Connections list with extension-side typing.
 export interface ConnectionDTOLike {
   readonly id: string;

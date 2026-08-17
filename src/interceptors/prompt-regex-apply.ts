@@ -11,7 +11,6 @@ import { imageUrlFromId } from '../interpreter/image-cache.js';
 import { getDecoratorBuffers as readDecoratorBuffers } from '../interpreter/decorator-buffers.js';
 import { getActiveLorebook } from '../state/lorebook-cache.js';
 import { getCachedMessages } from '../interpreter/messages-cache.js';
-import { getRegexScriptsApi } from '../adapters/spindle-extras.js';
 import type { LlmMessage } from '../adapters/spindle-extras.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
@@ -372,62 +371,18 @@ function rowToPromptScript(r: unknown): RegexCoreScript | null {
   };
 }
 
-async function listPromptRegexScope(
-  regexApi: NonNullable<ReturnType<typeof getRegexScriptsApi>>,
-  userId: string,
-  scope: 'global' | 'character' | 'chat',
-  scopeId: string | undefined,
-): Promise<RegexCoreScript[]> {
-  const PAGE_SIZE = 200;
-  const out: RegexCoreScript[] = [];
-  let offset = 0;
-  while (true) {
-    const page = await regexApi.list({
-      userId,
-      limit: PAGE_SIZE,
-      offset,
-      scope,
-      ...(scopeId !== undefined ? { scopeId } : {}),
-      target: 'prompt',
-    });
-    if (!Array.isArray(page.data) || page.data.length === 0) break;
-    for (const r of page.data) {
-      const row = r as RawRegexRow;
-      if (row.scope !== scope) continue;
-      if (scopeId !== undefined && row.scope_id !== scopeId) continue;
-      if (row.disabled === true) continue;
-      const mapped = rowToPromptScript(r);
-      if (mapped) out.push(mapped);
-    }
-    offset += page.data.length;
-    if (typeof page.total === 'number' && offset >= page.total) break;
-  }
-  return out;
-}
-
 export async function listLivePromptRegexScripts(
   characterId: string,
   chatId: string,
   userId: string,
 ): Promise<readonly RegexCoreScript[]> {
-  const regexApi = getRegexScriptsApi();
-  if (!regexApi?.list) {
-    throw new Error('spindle.regex_scripts.list is not available on this host');
+  const rows = await spindle.regex_scripts.getActive({
+    target: 'prompt', characterId, chatId, userId,
+  });
+  const out: RegexCoreScript[] = [];
+  for (const row of rows) {
+    const mapped = rowToPromptScript(row);
+    if (mapped) out.push(mapped);
   }
-
-  if (regexApi.getActive) {
-    const rows = await regexApi.getActive({ target: 'prompt', characterId, chatId, userId });
-    const out: RegexCoreScript[] = [];
-    for (const r of rows) {
-      const mapped = rowToPromptScript(r);
-      if (mapped) out.push(mapped);
-    }
-    return out;
-  }
-
-  return [
-    ...(await listPromptRegexScope(regexApi, userId, 'global', undefined)),
-    ...(await listPromptRegexScope(regexApi, userId, 'character', characterId)),
-    ...(await listPromptRegexScope(regexApi, userId, 'chat', chatId)),
-  ];
+  return out;
 }
