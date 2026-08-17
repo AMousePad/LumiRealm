@@ -36441,10 +36441,12 @@ function createLifecycleEventHandlers(deps) {
       if (p.key === "activePersonaId" || Array.isArray(p.keys) && p.keys.includes("activePersonaId")) {
         onPersonaChanged(userId, "SETTINGS_UPDATED activePersonaId");
       }
-      if (p.key !== "activeChatId")
-        return;
-      const chatId = typeof p.value === "string" && p.value.length > 0 ? p.value : null;
-      deps.log.info(`event SETTINGS_UPDATED activeChatId=${chatId ?? "<cleared>"} payload=${deps.dumpPayload(raw)}`);
+    },
+    CHAT_SWITCHED: async (raw, userId) => {
+      deps.captureUserId(userId, "CHAT_SWITCHED");
+      const p = raw;
+      const chatId = typeof p.chatId === "string" && p.chatId.length > 0 ? p.chatId : null;
+      deps.log.info(`event CHAT_SWITCHED chatId=${chatId ?? "<cleared>"} payload=${deps.dumpPayload(raw)}`);
       const prevChat = userId ? deps.lastActiveChatByUser.get(userId) : undefined;
       if (prevChat !== chatId) {
         if (prevChat)
@@ -36456,16 +36458,16 @@ function createLifecycleEventHandlers(deps) {
         deps.sendSetActiveChat(null, null, userId);
         const lastChat = userId ? deps.lastActiveChatByUser.get(userId) : undefined;
         if (lastChat) {
-          deps.log.info(`SETTINGS_UPDATED activeChatId cleared, dismounting bg-host for last chat=${lastChat}`);
+          deps.log.info(`CHAT_SWITCHED chatId cleared, dismounting bg-host for last chat=${lastChat}`);
           try {
             deps.send({ type: "clear_bg_html", chatId: lastChat }, userId);
           } catch (err) {
-            deps.log.warn(`SETTINGS_UPDATED clear_bg_html: ${err.message}`);
+            deps.log.warn(`CHAT_SWITCHED clear_bg_html: ${err.message}`);
           }
           if (userId)
             deps.lastActiveChatByUser.delete(userId);
         } else {
-          deps.log.info(`SETTINGS_UPDATED activeChatId cleared, no last chat to dismount`);
+          deps.log.info(`CHAT_SWITCHED chatId cleared, no last chat to dismount`);
         }
         return;
       }
@@ -36477,10 +36479,10 @@ function createLifecycleEventHandlers(deps) {
         if (chat?.character_id)
           characterId = chat.character_id;
       } catch (err) {
-        deps.log.warn(`SETTINGS_UPDATED activeChatId: chats.get failed: ${err.message}`);
+        deps.log.warn(`CHAT_SWITCHED: chats.get failed: ${err.message}`);
       }
       const active = await deps.ensureActiveCardForChat(chatId, characterId ?? null, userId);
-      deps.log.info(`SETTINGS_UPDATED activeChatId: active=${active ? `characterId=${active.card.character_id} hasBgHtml=${!!active.card.risuPayload.background_html} triggers=${active.card.risuPayload.triggers?.length ?? 0}` : "<none>"}`);
+      deps.log.info(`CHAT_SWITCHED: active=${active ? `characterId=${active.card.character_id} hasBgHtml=${!!active.card.risuPayload.background_html} triggers=${active.card.risuPayload.triggers?.length ?? 0}` : "<none>"}`);
       deps.sendSetActiveChat(active ? chatId : null, active ? active.card.character_id : null, userId);
       if (!active) {
         try {
@@ -36495,7 +36497,7 @@ function createLifecycleEventHandlers(deps) {
       await deps.refreshVariables(active, chatId, userId, { force: true });
       await deps.refreshToggleDefinitions(active, chatId, userId, { force: true });
       await deps.refreshBgHtml(active, chatId, userId);
-      deps.log.info(`SETTINGS_UPDATED activeChatId: ALL DONE chatId=${chatId}`);
+      deps.log.info(`CHAT_SWITCHED: ALL DONE chatId=${chatId}`);
     },
     PERSONA_CHANGED: async (_raw, userId) => {
       onPersonaChanged(userId, "PERSONA_CHANGED");
@@ -46339,6 +46341,7 @@ var lifecycleHandlers = createLifecycleEventHandlers({
   errMsg
 });
 spindle.on("SETTINGS_UPDATED", userScoped(lifecycleHandlers.SETTINGS_UPDATED));
+spindle.on("CHAT_SWITCHED", userScoped(lifecycleHandlers.CHAT_SWITCHED));
 spindle.on("PERSONA_CHANGED", userScoped(lifecycleHandlers.PERSONA_CHANGED));
 spindle.on("CHAT_CHANGED", userScoped(lifecycleHandlers.CHAT_CHANGED));
 spindle.on("MESSAGE_SENT", userScoped(lifecycleHandlers.MESSAGE_SENT));
