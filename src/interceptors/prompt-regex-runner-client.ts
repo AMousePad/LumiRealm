@@ -31,6 +31,7 @@ export interface RunnerClientDeps {
     readonly error: (m: string) => void;
   };
   readonly errMsg: (e: unknown) => string;
+  readonly requestTimeoutMs?: number;
 }
 
 export interface RunnerDispatchResult {
@@ -41,6 +42,7 @@ export interface RunnerDispatchResult {
 
 export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
   const { log, errMsg } = deps;
+  const requestTimeoutMs = deps.requestTimeoutMs ?? PROMPT_REGEX_TIMEOUT_MS;
 
   type Pending = {
     resolve: (reply: RegexRunnerReply) => void;
@@ -155,8 +157,8 @@ export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
       const timer = setTimeout(() => {
         if (!pending.has(requestId)) return;
         pending.delete(requestId);
-        resolve({ requestId, ok: false, error: `timeout after ${PROMPT_REGEX_TIMEOUT_MS}ms` });
-      }, PROMPT_REGEX_TIMEOUT_MS);
+        resolve({ requestId, ok: false, error: `timeout after ${requestTimeoutMs}ms` });
+      }, requestTimeoutMs);
       if (typeof (timer as { unref?: () => void }).unref === 'function') {
         (timer as { unref: () => void }).unref();
       }
