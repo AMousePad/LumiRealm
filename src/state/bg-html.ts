@@ -57,7 +57,12 @@ export interface BgHtmlRefresherDeps {
 }
 
 export interface BgHtmlRefresher {
-  readonly refresh: (active: ActiveCard, chatId: string, userId: string | undefined) => Promise<void>;
+  readonly refresh: (
+    active: ActiveCard,
+    chatId: string,
+    userId: string | undefined,
+    isCurrent?: () => boolean,
+  ) => Promise<void>;
   readonly extractCrossRuleStyleParts: (
     rules: readonly { replace_string?: string }[] | undefined,
     atActions: readonly unknown[] | undefined,
@@ -130,7 +135,12 @@ export function createBgHtmlRefresher(deps: BgHtmlRefresherDeps): BgHtmlRefreshe
     return out;
   }
 
-  async function refresh(active: ActiveCard, chatId: string, userId: string | undefined): Promise<void> {
+  async function refresh(
+    active: ActiveCard,
+    chatId: string,
+    userId: string | undefined,
+    isCurrent?: () => boolean,
+  ): Promise<void> {
     const bgRaw = active.card.risuPayload.background_html;
     const moduleBg = active.card.risuPayload.module_background_embedding ?? '';
     const bgCombined = (bgRaw ?? '') + (moduleBg.length > 0 ? '\n' + moduleBg : '');
@@ -168,6 +178,7 @@ export function createBgHtmlRefresher(deps: BgHtmlRefresherDeps): BgHtmlRefreshe
       log.error(`refreshBgHtml: resolve failed chatId=${chatId}: ${msg}`);
       return;
     }
+    if (isCurrent?.() === false) return;
     const elapsed = Date.now() - tResolve;
 
     if (resolvedBg.length === 0 && crossRuleStyles.length === 0) {
