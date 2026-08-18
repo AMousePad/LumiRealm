@@ -36154,6 +36154,7 @@ function readEditedBy(payload) {
 }
 var CHAT_CHANGED_DEBOUNCE_MS = 50;
 function createLifecycleEventHandlers(deps) {
+  const chatSwitchTokens = new Map;
   const chatChangedDebounceTimers = new Map;
   const chatChangedCoalescedCount = new Map;
   const chatChangedCoalescedFields = new Map;
@@ -36270,6 +36271,10 @@ function createLifecycleEventHandlers(deps) {
     },
     CHAT_SWITCHED: async (raw, userId) => {
       deps.captureUserId(userId, "CHAT_SWITCHED");
+      const switchToken = Symbol();
+      if (userId !== undefined)
+        chatSwitchTokens.set(userId, switchToken);
+      const isCurrent = () => userId === undefined || chatSwitchTokens.get(userId) === switchToken;
       const p = raw;
       const chatId = typeof p.chatId === "string" && p.chatId.length > 0 ? p.chatId : null;
       deps.log.info(`event CHAT_SWITCHED chatId=${chatId ?? "<cleared>"} payload=${deps.dumpPayload(raw)}`);
@@ -36307,7 +36312,11 @@ function createLifecycleEventHandlers(deps) {
       } catch (err) {
         deps.log.warn(`CHAT_SWITCHED: chats.get failed: ${err.message}`);
       }
+      if (!isCurrent())
+        return;
       const active = await deps.ensureActiveCardForChat(chatId, characterId ?? null, userId);
+      if (!isCurrent())
+        return;
       deps.log.info(`CHAT_SWITCHED: active=${active ? `characterId=${active.card.character_id} hasBgHtml=${!!active.card.risuPayload.background_html} triggers=${active.card.risuPayload.triggers?.length ?? 0}` : "<none>"}`);
       deps.sendSetActiveChat(active ? chatId : null, active ? active.card.character_id : null, userId);
       if (!active) {
@@ -36321,8 +36330,12 @@ function createLifecycleEventHandlers(deps) {
       deps.invalidateMacroInterceptorForChat(chatId);
       deps.refreshMessagesCache(chatId, userId);
       await deps.refreshVariables(active, chatId, userId, { force: true });
+      if (!isCurrent())
+        return;
       await deps.refreshToggleDefinitions(active, chatId, userId, { force: true });
-      await deps.refreshBgHtml(active, chatId, userId);
+      if (!isCurrent())
+        return;
+      await deps.refreshBgHtml(active, chatId, userId, isCurrent);
       deps.log.info(`CHAT_SWITCHED: ALL DONE chatId=${chatId}`);
     },
     PERSONA_CHANGED: async (_raw, userId) => {
@@ -39931,7 +39944,7 @@ __RISU_TEMPLATE_SEP_a3f9b__
     }
     return out;
   }
-  async function refresh(active, chatId, userId) {
+  async function refresh(active, chatId, userId, isCurrent) {
     const bgRaw = active.card.risuPayload.background_html;
     const moduleBg = active.card.risuPayload.module_background_embedding ?? "";
     const bgCombined = (bgRaw ?? "") + (moduleBg.length > 0 ? `
@@ -39957,6 +39970,8 @@ __RISU_TEMPLATE_SEP_a3f9b__
       log8.error(`refreshBgHtml: resolve failed chatId=${chatId}: ${msg}`);
       return;
     }
+    if (isCurrent?.() === false)
+      return;
     const elapsed = Date.now() - tResolve;
     if (resolvedBg.length === 0 && crossRuleStyles.length === 0) {
       log8.debug(`refreshBgHtml: no bg_html and no cross-rule styles, sending clear_bg_html`);

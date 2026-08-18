@@ -46,7 +46,12 @@ export interface LifecycleEventHandlerDeps {
 
   // Refresh / dispatch
   readonly refreshPersonaImage: (userId: string) => Promise<void>;
-  readonly refreshBgHtml: (active: ActiveCard, chatId: string, userId: string | undefined) => Promise<void>;
+  readonly refreshBgHtml: (
+    active: ActiveCard,
+    chatId: string,
+    userId: string | undefined,
+    isCurrent?: () => boolean,
+  ) => Promise<void>;
   readonly refreshVariables: (
     active: ActiveCard,
     chatId: string,
@@ -191,6 +196,7 @@ function readEditedBy(payload: MessageEditedPayload): string | null {
 const CHAT_CHANGED_DEBOUNCE_MS = 50;
 
 export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): LifecycleEventHandlers {
+  const chatSwitchTokens = new Map<string, symbol>();
   // Per-chat coalescing for external CHAT_CHANGED bursts (50ms debounce).
   const chatChangedDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const chatChangedCoalescedCount = new Map<string, number>();
@@ -329,6 +335,9 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
 
     CHAT_SWITCHED: async (raw, userId) => {
       deps.captureUserId(userId, 'CHAT_SWITCHED');
+      const switchToken = Symbol();
+      if (userId !== undefined) chatSwitchTokens.set(userId, switchToken);
+      const isCurrent = () => userId === undefined || chatSwitchTokens.get(userId) === switchToken;
       const p = raw as { chatId?: unknown };
       const chatId = typeof p.chatId === 'string' && p.chatId.length > 0 ? p.chatId : null;
       deps.log.info(`event CHAT_SWITCHED chatId=${chatId ?? '<cleared>'} payload=${deps.dumpPayload(raw)}`);
@@ -361,7 +370,9 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       } catch (err) {
         deps.log.warn(`CHAT_SWITCHED: chats.get failed: ${(err as Error).message}`);
       }
+      if (!isCurrent()) return;
       const active = await deps.ensureActiveCardForChat(chatId, characterId ?? null, userId);
+      if (!isCurrent()) return;
       deps.log.info(`CHAT_SWITCHED: active=${active ? `characterId=${active.card.character_id} hasBgHtml=${!!active.card.risuPayload.background_html} triggers=${active.card.risuPayload.triggers?.length ?? 0}` : '<none>'}`);
       deps.sendSetActiveChat(active ? chatId : null, active ? active.card.character_id : null, userId);
       if (!active) {
@@ -379,8 +390,10 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       // first (as it used to) queued the snapshot behind it, so the FE sat on a
       // not-ready resolver for ~5s. Snapshot before bg-html.
       await deps.refreshVariables(active, chatId, userId, { force: true });
+      if (!isCurrent()) return;
       await deps.refreshToggleDefinitions(active, chatId, userId, { force: true });
-      await deps.refreshBgHtml(active, chatId, userId);
+      if (!isCurrent()) return;
+      await deps.refreshBgHtml(active, chatId, userId, isCurrent);
       deps.log.info(`CHAT_SWITCHED: ALL DONE chatId=${chatId}`);
     },
 
