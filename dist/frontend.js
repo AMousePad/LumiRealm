@@ -30803,15 +30803,126 @@ var styles_default = `.risu-compat-drawer {\r
   overflow: hidden;\r
   text-overflow: ellipsis;\r
 }\r
-.lr-ss-option-secondary {\r
+.lr-ss-option-secondary {
   font-size: 10.5px;\r
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
   white-space: nowrap;\r
   overflow: hidden;\r
-  text-overflow: ellipsis;\r
-}\r
-\r
-/* ─── Variables tab ───────────────────────────────────────────────────── */\r
+  text-overflow: ellipsis;
+}
+
+/* Shared searchable multi-select + removable chips. */
+.lr-chip-select {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.lr-chip-select-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+.lr-chip-select-chips-expanded {
+  max-height: 168px;
+  overflow-y: auto;
+  align-content: flex-start;
+  padding-right: 3px;
+  scrollbar-width: thin;
+}
+.lr-chip-select-chip,
+.lr-chip-select-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.16));
+  border: 1px solid var(--lumiverse-primary, rgba(120, 160, 255, 0.42));
+  color: var(--lumiverse-text, inherit);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.lr-chip-select-chip-missing {
+  background: rgba(255, 130, 130, 0.12);
+  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));
+}
+.lr-chip-select-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.lr-chip-select-chip-x {
+  appearance: none;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 999px;
+  opacity: 0.68;
+}
+.lr-chip-select-chip-x:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+.lr-chip-select-more {
+  appearance: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.05));
+  border-color: var(--lumiverse-border, rgba(255, 255, 255, 0.15));
+}
+.lr-chip-select-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.lr-chip-select-trigger {
+  flex: 1 1 210px;
+}
+.lr-chip-select-count,
+.lr-chip-select-empty {
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));
+  font-size: 11px;
+}
+.lr-chip-select-action {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--lumiverse-primary, #8fb3ff);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 3px;
+}
+.lr-chip-select-action:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.lr-chip-select-action:disabled,
+.lr-chip-select-more:disabled,
+.lr-chip-select-chip-x:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+@media (hover: none) and (pointer: coarse) {
+  .lr-chip-select-chip-x {
+    padding: 2px 6px;
+    font-size: 15px;
+  }
+}
+
+/* ─── Variables tab ───────────────────────────────────────────────────── */
 \r
 .risu-vars-drawer {\r
   display: flex;\r
@@ -31712,12 +31823,44 @@ var styles_default = `.risu-compat-drawer {\r
 .risu-settings-drawer .rs-repair-row-danger {\r
   color: var(--lumiverse-warning, rgba(255, 200, 120, 0.9));\r
 }\r
-.risu-settings-drawer .rs-repair-count {\r
-  font-variant-numeric: tabular-nums;\r
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
-  font-size: 11px;\r
-}\r
-.risu-settings-drawer .rs-cleanup-list {\r
+.risu-settings-drawer .rs-repair-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));
+  font-size: 11px;
+}
+.risu-settings-drawer .rs-repair-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.08));
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.risu-settings-drawer .rs-repair-scope-intro,
+.risu-settings-drawer .rs-repair-target-hint {
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.58));
+  font-size: 11px;
+  line-height: 1.4;
+}
+.risu-settings-drawer .rs-repair-scope-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.risu-settings-drawer .rs-repair-target-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.risu-settings-drawer .rs-repair-target-heading {
+  color: var(--lumiverse-text, inherit);
+  font-size: 12px;
+  font-weight: 600;
+}
+.risu-settings-drawer .rs-cleanup-list {
   max-height: 60vh;\r
   overflow-y: auto;\r
   padding: 4px;\r
@@ -32666,62 +32809,7 @@ var styles_default = `.risu-compat-drawer {\r
   font-size: 10.5px;\r
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
 }\r
-.lr-modules-drawer .lrm-chips {\r
-  display: flex;\r
-  flex-wrap: wrap;\r
-  gap: 4px;\r
-  align-items: center;\r
-  min-height: 22px;\r
-}\r
-.lr-modules-drawer .lrm-chips-empty {\r
-  font-size: 11px;\r
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.45));\r
-}\r
-.lr-modules-drawer .lrm-chip {\r
-  display: inline-flex;\r
-  align-items: center;\r
-  gap: 4px;\r
-  max-width: 100%;\r
-  padding: 2px 4px 2px 8px;\r
-  font-size: 11px;\r
-  border-radius: 999px;\r
-  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.16));\r
-  border: 1px solid var(--lumiverse-primary, rgba(120, 160, 255, 0.45));\r
-  color: var(--lumiverse-text, inherit);\r
-}\r
-.lr-modules-drawer .lrm-chip-missing {\r
-  background: rgba(255, 130, 130, 0.12);\r
-  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));\r
-}\r
-.lr-modules-drawer .lrm-chip-label {\r
-  overflow: hidden;\r
-  text-overflow: ellipsis;\r
-  white-space: nowrap;\r
-  max-width: 220px;\r
-}\r
-.lr-modules-drawer .lrm-chip-x {\r
-  appearance: none;\r
-  background: none;\r
-  border: none;\r
-  color: inherit;\r
-  cursor: pointer;\r
-  font-size: 13px;\r
-  line-height: 1;\r
-  padding: 0 3px;\r
-  border-radius: 999px;\r
-  opacity: 0.65;\r
-}\r
-.lr-modules-drawer .lrm-chip-x:hover {\r
-  opacity: 1;\r
-  background: rgba(255, 255, 255, 0.12);\r
-}\r
-@media (hover: none) and (pointer: coarse) {\r
-  .lr-modules-drawer .lrm-chip-x {\r
-    padding: 2px 6px;\r
-    font-size: 15px;\r
-  }\r
-}\r
-.lr-modules-drawer .lrm-characters-list {\r
+.lr-modules-drawer .lrm-characters-list {
   display: flex;\r
   flex-direction: column;\r
   gap: 6px;\r
@@ -38857,6 +38945,194 @@ function createVirtualGrid(opts) {
   return { host, inner, invalidate, refresh, destroy };
 }
 
+// src/ui/chip-multi-select.ts
+function createChipMultiSelect(opts) {
+  let items = opts.items.slice();
+  let selected = new Set(opts.selectedValues ?? []);
+  let disabled = false;
+  let expanded = false;
+  let destroyed = false;
+  const collapsedLimit = Math.max(1, opts.collapsedChipLimit ?? 8);
+  const root = document.createElement("div");
+  root.className = "lr-chip-select" + (opts.className ? ` ${opts.className}` : "");
+  const chips = document.createElement("div");
+  chips.className = "lr-chip-select-chips";
+  root.appendChild(chips);
+  const toolbar = document.createElement("div");
+  toolbar.className = "lr-chip-select-toolbar";
+  root.appendChild(toolbar);
+  const count = document.createElement("span");
+  count.className = "lr-chip-select-count";
+  const selectAllBtn = document.createElement("button");
+  selectAllBtn.type = "button";
+  selectAllBtn.className = "lr-chip-select-action";
+  selectAllBtn.textContent = "Select all";
+  const clearBtn = document.createElement("button");
+  clearBtn.type = "button";
+  clearBtn.className = "lr-chip-select-action";
+  clearBtn.textContent = "Clear";
+  let selector;
+  function selectedValues() {
+    return [...selected];
+  }
+  function itemByValue() {
+    return new Map(items.map((item) => [item.value, item]));
+  }
+  function searchableItems() {
+    return items.map((item) => {
+      if (!selected.has(item.value))
+        return item;
+      const selectedHint = "Selected - choose to remove";
+      return {
+        ...item,
+        secondary: item.secondary ? `${item.secondary} · ${selectedHint}` : selectedHint
+      };
+    });
+  }
+  function emitChange() {
+    opts.onChange(selectedValues());
+  }
+  function toggleValue(value) {
+    const item = items.find((candidate) => candidate.value === value);
+    if (!item || item.disabled || disabled)
+      return;
+    if (selected.has(value))
+      selected.delete(value);
+    else
+      selected.add(value);
+    sync();
+    emitChange();
+  }
+  selector = createSearchableSelect({
+    items: searchableItems(),
+    placeholder: opts.placeholder ?? "Search and select…",
+    searchPlaceholder: opts.searchPlaceholder ?? "Search…",
+    emptyMessage: opts.emptySearchMessage ?? "No matches",
+    className: "lr-chip-select-trigger",
+    onChange(value) {
+      if (value !== null)
+        toggleValue(value);
+    }
+  });
+  toolbar.appendChild(selector.root);
+  toolbar.appendChild(count);
+  if (opts.showBulkActions !== false) {
+    toolbar.appendChild(selectAllBtn);
+    toolbar.appendChild(clearBtn);
+  }
+  function makeChip(value, item) {
+    const chip = document.createElement("span");
+    chip.className = "lr-chip-select-chip";
+    chip.setAttribute("data-value", value);
+    if (!item || item.danger)
+      chip.classList.add("lr-chip-select-chip-missing");
+    const label = document.createElement("span");
+    label.className = "lr-chip-select-chip-label";
+    label.textContent = item?.label ?? value;
+    label.title = item?.title ?? item?.label ?? value;
+    chip.appendChild(label);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "lr-chip-select-chip-x";
+    remove.textContent = "×";
+    remove.title = `Remove ${label.textContent}`;
+    remove.disabled = disabled;
+    remove.addEventListener("click", () => {
+      if (disabled)
+        return;
+      selected.delete(value);
+      sync();
+      emitChange();
+    });
+    chip.appendChild(remove);
+    return chip;
+  }
+  function renderChips() {
+    chips.replaceChildren();
+    const values = selectedValues();
+    if (values.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "lr-chip-select-empty";
+      empty.textContent = opts.emptySelectionMessage ?? "None selected";
+      chips.appendChild(empty);
+      chips.classList.remove("lr-chip-select-chips-expanded");
+      return;
+    }
+    const byValue = itemByValue();
+    const visible = expanded ? values : values.slice(0, collapsedLimit);
+    for (const value of visible)
+      chips.appendChild(makeChip(value, byValue.get(value)));
+    if (values.length > collapsedLimit) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "lr-chip-select-more";
+      toggle.textContent = expanded ? "Show less" : `+${values.length - collapsedLimit} more`;
+      toggle.disabled = disabled;
+      toggle.addEventListener("click", () => {
+        expanded = !expanded;
+        renderChips();
+      });
+      chips.appendChild(toggle);
+    }
+    chips.classList.toggle("lr-chip-select-chips-expanded", expanded);
+  }
+  function sync() {
+    selector.setItems(searchableItems());
+    selector.setValue(null);
+    selector.setDisabled(disabled || items.length === 0);
+    const selectable = items.filter((item) => !item.disabled);
+    const allSelected = selectable.length > 0 && selectable.every((item) => selected.has(item.value));
+    selectAllBtn.disabled = disabled || selectable.length === 0 || allSelected;
+    clearBtn.disabled = disabled || selected.size === 0;
+    count.textContent = `${selected.size} selected`;
+    renderChips();
+  }
+  selectAllBtn.addEventListener("click", () => {
+    if (disabled)
+      return;
+    for (const item of items) {
+      if (!item.disabled)
+        selected.add(item.value);
+    }
+    sync();
+    emitChange();
+  });
+  clearBtn.addEventListener("click", () => {
+    if (disabled || selected.size === 0)
+      return;
+    selected.clear();
+    expanded = false;
+    sync();
+    emitChange();
+  });
+  sync();
+  return {
+    root,
+    getSelectedValues: selectedValues,
+    setSelectedValues(values) {
+      selected = new Set(values);
+      if (selected.size <= collapsedLimit)
+        expanded = false;
+      sync();
+    },
+    setItems(next) {
+      items = next.slice();
+      sync();
+    },
+    setDisabled(next) {
+      disabled = next;
+      sync();
+    },
+    destroy() {
+      if (destroyed)
+        return;
+      destroyed = true;
+      selector.destroy();
+      root.replaceChildren();
+    }
+  };
+}
+
 // src/ui/settings-tab.ts
 var SAMPLER_DEFS = [
   { key: "temperature", label: "Temperature", type: "float", min: 0, max: 2, step: 0.01, defaultHint: 1 },
@@ -39384,12 +39660,27 @@ owner: ${o.ownerCharacterId}` : ""}`;
   let repairScanning = false;
   let repairApplying = false;
   let repairLastSummary = null;
+  const repairSelectedCharacterIds = new Set;
+  const repairSelectedModuleIds = new Set;
+  let repairCardPicker = null;
+  let repairModulePicker = null;
+  function destroyRepairPickers() {
+    try {
+      repairCardPicker?.destroy();
+    } catch {}
+    try {
+      repairModulePicker?.destroy();
+    } catch {}
+    repairCardPicker = null;
+    repairModulePicker = null;
+  }
   function refreshRepairUi() {
     repairScanBtn.disabled = repairScanning || repairApplying || cleanupScanning || cleanupDeleting;
     repairScanBtn.textContent = repairScanning ? "Scanning…" : "Scan for problems";
     refreshCleanupActionState();
   }
   function renderRepairResult() {
+    destroyRepairPickers();
     repairResultBox.replaceChildren();
     const s = repairLastSummary;
     if (!s) {
@@ -39400,29 +39691,24 @@ owner: ${o.ownerCharacterId}` : ""}`;
     const total = s.staleCharRegex + s.staleModuleRegex + s.deadJournals;
     const summaryLine = document.createElement("div");
     summaryLine.className = "rs-repair-summary";
-    summaryLine.textContent = total === 0 && s.charactersToRetranslate === 0 ? "No issues detected." : `Scan complete (${s.elapsedMs}ms). Pick what to apply:`;
+    summaryLine.textContent = total === 0 && s.cardTargets.length === 0 && s.moduleTargets.length === 0 ? "No issues detected." : `Scan complete (${s.elapsedMs}ms). Pick what to apply and scope the slow repair:`;
     repairResultBox.appendChild(summaryLine);
-    const retranslateLabel = s.charactersToRetranslate === 0 ? "Force re-translate every lumirealm character" : (() => {
-      const parts = [`${s.charactersToRetranslate} char${s.charactersToRetranslate === 1 ? "" : "s"}`];
-      if (s.modulesToReattach > 0)
-        parts.push(`${s.modulesToReattach} module reattach${s.modulesToReattach === 1 ? "" : "es"}`);
-      if (s.danglingModuleRefs > 0)
-        parts.push(`${s.danglingModuleRefs} dangling ref${s.danglingModuleRefs === 1 ? "" : "s"} to scrub`);
-      return `Force re-translate (${parts.join(", ")})`;
-    })();
     const rows = [
-      { key: "staleCharRegex", label: "Stale character regex rows (envelope gone)", count: s.staleCharRegex, danger: false },
-      { key: "staleModuleRegex", label: "Stale module regex rows (module envelope gone)", count: s.staleModuleRegex, danger: false },
-      { key: "deadJournals", label: "Dead image journals (owner gone)", count: s.deadJournals, danger: false },
-      { key: "forceRetranslate", label: retranslateLabel, count: s.charactersToRetranslate, danger: true }
+      { key: "staleCharRegex", label: "Stale character regex rows (envelope gone)", count: s.staleCharRegex },
+      { key: "staleModuleRegex", label: "Stale module regex rows (module envelope gone)", count: s.staleModuleRegex },
+      { key: "deadJournals", label: "Dead image journals (owner gone)", count: s.deadJournals }
     ];
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
     applyBtn.className = "lrm-btn lrm-btn-danger";
     applyBtn.textContent = repairApplying ? "Applying…" : "Apply repair";
-    const hasApplicableSelection = () => repairChecked.staleCharRegex && s.staleCharRegex > 0 || repairChecked.staleModuleRegex && s.staleModuleRegex > 0 || repairChecked.deadJournals && s.deadJournals > 0 || repairChecked.forceRetranslate && s.charactersToRetranslate > 0;
+    const hasApplicableSelection = () => repairChecked.staleCharRegex && s.staleCharRegex > 0 || repairChecked.staleModuleRegex && s.staleModuleRegex > 0 || repairChecked.deadJournals && s.deadJournals > 0 || repairChecked.forceRetranslate && (repairSelectedCharacterIds.size > 0 || repairSelectedModuleIds.size > 0);
+    let targetCountSpan = null;
     const refreshApplyBtn = () => {
       applyBtn.disabled = repairApplying || !hasApplicableSelection();
+      if (targetCountSpan) {
+        targetCountSpan.textContent = `${repairSelectedCharacterIds.size} cards · ${repairSelectedModuleIds.size} modules`;
+      }
     };
     for (const r of rows) {
       const row = document.createElement("label");
@@ -39440,20 +39726,123 @@ owner: ${o.ownerCharacterId}` : ""}`;
       labelText.textContent = r.label;
       if (r.count === 0)
         labelText.classList.add("rs-repair-row-empty");
-      if (r.danger)
-        labelText.classList.add("rs-repair-row-danger");
       row.appendChild(labelText);
       const countSpan = document.createElement("span");
       countSpan.className = "rs-repair-count";
-      countSpan.textContent = r.key === "forceRetranslate" ? r.count === 0 ? "—" : `${r.count} chars` : r.count === 0 ? "0" : String(r.count);
+      countSpan.textContent = r.count === 0 ? "0" : String(r.count);
       row.appendChild(countSpan);
       repairResultBox.appendChild(row);
+    }
+    const targetRow = document.createElement("label");
+    targetRow.className = "rs-repair-row";
+    const targetCheck = document.createElement("input");
+    targetCheck.type = "checkbox";
+    targetCheck.checked = repairChecked.forceRetranslate;
+    targetCheck.disabled = s.charactersToRetranslate === 0 && s.moduleTargets.length === 0;
+    targetCheck.addEventListener("change", () => {
+      repairChecked.forceRetranslate = targetCheck.checked;
+      refreshApplyBtn();
+    });
+    targetRow.appendChild(targetCheck);
+    const targetLabel = document.createElement("span");
+    targetLabel.className = "rs-repair-row-danger";
+    targetLabel.textContent = "Force re-translate";
+    targetRow.appendChild(targetLabel);
+    targetCountSpan = document.createElement("span");
+    targetCountSpan.className = "rs-repair-count";
+    targetRow.appendChild(targetCountSpan);
+    repairResultBox.appendChild(targetRow);
+    if (s.cardTargets.length > 0 || s.moduleTargets.length > 0) {
+      const scope = document.createElement("div");
+      scope.className = "rs-repair-scope";
+      const scopeIntro = document.createElement("div");
+      scopeIntro.className = "rs-repair-scope-intro";
+      scopeIntro.textContent = "Cards are re-translated individually. Modules are refreshed across their selected character attachments; missing modules scrub dangling references.";
+      scope.appendChild(scopeIntro);
+      const columns = document.createElement("div");
+      columns.className = "rs-repair-scope-columns";
+      scope.appendChild(columns);
+      const cardGroup = document.createElement("section");
+      cardGroup.className = "rs-repair-target-group";
+      const cardHeading = document.createElement("div");
+      cardHeading.className = "rs-repair-target-heading";
+      cardHeading.textContent = `Cards (${s.charactersToRetranslate} repairable)`;
+      cardGroup.appendChild(cardHeading);
+      const legacyCount = s.cardTargets.filter((target) => !target.canRetranslate).length;
+      if (legacyCount > 0) {
+        const legacyHint = document.createElement("div");
+        legacyHint.className = "rs-repair-target-hint";
+        legacyHint.textContent = `${legacyCount} legacy card${legacyCount === 1 ? "" : "s"} disabled - re-import required.`;
+        cardGroup.appendChild(legacyHint);
+      }
+      repairCardPicker = createChipMultiSelect({
+        items: s.cardTargets.map((target) => ({
+          value: target.characterId,
+          label: target.characterName,
+          secondary: target.canRetranslate ? `${target.attachedModuleCount} attached module${target.attachedModuleCount === 1 ? "" : "s"}` : "Legacy card - re-import required",
+          disabled: !target.canRetranslate,
+          searchTerms: [target.characterId],
+          title: `${target.characterName}
+${target.characterId}`
+        })),
+        selectedValues: [...repairSelectedCharacterIds],
+        placeholder: `Search cards… (${s.cardTargets.length})`,
+        searchPlaceholder: "Search cards by name or ID…",
+        emptySearchMessage: "No matching cards",
+        emptySelectionMessage: "No cards selected",
+        className: "rs-repair-card-picker",
+        collapsedChipLimit: 6,
+        onChange(values) {
+          repairSelectedCharacterIds.clear();
+          for (const value of values)
+            repairSelectedCharacterIds.add(value);
+          refreshApplyBtn();
+        }
+      });
+      repairCardPicker.setDisabled(repairApplying);
+      cardGroup.appendChild(repairCardPicker.root);
+      columns.appendChild(cardGroup);
+      const moduleGroup = document.createElement("section");
+      moduleGroup.className = "rs-repair-target-group";
+      const moduleHeading = document.createElement("div");
+      moduleHeading.className = "rs-repair-target-heading";
+      moduleHeading.textContent = `Modules (${s.moduleTargets.length} in use)`;
+      moduleGroup.appendChild(moduleHeading);
+      repairModulePicker = createChipMultiSelect({
+        items: s.moduleTargets.map((target) => ({
+          value: target.moduleId,
+          label: target.moduleName ?? `Missing module ${target.moduleId.slice(0, 8)}…`,
+          secondary: target.missing ? `${target.attachmentCount} dangling reference${target.attachmentCount === 1 ? "" : "s"}` : `${target.attachmentCount} character attachment${target.attachmentCount === 1 ? "" : "s"}`,
+          group: target.missing ? "Missing references" : "Available modules",
+          danger: target.missing,
+          searchTerms: [target.moduleId],
+          title: `${target.moduleName ?? "Missing module"}
+${target.moduleId}`
+        })),
+        selectedValues: [...repairSelectedModuleIds],
+        placeholder: `Search modules… (${s.moduleTargets.length})`,
+        searchPlaceholder: "Search modules by name or ID…",
+        emptySearchMessage: "No matching modules",
+        emptySelectionMessage: "No modules selected",
+        className: "rs-repair-module-picker",
+        collapsedChipLimit: 6,
+        onChange(values) {
+          repairSelectedModuleIds.clear();
+          for (const value of values)
+            repairSelectedModuleIds.add(value);
+          refreshApplyBtn();
+        }
+      });
+      repairModulePicker.setDisabled(repairApplying);
+      moduleGroup.appendChild(repairModulePicker.root);
+      columns.appendChild(moduleGroup);
+      repairResultBox.appendChild(scope);
     }
     refreshApplyBtn();
     applyBtn.addEventListener("click", () => {
       if (!hasApplicableSelection())
         return;
-      const willRetranslate = repairChecked.forceRetranslate && s.charactersToRetranslate > 0;
+      const willRetranslate = repairChecked.forceRetranslate && (repairSelectedCharacterIds.size > 0 || repairSelectedModuleIds.size > 0);
       const willDeleteRows = repairChecked.staleCharRegex && s.staleCharRegex > 0 || repairChecked.staleModuleRegex && s.staleModuleRegex > 0;
       const parts = [];
       if (repairChecked.staleCharRegex && s.staleCharRegex > 0) {
@@ -39466,12 +39855,18 @@ owner: ${o.ownerCharacterId}` : ""}`;
         parts.push(`clear ${s.deadJournals} dead journal(s)`);
       }
       if (willRetranslate) {
-        const retransParts = [`re-translate ${s.charactersToRetranslate} character(s)`];
-        if (s.modulesToReattach > 0)
-          retransParts.push(`reattach ${s.modulesToReattach} module(s)`);
-        if (s.danglingModuleRefs > 0)
-          retransParts.push(`scrub ${s.danglingModuleRefs} dangling ref(s)`);
-        parts.push(retransParts.join(" + ") + " (slow)");
+        const targetParts = [];
+        if (repairSelectedCharacterIds.size > 0) {
+          targetParts.push(`re-translate ${repairSelectedCharacterIds.size} selected character(s)`);
+        }
+        const selectedModules = s.moduleTargets.filter((target) => repairSelectedModuleIds.has(target.moduleId));
+        const liveAttachments = selectedModules.filter((target) => !target.missing).reduce((sum, target) => sum + target.attachmentCount, 0);
+        const danglingAttachments = selectedModules.filter((target) => target.missing).reduce((sum, target) => sum + target.attachmentCount, 0);
+        if (liveAttachments > 0)
+          targetParts.push(`refresh ${liveAttachments} selected module attachment(s)`);
+        if (danglingAttachments > 0)
+          targetParts.push(`scrub ${danglingAttachments} dangling ref(s)`);
+        parts.push(targetParts.join(" + ") + " (slow)");
       }
       if (!confirm(`Apply repair? This will:
 
@@ -39481,17 +39876,21 @@ owner: ${o.ownerCharacterId}` : ""}`;
 ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ? "Re-translation may take a while for large libraries." : ""}`)) {
         return;
       }
-      log8.info(`settings-tab: repair apply ${JSON.stringify(repairChecked)}`);
+      log8.info(`settings-tab: repair apply ${JSON.stringify(repairChecked)} ` + `cards=${repairSelectedCharacterIds.size} modules=${repairSelectedModuleIds.size}`);
       repairApplying = true;
       applyBtn.disabled = true;
       applyBtn.textContent = "Applying…";
+      repairCardPicker?.setDisabled(true);
+      repairModulePicker?.setDisabled(true);
       sendToBackend({
         type: "apply_repair",
         options: {
           applyStaleCharRegex: repairChecked.staleCharRegex,
           applyStaleModuleRegex: repairChecked.staleModuleRegex,
           applyDeadJournals: repairChecked.deadJournals,
-          applyForceRetranslate: repairChecked.forceRetranslate
+          applyForceRetranslate: repairChecked.forceRetranslate,
+          characterIds: [...repairSelectedCharacterIds],
+          moduleIds: [...repairSelectedModuleIds]
         }
       });
     });
@@ -39503,6 +39902,9 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     log8.info("settings-tab: repair scan requested");
     repairScanning = true;
     repairLastSummary = null;
+    repairSelectedCharacterIds.clear();
+    repairSelectedModuleIds.clear();
+    destroyRepairPickers();
     repairResultBox.style.display = "none";
     refreshRepairUi();
     sendToBackend({ type: "request_repair_scan" });
@@ -40038,6 +40440,9 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       repairScanning = false;
       if (msg.error) {
         repairLastSummary = null;
+        repairSelectedCharacterIds.clear();
+        repairSelectedModuleIds.clear();
+        destroyRepairPickers();
         repairResultBox.style.display = "";
         repairResultBox.replaceChildren();
         const errLine = document.createElement("div");
@@ -40046,6 +40451,15 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
         repairResultBox.appendChild(errLine);
       } else {
         repairLastSummary = msg.summary;
+        repairSelectedCharacterIds.clear();
+        for (const target of msg.summary.cardTargets) {
+          if (target.canRetranslate)
+            repairSelectedCharacterIds.add(target.characterId);
+        }
+        repairSelectedModuleIds.clear();
+        for (const target of msg.summary.moduleTargets) {
+          repairSelectedModuleIds.add(target.moduleId);
+        }
         renderRepairResult();
       }
       refreshRepairUi();
@@ -40054,6 +40468,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     }
     if (msg.type === "repair_apply_result") {
       repairApplying = false;
+      destroyRepairPickers();
       const r = msg.result;
       const parts = [];
       if (r.staleCharRegexDeleted > 0)
@@ -40085,6 +40500,9 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
         log8.info("settings-tab: repair re-scan after apply");
         repairScanning = true;
         repairLastSummary = null;
+        repairSelectedCharacterIds.clear();
+        repairSelectedModuleIds.clear();
+        destroyRepairPickers();
         repairResultBox.style.display = "none";
         refreshRepairUi();
         sendToBackend({ type: "request_repair_scan" });
@@ -40118,6 +40536,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       try {
         cleanupGrid?.destroy();
       } catch {}
+      destroyRepairPickers();
       try {
         root.replaceChildren();
       } catch {}
@@ -41023,7 +41442,7 @@ function mountModulesPanel(opts) {
   root.classList.add("lr-modules-drawer");
   let modules = null;
   let globalModuleIds = [];
-  let globalSelectHandle = null;
+  let globalPickerHandle = null;
   let cards = [];
   const attachedByCharacter = new Map;
   let activeTus = null;
@@ -41181,9 +41600,9 @@ function mountModulesPanel(opts) {
   activateSubTab(activeSubTab);
   function setStatus(_msg, _isError = false) {}
   function renderGlobalBox() {
-    if (globalSelectHandle) {
-      globalSelectHandle.destroy();
-      globalSelectHandle = null;
+    if (globalPickerHandle) {
+      globalPickerHandle.destroy();
+      globalPickerHandle = null;
     }
     globalBox.replaceChildren();
     if (modules === null)
@@ -41199,54 +41618,8 @@ function mountModulesPanel(opts) {
     hint.textContent = "Applied to every character, on top of its own attachments.";
     head.appendChild(hint);
     globalBox.appendChild(head);
-    const chips = document.createElement("div");
-    chips.className = "lrm-chips";
-    const byId = new Map(modules.map((m) => [m.id, m]));
-    if (globalModuleIds.length === 0) {
-      const none = document.createElement("span");
-      none.className = "lrm-chips-empty";
-      none.textContent = "None";
-      chips.appendChild(none);
-    }
-    for (const id of globalModuleIds) {
-      const m = byId.get(id);
-      const chip = document.createElement("span");
-      chip.className = "lrm-chip";
-      const label = document.createElement("span");
-      label.className = "lrm-chip-label";
-      label.textContent = m ? pickModuleDisplayName(m) || m.id : "(missing)";
-      if (!m)
-        chip.classList.add("lrm-chip-missing");
-      chip.appendChild(label);
-      const x = document.createElement("button");
-      x.type = "button";
-      x.className = "lrm-chip-x";
-      x.textContent = "×";
-      x.title = `Remove ${label.textContent} from global modules`;
-      x.addEventListener("click", () => {
-        sendGlobalModules(globalModuleIds.filter((g) => g !== id));
-      });
-      chip.appendChild(x);
-      chips.appendChild(chip);
-    }
-    globalBox.appendChild(chips);
-    const addable = modules.filter((m) => !globalModuleIds.includes(m.id)).slice().sort((a, b) => b.uploaded_at - a.uploaded_at);
-    if (addable.length === 0)
-      return;
-    const addWrap = document.createElement("div");
-    addWrap.className = "lrm-attach-wrap";
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "lrm-btn-mini lrm-btn-primary";
-    addBtn.textContent = "Add";
-    addBtn.disabled = true;
-    const ss = createSearchableSelect({
-      id: "lrm-global-add-select",
-      className: "lrm-attach-trigger",
-      placeholder: `Add a global module… (${addable.length})`,
-      searchPlaceholder: "Search modules…",
-      emptyMessage: "No matching modules",
-      items: addable.map((m) => {
+    const picker = createChipMultiSelect({
+      items: modules.slice().sort((a, b) => b.uploaded_at - a.uploaded_at).map((m) => {
         const display = pickModuleDisplayName(m) || m.id;
         const aliases = [];
         if (m.name && m.name !== display)
@@ -41260,20 +41633,17 @@ function mountModulesPanel(opts) {
           ...aliases.length > 0 ? { searchTerms: aliases } : {}
         };
       }),
-      onChange(selected) {
-        addBtn.disabled = selected === null;
-      }
+      selectedValues: globalModuleIds,
+      placeholder: `Search global modules… (${modules.length})`,
+      searchPlaceholder: "Search modules…",
+      emptySearchMessage: "No matching modules",
+      emptySelectionMessage: "None",
+      showBulkActions: false,
+      collapsedChipLimit: 8,
+      onChange: sendGlobalModules
     });
-    globalSelectHandle = ss;
-    addWrap.appendChild(ss.root);
-    addBtn.addEventListener("click", () => {
-      const id = ss.getValue();
-      if (!id)
-        return;
-      sendGlobalModules([...globalModuleIds, id]);
-    });
-    addWrap.appendChild(addBtn);
-    globalBox.appendChild(addWrap);
+    globalPickerHandle = picker;
+    globalBox.appendChild(picker.root);
   }
   function sendGlobalModules(next) {
     log8.info(`modules-panel: set_global_modules count=${next.length}`);
@@ -41964,9 +42334,9 @@ filename: ${m.filename}`;
     log8.info("modules-panel: destroy");
     destroyAttachSelects();
     try {
-      globalSelectHandle?.destroy();
+      globalPickerHandle?.destroy();
     } catch {}
-    globalSelectHandle = null;
+    globalPickerHandle = null;
     try {
       regexTargetSelect.destroy();
     } catch {}

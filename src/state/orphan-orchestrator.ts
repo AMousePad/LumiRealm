@@ -71,6 +71,8 @@ export interface OrphanOrchestratorDeps {
     readonly charactersToRetranslate: number;
     readonly modulesToReattach: number;
     readonly danglingModuleRefs: number;
+    readonly cardTargets: RepairScanSummary['cardTargets'];
+    readonly moduleTargets: RepairScanSummary['moduleTargets'];
   }>;
   readonly log: { readonly info: (m: string) => void; readonly warn: (m: string) => void };
   readonly errMsg: (e: unknown) => string;
@@ -421,7 +423,16 @@ export function createOrphanOrchestrator(
     } catch (err) {
       deps.log.warn(`scanRepairTargets: dead journal count failed: ${deps.errMsg(err)}`);
     }
-    let charCounts = { charactersToRetranslate: 0, modulesToReattach: 0, danglingModuleRefs: 0 };
+    let charCounts: Pick<
+      RepairScanSummary,
+      'charactersToRetranslate' | 'modulesToReattach' | 'danglingModuleRefs' | 'cardTargets' | 'moduleTargets'
+    > = {
+      charactersToRetranslate: 0,
+      modulesToReattach: 0,
+      danglingModuleRefs: 0,
+      cardTargets: [],
+      moduleTargets: [],
+    };
     try {
       charCounts = await deps.countCharacterRepair(userId);
     } catch (err) {
