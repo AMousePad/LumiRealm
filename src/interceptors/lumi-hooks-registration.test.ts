@@ -3,8 +3,12 @@ import type {
   InterceptorContextDTO,
   InterceptorHandler,
   LlmMessageDTO,
+  SpindleAPI,
 } from 'lumiverse-spindle-types';
 import type { ActiveCard } from '../interpreter/dispatch.js';
+import { resetListenEditPreloadCache } from '../interpreter/listenedit-preload.js';
+import { resetMacroInterceptorCache } from '../state/macro-interceptor-cache.js';
+import { resetRenderMcpCache } from '../state/render-mcp-cache.js';
 import {
   createLumiInterceptors,
   type CreateLumiInterceptorsDeps,
@@ -12,6 +16,9 @@ import {
 
 describe('createLumiInterceptors registration', () => {
   afterEach(() => {
+    resetListenEditPreloadCache();
+    resetMacroInterceptorCache();
+    resetRenderMcpCache();
     delete (globalThis as { spindle?: unknown }).spindle;
   });
 
@@ -231,5 +238,83 @@ describe('createLumiInterceptors registration', () => {
     expect(parts[0]).toBe(keptText);
     expect(parts[1]).toBe(image);
     expect(parts[2]!.cache_control).toBe(strippedText.cache_control);
+  });
+
+  test('runs display processing exactly once through the message content processor', async () => {
+    type MacroHandler = Parameters<SpindleAPI['registerMacroInterceptor']>[0];
+    type MessageHandler = Parameters<SpindleAPI['registerMessageContentProcessor']>[0];
+    let macroInterceptor: MacroHandler | null = null;
+    let messageContentProcessor: MessageHandler | null = null;
+    (globalThis as { spindle?: unknown }).spindle = {
+      registerMacroInterceptor(handler: MacroHandler) { macroInterceptor = handler; },
+      registerMessageContentProcessor(handler: MessageHandler) { messageContentProcessor = handler; },
+      registerInterceptor() {},
+      registerWorldInfoInterceptor() {},
+      registerContextHandler() {},
+      generate: { raw: async () => ({ content: '' }) },
+      chat: { getMessages: async () => [] },
+      chats: { get: async () => ({ metadata: {} }) },
+      characters: { get: async () => ({ id: 'character', world_book_ids: [] }) },
+    };
+    const active = {
+      ownerUserId: 'user',
+      card: {
+        character_id: 'character',
+        risuPayload: {
+          triggers: [{ effect: [{ type: 'triggerlua' }] }],
+          lua_scripts: ["listenEdit('editDisplay', function(_, value) return value .. ' [edited]' end)"],
+          scriptstate_defaults: {},
+          at_actions: [],
+          extra: {},
+        },
+      },
+    } as unknown as ActiveCard;
+    createLumiInterceptors({
+      activeCardByChat: new Map([['render-chat', active]]),
+      captureUserId() {},
+      ensureActiveCardForChat: async () => active,
+      getCachedSettingsSync: () => ({ legacyMediaFindings: false }),
+      modulesByNamespaceFromCard: () => null,
+      resolveReadonly: async (text: string) => text,
+      isFeDisplayAuthoritative: () => false,
+      log: { info() {}, warn() {}, error() {}, trace() {}, debug() {} },
+      errMsg: String,
+    } as unknown as CreateLumiInterceptorsDeps).registerAll();
+
+    const macroResult = await macroInterceptor!({
+      template: 'hello {{user}}',
+      env: {
+        commit: false,
+        names: { user: 'User', char: 'Character' },
+        character: { name: 'Character', firstMessage: '', alternateGreetings: [] },
+        chat: { id: 'render-chat', greetingIndex: 0, messageCount: 1, lastMessageId: 0 },
+        system: {},
+        variables: { local: {}, global: {}, chat: {} },
+        dynamicMacros: {},
+        extra: {},
+      },
+      commit: false,
+      phase: 'display',
+      userId: 'user',
+    });
+    expect(macroResult).toEqual({ text: 'hello User', touchedVars: [], volatile: false });
+
+    const renderContext = {
+      chatId: 'render-chat',
+      messageId: 'message',
+      isUser: false,
+      origin: 'render' as const,
+      userId: 'user',
+      extra: { messageIndex: 1 },
+    };
+    const first = await messageContentProcessor!({
+      ...renderContext,
+      content: (macroResult as { text: string }).text,
+    });
+    expect(first).toEqual({ content: 'hello User [edited]' });
+    expect(await messageContentProcessor!({
+      ...renderContext,
+      content: (first as { content: string }).content,
+    })).toBeUndefined();
   });
 });
