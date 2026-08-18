@@ -47479,7 +47479,6 @@ function setupRealmModal(deps) {
     const label = state.selected?.name || `RisuRealm character ${id}`;
     deps.onImportStart?.(label);
     sendToBackend({ type: "realm_download", requestId, id });
-    surface?.handle.dismiss();
   }
   function handleBackendMessage(msg) {
     switch (msg.type) {
@@ -47523,7 +47522,6 @@ function setupRealmModal(deps) {
           showToast("Downloaded — translating now…");
           state.selected = null;
           render();
-          surface?.handle.dismiss();
         } else {
           showToast(msg.error ?? "Download failed", true);
           render();

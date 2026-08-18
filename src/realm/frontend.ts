@@ -744,7 +744,9 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     const label = state.selected?.name || `RisuRealm character ${id}`;
     deps.onImportStart?.(label);
     sendToBackend({ type: 'realm_download', requestId, id });
-    surface?.handle.dismiss();
+    // The blocking import overlay sits above this modal. Keep the Realm
+    // surface mounted underneath so the browsing session resumes when the
+    // import finishes and the overlay hides.
   }
 
   function handleBackendMessage(msg: RealmBackendToFrontend): void {
@@ -785,7 +787,6 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
           showToast('Downloaded — translating now…');
           state.selected = null;
           render();
-          surface?.handle.dismiss();
         } else {
           showToast(msg.error ?? 'Download failed', true);
           render();
