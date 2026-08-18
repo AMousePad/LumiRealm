@@ -1702,6 +1702,9 @@ const viewerHandlers = createViewerHandlers({
   charactersApi,
   updateLumirealm,
   mutateTriggerLua,
+  getWorldBookEntry: (entryId, userId) => spindle.world_books.entries.get(entryId, userId),
+  updateWorldBookEntry: (entryId, input, userId) =>
+    spindle.world_books.entries.update(entryId, input, userId),
   viewerAssembly,
   viewerPushDeps,
   charactersAttachedTo,

@@ -31721,7 +31721,7 @@ var spindle_default = {
   ],
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.1.5",
+  minimum_lumiverse_version: "1.1.6",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"
@@ -34382,10 +34382,13 @@ function createAssetsHandlers(deps) {
 
 // src/handlers/viewer.ts
 function createViewerHandlers(deps) {
+  async function assembleViewerSource(source, userId) {
+    return source.kind === "character" ? deps.viewerAssembly.assembleCharacter(source.characterId, userId) : deps.viewerAssembly.assembleModule(source.moduleId, userId);
+  }
   return {
     request_viewer_data: async (msg, ctx) => {
       try {
-        const data = msg.source.kind === "character" ? await deps.viewerAssembly.assembleCharacter(msg.source.characterId, ctx.userId) : await deps.viewerAssembly.assembleModule(msg.source.moduleId, ctx.userId);
+        const data = await assembleViewerSource(msg.source, ctx.userId);
         if (data)
           ctx.send({ type: "viewer_data_pushed", data }, ctx.userId);
         else
@@ -34520,6 +34523,43 @@ function createViewerHandlers(deps) {
           deps.invalidateActiveForCharacter(charId, ctx.userId);
       } else {
         deps.invalidateActiveForCharacter(msg.source.characterId, ctx.userId);
+      }
+    },
+    set_viewer_lorebook_entry_disabled: async (msg, ctx) => {
+      const sendResult = (ok, error) => {
+        ctx.send({
+          type: "viewer_lorebook_entry_disabled_result",
+          source: msg.source,
+          worldBookId: msg.worldBookId,
+          entryId: msg.entryId,
+          disabled: msg.disabled,
+          ok,
+          ...error ? { error } : {}
+        }, ctx.userId);
+      };
+      if (deps.blockedByRepair(ctx.userId, msg.type)) {
+        sendResult(false, "A repair is in progress. Try again once it finishes.");
+        return;
+      }
+      try {
+        const data = await assembleViewerSource(msg.source, ctx.userId);
+        const group = data?.lorebook.find((candidate) => candidate.groupId === msg.worldBookId);
+        if (!group?.entries.some((entry) => entry.id === msg.entryId)) {
+          sendResult(false, "This lorebook entry is no longer part of the selected source. Refresh and try again.");
+          return;
+        }
+        const live = await deps.getWorldBookEntry(msg.entryId, ctx.userId);
+        if (!live || live.world_book_id !== msg.worldBookId) {
+          sendResult(false, "This lorebook entry no longer exists in that Lumiverse lorebook.");
+          return;
+        }
+        await deps.updateWorldBookEntry(msg.entryId, { disabled: msg.disabled }, ctx.userId);
+        sendResult(true);
+        deps.log.info(`${msg.type}: book=${msg.worldBookId} entry=${msg.entryId} disabled=${msg.disabled}`);
+      } catch (err) {
+        const error = deps.errMsg(err);
+        deps.log.warn(`${msg.type}: entry=${msg.entryId} failed: ${error}`);
+        sendResult(false, error);
       }
     }
   };
@@ -46514,6 +46554,8 @@ var viewerHandlers = createViewerHandlers({
   charactersApi,
   updateLumirealm,
   mutateTriggerLua,
+  getWorldBookEntry: (entryId, userId) => spindle.world_books.entries.get(entryId, userId),
+  updateWorldBookEntry: (entryId, input, userId) => spindle.world_books.entries.update(entryId, input, userId),
   viewerAssembly,
   viewerPushDeps,
   charactersAttachedTo,

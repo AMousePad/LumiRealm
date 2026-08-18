@@ -117,6 +117,10 @@ export interface RepairApplyResult {
   readonly elapsedMs: number;
 }
 
+export type ViewerSourceRef =
+  | { readonly kind: 'character'; readonly characterId: string }
+  | { readonly kind: 'module'; readonly moduleId: string };
+
 export interface PendingRegexScriptMsg {
   readonly name: string;
   readonly script_id: string;
@@ -271,8 +275,15 @@ export type FrontendToBackend =
   | { type: 'export_character'; characterId: string }
   | {
       type: 'request_viewer_data';
-      source: { kind: 'character'; characterId: string }
-        | { kind: 'module'; moduleId: string };
+      source: ViewerSourceRef;
+    }
+  | {
+      /** Toggle the live Lumiverse world-book row shown by Viewer → Lore. */
+      type: 'set_viewer_lorebook_entry_disabled';
+      source: ViewerSourceRef;
+      worldBookId: string;
+      entryId: string;
+      disabled: boolean;
     }
   // Single envelope write + single viewer re-push regardless of `entries.length`.
   // FE pre-uploads bytes via `/api/v1/images`.
@@ -653,6 +664,15 @@ export type BackendToFrontend =
   | {
       type: 'viewer_data_pushed';
       data: ViewerData;
+    }
+  | {
+      type: 'viewer_lorebook_entry_disabled_result';
+      source: ViewerSourceRef;
+      worldBookId: string;
+      entryId: string;
+      disabled: boolean;
+      ok: boolean;
+      error?: string;
     }
   | {
       type: 'lorebook_import_result';

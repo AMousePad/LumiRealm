@@ -47,6 +47,18 @@ interface SubPanelHandle {
   setActiveChatId?(chatId: string | null): void;
 }
 
+// Lumiverse 1.1.5 exposes frontend host actions at ctx.host.surfaces. The
+// runtime contract landed ahead of spindle-types 0.6.15, so keep the local
+// type narrow until the package declaration catches up.
+interface WorldBookEditorHost {
+  readonly surfaces?: {
+    invoke(
+      ref: { readonly kind: 'modal'; readonly id: 'world_book_editor' },
+      params: { readonly id: string; readonly entryId?: string },
+    ): void | Promise<void>;
+  };
+}
+
 export interface SidebarHandle {
   handleBackendMessage(msg: BackendToFrontend): void;
   setActiveChatId(chatId: string | null): void;
@@ -68,6 +80,14 @@ export interface CreateSidebarOptions {
 
 export function createSidebar(opts: CreateSidebarOptions): SidebarHandle {
   const { ctx, sendToBackend, log } = opts;
+  const openWorldBookEditor = async (worldBookId: string, entryId?: string): Promise<void> => {
+    const surfaces = (ctx.host as unknown as WorldBookEditorHost).surfaces;
+    if (!surfaces) throw new Error('Lumiverse host action API is unavailable');
+    await surfaces.invoke(
+      { kind: 'modal', id: 'world_book_editor' },
+      { id: worldBookId, ...(entryId ? { entryId } : {}) },
+    );
+  };
   log.info('sidebar: registering single drawer tab');
   const tab = ctx.ui.registerDrawerTab({
     id: 'lumirealm',
@@ -167,7 +187,7 @@ export function createSidebar(opts: CreateSidebarOptions): SidebarHandle {
         break;
       }
       case 'viewer':
-        handle = mountViewerPanel({ root: host, sendToBackend, log });
+        handle = mountViewerPanel({ root: host, sendToBackend, log, openWorldBookEditor });
         break;
       case 'state': {
         const subNav = document.createElement('div');

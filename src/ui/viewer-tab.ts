@@ -6,8 +6,10 @@ import type {
   ModuleSummary,
   ViewerAssetEntry,
   ViewerData,
+  ViewerLorebookEntry,
   ViewerLorebookGroup,
   ViewerRegexEntry,
+  ViewerSourceRef,
   ViewerTriggerEntry,
 } from '../types/messages.js';
 import type { FrontendLog } from './drawer.js';
@@ -40,6 +42,7 @@ export interface MountViewerPanelOptions {
   readonly root: HTMLElement;
   readonly sendToBackend: (msg: FrontendToBackend) => void;
   readonly log: FrontendLog;
+  readonly openWorldBookEditor?: (worldBookId: string, entryId?: string) => Promise<void>;
 }
 
 interface SourceOption {
@@ -49,7 +52,7 @@ interface SourceOption {
 }
 
 export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHandle {
-  const { sendToBackend, log } = opts;
+  const { sendToBackend, log, openWorldBookEditor } = opts;
   log.info('viewer-panel: mounting');
 
   const root = opts.root;
@@ -61,6 +64,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   let viewerData: ViewerData | null = null;
   let loading = false;
   let lastError: string | null = null;
+  let destroyed = false;
   // Active sub-tab inside the viewer panel. Persists across re-renders within
   // a session; switching the source resets to 'assets'. Default vars moved
   // to State → Variables → Default in Phase B; lorebook import moved to
@@ -101,6 +105,14 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   // null = no unsaved changes (textarea derives from snapshot)
   let defaultsTextBuffer: string | null = null;
   let bgHtmlTextBuffer: string | null = null;
+  // Lore details survive viewer re-renders (including enable/disable replies),
+  // while source changes intentionally reset the expansion state.
+  const closedLorebookGroups = new Set<string>();
+  const openLorebookFolders = new Set<string>();
+  const openLorebookEntries = new Set<string>();
+  const lorebookMutationPending = new Map<string, boolean>();
+  const lorebookNavigationPending = new Set<string>();
+  let lorebookActionError: string | null = null;
 
   const intro = document.createElement('p');
   intro.className = 'lrv-intro';
@@ -255,6 +267,58 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     return `${o.kind}::${o.id}`;
   }
 
+  function viewerSourceKey(source: ViewerSourceRef): string {
+    return source.kind === 'character'
+      ? `character::${source.characterId}`
+      : `module::${source.moduleId}`;
+  }
+
+  function currentViewerSourceRef(): ViewerSourceRef | null {
+    const source = viewerData?.source;
+    if (!source) return null;
+    return source.kind === 'character'
+      ? { kind: 'character', characterId: source.characterId }
+      : { kind: 'module', moduleId: source.moduleId };
+  }
+
+  function resetLorebookUiState(): void {
+    closedLorebookGroups.clear();
+    openLorebookFolders.clear();
+    openLorebookEntries.clear();
+    lorebookMutationPending.clear();
+    lorebookNavigationPending.clear();
+    lorebookActionError = null;
+  }
+
+  function lorebookNavigationKey(worldBookId: string, entryId?: string): string {
+    return `${selectedSourceKey ?? ''}::${worldBookId}::${entryId ?? ''}`;
+  }
+
+  function beginOpenWorldBookEditor(worldBookId: string, entryId?: string): void {
+    const navigationKey = lorebookNavigationKey(worldBookId, entryId);
+    if (lorebookNavigationPending.has(navigationKey)) return;
+    if (!openWorldBookEditor) {
+      lorebookActionError = 'This Lumiverse build does not expose the World Book Editor action.';
+      renderSurfaces();
+      return;
+    }
+    lorebookNavigationPending.add(navigationKey);
+    if (entryId) openLorebookEntries.add(`${worldBookId}::${entryId}`);
+    lorebookActionError = null;
+    renderSurfaces();
+    void openWorldBookEditor(worldBookId, entryId).then(() => {
+      lorebookNavigationPending.delete(navigationKey);
+      if (!destroyed) renderSurfaces();
+    }).catch((err: unknown) => {
+      lorebookNavigationPending.delete(navigationKey);
+      if (destroyed) return;
+      lorebookActionError = `Could not open ${entryId ? 'this entry' : 'this lorebook'} in Lumiverse: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      renderSurfaces();
+    });
+  }
+
   function parseSourceKey(key: string): SourceOption | null {
     const idx = key.indexOf('::');
     if (idx < 0) return null;
@@ -288,6 +352,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     assetSelectMode = false;
     assetSelected.clear();
     assetLastClickedIndex = null;
+    resetLorebookUiState();
     // Modules have no creator notes, jump straight to Assets.
     activeSubTab = o.kind === 'character' ? 'notes' : 'assets';
     assetPagesShown = 1;
@@ -1661,6 +1726,57 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   function renderLorebookSection(groups: readonly ViewerLorebookGroup[]): HTMLElement {
     const det = document.createElement('section');
     det.className = 'lrv-section lrv-lb-section';
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'lrv-lb-toolbar';
+    const legend = document.createElement('div');
+    legend.className = 'lrv-lb-legend';
+    legend.setAttribute('aria-label', 'Lorebook entry status legend');
+    const legendItems: ReadonlyArray<{ label: string; status: 'constant' | 'enabled' | 'disabled' }> = [
+      { label: 'Constant', status: 'constant' },
+      { label: 'Enabled', status: 'enabled' },
+      { label: 'Disabled', status: 'disabled' },
+    ];
+    for (const item of legendItems) {
+      const legendItem = document.createElement('span');
+      legendItem.className = 'lrv-lb-legend-item';
+      const dot = document.createElement('span');
+      dot.className = `lrv-lb-status lrv-lb-status-${item.status}`;
+      dot.setAttribute('aria-hidden', 'true');
+      legendItem.appendChild(dot);
+      legendItem.appendChild(document.createTextNode(item.label));
+      legend.appendChild(legendItem);
+    }
+    toolbar.appendChild(legend);
+
+    // Prefer the character's own book over attached-module books. Module
+    // sources still fall back to their installed live book. Synthetic
+    // envelope-only groups use the literal "module" and have no host target.
+    const bookTarget = groups.find((group) => group.groupId !== 'module' && !group.moduleId)
+      ?? groups.find((group) => group.groupId !== 'module');
+    if (bookTarget) {
+      const navigationKey = lorebookNavigationKey(bookTarget.groupId);
+      const navigationPending = lorebookNavigationPending.has(navigationKey);
+      const openBookButton = document.createElement('button');
+      openBookButton.type = 'button';
+      openBookButton.className = 'lrv-btn lrv-lb-open-lumiverse lrv-lb-open-book';
+      openBookButton.textContent = navigationPending ? 'Opening…' : 'Open in Lumiverse';
+      openBookButton.disabled = navigationPending;
+      openBookButton.title = `Open ${bookTarget.groupName} in Lumiverse's World Book Editor.`;
+      openBookButton.addEventListener('click', () => {
+        beginOpenWorldBookEditor(bookTarget.groupId);
+      });
+      toolbar.appendChild(openBookButton);
+    }
+    det.appendChild(toolbar);
+
+    if (lorebookActionError) {
+      const error = document.createElement('div');
+      error.className = 'lrv-lb-action-error';
+      error.textContent = lorebookActionError;
+      det.appendChild(error);
+    }
+
     if (groups.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'lrv-empty';
@@ -1677,7 +1793,12 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
       }
       const grpDet = document.createElement('details');
       grpDet.className = 'lrv-lb-group';
-      grpDet.open = true;
+      grpDet.open = !closedLorebookGroups.has(g.groupId);
+      grpDet.dataset['worldBookId'] = g.groupId;
+      grpDet.addEventListener('toggle', () => {
+        if (grpDet.open) closedLorebookGroups.delete(g.groupId);
+        else closedLorebookGroups.add(g.groupId);
+      });
       const grpSum = document.createElement('summary');
       grpSum.className = 'lrv-lb-group-summary';
       const display = pickLoreGroupDisplay(g);
@@ -1685,13 +1806,13 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
       grpSum.textContent = `${display} (${g.entries.length})`;
       if (isTranslated) grpSum.title = g.groupName;
       grpDet.appendChild(grpSum);
-      renderLorebookEntriesWithFolders(grpDet, risuEntries);
+      renderLorebookEntriesWithFolders(grpDet, g, risuEntries);
       if (userAdditions.length > 0) {
         const uaHead = document.createElement('div');
         uaHead.className = 'lrv-lb-useradds-head';
         uaHead.textContent = `User Additions (${userAdditions.length})`;
         grpDet.appendChild(uaHead);
-        renderLorebookEntriesWithFolders(grpDet, userAdditions);
+        renderLorebookEntriesWithFolders(grpDet, g, userAdditions);
       }
       det.appendChild(grpDet);
     }
@@ -1700,9 +1821,10 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
 
   function renderLorebookEntriesWithFolders(
     container: HTMLElement,
-    entries: readonly import('../types/messages.js').ViewerLorebookEntry[],
+    group: ViewerLorebookGroup,
+    entries: readonly ViewerLorebookEntry[],
   ): void {
-    const childrenByFolder = new Map<string, import('../types/messages.js').ViewerLorebookEntry[]>();
+    const childrenByFolder = new Map<string, ViewerLorebookEntry[]>();
     const folderKeys = new Set<string>();
     for (const e of entries) {
       if (e.risuMode === 'folder' && e.risuFolderKey) folderKeys.add(e.risuFolderKey);
@@ -1715,20 +1837,27 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     for (const e of entries) {
       if (e.risuMode === 'folder' && e.risuFolderKey) {
         const children = childrenByFolder.get(e.risuFolderKey) ?? [];
-        container.appendChild(renderLorebookFolderGroup(e, children));
+        container.appendChild(renderLorebookFolderGroup(group, e, children));
         continue;
       }
       if (e.risuFolderRef && folderKeys.has(e.risuFolderRef)) continue;
-      container.appendChild(renderLorebookRow(e));
+      container.appendChild(renderLorebookRow(group, e));
     }
   }
 
   function renderLorebookFolderGroup(
-    folder: import('../types/messages.js').ViewerLorebookEntry,
-    children: readonly import('../types/messages.js').ViewerLorebookEntry[],
+    group: ViewerLorebookGroup,
+    folder: ViewerLorebookEntry,
+    children: readonly ViewerLorebookEntry[],
   ): HTMLDetailsElement {
     const det = document.createElement('details');
     det.className = 'lrv-lb-folder-group';
+    const folderStateKey = `${group.groupId}::${folder.id}`;
+    det.open = openLorebookFolders.has(folderStateKey);
+    det.addEventListener('toggle', () => {
+      if (det.open) openLorebookFolders.add(folderStateKey);
+      else openLorebookFolders.delete(folderStateKey);
+    });
     const sum = document.createElement('summary');
     sum.className = 'lrv-lb-folder-summary';
     const icon = document.createElement('span');
@@ -1748,39 +1877,54 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     det.appendChild(sum);
     const body = document.createElement('div');
     body.className = 'lrv-lb-folder-body';
-    for (const c of children) body.appendChild(renderLorebookRow(c));
+    for (const c of children) body.appendChild(renderLorebookRow(group, c));
     det.appendChild(body);
     return det;
   }
 
-  function renderLorebookRow(e: import('../types/messages.js').ViewerLorebookEntry): HTMLElement {
+  function lorebookStatus(e: ViewerLorebookEntry): {
+    readonly kind: 'constant' | 'enabled' | 'disabled';
+    readonly label: string;
+  } {
+    if (e.disabled) return { kind: 'disabled', label: 'Disabled' };
+    if (e.constant) return { kind: 'constant', label: 'Constant' };
+    return { kind: 'enabled', label: 'Enabled' };
+  }
+
+  function renderLorebookRow(group: ViewerLorebookGroup, e: ViewerLorebookEntry): HTMLElement {
     if (e.risuMode === 'folder') return renderLorebookFolderHeader(e);
     if (e.risuMode === 'child') return renderLorebookChildLink(e);
     const row = document.createElement('details');
     row.className = 'lrv-lb-row';
+    row.dataset['entryId'] = e.id;
+    row.dataset['worldBookId'] = group.groupId;
     if (e.disabled) row.classList.add('lrv-lb-row-disabled');
+    const entryStateKey = `${group.groupId}::${e.id}`;
+    row.open = openLorebookEntries.has(entryStateKey);
+    row.addEventListener('toggle', () => {
+      if (row.open) openLorebookEntries.add(entryStateKey);
+      else openLorebookEntries.delete(entryStateKey);
+    });
     const sum = document.createElement('summary');
     sum.className = 'lrv-lb-row-summary';
     const dot = document.createElement('span');
-    dot.className = e.constant
-      ? 'lrv-lb-status lrv-lb-status-always'
-      : 'lrv-lb-status lrv-lb-status-keyed';
-    dot.title = e.disabled
-      ? 'disabled'
-      : e.constant ? 'always active' : 'key-based';
+    const status = lorebookStatus(e);
+    dot.className = `lrv-lb-status lrv-lb-status-${status.kind}`;
+    dot.title = status.label;
+    dot.setAttribute('aria-label', status.label);
     sum.appendChild(dot);
     const name = document.createElement('span');
     name.className = 'lrv-lb-name';
     name.textContent = lorebookEntryName(e);
     sum.appendChild(name);
     row.appendChild(sum);
-    row.appendChild(renderLorebookRowDetail(e));
+    row.appendChild(renderLorebookRowDetail(group, e));
     kickoffEntryTranslation(e, name);
     return row;
   }
 
   function renderLorebookFolderHeader(
-    e: import('../types/messages.js').ViewerLorebookEntry,
+    e: ViewerLorebookEntry,
   ): HTMLDivElement {
     const row = document.createElement('div');
     row.className = 'lrv-lb-folder';
@@ -1798,7 +1942,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   }
 
   function renderLorebookChildLink(
-    e: import('../types/messages.js').ViewerLorebookEntry,
+    e: ViewerLorebookEntry,
   ): HTMLDivElement {
     const row = document.createElement('div');
     row.className = 'lrv-lb-child';
@@ -1811,7 +1955,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     return row;
   }
 
-  function lorebookDisplayComment(e: import('../types/messages.js').ViewerLorebookEntry): string | undefined {
+  function lorebookDisplayComment(e: ViewerLorebookEntry): string | undefined {
     if (getTranslateEnabled() && e.translatedComment) return e.translatedComment;
     return e.comment;
   }
@@ -1844,7 +1988,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   }
 
   function kickoffEntryTranslation(
-    e: import('../types/messages.js').ViewerLorebookEntry,
+    e: ViewerLorebookEntry,
     nameEl: HTMLElement,
   ): void {
     if (!getTranslateEnabled()) return;
@@ -1860,7 +2004,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     });
   }
 
-  function lorebookEntryName(e: import('../types/messages.js').ViewerLorebookEntry): string {
+  function lorebookEntryName(e: ViewerLorebookEntry): string {
     const display = lorebookDisplayComment(e);
     if (display && display.length > 0) return display;
     if (e.key.length > 0) return e.key.join(', ');
@@ -1868,7 +2012,8 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   }
 
   function renderLorebookRowDetail(
-    e: import('../types/messages.js').ViewerLorebookEntry,
+    group: ViewerLorebookGroup,
+    e: ViewerLorebookEntry,
   ): HTMLDivElement {
     const body = document.createElement('div');
     body.className = 'lrv-lb-body';
@@ -1889,6 +2034,53 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
     content.className = 'lrv-lb-content';
     content.textContent = e.content;
     body.appendChild(content);
+
+    if (group.groupId !== 'module') {
+      const actions = document.createElement('div');
+      actions.className = 'lrv-lb-actions';
+      const mutationKey = `${group.groupId}::${e.id}`;
+      const navigationKey = lorebookNavigationKey(group.groupId, e.id);
+      const navigationPending = lorebookNavigationPending.has(navigationKey);
+      const pendingDisabled = lorebookMutationPending.get(mutationKey);
+      const pending = pendingDisabled !== undefined;
+
+      const openButton = document.createElement('button');
+      openButton.type = 'button';
+      openButton.className = 'lrv-btn lrv-lb-open-lumiverse lrv-lb-open-entry';
+      openButton.textContent = navigationPending ? 'Opening…' : 'Open in Lumiverse';
+      openButton.disabled = navigationPending;
+      openButton.title = 'Open this exact entry in Lumiverse\'s World Book Editor.';
+      openButton.addEventListener('click', () => {
+        beginOpenWorldBookEditor(group.groupId, e.id);
+      });
+      actions.appendChild(openButton);
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'lrv-btn lrv-lb-toggle-entry';
+      toggle.textContent = pending
+        ? (pendingDisabled ? 'Disabling…' : 'Enabling…')
+        : (e.disabled ? 'Enable entry' : 'Disable entry');
+      toggle.disabled = pending;
+      toggle.addEventListener('click', () => {
+        if (lorebookMutationPending.has(mutationKey)) return;
+        const source = currentViewerSourceRef();
+        if (!source) return;
+        lorebookMutationPending.set(mutationKey, !e.disabled);
+        openLorebookEntries.add(mutationKey);
+        lorebookActionError = null;
+        renderSurfaces();
+        sendToBackend({
+          type: 'set_viewer_lorebook_entry_disabled',
+          source,
+          worldBookId: group.groupId,
+          entryId: e.id,
+          disabled: !e.disabled,
+        });
+      });
+      actions.appendChild(toggle);
+      body.appendChild(actions);
+    }
     return body;
   }
 
@@ -2004,6 +2196,32 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
         }
         break;
       }
+      case 'viewer_lorebook_entry_disabled_result': {
+        const mutationKey = `${msg.worldBookId}::${msg.entryId}`;
+        if (selectedSourceKey !== viewerSourceKey(msg.source)) break;
+        lorebookMutationPending.delete(mutationKey);
+        if (!msg.ok) {
+          lorebookActionError = `Could not update lorebook entry: ${msg.error ?? 'unknown error'}`;
+          render();
+          break;
+        }
+        lorebookActionError = null;
+        if (viewerData) {
+          viewerData = {
+            ...viewerData,
+            lorebook: viewerData.lorebook.map((group) => group.groupId !== msg.worldBookId
+              ? group
+              : {
+                  ...group,
+                  entries: group.entries.map((entry) => entry.id === msg.entryId
+                    ? { ...entry, disabled: msg.disabled }
+                    : entry),
+                }),
+          };
+        }
+        render();
+        break;
+      }
       case 'viewer_data_pushed': {
         const d = msg.data;
         const expectedKey = sourceKey(
@@ -2058,6 +2276,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
 
   function destroy(): void {
     log.info('viewer-panel: destroy');
+    destroyed = true;
     try { document.removeEventListener('keydown', onEscapeKeyDown, true); } catch { /* */ }
     try { sourceSelect.destroy(); } catch { /* */ }
     try { unsubTranslate(); } catch { /* */ }

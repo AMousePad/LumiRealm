@@ -22411,7 +22411,7 @@ var spindle_default = {
   ],
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.1.5",
+  minimum_lumiverse_version: "1.1.6",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"
@@ -32383,7 +32383,7 @@ var styles_default = `.risu-compat-drawer {\r
 \r
 /* ─── Unified sidebar — sub-tab nav + panel hosts ───────────────────── */\r
 \r
-.lr-sidebar {\r
+.lr-sidebar {
   display: flex;\r
   flex-direction: column;\r
   gap: 0;\r
@@ -32391,8 +32391,8 @@ var styles_default = `.risu-compat-drawer {\r
   color: var(--lumiverse-text, inherit);\r
   font-size: 13px;\r
   min-width: 0;\r
-  height: 100%;\r
-}\r
+  min-height: 100%;
+}
 .lr-sidebar-nav {\r
   display: flex;\r
   flex-wrap: wrap;\r
@@ -32425,11 +32425,11 @@ var styles_default = `.risu-compat-drawer {\r
   border-bottom-color: var(--lumiverse-primary, #6c9cff);\r
   background: var(--lumiverse-fill, rgba(120, 160, 255, 0.08));\r
 }\r
-.lr-sidebar-panels {\r
-  flex: 1 1 auto;\r
-  min-height: 0;\r
-  overflow-y: auto;\r
-}\r
+.lr-sidebar-panels {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
 .lr-sidebar-panel {\r
   display: block;\r
 }\r
@@ -33634,9 +33634,45 @@ var styles_default = `.risu-compat-drawer {\r
 }\r
 \r
 /* Risu-faithful lorebook viewer: one line per entry, expand for read-only detail. */\r
-.lr-viewer-drawer .lrv-lb-section {\r
-  padding: 0;\r
-}\r
+.lr-viewer-drawer .lrv-lb-section {
+  padding: 0;
+}
+.lr-viewer-drawer .lrv-lb-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.07));
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.025));
+}
+.lr-viewer-drawer .lrv-lb-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));
+  font-size: 10.5px;
+}
+.lr-viewer-drawer .lrv-lb-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.lr-viewer-drawer .lrv-lb-open-lumiverse {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.lr-viewer-drawer .lrv-lb-action-error {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--lumiverse-danger, rgba(255, 120, 120, 0.35));
+  background: rgba(255, 100, 100, 0.08);
+  color: var(--lumiverse-danger, rgba(255, 170, 170, 0.95));
+  font-size: 11px;
+  line-height: 1.4;
+}
 .lr-viewer-drawer .lrv-lb-group {\r
   border-top: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.05));\r
 }\r
@@ -33681,7 +33717,7 @@ var styles_default = `.risu-compat-drawer {\r
 .lr-viewer-drawer .lrv-lb-row-summary:hover {\r
   background: var(--lumiverse-surface-2, rgba(255, 255, 255, 0.03));\r
 }\r
-.lr-viewer-drawer .lrv-lb-row-disabled .lrv-lb-row-summary { opacity: 0.45; }\r
+.lr-viewer-drawer .lrv-lb-row-disabled .lrv-lb-name { opacity: 0.5; }
 .lr-viewer-drawer .lrv-lb-status {\r
   flex: 0 0 auto;\r
   width: 8px;\r
@@ -33689,15 +33725,15 @@ var styles_default = `.risu-compat-drawer {\r
   border-radius: 50%;\r
   display: inline-block;\r
 }\r
-.lr-viewer-drawer .lrv-lb-status-always {\r
-  background: #f5b73a;\r
-}\r
-.lr-viewer-drawer .lrv-lb-status-keyed {\r
-  background: transparent;\r
-  border: 1px solid var(--lumiverse-text-muted, rgba(255, 255, 255, 0.5));\r
-  width: 7px;\r
-  height: 7px;\r
-}\r
+.lr-viewer-drawer .lrv-lb-status-constant {
+  background: #f5b73a;
+}
+.lr-viewer-drawer .lrv-lb-status-enabled {
+  background: #45bd72;
+}
+.lr-viewer-drawer .lrv-lb-status-disabled {
+  background: #e85d68;
+}
 .lr-viewer-drawer .lrv-lb-name {\r
   flex: 1 1 auto;\r
   white-space: nowrap;\r
@@ -33731,7 +33767,7 @@ var styles_default = `.risu-compat-drawer {\r
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\r
   word-break: break-word;\r
 }\r
-.lr-viewer-drawer .lrv-lb-content {\r
+.lr-viewer-drawer .lrv-lb-content {
   margin: 0;\r
   padding: 6px 8px;\r
   background: var(--lumiverse-surface-2, rgba(255, 255, 255, 0.04));\r
@@ -33741,8 +33777,23 @@ var styles_default = `.risu-compat-drawer {\r
   line-height: 1.45;\r
   font-family: inherit;\r
   max-height: 300px;\r
-  overflow: auto;\r
-}\r
+  overflow: auto;
+}
+.lr-viewer-drawer .lrv-lb-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 2px;
+}
+.lr-viewer-drawer .lrv-lb-toggle-entry {
+  min-width: 92px;
+}
+.lr-viewer-drawer .lrv-lb-toggle-entry:disabled,
+.lr-viewer-drawer .lrv-lb-open-lumiverse:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
 \r
 .lr-viewer-drawer .lrv-lb-useradds-head {\r
   padding: 10px 16px 4px;\r
@@ -42391,7 +42442,7 @@ function pickLorebookFile() {
 var MAX_ASSET_MB = 50;
 var MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 function mountViewerPanel(opts) {
-  const { sendToBackend, log: log8 } = opts;
+  const { sendToBackend, log: log8, openWorldBookEditor } = opts;
   log8.info("viewer-panel: mounting");
   const root = opts.root;
   root.classList.add("lr-viewer-drawer");
@@ -42401,6 +42452,7 @@ function mountViewerPanel(opts) {
   let viewerData = null;
   let loading = false;
   let lastError = null;
+  let destroyed = false;
   let activeSubTab = "notes";
   let activeCharacterId = null;
   let pendingAutoSwitch = false;
@@ -42419,6 +42471,12 @@ function mountViewerPanel(opts) {
   let editingTriggerLua = "";
   let defaultsTextBuffer = null;
   let bgHtmlTextBuffer = null;
+  const closedLorebookGroups = new Set;
+  const openLorebookFolders = new Set;
+  const openLorebookEntries = new Set;
+  const lorebookMutationPending = new Map;
+  const lorebookNavigationPending = new Set;
+  let lorebookActionError = null;
   const intro = document.createElement("p");
   intro.className = "lrv-intro";
   intro.textContent = "Inspect, HTML, triggers, and assets for a character or module.";
@@ -42565,6 +42623,52 @@ function mountViewerPanel(opts) {
   function sourceKey2(o) {
     return `${o.kind}::${o.id}`;
   }
+  function viewerSourceKey(source) {
+    return source.kind === "character" ? `character::${source.characterId}` : `module::${source.moduleId}`;
+  }
+  function currentViewerSourceRef() {
+    const source = viewerData?.source;
+    if (!source)
+      return null;
+    return source.kind === "character" ? { kind: "character", characterId: source.characterId } : { kind: "module", moduleId: source.moduleId };
+  }
+  function resetLorebookUiState() {
+    closedLorebookGroups.clear();
+    openLorebookFolders.clear();
+    openLorebookEntries.clear();
+    lorebookMutationPending.clear();
+    lorebookNavigationPending.clear();
+    lorebookActionError = null;
+  }
+  function lorebookNavigationKey(worldBookId, entryId) {
+    return `${selectedSourceKey ?? ""}::${worldBookId}::${entryId ?? ""}`;
+  }
+  function beginOpenWorldBookEditor(worldBookId, entryId) {
+    const navigationKey = lorebookNavigationKey(worldBookId, entryId);
+    if (lorebookNavigationPending.has(navigationKey))
+      return;
+    if (!openWorldBookEditor) {
+      lorebookActionError = "This Lumiverse build does not expose the World Book Editor action.";
+      renderSurfaces();
+      return;
+    }
+    lorebookNavigationPending.add(navigationKey);
+    if (entryId)
+      openLorebookEntries.add(`${worldBookId}::${entryId}`);
+    lorebookActionError = null;
+    renderSurfaces();
+    openWorldBookEditor(worldBookId, entryId).then(() => {
+      lorebookNavigationPending.delete(navigationKey);
+      if (!destroyed)
+        renderSurfaces();
+    }).catch((err) => {
+      lorebookNavigationPending.delete(navigationKey);
+      if (destroyed)
+        return;
+      lorebookActionError = `Could not open ${entryId ? "this entry" : "this lorebook"} in Lumiverse: ${err instanceof Error ? err.message : String(err)}`;
+      renderSurfaces();
+    });
+  }
   function parseSourceKey(key2) {
     const idx = key2.indexOf("::");
     if (idx < 0)
@@ -42598,6 +42702,7 @@ function mountViewerPanel(opts) {
     assetSelectMode = false;
     assetSelected.clear();
     assetLastClickedIndex = null;
+    resetLorebookUiState();
     activeSubTab = o.kind === "character" ? "notes" : "assets";
     assetPagesShown = 1;
     renderStatus();
@@ -43896,6 +44001,49 @@ ${preview}${more}
   function renderLorebookSection(groups) {
     const det = document.createElement("section");
     det.className = "lrv-section lrv-lb-section";
+    const toolbar2 = document.createElement("div");
+    toolbar2.className = "lrv-lb-toolbar";
+    const legend = document.createElement("div");
+    legend.className = "lrv-lb-legend";
+    legend.setAttribute("aria-label", "Lorebook entry status legend");
+    const legendItems = [
+      { label: "Constant", status: "constant" },
+      { label: "Enabled", status: "enabled" },
+      { label: "Disabled", status: "disabled" }
+    ];
+    for (const item of legendItems) {
+      const legendItem = document.createElement("span");
+      legendItem.className = "lrv-lb-legend-item";
+      const dot = document.createElement("span");
+      dot.className = `lrv-lb-status lrv-lb-status-${item.status}`;
+      dot.setAttribute("aria-hidden", "true");
+      legendItem.appendChild(dot);
+      legendItem.appendChild(document.createTextNode(item.label));
+      legend.appendChild(legendItem);
+    }
+    toolbar2.appendChild(legend);
+    const bookTarget = groups.find((group) => group.groupId !== "module" && !group.moduleId) ?? groups.find((group) => group.groupId !== "module");
+    if (bookTarget) {
+      const navigationKey = lorebookNavigationKey(bookTarget.groupId);
+      const navigationPending = lorebookNavigationPending.has(navigationKey);
+      const openBookButton = document.createElement("button");
+      openBookButton.type = "button";
+      openBookButton.className = "lrv-btn lrv-lb-open-lumiverse lrv-lb-open-book";
+      openBookButton.textContent = navigationPending ? "Opening…" : "Open in Lumiverse";
+      openBookButton.disabled = navigationPending;
+      openBookButton.title = `Open ${bookTarget.groupName} in Lumiverse's World Book Editor.`;
+      openBookButton.addEventListener("click", () => {
+        beginOpenWorldBookEditor(bookTarget.groupId);
+      });
+      toolbar2.appendChild(openBookButton);
+    }
+    det.appendChild(toolbar2);
+    if (lorebookActionError) {
+      const error = document.createElement("div");
+      error.className = "lrv-lb-action-error";
+      error.textContent = lorebookActionError;
+      det.appendChild(error);
+    }
     if (groups.length === 0) {
       const empty = document.createElement("div");
       empty.className = "lrv-empty";
@@ -43914,7 +44062,14 @@ ${preview}${more}
       }
       const grpDet = document.createElement("details");
       grpDet.className = "lrv-lb-group";
-      grpDet.open = true;
+      grpDet.open = !closedLorebookGroups.has(g.groupId);
+      grpDet.dataset["worldBookId"] = g.groupId;
+      grpDet.addEventListener("toggle", () => {
+        if (grpDet.open)
+          closedLorebookGroups.delete(g.groupId);
+        else
+          closedLorebookGroups.add(g.groupId);
+      });
       const grpSum = document.createElement("summary");
       grpSum.className = "lrv-lb-group-summary";
       const display = pickLoreGroupDisplay(g);
@@ -43923,19 +44078,19 @@ ${preview}${more}
       if (isTranslated)
         grpSum.title = g.groupName;
       grpDet.appendChild(grpSum);
-      renderLorebookEntriesWithFolders(grpDet, risuEntries);
+      renderLorebookEntriesWithFolders(grpDet, g, risuEntries);
       if (userAdditions.length > 0) {
         const uaHead = document.createElement("div");
         uaHead.className = "lrv-lb-useradds-head";
         uaHead.textContent = `User Additions (${userAdditions.length})`;
         grpDet.appendChild(uaHead);
-        renderLorebookEntriesWithFolders(grpDet, userAdditions);
+        renderLorebookEntriesWithFolders(grpDet, g, userAdditions);
       }
       det.appendChild(grpDet);
     }
     return det;
   }
-  function renderLorebookEntriesWithFolders(container, entries) {
+  function renderLorebookEntriesWithFolders(container, group, entries) {
     const childrenByFolder = new Map;
     const folderKeys = new Set;
     for (const e of entries) {
@@ -43950,17 +44105,25 @@ ${preview}${more}
     for (const e of entries) {
       if (e.risuMode === "folder" && e.risuFolderKey) {
         const children = childrenByFolder.get(e.risuFolderKey) ?? [];
-        container.appendChild(renderLorebookFolderGroup(e, children));
+        container.appendChild(renderLorebookFolderGroup(group, e, children));
         continue;
       }
       if (e.risuFolderRef && folderKeys.has(e.risuFolderRef))
         continue;
-      container.appendChild(renderLorebookRow(e));
+      container.appendChild(renderLorebookRow(group, e));
     }
   }
-  function renderLorebookFolderGroup(folder, children) {
+  function renderLorebookFolderGroup(group, folder, children) {
     const det = document.createElement("details");
     det.className = "lrv-lb-folder-group";
+    const folderStateKey = `${group.groupId}::${folder.id}`;
+    det.open = openLorebookFolders.has(folderStateKey);
+    det.addEventListener("toggle", () => {
+      if (det.open)
+        openLorebookFolders.add(folderStateKey);
+      else
+        openLorebookFolders.delete(folderStateKey);
+    });
     const sum = document.createElement("summary");
     sum.className = "lrv-lb-folder-summary";
     const icon = document.createElement("span");
@@ -43981,31 +44144,50 @@ ${preview}${more}
     const body = document.createElement("div");
     body.className = "lrv-lb-folder-body";
     for (const c of children)
-      body.appendChild(renderLorebookRow(c));
+      body.appendChild(renderLorebookRow(group, c));
     det.appendChild(body);
     return det;
   }
-  function renderLorebookRow(e) {
+  function lorebookStatus(e) {
+    if (e.disabled)
+      return { kind: "disabled", label: "Disabled" };
+    if (e.constant)
+      return { kind: "constant", label: "Constant" };
+    return { kind: "enabled", label: "Enabled" };
+  }
+  function renderLorebookRow(group, e) {
     if (e.risuMode === "folder")
       return renderLorebookFolderHeader(e);
     if (e.risuMode === "child")
       return renderLorebookChildLink(e);
     const row = document.createElement("details");
     row.className = "lrv-lb-row";
+    row.dataset["entryId"] = e.id;
+    row.dataset["worldBookId"] = group.groupId;
     if (e.disabled)
       row.classList.add("lrv-lb-row-disabled");
+    const entryStateKey = `${group.groupId}::${e.id}`;
+    row.open = openLorebookEntries.has(entryStateKey);
+    row.addEventListener("toggle", () => {
+      if (row.open)
+        openLorebookEntries.add(entryStateKey);
+      else
+        openLorebookEntries.delete(entryStateKey);
+    });
     const sum = document.createElement("summary");
     sum.className = "lrv-lb-row-summary";
     const dot = document.createElement("span");
-    dot.className = e.constant ? "lrv-lb-status lrv-lb-status-always" : "lrv-lb-status lrv-lb-status-keyed";
-    dot.title = e.disabled ? "disabled" : e.constant ? "always active" : "key-based";
+    const status2 = lorebookStatus(e);
+    dot.className = `lrv-lb-status lrv-lb-status-${status2.kind}`;
+    dot.title = status2.label;
+    dot.setAttribute("aria-label", status2.label);
     sum.appendChild(dot);
     const name = document.createElement("span");
     name.className = "lrv-lb-name";
     name.textContent = lorebookEntryName(e);
     sum.appendChild(name);
     row.appendChild(sum);
-    row.appendChild(renderLorebookRowDetail(e));
+    row.appendChild(renderLorebookRowDetail(group, e));
     kickoffEntryTranslation(e, name);
     return row;
   }
@@ -44087,7 +44269,7 @@ ${preview}${more}
       return e.key.join(", ");
     return "(unnamed)";
   }
-  function renderLorebookRowDetail(e) {
+  function renderLorebookRowDetail(group, e) {
     const body = document.createElement("div");
     body.className = "lrv-lb-body";
     if (!e.constant && e.key.length > 0) {
@@ -44107,6 +44289,50 @@ ${preview}${more}
     content.className = "lrv-lb-content";
     content.textContent = e.content;
     body.appendChild(content);
+    if (group.groupId !== "module") {
+      const actions = document.createElement("div");
+      actions.className = "lrv-lb-actions";
+      const mutationKey = `${group.groupId}::${e.id}`;
+      const navigationKey = lorebookNavigationKey(group.groupId, e.id);
+      const navigationPending = lorebookNavigationPending.has(navigationKey);
+      const pendingDisabled = lorebookMutationPending.get(mutationKey);
+      const pending = pendingDisabled !== undefined;
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "lrv-btn lrv-lb-open-lumiverse lrv-lb-open-entry";
+      openButton.textContent = navigationPending ? "Opening…" : "Open in Lumiverse";
+      openButton.disabled = navigationPending;
+      openButton.title = "Open this exact entry in Lumiverse's World Book Editor.";
+      openButton.addEventListener("click", () => {
+        beginOpenWorldBookEditor(group.groupId, e.id);
+      });
+      actions.appendChild(openButton);
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "lrv-btn lrv-lb-toggle-entry";
+      toggle.textContent = pending ? pendingDisabled ? "Disabling…" : "Enabling…" : e.disabled ? "Enable entry" : "Disable entry";
+      toggle.disabled = pending;
+      toggle.addEventListener("click", () => {
+        if (lorebookMutationPending.has(mutationKey))
+          return;
+        const source = currentViewerSourceRef();
+        if (!source)
+          return;
+        lorebookMutationPending.set(mutationKey, !e.disabled);
+        openLorebookEntries.add(mutationKey);
+        lorebookActionError = null;
+        renderSurfaces();
+        sendToBackend({
+          type: "set_viewer_lorebook_entry_disabled",
+          source,
+          worldBookId: group.groupId,
+          entryId: e.id,
+          disabled: !e.disabled
+        });
+      });
+      actions.appendChild(toggle);
+      body.appendChild(actions);
+    }
     return body;
   }
   function field(label, value) {
@@ -44224,6 +44450,29 @@ ${preview}${more}
         }
         break;
       }
+      case "viewer_lorebook_entry_disabled_result": {
+        const mutationKey = `${msg.worldBookId}::${msg.entryId}`;
+        if (selectedSourceKey !== viewerSourceKey(msg.source))
+          break;
+        lorebookMutationPending.delete(mutationKey);
+        if (!msg.ok) {
+          lorebookActionError = `Could not update lorebook entry: ${msg.error ?? "unknown error"}`;
+          render();
+          break;
+        }
+        lorebookActionError = null;
+        if (viewerData) {
+          viewerData = {
+            ...viewerData,
+            lorebook: viewerData.lorebook.map((group) => group.groupId !== msg.worldBookId ? group : {
+              ...group,
+              entries: group.entries.map((entry) => entry.id === msg.entryId ? { ...entry, disabled: msg.disabled } : entry)
+            })
+          };
+        }
+        render();
+        break;
+      }
       case "viewer_data_pushed": {
         const d = msg.data;
         const expectedKey = sourceKey2(d.source.kind === "character" ? { kind: "character", id: d.source.characterId, label: d.source.name } : { kind: "module", id: d.source.moduleId, label: d.source.name });
@@ -44268,6 +44517,7 @@ ${preview}${more}
   document.addEventListener("keydown", onEscapeKeyDown, true);
   function destroy() {
     log8.info("viewer-panel: destroy");
+    destroyed = true;
     try {
       document.removeEventListener("keydown", onEscapeKeyDown, true);
     } catch {}
@@ -44729,6 +44979,12 @@ var STATE_SUB_TABS = [
 ];
 function createSidebar(opts) {
   const { ctx, sendToBackend, log: log8 } = opts;
+  const openWorldBookEditor = async (worldBookId, entryId) => {
+    const surfaces = ctx.host.surfaces;
+    if (!surfaces)
+      throw new Error("Lumiverse host action API is unavailable");
+    await surfaces.invoke({ kind: "modal", id: "world_book_editor" }, { id: worldBookId, ...entryId ? { entryId } : {} });
+  };
   log8.info("sidebar: registering single drawer tab");
   const tab = ctx.ui.registerDrawerTab({
     id: "lumirealm",
@@ -44836,7 +45092,7 @@ function createSidebar(opts) {
         break;
       }
       case "viewer":
-        handle = mountViewerPanel({ root: host, sendToBackend, log: log8 });
+        handle = mountViewerPanel({ root: host, sendToBackend, log: log8, openWorldBookEditor });
         break;
       case "state": {
         let activateSub = function(id2) {
