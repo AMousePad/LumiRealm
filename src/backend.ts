@@ -132,6 +132,7 @@ import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
 import { createTriggerDispatcher } from './state/trigger-dispatch.js';
 import { createRepairOrchestrator } from './state/repair-orchestrator.js';
+import { buildRepairTargetSummary } from './state/repair-targets.js';
 import { createMigrationsRunner } from './migrations/runner.js';
 import { createMassMigrationsRunner } from './migrations/mass.js';
 import { createActiveCardLoader } from './state/active-card.js';
@@ -499,20 +500,8 @@ const orphanOrchestrator = createOrphanOrchestrator({
   buildOrphanDetectDeps,
   countCharacterRepair: async (userId) => {
     const entries = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
-    const liveModuleIds = new Set((await listModuleStore(moduleStorage(), userId)).map((m) => m.id));
-    let charactersToRetranslate = 0;
-    let modulesToReattach = 0;
-    let danglingModuleRefs = 0;
-    for (const e of entries) {
-      if (!e.data) continue;
-      charactersToRetranslate += 1;
-      const ids = e.data.user_overrides.attached_module_ids ?? [];
-      for (const id of ids) {
-        if (liveModuleIds.has(id)) modulesToReattach++;
-        else danglingModuleRefs++;
-      }
-    }
-    return { charactersToRetranslate, modulesToReattach, danglingModuleRefs };
+    const modules = await listModuleStore(moduleStorage(), userId);
+    return buildRepairTargetSummary(entries, modules);
   },
   log,
   errMsg,

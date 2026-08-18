@@ -13,7 +13,7 @@ export interface RepairHandlerDeps {
 const EMPTY_REPAIR_SUMMARY: RepairScanSummary = {
   staleModuleRegex: 0, staleCharRegex: 0, deadJournals: 0,
   charactersToRetranslate: 0, modulesToReattach: 0,
-  danglingModuleRefs: 0, elapsedMs: 0,
+  danglingModuleRefs: 0, cardTargets: [], moduleTargets: [], elapsedMs: 0,
 };
 
 const EMPTY_REPAIR_RESULT: RepairApplyResult = {

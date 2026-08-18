@@ -33977,7 +33977,13 @@ function createOrphanOrchestrator(deps) {
     } catch (err) {
       deps.log.warn(`scanRepairTargets: dead journal count failed: ${deps.errMsg(err)}`);
     }
-    let charCounts = { charactersToRetranslate: 0, modulesToReattach: 0, danglingModuleRefs: 0 };
+    let charCounts = {
+      charactersToRetranslate: 0,
+      modulesToReattach: 0,
+      danglingModuleRefs: 0,
+      cardTargets: [],
+      moduleTargets: []
+    };
     try {
       charCounts = await deps.countCharacterRepair(userId);
     } catch (err) {
@@ -36055,6 +36061,8 @@ var EMPTY_REPAIR_SUMMARY = {
   charactersToRetranslate: 0,
   modulesToReattach: 0,
   danglingModuleRefs: 0,
+  cardTargets: [],
+  moduleTargets: [],
   elapsedMs: 0
 };
 var EMPTY_REPAIR_RESULT = {
@@ -40358,72 +40366,97 @@ function createRepairOrchestrator(deps) {
     let modulesReattached = 0;
     let modulesScrubbed = 0;
     let processed = 0;
-    const total = entries.length;
+    const characterFilter = opts.characterIds === undefined ? null : new Set(opts.characterIds);
+    const moduleFilter = opts.moduleIds === undefined ? null : new Set(opts.moduleIds);
+    let total = 0;
     for (const entry of entries) {
-      if (!entry.data) {
-        processed++;
+      if (!entry.data)
         continue;
+      if (characterFilter === null || characterFilter.has(entry.character.id))
+        total++;
+      for (const moduleId of entry.data.user_overrides.attached_module_ids ?? []) {
+        if (moduleFilter === null || moduleFilter.has(moduleId))
+          total++;
       }
+    }
+    const moduleLookups = new Map;
+    const lookupModule = (moduleId) => {
+      const existing = moduleLookups.get(moduleId);
+      if (existing)
+        return existing;
+      const pending4 = (async () => {
+        try {
+          const env = await readModuleEnvelope(userId, moduleId);
+          return env ? { kind: "found", env } : { kind: "missing" };
+        } catch (err) {
+          log8.warn(`forceRetranslateAll: readModuleEnvelope(${moduleId}) threw: ${errMsg2(err)}`);
+          return { kind: "error" };
+        }
+      })();
+      moduleLookups.set(moduleId, pending4);
+      return pending4;
+    };
+    for (const entry of entries) {
+      if (!entry.data)
+        continue;
       const charId = entry.character.id;
       const charName = entry.character.name ?? "(unnamed)";
-      opts.onProgress?.(processed, total, charName);
-      if (entry.data.source === undefined) {
-        skippedLegacy++;
+      let currentData = entry.data;
+      if (characterFilter === null || characterFilter.has(charId)) {
+        opts.onProgress?.(processed, total, charName);
+        if (currentData.source === undefined) {
+          skippedLegacy++;
+        } else {
+          translatorMigrationChecked.delete(charId);
+          const reset = { ...currentData, translator_schema_version: 0 };
+          let wroteReset = false;
+          try {
+            await writeLumirealm2(charId, reset, userId);
+            currentData = reset;
+            wroteReset = true;
+          } catch (err) {
+            log8.warn(`forceRetranslateAll: writeLumirealm(${charId}) failed: ${errMsg2(err)}`);
+          }
+          if (wroteReset) {
+            try {
+              const kind = await runCharacterMigration(charId, charName, userId, reset, { silent: true });
+              if (kind === "migrated")
+                retranslated++;
+            } catch (err) {
+              log8.warn(`forceRetranslateAll: runCharacterMigration(${charId}) failed: ${errMsg2(err)}`);
+            }
+            try {
+              const postFetch = await readLumirealm2(charId, userId);
+              if (postFetch?.data)
+                currentData = postFetch.data;
+            } catch (err) {
+              log8.warn(`forceRetranslateAll: readLumirealm(${charId}) post-migrate failed: ${errMsg2(err)}`);
+            }
+          }
+        }
         processed++;
-        continue;
       }
-      translatorMigrationChecked.delete(charId);
-      const reset = { ...entry.data, translator_schema_version: 0 };
-      try {
-        await writeLumirealm2(charId, reset, userId);
-      } catch (err) {
-        log8.warn(`forceRetranslateAll: writeLumirealm(${charId}) failed: ${errMsg2(err)}`);
-        processed++;
-        continue;
-      }
-      try {
-        const kind = await runCharacterMigration(charId, charName, userId, reset, { silent: true });
-        if (kind === "migrated")
-          retranslated++;
-      } catch (err) {
-        log8.warn(`forceRetranslateAll: runCharacterMigration(${charId}) failed: ${errMsg2(err)}`);
-      }
-      let postFetch;
-      try {
-        postFetch = await readLumirealm2(charId, userId);
-      } catch (err) {
-        log8.warn(`forceRetranslateAll: readLumirealm(${charId}) post-migrate failed: ${errMsg2(err)}`);
-        processed++;
-        continue;
-      }
-      if (!postFetch?.data) {
-        processed++;
-        continue;
-      }
-      const attachedIds = postFetch.data.user_overrides.attached_module_ids ?? [];
-      if (attachedIds.length === 0) {
-        processed++;
-        continue;
-      }
+      const attachedIds = currentData.user_overrides.attached_module_ids ?? [];
       const danglingIds = [];
       for (const moduleId of attachedIds) {
-        let env;
-        try {
-          env = await readModuleEnvelope(userId, moduleId);
-        } catch (err) {
-          log8.warn(`forceRetranslateAll: readModuleEnvelope(${moduleId}) char=${charId} threw: ${errMsg2(err)}`);
-          env = null;
-        }
-        if (!env) {
+        if (moduleFilter !== null && !moduleFilter.has(moduleId))
+          continue;
+        opts.onProgress?.(processed, total, `${charName} / ${moduleId}`);
+        const lookup2 = await lookupModule(moduleId);
+        if (lookup2.kind === "missing") {
           danglingIds.push(moduleId);
+          processed++;
           continue;
         }
-        try {
-          await refreshAttachedModule(charId, env, userId);
-          modulesReattached++;
-        } catch (err) {
-          log8.warn(`forceRetranslateAll: refreshAttachedModule(${charId}, ${moduleId}) failed: ${errMsg2(err)}`);
+        if (lookup2.kind === "found") {
+          try {
+            await refreshAttachedModule(charId, lookup2.env, userId);
+            modulesReattached++;
+          } catch (err) {
+            log8.warn(`forceRetranslateAll: refreshAttachedModule(${charId}, ${moduleId}) failed: ${errMsg2(err)}`);
+          }
         }
+        processed++;
       }
       if (danglingIds.length > 0) {
         try {
@@ -40433,7 +40466,6 @@ function createRepairOrchestrator(deps) {
           log8.warn(`forceRetranslateAll: scrubDanglingModuleRefs(${charId}) failed: ${errMsg2(err)}`);
         }
       }
-      processed++;
     }
     return { retranslated, skippedLegacy, modulesReattached, modulesScrubbed };
   }
@@ -40479,6 +40511,8 @@ function createRepairOrchestrator(deps) {
     if (options.applyForceRetranslate) {
       try {
         const r = await forceRetranslateAll(userId, {
+          ...options.characterIds !== undefined ? { characterIds: options.characterIds } : {},
+          ...options.moduleIds !== undefined ? { moduleIds: options.moduleIds } : {},
           onProgress: (processed, total, name) => {
             if (total <= 0)
               return;
@@ -40507,6 +40541,59 @@ function createRepairOrchestrator(deps) {
     };
   }
   return { forceRetranslateAll, scrubDanglingModuleRefs, applyRepair };
+}
+
+// src/state/repair-targets.ts
+function buildRepairTargetSummary(entries, modules) {
+  const moduleNames = new Map(modules.map((module) => [
+    module.id,
+    module.name.trim() || module.id
+  ]));
+  const attachmentCounts = new Map;
+  const cardTargets = [];
+  let charactersToRetranslate = 0;
+  let modulesToReattach = 0;
+  let danglingModuleRefs = 0;
+  for (const entry of entries) {
+    if (!entry.data)
+      continue;
+    const attachedModuleIds = entry.data.user_overrides.attached_module_ids ?? [];
+    const canRetranslate = entry.data.source !== undefined;
+    if (canRetranslate)
+      charactersToRetranslate++;
+    cardTargets.push({
+      characterId: entry.character.id,
+      characterName: entry.character.name?.trim() || "(unnamed)",
+      canRetranslate,
+      attachedModuleCount: attachedModuleIds.length
+    });
+    for (const moduleId of attachedModuleIds) {
+      attachmentCounts.set(moduleId, (attachmentCounts.get(moduleId) ?? 0) + 1);
+      if (moduleNames.has(moduleId))
+        modulesToReattach++;
+      else
+        danglingModuleRefs++;
+    }
+  }
+  cardTargets.sort((a, b) => a.characterName.localeCompare(b.characterName) || a.characterId.localeCompare(b.characterId));
+  const moduleTargets = [];
+  for (const [moduleId, attachmentCount] of attachmentCounts) {
+    const moduleName = moduleNames.get(moduleId) ?? null;
+    moduleTargets.push({
+      moduleId,
+      moduleName,
+      missing: moduleName === null,
+      attachmentCount
+    });
+  }
+  moduleTargets.sort((a, b) => Number(a.missing) - Number(b.missing) || (a.moduleName ?? a.moduleId).localeCompare(b.moduleName ?? b.moduleId) || a.moduleId.localeCompare(b.moduleId));
+  return {
+    charactersToRetranslate,
+    modulesToReattach,
+    danglingModuleRefs,
+    cardTargets,
+    moduleTargets
+  };
 }
 
 // src/state/legacy-reimport-warnings.ts
@@ -45403,23 +45490,8 @@ var orphanOrchestrator = createOrphanOrchestrator({
   buildOrphanDetectDeps,
   countCharacterRepair: async (userId) => {
     const entries = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
-    const liveModuleIds = new Set((await listModules(moduleStorage(), userId)).map((m) => m.id));
-    let charactersToRetranslate = 0;
-    let modulesToReattach = 0;
-    let danglingModuleRefs = 0;
-    for (const e of entries) {
-      if (!e.data)
-        continue;
-      charactersToRetranslate += 1;
-      const ids = e.data.user_overrides.attached_module_ids ?? [];
-      for (const id of ids) {
-        if (liveModuleIds.has(id))
-          modulesToReattach++;
-        else
-          danglingModuleRefs++;
-      }
-    }
-    return { charactersToRetranslate, modulesToReattach, danglingModuleRefs };
+    const modules = await listModules(moduleStorage(), userId);
+    return buildRepairTargetSummary(entries, modules);
   },
   log: log8,
   errMsg

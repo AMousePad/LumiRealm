@@ -54,6 +54,23 @@ export interface OrphanAssetEntry {
   readonly createdAt: number;
 }
 
+export interface RepairCardTarget {
+  readonly characterId: string;
+  readonly characterName: string;
+  /** Pre-0.3 cards have no retained source and cannot be re-translated. */
+  readonly canRetranslate: boolean;
+  readonly attachedModuleCount: number;
+}
+
+export interface RepairModuleTarget {
+  readonly moduleId: string;
+  /** `null` when characters still reference a module envelope that is gone. */
+  readonly moduleName: string | null;
+  readonly missing: boolean;
+  /** Number of character attachments repaired when this module is selected. */
+  readonly attachmentCount: number;
+}
+
 export interface RepairScanSummary {
   /** regex_scripts rows whose `metadata._risu.module_id` is not in the live module library. */
   readonly staleModuleRegex: number;
@@ -67,6 +84,9 @@ export interface RepairScanSummary {
   readonly modulesToReattach: number;
   /** (char, module) pairs where the module envelope is missing, will scrub the reference. */
   readonly danglingModuleRefs: number;
+  /** Named, lightweight targets for the searchable repair scope picker. */
+  readonly cardTargets: readonly RepairCardTarget[];
+  readonly moduleTargets: readonly RepairModuleTarget[];
   readonly elapsedMs: number;
 }
 
@@ -75,6 +95,12 @@ export interface RepairApplyOptions {
   readonly applyStaleCharRegex: boolean;
   readonly applyDeadJournals: boolean;
   readonly applyForceRetranslate: boolean;
+  /** When supplied, only these characters are re-translated. Omitted keeps
+   *  the pre-picker all-character behavior for older callers. */
+  readonly characterIds?: readonly string[];
+  /** When supplied, only these modules are refreshed (or scrubbed when
+   *  missing) across their character attachments. */
+  readonly moduleIds?: readonly string[];
 }
 
 export interface RepairApplyResult {

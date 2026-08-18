@@ -11,6 +11,7 @@ import { getTranslateEnabled, subscribeTranslateEnabled } from './translate-togg
 import { translateModuleName, translateModuleDescription, translateCharacterName, setModuleScopeLang, setCharacterScopeLang } from './translate-orchestrator.js';
 import { dominantScriptLang } from './browser-translator.js';
 import { createSearchableSelect, type SearchableSelectHandle } from './searchable-select.js';
+import { createChipMultiSelect, type ChipMultiSelectHandle } from './chip-multi-select.js';
 import { renderDescription } from '../realm/markdown.js';
 import { sendImportText } from './import-text-upload.js';
 import * as tus from 'tus-js-client';
@@ -108,7 +109,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
   let modules: readonly ModuleSummary[] | null = null;
   let globalModuleIds: readonly string[] = [];
-  let globalSelectHandle: SearchableSelectHandle | null = null;
+  let globalPickerHandle: ChipMultiSelectHandle | null = null;
   let cards: readonly CardSummary[] = [];
   const attachedByCharacter = new Map<string, readonly AttachedModuleSummary[]>();
   let activeTus: tus.Upload | null = null;
@@ -305,9 +306,9 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   // renderCharacterList, which destroys every entry on each pass and would kill
   // this dropdown before the user could open it.
   function renderGlobalBox(): void {
-    if (globalSelectHandle) {
-      globalSelectHandle.destroy();
-      globalSelectHandle = null;
+    if (globalPickerHandle) {
+      globalPickerHandle.destroy();
+      globalPickerHandle = null;
     }
     globalBox.replaceChildren();
     if (modules === null) return;
@@ -324,57 +325,8 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     head.appendChild(hint);
     globalBox.appendChild(head);
 
-    const chips = document.createElement('div');
-    chips.className = 'lrm-chips';
-    const byId = new Map(modules.map((m) => [m.id, m]));
-    if (globalModuleIds.length === 0) {
-      const none = document.createElement('span');
-      none.className = 'lrm-chips-empty';
-      none.textContent = 'None';
-      chips.appendChild(none);
-    }
-    for (const id of globalModuleIds) {
-      const m = byId.get(id);
-      const chip = document.createElement('span');
-      chip.className = 'lrm-chip';
-      const label = document.createElement('span');
-      label.className = 'lrm-chip-label';
-      label.textContent = m ? (pickModuleDisplayName(m) || m.id) : '(missing)';
-      if (!m) chip.classList.add('lrm-chip-missing');
-      chip.appendChild(label);
-      const x = document.createElement('button');
-      x.type = 'button';
-      x.className = 'lrm-chip-x';
-      x.textContent = '×';
-      x.title = `Remove ${label.textContent} from global modules`;
-      x.addEventListener('click', () => {
-        sendGlobalModules(globalModuleIds.filter((g) => g !== id));
-      });
-      chip.appendChild(x);
-      chips.appendChild(chip);
-    }
-    globalBox.appendChild(chips);
-
-    const addable = modules
-      .filter((m) => !globalModuleIds.includes(m.id))
-      .slice()
-      .sort((a, b) => b.uploaded_at - a.uploaded_at);
-    if (addable.length === 0) return;
-
-    const addWrap = document.createElement('div');
-    addWrap.className = 'lrm-attach-wrap';
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'lrm-btn-mini lrm-btn-primary';
-    addBtn.textContent = 'Add';
-    addBtn.disabled = true;
-    const ss = createSearchableSelect({
-      id: 'lrm-global-add-select',
-      className: 'lrm-attach-trigger',
-      placeholder: `Add a global module… (${addable.length})`,
-      searchPlaceholder: 'Search modules…',
-      emptyMessage: 'No matching modules',
-      items: addable.map((m) => {
+    const picker = createChipMultiSelect({
+      items: modules.slice().sort((a, b) => b.uploaded_at - a.uploaded_at).map((m) => {
         const display = pickModuleDisplayName(m) || m.id;
         const aliases: string[] = [];
         if (m.name && m.name !== display) aliases.push(m.name);
@@ -388,17 +340,17 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
           ...(aliases.length > 0 ? { searchTerms: aliases } : {}),
         };
       }),
-      onChange(selected) { addBtn.disabled = selected === null; },
+      selectedValues: globalModuleIds,
+      placeholder: `Search global modules… (${modules.length})`,
+      searchPlaceholder: 'Search modules…',
+      emptySearchMessage: 'No matching modules',
+      emptySelectionMessage: 'None',
+      showBulkActions: false,
+      collapsedChipLimit: 8,
+      onChange: sendGlobalModules,
     });
-    globalSelectHandle = ss;
-    addWrap.appendChild(ss.root);
-    addBtn.addEventListener('click', () => {
-      const id = ss.getValue();
-      if (!id) return;
-      sendGlobalModules([...globalModuleIds, id]);
-    });
-    addWrap.appendChild(addBtn);
-    globalBox.appendChild(addWrap);
+    globalPickerHandle = picker;
+    globalBox.appendChild(picker.root);
   }
 
   function sendGlobalModules(next: readonly string[]): void {
@@ -1131,8 +1083,8 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   function destroy(): void {
     log.info('modules-panel: destroy');
     destroyAttachSelects();
-    try { globalSelectHandle?.destroy(); } catch { void 0; }
-    globalSelectHandle = null;
+    try { globalPickerHandle?.destroy(); } catch { void 0; }
+    globalPickerHandle = null;
     try { regexTargetSelect.destroy(); } catch { void 0; }
     if (charHeaderHandle) {
       try { charHeaderHandle.destroy(); } catch { void 0; }

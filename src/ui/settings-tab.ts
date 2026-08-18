@@ -2,11 +2,13 @@ import type {
   BackendToFrontend,
   FrontendToBackend,
   OrphanAssetEntry,
+  RepairScanSummary,
 } from '../types/messages.js';
 import type { FrontendLog } from './drawer.js';
 import { mountLogsPanel } from './logs-tab.js';
 import { createVirtualGrid, type VirtualGridHandle } from './virtual-grid.js';
 import { createSearchableSelect, type SearchableSelectItem } from './searchable-select.js';
+import { createChipMultiSelect, type ChipMultiSelectHandle } from './chip-multi-select.js';
 
 // Settings UI for aux/submodel LLM connections.
 // Every change is sent as update_settings; state is reflected back via settings_pushed.
@@ -685,7 +687,18 @@ export function mountSettingsPanel(
   };
   let repairScanning = false;
   let repairApplying = false;
-  let repairLastSummary: import('../types/messages.js').RepairScanSummary | null = null;
+  let repairLastSummary: RepairScanSummary | null = null;
+  const repairSelectedCharacterIds = new Set<string>();
+  const repairSelectedModuleIds = new Set<string>();
+  let repairCardPicker: ChipMultiSelectHandle | null = null;
+  let repairModulePicker: ChipMultiSelectHandle | null = null;
+
+  function destroyRepairPickers(): void {
+    try { repairCardPicker?.destroy(); } catch { /* */ }
+    try { repairModulePicker?.destroy(); } catch { /* */ }
+    repairCardPicker = null;
+    repairModulePicker = null;
+  }
 
   function refreshRepairUi(): void {
     repairScanBtn.disabled = repairScanning || repairApplying || cleanupScanning || cleanupDeleting;
@@ -694,6 +707,7 @@ export function mountSettingsPanel(
   }
 
   function renderRepairResult(): void {
+    destroyRepairPickers();
     repairResultBox.replaceChildren();
     const s = repairLastSummary;
     if (!s) {
@@ -704,25 +718,15 @@ export function mountSettingsPanel(
     const total = s.staleCharRegex + s.staleModuleRegex + s.deadJournals;
     const summaryLine = document.createElement('div');
     summaryLine.className = 'rs-repair-summary';
-    summaryLine.textContent = total === 0 && s.charactersToRetranslate === 0
+    summaryLine.textContent = total === 0 && s.cardTargets.length === 0 && s.moduleTargets.length === 0
       ? 'No issues detected.'
-      : `Scan complete (${s.elapsedMs}ms). Pick what to apply:`;
+      : `Scan complete (${s.elapsedMs}ms). Pick what to apply and scope the slow repair:`;
     repairResultBox.appendChild(summaryLine);
 
-    const retranslateLabel = s.charactersToRetranslate === 0
-      ? 'Force re-translate every lumirealm character'
-      : (() => {
-        const parts: string[] = [`${s.charactersToRetranslate} char${s.charactersToRetranslate === 1 ? '' : 's'}`];
-        if (s.modulesToReattach > 0) parts.push(`${s.modulesToReattach} module reattach${s.modulesToReattach === 1 ? '' : 'es'}`);
-        if (s.danglingModuleRefs > 0) parts.push(`${s.danglingModuleRefs} dangling ref${s.danglingModuleRefs === 1 ? '' : 's'} to scrub`);
-        return `Force re-translate (${parts.join(', ')})`;
-      })();
-
-    const rows: { key: RepairKey; label: string; count: number; danger: boolean }[] = [
-      { key: 'staleCharRegex', label: 'Stale character regex rows (envelope gone)', count: s.staleCharRegex, danger: false },
-      { key: 'staleModuleRegex', label: 'Stale module regex rows (module envelope gone)', count: s.staleModuleRegex, danger: false },
-      { key: 'deadJournals', label: 'Dead image journals (owner gone)', count: s.deadJournals, danger: false },
-      { key: 'forceRetranslate', label: retranslateLabel, count: s.charactersToRetranslate, danger: true },
+    const rows: { key: Exclude<RepairKey, 'forceRetranslate'>; label: string; count: number }[] = [
+      { key: 'staleCharRegex', label: 'Stale character regex rows (envelope gone)', count: s.staleCharRegex },
+      { key: 'staleModuleRegex', label: 'Stale module regex rows (module envelope gone)', count: s.staleModuleRegex },
+      { key: 'deadJournals', label: 'Dead image journals (owner gone)', count: s.deadJournals },
     ];
     const applyBtn = document.createElement('button');
     applyBtn.type = 'button';
@@ -733,10 +737,16 @@ export function mountSettingsPanel(
       (repairChecked.staleCharRegex && s.staleCharRegex > 0)
       || (repairChecked.staleModuleRegex && s.staleModuleRegex > 0)
       || (repairChecked.deadJournals && s.deadJournals > 0)
-      || (repairChecked.forceRetranslate && s.charactersToRetranslate > 0)
+      || (repairChecked.forceRetranslate
+        && (repairSelectedCharacterIds.size > 0 || repairSelectedModuleIds.size > 0))
     );
+    let targetCountSpan: HTMLSpanElement | null = null;
     const refreshApplyBtn = (): void => {
       applyBtn.disabled = repairApplying || !hasApplicableSelection();
+      if (targetCountSpan) {
+        targetCountSpan.textContent =
+          `${repairSelectedCharacterIds.size} cards · ${repairSelectedModuleIds.size} modules`;
+      }
     };
 
     for (const r of rows) {
@@ -754,21 +764,130 @@ export function mountSettingsPanel(
       const labelText = document.createElement('span');
       labelText.textContent = r.label;
       if (r.count === 0) labelText.classList.add('rs-repair-row-empty');
-      if (r.danger) labelText.classList.add('rs-repair-row-danger');
       row.appendChild(labelText);
       const countSpan = document.createElement('span');
       countSpan.className = 'rs-repair-count';
-      countSpan.textContent = r.key === 'forceRetranslate'
-        ? (r.count === 0 ? '—' : `${r.count} chars`)
-        : (r.count === 0 ? '0' : String(r.count));
+      countSpan.textContent = r.count === 0 ? '0' : String(r.count);
       row.appendChild(countSpan);
       repairResultBox.appendChild(row);
+    }
+
+    const targetRow = document.createElement('label');
+    targetRow.className = 'rs-repair-row';
+    const targetCheck = document.createElement('input');
+    targetCheck.type = 'checkbox';
+    targetCheck.checked = repairChecked.forceRetranslate;
+    targetCheck.disabled = s.charactersToRetranslate === 0 && s.moduleTargets.length === 0;
+    targetCheck.addEventListener('change', () => {
+      repairChecked.forceRetranslate = targetCheck.checked;
+      refreshApplyBtn();
+    });
+    targetRow.appendChild(targetCheck);
+    const targetLabel = document.createElement('span');
+    targetLabel.className = 'rs-repair-row-danger';
+    targetLabel.textContent = 'Force re-translate';
+    targetRow.appendChild(targetLabel);
+    targetCountSpan = document.createElement('span');
+    targetCountSpan.className = 'rs-repair-count';
+    targetRow.appendChild(targetCountSpan);
+    repairResultBox.appendChild(targetRow);
+
+    if (s.cardTargets.length > 0 || s.moduleTargets.length > 0) {
+      const scope = document.createElement('div');
+      scope.className = 'rs-repair-scope';
+      const scopeIntro = document.createElement('div');
+      scopeIntro.className = 'rs-repair-scope-intro';
+      scopeIntro.textContent =
+        'Cards are re-translated individually. Modules are refreshed across their selected character attachments; missing modules scrub dangling references.';
+      scope.appendChild(scopeIntro);
+
+      const columns = document.createElement('div');
+      columns.className = 'rs-repair-scope-columns';
+      scope.appendChild(columns);
+
+      const cardGroup = document.createElement('section');
+      cardGroup.className = 'rs-repair-target-group';
+      const cardHeading = document.createElement('div');
+      cardHeading.className = 'rs-repair-target-heading';
+      cardHeading.textContent = `Cards (${s.charactersToRetranslate} repairable)`;
+      cardGroup.appendChild(cardHeading);
+      const legacyCount = s.cardTargets.filter((target) => !target.canRetranslate).length;
+      if (legacyCount > 0) {
+        const legacyHint = document.createElement('div');
+        legacyHint.className = 'rs-repair-target-hint';
+        legacyHint.textContent = `${legacyCount} legacy card${legacyCount === 1 ? '' : 's'} disabled - re-import required.`;
+        cardGroup.appendChild(legacyHint);
+      }
+      repairCardPicker = createChipMultiSelect({
+        items: s.cardTargets.map((target) => ({
+          value: target.characterId,
+          label: target.characterName,
+          secondary: target.canRetranslate
+            ? `${target.attachedModuleCount} attached module${target.attachedModuleCount === 1 ? '' : 's'}`
+            : 'Legacy card - re-import required',
+          disabled: !target.canRetranslate,
+          searchTerms: [target.characterId],
+          title: `${target.characterName}\n${target.characterId}`,
+        })),
+        selectedValues: [...repairSelectedCharacterIds],
+        placeholder: `Search cards… (${s.cardTargets.length})`,
+        searchPlaceholder: 'Search cards by name or ID…',
+        emptySearchMessage: 'No matching cards',
+        emptySelectionMessage: 'No cards selected',
+        className: 'rs-repair-card-picker',
+        collapsedChipLimit: 6,
+        onChange(values) {
+          repairSelectedCharacterIds.clear();
+          for (const value of values) repairSelectedCharacterIds.add(value);
+          refreshApplyBtn();
+        },
+      });
+      repairCardPicker.setDisabled(repairApplying);
+      cardGroup.appendChild(repairCardPicker.root);
+      columns.appendChild(cardGroup);
+
+      const moduleGroup = document.createElement('section');
+      moduleGroup.className = 'rs-repair-target-group';
+      const moduleHeading = document.createElement('div');
+      moduleHeading.className = 'rs-repair-target-heading';
+      moduleHeading.textContent = `Modules (${s.moduleTargets.length} in use)`;
+      moduleGroup.appendChild(moduleHeading);
+      repairModulePicker = createChipMultiSelect({
+        items: s.moduleTargets.map((target) => ({
+          value: target.moduleId,
+          label: target.moduleName ?? `Missing module ${target.moduleId.slice(0, 8)}…`,
+          secondary: target.missing
+            ? `${target.attachmentCount} dangling reference${target.attachmentCount === 1 ? '' : 's'}`
+            : `${target.attachmentCount} character attachment${target.attachmentCount === 1 ? '' : 's'}`,
+          group: target.missing ? 'Missing references' : 'Available modules',
+          danger: target.missing,
+          searchTerms: [target.moduleId],
+          title: `${target.moduleName ?? 'Missing module'}\n${target.moduleId}`,
+        })),
+        selectedValues: [...repairSelectedModuleIds],
+        placeholder: `Search modules… (${s.moduleTargets.length})`,
+        searchPlaceholder: 'Search modules by name or ID…',
+        emptySearchMessage: 'No matching modules',
+        emptySelectionMessage: 'No modules selected',
+        className: 'rs-repair-module-picker',
+        collapsedChipLimit: 6,
+        onChange(values) {
+          repairSelectedModuleIds.clear();
+          for (const value of values) repairSelectedModuleIds.add(value);
+          refreshApplyBtn();
+        },
+      });
+      repairModulePicker.setDisabled(repairApplying);
+      moduleGroup.appendChild(repairModulePicker.root);
+      columns.appendChild(moduleGroup);
+      repairResultBox.appendChild(scope);
     }
 
     refreshApplyBtn();
     applyBtn.addEventListener('click', () => {
       if (!hasApplicableSelection()) return;
-      const willRetranslate = repairChecked.forceRetranslate && s.charactersToRetranslate > 0;
+      const willRetranslate = repairChecked.forceRetranslate
+        && (repairSelectedCharacterIds.size > 0 || repairSelectedModuleIds.size > 0);
       const willDeleteRows = (repairChecked.staleCharRegex && s.staleCharRegex > 0)
         || (repairChecked.staleModuleRegex && s.staleModuleRegex > 0);
       const parts: string[] = [];
@@ -782,18 +901,33 @@ export function mountSettingsPanel(
         parts.push(`clear ${s.deadJournals} dead journal(s)`);
       }
       if (willRetranslate) {
-        const retransParts: string[] = [`re-translate ${s.charactersToRetranslate} character(s)`];
-        if (s.modulesToReattach > 0) retransParts.push(`reattach ${s.modulesToReattach} module(s)`);
-        if (s.danglingModuleRefs > 0) retransParts.push(`scrub ${s.danglingModuleRefs} dangling ref(s)`);
-        parts.push(retransParts.join(' + ') + ' (slow)');
+        const targetParts: string[] = [];
+        if (repairSelectedCharacterIds.size > 0) {
+          targetParts.push(`re-translate ${repairSelectedCharacterIds.size} selected character(s)`);
+        }
+        const selectedModules = s.moduleTargets.filter((target) => repairSelectedModuleIds.has(target.moduleId));
+        const liveAttachments = selectedModules
+          .filter((target) => !target.missing)
+          .reduce((sum, target) => sum + target.attachmentCount, 0);
+        const danglingAttachments = selectedModules
+          .filter((target) => target.missing)
+          .reduce((sum, target) => sum + target.attachmentCount, 0);
+        if (liveAttachments > 0) targetParts.push(`refresh ${liveAttachments} selected module attachment(s)`);
+        if (danglingAttachments > 0) targetParts.push(`scrub ${danglingAttachments} dangling ref(s)`);
+        parts.push(targetParts.join(' + ') + ' (slow)');
       }
       if (!confirm(`Apply repair? This will:\n\n• ${parts.join('\n• ')}\n\n${willDeleteRows ? 'Deleted rows cannot be recovered. ' : ''}${willRetranslate ? 'Re-translation may take a while for large libraries.' : ''}`)) {
         return;
       }
-      log.info(`settings-tab: repair apply ${JSON.stringify(repairChecked)}`);
+      log.info(
+        `settings-tab: repair apply ${JSON.stringify(repairChecked)} ` +
+          `cards=${repairSelectedCharacterIds.size} modules=${repairSelectedModuleIds.size}`,
+      );
       repairApplying = true;
       applyBtn.disabled = true;
       applyBtn.textContent = 'Applying…';
+      repairCardPicker?.setDisabled(true);
+      repairModulePicker?.setDisabled(true);
       sendToBackend({
         type: 'apply_repair',
         options: {
@@ -801,6 +935,8 @@ export function mountSettingsPanel(
           applyStaleModuleRegex: repairChecked.staleModuleRegex,
           applyDeadJournals: repairChecked.deadJournals,
           applyForceRetranslate: repairChecked.forceRetranslate,
+          characterIds: [...repairSelectedCharacterIds],
+          moduleIds: [...repairSelectedModuleIds],
         },
       });
     });
@@ -812,6 +948,9 @@ export function mountSettingsPanel(
     log.info('settings-tab: repair scan requested');
     repairScanning = true;
     repairLastSummary = null;
+    repairSelectedCharacterIds.clear();
+    repairSelectedModuleIds.clear();
+    destroyRepairPickers();
     repairResultBox.style.display = 'none';
     refreshRepairUi();
     sendToBackend({ type: 'request_repair_scan' });
@@ -1378,6 +1517,9 @@ export function mountSettingsPanel(
       repairScanning = false;
       if (msg.error) {
         repairLastSummary = null;
+        repairSelectedCharacterIds.clear();
+        repairSelectedModuleIds.clear();
+        destroyRepairPickers();
         repairResultBox.style.display = '';
         repairResultBox.replaceChildren();
         const errLine = document.createElement('div');
@@ -1386,6 +1528,14 @@ export function mountSettingsPanel(
         repairResultBox.appendChild(errLine);
       } else {
         repairLastSummary = msg.summary;
+        repairSelectedCharacterIds.clear();
+        for (const target of msg.summary.cardTargets) {
+          if (target.canRetranslate) repairSelectedCharacterIds.add(target.characterId);
+        }
+        repairSelectedModuleIds.clear();
+        for (const target of msg.summary.moduleTargets) {
+          repairSelectedModuleIds.add(target.moduleId);
+        }
         renderRepairResult();
       }
       refreshRepairUi();
@@ -1394,6 +1544,7 @@ export function mountSettingsPanel(
     }
     if (msg.type === 'repair_apply_result') {
       repairApplying = false;
+      destroyRepairPickers();
       const r = msg.result;
       const parts: string[] = [];
       if (r.staleCharRegexDeleted > 0) parts.push(`${r.staleCharRegexDeleted} char regex deleted`);
@@ -1418,6 +1569,9 @@ export function mountSettingsPanel(
         log.info('settings-tab: repair re-scan after apply');
         repairScanning = true;
         repairLastSummary = null;
+        repairSelectedCharacterIds.clear();
+        repairSelectedModuleIds.clear();
+        destroyRepairPickers();
         repairResultBox.style.display = 'none';
         refreshRepairUi();
         sendToBackend({ type: 'request_repair_scan' });
@@ -1442,6 +1596,7 @@ export function mountSettingsPanel(
       try { submodelConnSelect.destroy(); } catch { /* */ }
       try { logsHandle.destroy(); } catch { /* */ }
       try { cleanupGrid?.destroy(); } catch { /* */ }
+      destroyRepairPickers();
       try { root.replaceChildren(); } catch { /* */ }
     },
   };

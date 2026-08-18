@@ -59,6 +59,8 @@ function createScanOrchestrator(
       charactersToRetranslate: 0,
       modulesToReattach: 0,
       danglingModuleRefs: 0,
+      cardTargets: [],
+      moduleTargets: [],
     }),
     log: { info: () => {}, warn: (message) => warnings.push(message) },
     errMsg: (error) => error instanceof Error ? error.message : String(error),

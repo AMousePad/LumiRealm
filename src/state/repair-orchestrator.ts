@@ -17,6 +17,10 @@ export interface ForceRetranslateResult {
 }
 
 export interface ForceRetranslateOpts {
+  /** Omitted means every character, preserving the original repair behavior. */
+  readonly characterIds?: readonly string[];
+  /** Omitted means every attached module, preserving the original repair behavior. */
+  readonly moduleIds?: readonly string[];
   readonly onProgress?: (processed: number, total: number, currentName: string) => void;
 }
 
@@ -164,73 +168,102 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
     let modulesReattached = 0;
     let modulesScrubbed = 0;
     let processed = 0;
-    const total = entries.length;
+    const characterFilter = opts.characterIds === undefined ? null : new Set(opts.characterIds);
+    const moduleFilter = opts.moduleIds === undefined ? null : new Set(opts.moduleIds);
+    let total = 0;
     for (const entry of entries) {
-      if (!entry.data) {
-        processed++;
-        continue;
+      if (!entry.data) continue;
+      if (characterFilter === null || characterFilter.has(entry.character.id)) total++;
+      for (const moduleId of entry.data.user_overrides.attached_module_ids ?? []) {
+        if (moduleFilter === null || moduleFilter.has(moduleId)) total++;
       }
+    }
+
+    type ModuleLookup =
+      | { readonly kind: 'found'; readonly env: ModuleEnvelope }
+      | { readonly kind: 'missing' }
+      | { readonly kind: 'error' };
+    const moduleLookups = new Map<string, Promise<ModuleLookup>>();
+    const lookupModule = (moduleId: string): Promise<ModuleLookup> => {
+      const existing = moduleLookups.get(moduleId);
+      if (existing) return existing;
+      const pending = (async (): Promise<ModuleLookup> => {
+        try {
+          const env = await readModuleEnvelope(userId, moduleId);
+          return env ? { kind: 'found', env } : { kind: 'missing' };
+        } catch (err) {
+          log.warn(`forceRetranslateAll: readModuleEnvelope(${moduleId}) threw: ${errMsg(err)}`);
+          return { kind: 'error' };
+        }
+      })();
+      moduleLookups.set(moduleId, pending);
+      return pending;
+    };
+
+    for (const entry of entries) {
+      if (!entry.data) continue;
       const charId = entry.character.id;
       const charName = entry.character.name ?? '(unnamed)';
-      opts.onProgress?.(processed, total, charName);
-      // Pre-0.3 cards lack envelope.source: re-translation is impossible, resetting their version would brick at v0 forever.
-      if (entry.data.source === undefined) {
-        skippedLegacy++;
+      let currentData = entry.data;
+
+      if (characterFilter === null || characterFilter.has(charId)) {
+        opts.onProgress?.(processed, total, charName);
+        // Pre-0.3 cards lack envelope.source: re-translation is impossible,
+        // resetting their version would brick at v0 forever.
+        if (currentData.source === undefined) {
+          skippedLegacy++;
+        } else {
+          translatorMigrationChecked.delete(charId);
+          const reset: typeof currentData = { ...currentData, translator_schema_version: 0 };
+          let wroteReset = false;
+          try {
+            await writeLumirealm(charId, reset, userId);
+            currentData = reset;
+            wroteReset = true;
+          } catch (err) {
+            log.warn(`forceRetranslateAll: writeLumirealm(${charId}) failed: ${errMsg(err)}`);
+          }
+          if (wroteReset) {
+            try {
+              const kind = await runCharacterMigration(charId, charName, userId, reset, { silent: true });
+              if (kind === 'migrated') retranslated++;
+            } catch (err) {
+              log.warn(`forceRetranslateAll: runCharacterMigration(${charId}) failed: ${errMsg(err)}`);
+            }
+            // Re-fetch post-migration before module repair. A failed read does
+            // not block independent module refreshes; attachment ids survive
+            // on the reset envelope.
+            try {
+              const postFetch = await readLumirealm(charId, userId);
+              if (postFetch?.data) currentData = postFetch.data;
+            } catch (err) {
+              log.warn(`forceRetranslateAll: readLumirealm(${charId}) post-migrate failed: ${errMsg(err)}`);
+            }
+          }
+        }
         processed++;
-        continue;
       }
-      translatorMigrationChecked.delete(charId);
-      const reset: typeof entry.data = { ...entry.data, translator_schema_version: 0 };
-      try {
-        await writeLumirealm(charId, reset, userId);
-      } catch (err) {
-        log.warn(`forceRetranslateAll: writeLumirealm(${charId}) failed: ${errMsg(err)}`);
-        processed++;
-        continue;
-      }
-      try {
-        const kind = await runCharacterMigration(charId, charName, userId, reset, { silent: true });
-        if (kind === 'migrated') retranslated++;
-      } catch (err) {
-        log.warn(`forceRetranslateAll: runCharacterMigration(${charId}) failed: ${errMsg(err)}`);
-      }
-      // Re-fetch post-migration to read the current attached_module_ids.
-      let postFetch: Awaited<ReturnType<typeof readLumirealm>>;
-      try {
-        postFetch = await readLumirealm(charId, userId);
-      } catch (err) {
-        log.warn(`forceRetranslateAll: readLumirealm(${charId}) post-migrate failed: ${errMsg(err)}`);
-        processed++;
-        continue;
-      }
-      if (!postFetch?.data) {
-        processed++;
-        continue;
-      }
-      const attachedIds = postFetch.data.user_overrides.attached_module_ids ?? [];
-      if (attachedIds.length === 0) {
-        processed++;
-        continue;
-      }
+
+      const attachedIds = currentData.user_overrides.attached_module_ids ?? [];
       const danglingIds: string[] = [];
       for (const moduleId of attachedIds) {
-        let env: ModuleEnvelope | null;
-        try {
-          env = await readModuleEnvelope(userId, moduleId);
-        } catch (err) {
-          log.warn(`forceRetranslateAll: readModuleEnvelope(${moduleId}) char=${charId} threw: ${errMsg(err)}`);
-          env = null;
-        }
-        if (!env) {
+        if (moduleFilter !== null && !moduleFilter.has(moduleId)) continue;
+        opts.onProgress?.(processed, total, `${charName} / ${moduleId}`);
+        const lookup = await lookupModule(moduleId);
+        if (lookup.kind === 'missing') {
           danglingIds.push(moduleId);
+          processed++;
           continue;
         }
-        try {
-          await refreshAttachedModule(charId, env, userId);
-          modulesReattached++;
-        } catch (err) {
-          log.warn(`forceRetranslateAll: refreshAttachedModule(${charId}, ${moduleId}) failed: ${errMsg(err)}`);
+        if (lookup.kind === 'found') {
+          try {
+            await refreshAttachedModule(charId, lookup.env, userId);
+            modulesReattached++;
+          } catch (err) {
+            log.warn(`forceRetranslateAll: refreshAttachedModule(${charId}, ${moduleId}) failed: ${errMsg(err)}`);
+          }
         }
+        processed++;
       }
       if (danglingIds.length > 0) {
         try {
@@ -240,7 +273,6 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
           log.warn(`forceRetranslateAll: scrubDanglingModuleRefs(${charId}) failed: ${errMsg(err)}`);
         }
       }
-      processed++;
     }
     return { retranslated, skippedLegacy, modulesReattached, modulesScrubbed };
   }
@@ -290,6 +322,8 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
     if (options.applyForceRetranslate) {
       try {
         const r = await forceRetranslateAll(userId, {
+          ...(options.characterIds !== undefined ? { characterIds: options.characterIds } : {}),
+          ...(options.moduleIds !== undefined ? { moduleIds: options.moduleIds } : {}),
           onProgress: (processed, total, name) => {
             if (total <= 0) return;
             // Reserve 0.3 to 0.95 for retranslate progress, leaving room above and below.
