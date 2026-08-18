@@ -39490,6 +39490,7 @@ var STARTUP_TIMEOUT_MS = 1e4;
 var HEARTBEAT_TIMEOUT_MS = 45000;
 function createPromptRegexRunnerClient(deps) {
   const { log: log8, errMsg: errMsg2 } = deps;
+  const requestTimeoutMs = deps.requestTimeoutMs ?? PROMPT_REGEX_TIMEOUT_MS;
   const pending4 = new Map;
   let handle = null;
   let handleProcessId = null;
@@ -39589,8 +39590,8 @@ function createPromptRegexRunnerClient(deps) {
         if (!pending4.has(requestId))
           return;
         pending4.delete(requestId);
-        resolve({ requestId, ok: false, error: `timeout after ${PROMPT_REGEX_TIMEOUT_MS}ms` });
-      }, PROMPT_REGEX_TIMEOUT_MS);
+        resolve({ requestId, ok: false, error: `timeout after ${requestTimeoutMs}ms` });
+      }, requestTimeoutMs);
       if (typeof timer.unref === "function") {
         timer.unref();
       }
