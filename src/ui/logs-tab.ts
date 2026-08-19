@@ -1,6 +1,11 @@
 import type { BackendToFrontend, FrontendToBackend, LogLevelWire } from '../types/messages.js';
 import type { FrontendLog } from './drawer.js';
 import { createSearchableSelect } from './searchable-select.js';
+import { logStore } from '../log/store.js';
+
+// The backend only pushes log state on request/set/clear, so a live buffer
+// would otherwise display the count captured at enable time (always 0) forever.
+const STATUS_POLL_MS = 1000;
 
 interface LevelOption {
   readonly value: LogLevelWire;
@@ -34,6 +39,8 @@ interface State {
   level: LogLevelWire;
   eventCount: number;
   bufferBytes: number;
+  /** False until the first log_state_pushed lands, so mount does not claim 0. */
+  backendStateKnown: boolean;
   lastDownloadAt: number | null;
   lastError: string | null;
 }
@@ -48,6 +55,7 @@ export function mountLogsPanel(opts: MountOpts): LogsPanelHandle {
     level: 'info',
     eventCount: 0,
     bufferBytes: 0,
+    backendStateKnown: false,
     lastDownloadAt: null,
     lastError: null,
   };
@@ -136,7 +144,7 @@ export function mountLogsPanel(opts: MountOpts): LogsPanelHandle {
   downloadBtn.textContent = 'Download';
   downloadBtn.title = 'Save the bundle and turn logging off.';
   downloadBtn.addEventListener('click', () => {
-    if (!state.enabled && state.eventCount === 0) {
+    if (!state.enabled && totals().events === 0) {
       flash('Nothing to download. Enable logging first.');
       return;
     }
@@ -167,6 +175,16 @@ export function mountLogsPanel(opts: MountOpts): LogsPanelHandle {
     flashTimer = window.setTimeout(() => { flashEl.textContent = ''; }, 6000);
   }
 
+  // Backend and frontend keep separate buffers and are only merged at export,
+  // so the status has to sum both or it silently undercounts by every UI event.
+  function totals(): { events: number; bytes: number } {
+    const local = logStore.getState();
+    return {
+      events: state.eventCount + local.eventCount,
+      bytes: state.bufferBytes + local.bufferBytes,
+    };
+  }
+
   function render(): void {
     enableRow.input.checked = state.enabled;
     chatRow.input.checked = state.includeChatData;
@@ -174,11 +192,16 @@ export function mountLogsPanel(opts: MountOpts): LogsPanelHandle {
     chatRow.row.classList.toggle('lr-logs-row-disabled', !state.enabled);
     if (levelSelect.getValue() !== state.level) levelSelect.setValue(state.level);
 
-    const kb = (state.bufferBytes / 1024).toFixed(1);
     const levelTxt = `level=${state.level}`;
-    status.textContent = state.enabled
-      ? `${state.eventCount} events, ${kb} KB · ${levelTxt}`
-      : `Off. ${state.eventCount} events, ${kb} KB · ${levelTxt}.`;
+    if (!state.backendStateKnown) {
+      status.textContent = `Loading state… · ${levelTxt}`;
+    } else {
+      const { events, bytes } = totals();
+      const kb = (bytes / 1024).toFixed(1);
+      status.textContent = state.enabled
+        ? `${events} events, ${kb} KB · ${levelTxt}`
+        : `Off. ${events} events, ${kb} KB · ${levelTxt}.`;
+    }
     if (state.lastError) {
       status.textContent += `  ·  ${state.lastError}`;
     }
@@ -188,6 +211,16 @@ export function mountLogsPanel(opts: MountOpts): LogsPanelHandle {
   sendToBackend({ type: 'log_request_state' });
   render();
 
+  const poll = window.setInterval(() => {
+    // Frontend events accrue locally, so repaint even while the buffer is off
+    // and no backend round-trip is warranted.
+    if (!state.enabled) {
+      render();
+      return;
+    }
+    sendToBackend({ type: 'log_request_state' });
+  }, STATUS_POLL_MS);
+
   function handleBackendMessage(msg: BackendToFrontend): void {
     if (msg.type === 'log_state_pushed') {
       state.enabled = msg.enabled;
@@ -195,6 +228,7 @@ export function mountLogsPanel(opts: MountOpts): LogsPanelHandle {
       if (msg.level !== undefined) state.level = msg.level;
       state.eventCount = msg.eventCount;
       state.bufferBytes = msg.bufferBytes;
+      state.backendStateKnown = true;
       render();
     } else if (msg.type === 'log_export_pushed') {
       // Frontend handles the download. Refresh status text and confirm.
@@ -205,6 +239,7 @@ export function mountLogsPanel(opts: MountOpts): LogsPanelHandle {
 
   function destroy(): void {
     log.info('logs-tab: destroy');
+    window.clearInterval(poll);
     if (flashTimer !== undefined) window.clearTimeout(flashTimer);
     levelSelect.destroy();
     while (root.firstChild) root.removeChild(root.firstChild);
