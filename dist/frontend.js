@@ -29584,19 +29584,19 @@ function makeMirroredConsole(name) {
     info: (...a) => L.info(`console.info: ${fmt(a)}`)
   };
 }
-async function runInterpretedTrigger(entry, api, data, scriptNS, outFlags) {
+async function runInterpretedTrigger(entry, api, data, scriptNS, invocation, outFlags) {
   await withTriggerDepth(async () => {
     const rLog = makeSafeLogger(`runTrigger[${entry.name}]`);
     const t0 = Date.now();
     const rt = await makeRisuTriggerRuntime(api, data, scriptNS, {
-      displayMode: entry.rtOpts.displayMode,
+      displayMode: invocation.displayMode,
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
-      binding: entry.rtOpts.binding,
+      binding: invocation.binding,
       characterId: entry.rtOpts.characterId
     });
     try {
       await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {
-        displayMode: entry.rtOpts.displayMode,
+        displayMode: invocation.displayMode,
         lowLevelAccess: entry.rtOpts.lowLevelAccess
       });
       rLog.info(`RETURN OK elapsed=${Date.now() - t0}ms`);
@@ -29616,7 +29616,7 @@ function registerManualTriggers(scriptNS, compiled, api) {
     if (entry.type !== "library")
       continue;
     scriptNS.registerManual(entry.name, async (ctx) => {
-      await runInterpretedTrigger(entry, ctx.api ?? api, ctx.data, scriptNS);
+      await runInterpretedTrigger(entry, ctx.api ?? api, ctx.data, scriptNS, { binding: "manual", displayMode: false });
     });
   }
 }
