@@ -162,6 +162,7 @@ import {
 import { normalizeSettingsPatch } from './state/settings-store.js';
 import { consumeOwnChatChange } from './state/own-chat-change.js';
 import { consumeOwnCharacterEdit, expectCharacterEdit } from './state/own-character-edit.js';
+import { recompileDerivedPayload } from './state/derived-payload.js';
 import { consumeIfOurWrite } from './state/recent-writes.js';
 import {
   invalidateRenderMcpForChat,
@@ -514,6 +515,19 @@ const scanOrphanedImages = (userId: string) => orphanOrchestrator.scanOrphanedIm
 const listStaleModuleRegexIds = (userId: string) => orphanOrchestrator.listStaleModuleRegexIds(userId);
 const listStaleCharRegexIds = (userId: string) => orphanOrchestrator.listStaleCharRegexIds(userId);
 const clearDeadJournals = (userId: string) => orphanOrchestrator.clearDeadJournals(userId);
+
+const recompileDerivedPayloadForCharacter = async (characterId: string, userId: string | undefined): Promise<void> => {
+  try {
+    await updateLumirealm(charactersApi(), characterId, userId, (cur) => {
+      const result = recompileDerivedPayload(cur);
+      if (result === null) return cur;
+      log.info(`recompile-derived: char=${characterId} rebuilt [${result.changed.join(',')}]`);
+      return result.next;
+    });
+  } catch (err) {
+    log.warn(`recompile-derived: char=${characterId} failed: ${errMsg(err)}`);
+  }
+};
 
 const deleteRepairRegexRows = async (userId: string, ids: readonly string[]): Promise<number> => {
   if (ids.length === 0) return 0;
@@ -1162,6 +1176,7 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   generationEndedBindings: GENERATION_ENDED_BINDINGS,
   consumeOwnChatChange,
   consumeOwnCharacterEdit,
+  recompileDerivedPayload: recompileDerivedPayloadForCharacter,
   consumeIfOurWrite,
   send,
   sendSetActiveChat,

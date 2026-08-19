@@ -21,6 +21,7 @@ function harness(options: {
     captureUserId: (userId, where) => trace.push(`capture:${where}:${userId ?? '-'}`),
     extractIds: () => ({ chatId: null, characterId: null }),
     dumpPayload: () => '{}',
+    recompileDerivedPayload: async (characterId) => { trace.push(`recompile:${characterId}`); },
     activeCardByChat: new Map(),
     lastActiveChatByUser: new Map(),
     lastSentBgHtmlByChat: new Map(),

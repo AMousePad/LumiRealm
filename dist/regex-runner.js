@@ -9902,7 +9902,7 @@ var init_scanner = __esm(() => {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.8.10",
+  version: "0.8.11",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",

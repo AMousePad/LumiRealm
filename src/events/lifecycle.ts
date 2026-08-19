@@ -77,6 +77,8 @@ export interface LifecycleEventHandlerDeps {
   // Self-echo gates
   readonly consumeOwnChatChange: (chatId: string) => boolean;
   readonly consumeOwnCharacterEdit: (characterId: string) => boolean;
+  /** Rebuild compiled payload fields after a write that bypassed the UI handler. */
+  readonly recompileDerivedPayload: (characterId: string, userId: string | undefined) => Promise<void>;
   readonly consumeIfOurWrite: (chatId: string, messageId: string, content: string) => boolean;
 
   // Drawer / FE messaging
@@ -710,6 +712,7 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       const wasOwn = deps.consumeOwnCharacterEdit(characterId);
       deps.log.info(`event CHARACTER_EDITED characterId=${characterId} ownWrite=${wasOwn}`);
       if (wasOwn) return;
+      await deps.recompileDerivedPayload(characterId, userId);
       deps.invalidateActiveForCharacter(characterId, userId);
       try {
         deps.pushCards(await deps.listCards(userId), userId);

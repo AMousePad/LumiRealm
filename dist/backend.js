@@ -31760,7 +31760,7 @@ function clearActiveModulesByNamespace(chatId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.8.10",
+  version: "0.8.11",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -36679,6 +36679,7 @@ function createLifecycleEventHandlers(deps) {
       deps.log.info(`event CHARACTER_EDITED characterId=${characterId} ownWrite=${wasOwn}`);
       if (wasOwn)
         return;
+      await deps.recompileDerivedPayload(characterId, userId);
       deps.invalidateActiveForCharacter(characterId, userId);
       try {
         deps.pushCards(await deps.listCards(userId), userId);
@@ -40663,11 +40664,14 @@ async function installCurrentCharacterRegexScripts(args, deps) {
   }));
   let ownership = await ensureRegexOwnership(deps.regexApi, pending4, args.userId);
   if (ownership.unowned > 0 && deps.deleteRegexRows) {
-    const removed = await deps.deleteRegexRows(args.userId, ownership.unownedRowIds);
-    if (removed !== ownership.unownedRowIds.length) {
-      throw new Error(`unowned regex takeover removed ${removed}/${ownership.unownedRowIds.length} row(s)`);
+    const ids = ownership.unownedRowIds;
+    deps.log?.info(`regex takeover: char=${args.characterId} deleting ${ids.length} unowned row(s) [${ids.join(",")}]`);
+    const removed = await deps.deleteRegexRows(args.userId, ids);
+    if (removed !== ids.length) {
+      throw new Error(`unowned regex takeover removed ${removed}/${ids.length} row(s), deleted rows are recreated on the next run`);
     }
     ownership = await ensureRegexOwnership(deps.regexApi, pending4, args.userId);
+    deps.log?.info(`regex takeover: char=${args.characterId} recreated created=${ownership.created} ` + `stillUnowned=${ownership.unowned} failed=${ownership.failed}`);
   }
   if (!ownership.allOwned) {
     throw new Error(`regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}` + ` [${describeRegexOwnershipFailures(ownership.failures)}]`);
@@ -40902,7 +40906,7 @@ function createMigrationsRunner(deps) {
       extensionVersion,
       log: log8,
       installCharacterRegexScripts: async (charId, charName, scripts) => {
-        await installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId }, { regexApi: spindle.regex_scripts, send, deleteRegexRows });
+        await installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId }, { regexApi: spindle.regex_scripts, send, deleteRegexRows, log: log8 });
       },
       reinstallAttachedModules: async (charId) => {
         const ids = envelope.user_overrides.attached_module_ids ?? [];
@@ -44346,6 +44350,38 @@ function makeDeleteCardByChar(deps) {
   };
 }
 
+// src/state/derived-payload.ts
+function recompileDerivedPayload(cur) {
+  const changed = [];
+  const nextLua = cur.payload.triggers.map((t) => extractLuaForTrigger(t));
+  const luaStale = nextLua.length !== cur.payload.lua_scripts.length || nextLua.some((code, i) => code !== cur.payload.lua_scripts[i]);
+  if (luaStale)
+    changed.push("lua_scripts");
+  const source = cur.payload.background_html_source;
+  const nextBg = typeof source === "string" ? prepareBackgroundHtmlForRuntime(source, {
+    regexReplaceStrings: cur.regex_scripts.map((r) => r.replace_string ?? "")
+  }).translated : cur.payload.background_html;
+  const bgStale = nextBg !== cur.payload.background_html;
+  if (bgStale)
+    changed.push("background_html");
+  if (changed.length === 0)
+    return null;
+  return {
+    next: {
+      ...cur,
+      payload: {
+        ...cur.payload,
+        ...luaStale ? {
+          lua_scripts: nextLua,
+          requires: { ...cur.payload.requires, lua: nextLua.some((s) => s.length > 0) }
+        } : {},
+        ...bgStale ? { background_html: nextBg } : {}
+      }
+    },
+    changed
+  };
+}
+
 // src/state/state-changed-debouncer.ts
 var DEBOUNCE_MS = 50;
 var pendingTimers = new Map;
@@ -45628,6 +45664,19 @@ var scanOrphanedImages = (userId) => orphanOrchestrator.scanOrphanedImages(userI
 var listStaleModuleRegexIds = (userId) => orphanOrchestrator.listStaleModuleRegexIds(userId);
 var listStaleCharRegexIds = (userId) => orphanOrchestrator.listStaleCharRegexIds(userId);
 var clearDeadJournals = (userId) => orphanOrchestrator.clearDeadJournals(userId);
+var recompileDerivedPayloadForCharacter = async (characterId, userId) => {
+  try {
+    await updateLumirealm(charactersApi(), characterId, userId, (cur) => {
+      const result = recompileDerivedPayload(cur);
+      if (result === null)
+        return cur;
+      log8.info(`recompile-derived: char=${characterId} rebuilt [${result.changed.join(",")}]`);
+      return result.next;
+    });
+  } catch (err) {
+    log8.warn(`recompile-derived: char=${characterId} failed: ${errMsg(err)}`);
+  }
+};
 var deleteRepairRegexRows = async (userId, ids) => {
   if (ids.length === 0)
     return 0;
@@ -46138,6 +46187,7 @@ var lifecycleHandlers = createLifecycleEventHandlers({
   generationEndedBindings: GENERATION_ENDED_BINDINGS,
   consumeOwnChatChange,
   consumeOwnCharacterEdit,
+  recompileDerivedPayload: recompileDerivedPayloadForCharacter,
   consumeIfOurWrite,
   send,
   sendSetActiveChat,
@@ -46470,7 +46520,7 @@ var repairOrchestrator = createRepairOrchestrator({
       const character2 = await spindle.characters.get(charId, uid);
       return typeof character2?.image_id === "string" && character2.image_id.length > 0 ? character2.image_id : null;
     },
-    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send, deleteRegexRows: deleteRepairRegexRows }),
+    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send, deleteRegexRows: deleteRepairRegexRows, log: log8 }),
     writeEnvelope: (charId, data, uid) => writeLumirealm(charactersApi(), charId, data, uid).then(() => {
       return;
     }),
