@@ -553,6 +553,9 @@ export function mountVariablesPanel(
   function handleBackendMessage(msg: BackendToFrontend): void {
     if (msg.type !== 'set_variables') return;
     log.info(`variables-tab.set_variables: chatId=${msg.chatId} seq=${msg.seq} ts=${msg.ts}`);
+    // One slot: a background chat's push would blank the panel until the next
+    // switch. CHAT_SWITCHED force-pushes, so dropping loses nothing.
+    if (activeChatId !== null && msg.chatId !== activeChatId) return;
     if (snapshot && snapshot.chatId === msg.chatId && snapshot.seq > msg.seq) {
       log.info(`variables-tab: ignoring older snapshot seq=${msg.seq} (have=${snapshot.seq})`);
       return;
