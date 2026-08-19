@@ -1450,6 +1450,7 @@ const migrationsRunner = createMigrationsRunner({
   currentModuleSchemaVersion: CURRENT_MODULE_SCHEMA_VERSION,
   translatorMigrationChecked,
   send,
+  deleteRegexRows: deleteRepairRegexRows,
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
   writeModuleEnvelope: async (userId, env) => { await writeModuleEnvelope(moduleStorage(), userId, env); },
   dispatchModuleArtifactInstall: (charId, env, userId, options) =>
@@ -1554,7 +1555,7 @@ const repairOrchestrator = createRepairOrchestrator({
         installCharacterRegexScripts: (charId, charName, scripts, uid) =>
           installCurrentCharacterRegexScripts(
             { characterId: charId, characterName: charName, scripts, userId: uid },
-            { regexApi: spindle.regex_scripts, send },
+            { regexApi: spindle.regex_scripts, send, deleteRegexRows: deleteRepairRegexRows, log },
           ),
         writeEnvelope: (charId, data, uid) =>
           writeLumirealm(charactersApi(), charId, data, uid).then(() => undefined),

@@ -25858,6 +25858,7 @@ async function ensureRegexOwnership(api, scripts, userId) {
   const rowsByScope = new Map;
   const seen = new Set;
   const failures = [];
+  const unownedRowIds = [];
   let created = 0;
   let alreadyOwned = 0;
   let unowned = 0;
@@ -25885,6 +25886,7 @@ async function ensureRegexOwnership(api, scripts, userId) {
     if (existing) {
       if (existing.can_mutate !== true) {
         unowned++;
+        unownedRowIds.push(existing.id);
         fail(script, "unowned", `row ${existing.id} is not mutable by this extension`);
         continue;
       }
@@ -25912,7 +25914,8 @@ async function ensureRegexOwnership(api, scripts, userId) {
     alreadyOwned,
     unowned,
     failed,
-    failures
+    failures,
+    unownedRowIds
   };
 }
 
@@ -40698,7 +40701,14 @@ async function installCurrentCharacterRegexScripts(args, deps) {
     ...script,
     metadata: { ...script.metadata ?? {} }
   }));
-  const ownership = await ensureRegexOwnership(deps.regexApi, pending4, args.userId);
+  let ownership = await ensureRegexOwnership(deps.regexApi, pending4, args.userId);
+  if (ownership.unowned > 0 && deps.deleteRegexRows) {
+    const removed = await deps.deleteRegexRows(args.userId, ownership.unownedRowIds);
+    if (removed !== ownership.unownedRowIds.length) {
+      throw new Error(`unowned regex takeover removed ${removed}/${ownership.unownedRowIds.length} row(s)`);
+    }
+    ownership = await ensureRegexOwnership(deps.regexApi, pending4, args.userId);
+  }
   if (!ownership.allOwned) {
     throw new Error(`regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}` + ` [${describeRegexOwnershipFailures(ownership.failures)}]`);
   }
@@ -40919,6 +40929,7 @@ function createMigrationsRunner(deps) {
     dispatchGlobalModuleArtifactInstall,
     isGlobalModule,
     writeLumirealm: writeLumirealm2,
+    deleteRegexRows,
     invalidateActiveForCharacter,
     toastFor,
     charactersAttachedTo,
@@ -40931,7 +40942,7 @@ function createMigrationsRunner(deps) {
       extensionVersion,
       log: log8,
       installCharacterRegexScripts: async (charId, charName, scripts) => {
-        await installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId }, { regexApi: spindle.regex_scripts, send });
+        await installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId }, { regexApi: spindle.regex_scripts, send, deleteRegexRows });
       },
       reinstallAttachedModules: async (charId) => {
         const ids = envelope.user_overrides.attached_module_ids ?? [];
@@ -46408,6 +46419,7 @@ var migrationsRunner = createMigrationsRunner({
   currentModuleSchemaVersion: CURRENT_MODULE_SCHEMA_VERSION,
   translatorMigrationChecked,
   send,
+  deleteRegexRows: deleteRepairRegexRows,
   readModuleEnvelope: (userId, moduleId) => readEnvelope(moduleStorage(), userId, moduleId),
   writeModuleEnvelope: async (userId, env) => {
     await writeEnvelope(moduleStorage(), userId, env);
@@ -46498,7 +46510,7 @@ var repairOrchestrator = createRepairOrchestrator({
       const character2 = await spindle.characters.get(charId, uid);
       return typeof character2?.image_id === "string" && character2.image_id.length > 0 ? character2.image_id : null;
     },
-    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send }),
+    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send, deleteRegexRows: deleteRepairRegexRows }),
     writeEnvelope: (charId, data, uid) => writeLumirealm(charactersApi(), charId, data, uid).then(() => {
       return;
     }),

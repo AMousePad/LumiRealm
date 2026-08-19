@@ -51,6 +51,7 @@ export interface MigrationsFactoryDeps {
     userId: string,
     mutator: (current: LumirealmCharacterData) => LumirealmCharacterData,
   ) => Promise<LumirealmCharacterData | null>;
+  readonly deleteRegexRows: (userId: string, ids: readonly string[]) => Promise<number>;
   readonly invalidateActiveForCharacter: (characterId: string, userId: string | undefined) => void;
   readonly toastFor: (
     userId: string | undefined,
@@ -210,6 +211,7 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
     dispatchGlobalModuleArtifactInstall,
     isGlobalModule,
     writeLumirealm,
+    deleteRegexRows,
     invalidateActiveForCharacter,
     toastFor,
     charactersAttachedTo,
@@ -231,7 +233,7 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       installCharacterRegexScripts: async (charId, charName, scripts) => {
         await installCurrentCharacterRegexScripts(
           { characterId: charId, characterName: charName, scripts, userId },
-          { regexApi: spindle.regex_scripts, send },
+          { regexApi: spindle.regex_scripts, send, deleteRegexRows, log },
         );
       },
       reinstallAttachedModules: async (charId) => {
