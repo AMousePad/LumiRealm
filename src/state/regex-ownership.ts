@@ -24,6 +24,9 @@ export interface RegexOwnershipResult {
   readonly unowned: number;
   readonly failed: number;
   readonly failures: readonly RegexOwnershipFailure[];
+  /** Row ids blocked by host ownership. Each one shadows a desired script_id,
+   *  so deleting them is recoverable: a re-run recreates them as owned rows. */
+  readonly unownedRowIds: readonly string[];
 }
 
 const MAX_DESCRIBED_FAILURES = 5;
@@ -108,6 +111,7 @@ export async function ensureRegexOwnership(
   const rowsByScope = new Map<string, Map<string, ListedRegex>>();
   const seen = new Set<string>();
   const failures: RegexOwnershipFailure[] = [];
+  const unownedRowIds: string[] = [];
   let created = 0;
   let alreadyOwned = 0;
   let unowned = 0;
@@ -147,6 +151,7 @@ export async function ensureRegexOwnership(
     if (existing) {
       if (existing.can_mutate !== true) {
         unowned++;
+        unownedRowIds.push(existing.id);
         fail(script, 'unowned', `row ${existing.id} is not mutable by this extension`);
         continue;
       }
@@ -180,5 +185,6 @@ export async function ensureRegexOwnership(
     unowned,
     failed,
     failures,
+    unownedRowIds,
   };
 }
