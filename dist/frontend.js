@@ -38663,6 +38663,7 @@ function createSearchableSelect(opts) {
 }
 
 // src/ui/logs-tab.ts
+var STATUS_POLL_MS = 1000;
 var LEVEL_OPTIONS = [
   { value: "silent", label: "Silent", title: "Drop everything, including errors. Same as logging off but the master switch stays on." },
   { value: "error", label: "Error", title: "Errors only." },
@@ -38680,6 +38681,7 @@ function mountLogsPanel(opts) {
     level: "info",
     eventCount: 0,
     bufferBytes: 0,
+    backendStateKnown: false,
     lastDownloadAt: null,
     lastError: null
   };
@@ -38761,7 +38763,7 @@ function mountLogsPanel(opts) {
   downloadBtn.textContent = "Download";
   downloadBtn.title = "Save the bundle and turn logging off.";
   downloadBtn.addEventListener("click", () => {
-    if (!state.enabled && state.eventCount === 0) {
+    if (!state.enabled && totals().events === 0) {
       flash("Nothing to download. Enable logging first.");
       return;
     }
@@ -38791,6 +38793,13 @@ function mountLogsPanel(opts) {
       flashEl.textContent = "";
     }, 6000);
   }
+  function totals() {
+    const local = logStore.getState();
+    return {
+      events: state.eventCount + local.eventCount,
+      bytes: state.bufferBytes + local.bufferBytes
+    };
+  }
   function render() {
     enableRow.input.checked = state.enabled;
     chatRow.input.checked = state.includeChatData;
@@ -38798,15 +38807,27 @@ function mountLogsPanel(opts) {
     chatRow.row.classList.toggle("lr-logs-row-disabled", !state.enabled);
     if (levelSelect.getValue() !== state.level)
       levelSelect.setValue(state.level);
-    const kb = (state.bufferBytes / 1024).toFixed(1);
     const levelTxt = `level=${state.level}`;
-    status.textContent = state.enabled ? `${state.eventCount} events, ${kb} KB · ${levelTxt}` : `Off. ${state.eventCount} events, ${kb} KB · ${levelTxt}.`;
+    if (!state.backendStateKnown) {
+      status.textContent = `Loading state… · ${levelTxt}`;
+    } else {
+      const { events, bytes } = totals();
+      const kb = (bytes / 1024).toFixed(1);
+      status.textContent = state.enabled ? `${events} events, ${kb} KB · ${levelTxt}` : `Off. ${events} events, ${kb} KB · ${levelTxt}.`;
+    }
     if (state.lastError) {
       status.textContent += `  ·  ${state.lastError}`;
     }
   }
   sendToBackend({ type: "log_request_state" });
   render();
+  const poll = window.setInterval(() => {
+    if (!state.enabled) {
+      render();
+      return;
+    }
+    sendToBackend({ type: "log_request_state" });
+  }, STATUS_POLL_MS);
   function handleBackendMessage(msg) {
     if (msg.type === "log_state_pushed") {
       state.enabled = msg.enabled;
@@ -38815,6 +38836,7 @@ function mountLogsPanel(opts) {
         state.level = msg.level;
       state.eventCount = msg.eventCount;
       state.bufferBytes = msg.bufferBytes;
+      state.backendStateKnown = true;
       render();
     } else if (msg.type === "log_export_pushed") {
       state.lastDownloadAt = Date.now();
@@ -38823,6 +38845,7 @@ function mountLogsPanel(opts) {
   }
   function destroy() {
     log8.info("logs-tab: destroy");
+    window.clearInterval(poll);
     if (flashTimer !== undefined)
       window.clearTimeout(flashTimer);
     levelSelect.destroy();
