@@ -14,6 +14,10 @@ import {
 } from '../payload/types.js';
 import { buildAssetIndexes } from '../payload/import.js';
 import {
+  neutralizeUncompilableRegex,
+  type ProjectedCharacterRegexScript,
+} from '../payload/character-regex-projection.js';
+import {
   LEGACY_ENTRY_HASH_FIELDS_V1,
   computeEntrySourceHashWithFields,
 } from '../core/mappers/lorebook-hash.js';
@@ -200,6 +204,7 @@ async function applyV7ReinstallRegex(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
 ): Promise<CharacterMigrationStepResult> {
+  const neutralized: string[] = [];
   const stored: StoredRegexScript[] = args.newBundle.regexScripts.map((r) => ({
     name: r.name,
     script_id: r.script_id,
@@ -220,7 +225,16 @@ async function applyV7ReinstallRegex(
     description: r.description,
     folder: r.folder,
     metadata: { ...(r.metadata ?? {}) },
-  }));
+  })).map((row) => {
+    const result = neutralizeUncompilableRegex(row as ProjectedCharacterRegexScript);
+    if (result.error !== null) {
+      neutralized.push(row.name);
+      deps.log.warn(
+        `migrate(${args.characterId}) v7: "${row.name}" regex does not compile, parked as disabled: ${result.error}`,
+      );
+    }
+    return result.row as StoredRegexScript;
+  });
   await deps.installCharacterRegexScripts(args.characterId, args.characterName, stored);
   const dividerCount = stored.filter((s) => {
     const m = s.metadata as { _risu?: { source_type?: string } } | undefined;
@@ -231,7 +245,12 @@ async function applyV7ReinstallRegex(
       ...args.envelope,
       regex_scripts: stored,
     },
-    notes: [`reinstalled ${stored.length} regex_script(s), dividers=${dividerCount}`],
+    notes: [
+      `reinstalled ${stored.length} regex_script(s), dividers=${dividerCount}`,
+      ...(neutralized.length > 0
+        ? [`parked ${neutralized.length} uncompilable rule(s): ${neutralized.join(', ')}`]
+        : []),
+    ],
   };
 }
 

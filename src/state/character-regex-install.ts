@@ -3,7 +3,7 @@ import type { SpindleAPI } from 'lumiverse-spindle-types';
 import type { StoredRegexScript } from '../payload/types.js';
 import type { BackendToFrontend } from '../types/messages.js';
 import { awaitRegexInstall } from '../migrations/install-coordinator.js';
-import { ensureRegexOwnership } from './regex-ownership.js';
+import { describeRegexOwnershipFailures, ensureRegexOwnership } from './regex-ownership.js';
 
 type RegexApi = Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'>;
 
@@ -32,7 +32,8 @@ export async function installCurrentCharacterRegexScripts(
   const ownership = await ensureRegexOwnership(deps.regexApi, pending, args.userId);
   if (!ownership.allOwned) {
     throw new Error(
-      `regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}`,
+      `regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}` +
+        ` [${describeRegexOwnershipFailures(ownership.failures)}]`,
     );
   }
   const completion = await awaitRegexInstall(args.userId, (requestId) => {

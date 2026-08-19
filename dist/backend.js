@@ -24229,9 +24229,47 @@ function makeSafeLogger(prefix) {
 }
 
 // src/payload/character-regex-projection.ts
+var INVALID_SOURCE_REGEX_KEY = "_lr_invalid_source_regex";
+var NEVER_MATCH_PATTERN = "(?!)";
+var SAFE_FLAGS = "g";
+function hasMacroSyntax(pattern) {
+  return pattern.includes("{{") || pattern.includes("<USER>") || pattern.includes("<BOT>") || pattern.includes("<CHAR>");
+}
+function hostRegexCompileError(findRegex, flags, substituteMacros) {
+  const pattern = substituteMacros !== "none" && hasMacroSyntax(findRegex) ? findRegex.replace(/\{\{[\s\S]*?\}\}/g, "x").replace(/<USER>|<BOT>|<CHAR>/g, "x") : findRegex;
+  try {
+    new RegExp(pattern, flags);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+function neutralizeUncompilableRegex(row) {
+  const error = hostRegexCompileError(row.find_regex, row.flags, row.substitute_macros);
+  if (error === null)
+    return { row, error: null };
+  return {
+    row: {
+      ...row,
+      find_regex: NEVER_MATCH_PATTERN,
+      flags: SAFE_FLAGS,
+      disabled: true,
+      description: `Disabled: source card regex does not compile (${error}).`,
+      metadata: {
+        ...row.metadata,
+        [INVALID_SOURCE_REGEX_KEY]: {
+          find_regex: row.find_regex,
+          flags: row.flags,
+          error
+        }
+      }
+    },
+    error
+  };
+}
 function projectCharacterRegexScripts(rows, characterId, characterName) {
   const fallbackFolder = `Risu \u2014 ${characterName}`.slice(0, 80);
-  return rows.map((row) => ({
+  return rows.map((row) => neutralizeUncompilableRegex({
     name: row.name,
     script_id: row.script_id,
     find_regex: row.find_regex,
@@ -24251,7 +24289,7 @@ function projectCharacterRegexScripts(rows, characterId, characterName) {
     description: row.description,
     folder: row.folder || fallbackFolder,
     metadata: { ...row.metadata ?? {} }
-  }));
+  }).row);
 }
 
 // src/payload/import.ts
@@ -24905,6 +24943,7 @@ async function applyV5AssetIndexRebuild(args, deps) {
   };
 }
 async function applyV7ReinstallRegex(args, deps) {
+  const neutralized = [];
   const stored = args.newBundle.regexScripts.map((r) => ({
     name: r.name,
     script_id: r.script_id,
@@ -24925,7 +24964,14 @@ async function applyV7ReinstallRegex(args, deps) {
     description: r.description,
     folder: r.folder,
     metadata: { ...r.metadata ?? {} }
-  }));
+  })).map((row) => {
+    const result = neutralizeUncompilableRegex(row);
+    if (result.error !== null) {
+      neutralized.push(row.name);
+      deps.log.warn(`migrate(${args.characterId}) v7: "${row.name}" regex does not compile, parked as disabled: ${result.error}`);
+    }
+    return result.row;
+  });
   await deps.installCharacterRegexScripts(args.characterId, args.characterName, stored);
   const dividerCount = stored.filter((s) => {
     const m = s.metadata;
@@ -24936,7 +24982,10 @@ async function applyV7ReinstallRegex(args, deps) {
       ...args.envelope,
       regex_scripts: stored
     },
-    notes: [`reinstalled ${stored.length} regex_script(s), dividers=${dividerCount}`]
+    notes: [
+      `reinstalled ${stored.length} regex_script(s), dividers=${dividerCount}`,
+      ...neutralized.length > 0 ? [`parked ${neutralized.length} uncompilable rule(s): ${neutralized.join(", ")}`] : []
+    ]
   };
 }
 async function applyV16RefreshRegexRuntime(args, deps) {
@@ -25747,6 +25796,25 @@ function consumeOwnCharacterEdit(characterId) {
 }
 
 // src/state/regex-ownership.ts
+var MAX_DESCRIBED_FAILURES = 5;
+function describeRegexOwnershipFailures(failures) {
+  if (failures.length === 0)
+    return "";
+  const shown = failures.slice(0, MAX_DESCRIBED_FAILURES).map((f) => `${f.stage}:${f.scriptId || "<empty-id>"}("${f.name}") ${f.message}`);
+  const rest = failures.length - shown.length;
+  return shown.join("; ") + (rest > 0 ? `; +${rest} more` : "");
+}
+function errText(err) {
+  if (err instanceof Error)
+    return err.message;
+  if (typeof err === "string")
+    return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
 function normalizeScriptId(raw) {
   return raw.toLowerCase().replace(/[\s\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
 }
@@ -25789,13 +25857,16 @@ async function ensureRegexOwnership(api, scripts, userId) {
   }));
   const rowsByScope = new Map;
   const seen = new Set;
+  const failures = [];
   let created = 0;
   let alreadyOwned = 0;
   let unowned = 0;
-  let failed = 0;
+  const fail = (script, stage, message) => {
+    failures.push({ scriptId: script.script_id, name: script.name, stage, message });
+  };
   for (const script of normalizedScripts) {
     if (!script.script_id || seen.has(script.script_id)) {
-      failed++;
+      fail(script, "duplicate_id", script.script_id ? "normalized script_id collides with an earlier row" : "empty script_id");
       continue;
     }
     seen.add(script.script_id);
@@ -25805,8 +25876,8 @@ async function ensureRegexOwnership(api, scripts, userId) {
       try {
         existingById = await listScope(api, script, userId);
         rowsByScope.set(key, existingById);
-      } catch {
-        failed++;
+      } catch (err) {
+        fail(script, "list", errText(err));
         continue;
       }
     }
@@ -25814,13 +25885,14 @@ async function ensureRegexOwnership(api, scripts, userId) {
     if (existing) {
       if (existing.can_mutate !== true) {
         unowned++;
+        fail(script, "unowned", `row ${existing.id} is not mutable by this extension`);
         continue;
       }
       try {
         await api.update(existing.id, createInput(script), userId);
         alreadyOwned++;
-      } catch {
-        failed++;
+      } catch (err) {
+        fail(script, "update", errText(err));
       }
       continue;
     }
@@ -25828,17 +25900,19 @@ async function ensureRegexOwnership(api, scripts, userId) {
       const createdRow = await api.create(createInput(script), userId);
       created++;
       existingById.set(script.script_id, createdRow);
-    } catch {
-      failed++;
+    } catch (err) {
+      fail(script, "create", errText(err));
     }
   }
+  const failed = failures.length - unowned;
   return {
     scripts: normalizedScripts,
     allOwned: unowned === 0 && failed === 0,
     created,
     alreadyOwned,
     unowned,
-    failed
+    failed,
+    failures
   };
 }
 
@@ -31492,7 +31566,7 @@ function createRegexImporter(deps) {
     }
     const ownership = await ensureRegexOwnership(deps.regexApi, scripts, userId);
     if (!ownership.allOwned) {
-      deps.log.warn(`import_regex: ownership incomplete unowned=${ownership.unowned} failed=${ownership.failed}; ` + "REST import will continue without deleting anything");
+      deps.log.warn(`import_regex: ownership incomplete unowned=${ownership.unowned} failed=${ownership.failed} ` + `[${describeRegexOwnershipFailures(ownership.failures)}]; ` + "REST import will continue without deleting anything");
     }
     deps.send({
       type: "standalone_regex_install",
@@ -40586,7 +40660,7 @@ async function installCurrentCharacterRegexScripts(args, deps) {
   }));
   const ownership = await ensureRegexOwnership(deps.regexApi, pending4, args.userId);
   if (!ownership.allOwned) {
-    throw new Error(`regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}`);
+    throw new Error(`regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}` + ` [${describeRegexOwnershipFailures(ownership.failures)}]`);
   }
   const completion = await awaitRegexInstall(args.userId, (requestId) => {
     deps.send({
