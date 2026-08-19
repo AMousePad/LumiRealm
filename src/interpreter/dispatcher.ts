@@ -128,7 +128,14 @@ export async function dispatchBinding(
     // Out-param: a stopChat() issued before a later crash still counts.
     const flags = { stopSending: false };
     try {
-      await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS, flags);
+      await runInterpretedTrigger(
+        entry,
+        ctx.api,
+        ctx.data,
+        ctx.scriptNS,
+        { binding, displayMode: binding === 'display' },
+        flags,
+      );
       dlog(`← trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms stopSending=${flags.stopSending}`);
     } catch (err) {
       dlog(`× trigger ERROR name=${entry.name} elapsed=${Date.now() - tStart}ms msg=${(err as Error).message} stopSending=${flags.stopSending}`);
@@ -158,25 +165,33 @@ function makeMirroredConsole(name: string): InterpConsole {
   };
 }
 
+// Risu's `arg.displayMode`: set by a render pass only, never derived from the
+// declared type. Deriving it would make variables ephemeral on manual clicks.
+interface TriggerInvocation {
+  readonly binding: RisuBinding;
+  readonly displayMode: boolean;
+}
+
 async function runInterpretedTrigger(
   entry: CompiledTriggerEntry,
   api: HostApi,
   data: DispatchData,
   scriptNS: DispatcherScriptNS,
+  invocation: TriggerInvocation,
   outFlags?: { stopSending: boolean },
 ): Promise<void> {
   await withTriggerDepth(async () => {
     const rLog = makeSafeLogger(`runTrigger[${entry.name}]`);
     const t0 = Date.now();
     const rt = await makeRisuTriggerRuntime(api, data, scriptNS, {
-      displayMode: entry.rtOpts.displayMode,
+      displayMode: invocation.displayMode,
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
-      binding: entry.rtOpts.binding,
+      binding: invocation.binding,
       characterId: entry.rtOpts.characterId,
     });
     try {
       await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {
-        displayMode: entry.rtOpts.displayMode,
+        displayMode: invocation.displayMode,
         lowLevelAccess: entry.rtOpts.lowLevelAccess,
       });
       rLog.info(`RETURN OK elapsed=${Date.now() - t0}ms`);
@@ -206,7 +221,13 @@ export async function dispatchByManualName(
   let fired = 0;
   for (const entry of matches) {
     try {
-      await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS);
+      await runInterpretedTrigger(
+        entry,
+        ctx.api,
+        ctx.data,
+        ctx.scriptNS,
+        { binding: 'manual', displayMode: false },
+      );
       fired++;
       dlog(`dispatchByManualName: fired entry name=${entry.name} type=${entry.type} binding=${entry.binding}`);
     } catch (err) {
@@ -224,7 +245,13 @@ export function registerManualTriggers(
   for (const entry of compiled) {
     if (entry.type !== 'library') continue;
     scriptNS.registerManual(entry.name, async (ctx) => {
-      await runInterpretedTrigger(entry, ctx.api ?? api, ctx.data, scriptNS);
+      await runInterpretedTrigger(
+        entry,
+        ctx.api ?? api,
+        ctx.data,
+        scriptNS,
+        { binding: 'manual', displayMode: false },
+      );
     });
   }
 }
