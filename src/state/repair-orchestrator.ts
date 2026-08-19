@@ -5,7 +5,7 @@ import type {
 } from '../types/messages.js';
 import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ModuleEnvelope } from './modules-store.js';
-import type { MigrationResult } from '../migrations/character.js';
+import type { CharacterRetranslateResult } from './character-retranslate.js';
 
 type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 
@@ -28,7 +28,6 @@ export interface RepairOrchestratorDeps {
   readonly listLumirealmCharacters: (
     userId: string,
   ) => Promise<readonly { character: { id: string; name?: string }; data: LumirealmCharacterData | null }[]>;
-  readonly writeLumirealm: (characterId: string, data: LumirealmCharacterData, userId: string) => Promise<unknown>;
   readonly readLumirealm: (
     characterId: string,
     userId: string,
@@ -46,20 +45,18 @@ export interface RepairOrchestratorDeps {
     base: LumirealmCharacterData['user_overrides'],
     moduleIds: readonly string[],
   ) => Record<string, unknown>;
-  readonly runCharacterMigration: (
+  readonly retranslateCharacter: (
     characterId: string,
     characterName: string,
     userId: string,
     envelope: LumirealmCharacterData,
-    opts?: { firePromptOnNeedsReimport?: boolean; silent?: boolean },
-  ) => Promise<MigrationResult['kind']>;
+  ) => Promise<CharacterRetranslateResult>;
   readonly readModuleEnvelope: (userId: string, moduleId: string) => Promise<ModuleEnvelope | null>;
   readonly refreshAttachedModule: (
     characterId: string,
     env: ModuleEnvelope,
     userId: string,
   ) => Promise<void>;
-  readonly translatorMigrationChecked: Set<string>;
   readonly listStaleModuleRegexIds: (userId: string) => Promise<readonly string[]>;
   readonly listStaleCharRegexIds: (userId: string) => Promise<readonly string[]>;
   readonly deleteRegexRows: (userId: string, ids: readonly string[]) => Promise<number>;
@@ -97,15 +94,13 @@ export interface RepairOrchestrator {
 export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOrchestrator {
   const {
     listLumirealmCharacters,
-    writeLumirealm,
     readLumirealm,
     updateLumirealm,
     mergeUserOverrides,
     buildDetachModulesPatch,
-    runCharacterMigration,
+    retranslateCharacter,
     readModuleEnvelope,
     refreshAttachedModule,
-    translatorMigrationChecked,
     listStaleModuleRegexIds,
     listStaleCharRegexIds,
     deleteRegexRows,
@@ -208,37 +203,23 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
 
       if (characterFilter === null || characterFilter.has(charId)) {
         opts.onProgress?.(processed, total, charName);
-        // Pre-0.3 cards lack envelope.source: re-translation is impossible,
-        // resetting their version would brick at v0 forever.
+        // Pre-0.3 cards lack envelope.source, so current-pipeline
+        // re-translation is impossible without a re-import.
         if (currentData.source === undefined) {
           skippedLegacy++;
         } else {
-          translatorMigrationChecked.delete(charId);
-          const reset: typeof currentData = { ...currentData, translator_schema_version: 0 };
-          let wroteReset = false;
           try {
-            await writeLumirealm(charId, reset, userId);
-            currentData = reset;
-            wroteReset = true;
+            const result = await retranslateCharacter(charId, charName, userId, currentData);
+            if (result.kind === 'retranslated') {
+              retranslated++;
+              currentData = result.data;
+            } else if (result.kind === 'needs_reimport') {
+              skippedLegacy++;
+            } else {
+              log.warn(`forceRetranslateAll: retranslateCharacter(${charId}) failed: ${result.error}`);
+            }
           } catch (err) {
-            log.warn(`forceRetranslateAll: writeLumirealm(${charId}) failed: ${errMsg(err)}`);
-          }
-          if (wroteReset) {
-            try {
-              const kind = await runCharacterMigration(charId, charName, userId, reset, { silent: true });
-              if (kind === 'migrated') retranslated++;
-            } catch (err) {
-              log.warn(`forceRetranslateAll: runCharacterMigration(${charId}) failed: ${errMsg(err)}`);
-            }
-            // Re-fetch post-migration before module repair. A failed read does
-            // not block independent module refreshes; attachment ids survive
-            // on the reset envelope.
-            try {
-              const postFetch = await readLumirealm(charId, userId);
-              if (postFetch?.data) currentData = postFetch.data;
-            } catch (err) {
-              log.warn(`forceRetranslateAll: readLumirealm(${charId}) post-migrate failed: ${errMsg(err)}`);
-            }
+            log.warn(`forceRetranslateAll: retranslateCharacter(${charId}) threw: ${errMsg(err)}`);
           }
         }
         processed++;

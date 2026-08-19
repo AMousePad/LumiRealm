@@ -132,6 +132,8 @@ import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
 import { createTriggerDispatcher } from './state/trigger-dispatch.js';
 import { createRepairOrchestrator } from './state/repair-orchestrator.js';
+import { retranslateCharacterFromCurrentSource } from './state/character-retranslate.js';
+import { installCurrentCharacterRegexScripts } from './state/character-regex-install.js';
 import { buildRepairTargetSummary } from './state/repair-targets.js';
 import { createMigrationsRunner } from './migrations/runner.js';
 import { createMassMigrationsRunner } from './migrations/mass.js';
@@ -1534,16 +1536,49 @@ const repairOrchestrator = createRepairOrchestrator({
       data: e.data,
     }));
   },
-  writeLumirealm: (characterId, data, userId) => writeLumirealm(charactersApi(), characterId, data, userId),
   readLumirealm: (characterId, userId) => readLumirealm(charactersApi(), characterId, userId),
   updateLumirealm: (characterId, userId, fn) => updateLumirealm(charactersApi(), characterId, userId, fn),
   mergeUserOverrides: (base, patch) => mergeUserOverrides(base, patch as never),
   buildDetachModulesPatch: (base, ids) => buildDetachModulesPatch(base, ids) as never,
-  runCharacterMigration: (charId, charName, userId, env, opts) =>
-    runCharacterMigration(charId, charName, userId, env, opts),
+  retranslateCharacter: (characterId, characterName, userId, envelope) =>
+    retranslateCharacterFromCurrentSource(
+      { characterId, characterName, userId, envelope },
+      {
+        extensionVersion: EXTENSION_VERSION,
+        getAvatarImageId: async (charId, uid) => {
+          const character = await spindle.characters.get(charId, uid) as { image_id?: unknown };
+          return typeof character?.image_id === 'string' && character.image_id.length > 0
+            ? character.image_id
+            : null;
+        },
+        installCharacterRegexScripts: (charId, charName, scripts, uid) =>
+          installCurrentCharacterRegexScripts(
+            { characterId: charId, characterName: charName, scripts, userId: uid },
+            { regexApi: spindle.regex_scripts, send },
+          ),
+        writeEnvelope: (charId, data, uid) =>
+          writeLumirealm(charactersApi(), charId, data, uid).then(() => undefined),
+        dispatchSvgRasterize: (charId, charName, tasks, uid) => {
+          send({
+            type: 'rasterize_svgs',
+            characterId: charId,
+            characterName: charName,
+            svgs: tasks.map((task) => ({
+              markerN: task.markerN,
+              svg: task.svg,
+              classification: task.classification as 'simple' | 'theme-reactive' | 'animated',
+              width: task.width,
+              height: task.height,
+            })),
+          }, uid);
+        },
+        invalidateActiveForCharacter: (charId, uid) =>
+          invalidateActiveForCharacter(charId, uid),
+        log,
+      },
+    ),
   readModuleEnvelope: (userId, moduleId) => readModuleEnvelope(moduleStorage(), userId, moduleId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
-  translatorMigrationChecked,
   listStaleModuleRegexIds,
   listStaleCharRegexIds,
   deleteRegexRows: deleteRepairRegexRows,

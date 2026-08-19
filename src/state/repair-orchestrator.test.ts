@@ -44,25 +44,22 @@ describe('repair regex cleanup', () => {
   test('scopes character translation and module refresh independently', async () => {
     const a = repairData(['module-1', 'module-2']);
     const b = repairData(['module-1']);
-    const writes: string[] = [];
-    const migrations: string[] = [];
+    const retranslations: string[] = [];
     const refreshed: string[] = [];
     const repair = createRepairOrchestrator({
       listLumirealmCharacters: async () => [
         { character: { id: 'char-a', name: 'A' }, data: a },
         { character: { id: 'char-b', name: 'B' }, data: b },
       ],
-      writeLumirealm: async (characterId: string) => { writes.push(characterId); },
       readLumirealm: async (characterId: string) => ({ data: characterId === 'char-a' ? a : b }),
-      runCharacterMigration: async (characterId: string) => {
-        migrations.push(characterId);
-        return 'migrated';
+      retranslateCharacter: async (characterId: string) => {
+        retranslations.push(characterId);
+        return { kind: 'retranslated', data: characterId === 'char-a' ? a : b };
       },
       readModuleEnvelope: async (_userId: string, moduleId: string) => ({ id: moduleId }) as ModuleEnvelope,
       refreshAttachedModule: async (characterId: string, env: ModuleEnvelope) => {
         refreshed.push(`${characterId}:${env.id}`);
       },
-      translatorMigrationChecked: new Set<string>(),
       listStaleCharRegexIds: async () => [],
       listStaleModuleRegexIds: async () => [],
       deleteRegexRows: async () => 0,
@@ -82,22 +79,23 @@ describe('repair regex cleanup', () => {
       moduleIds: ['module-1'],
     });
 
-    expect(writes).toEqual(['char-a']);
-    expect(migrations).toEqual(['char-a']);
+    expect(retranslations).toEqual(['char-a']);
     expect(refreshed).toEqual(['char-a:module-1', 'char-b:module-1']);
     expect(result).toMatchObject({ charactersRetranslated: 1, modulesReattached: 2 });
   });
 
   test('treats explicit empty target arrays as a no-op', async () => {
-    let writes = 0;
+    let retranslations = 0;
     let refreshes = 0;
     const repair = createRepairOrchestrator({
       listLumirealmCharacters: async () => [
         { character: { id: 'char-a', name: 'A' }, data: repairData(['module-1']) },
       ],
-      writeLumirealm: async () => { writes++; },
+      retranslateCharacter: async () => {
+        retranslations++;
+        return { kind: 'failed', error: 'unexpected' };
+      },
       refreshAttachedModule: async () => { refreshes++; },
-      translatorMigrationChecked: new Set<string>(),
       listStaleCharRegexIds: async () => [],
       listStaleModuleRegexIds: async () => [],
       deleteRegexRows: async () => 0,
@@ -117,7 +115,7 @@ describe('repair regex cleanup', () => {
       moduleIds: [],
     });
 
-    expect(writes).toBe(0);
+    expect(retranslations).toBe(0);
     expect(refreshes).toBe(0);
     expect(result).toMatchObject({ charactersRetranslated: 0, modulesReattached: 0 });
   });
@@ -149,7 +147,6 @@ describe('repair regex cleanup', () => {
           .filter((moduleId: string) => !moduleIds.includes(moduleId)),
       }),
       readModuleEnvelope: async () => null,
-      translatorMigrationChecked: new Set<string>(),
       listStaleCharRegexIds: async () => [],
       listStaleModuleRegexIds: async () => [],
       deleteRegexRows: async () => 0,
