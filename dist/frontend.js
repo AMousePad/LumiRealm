@@ -30803,126 +30803,126 @@ var styles_default = `.risu-compat-drawer {\r
   overflow: hidden;\r
   text-overflow: ellipsis;\r
 }\r
-.lr-ss-option-secondary {
+.lr-ss-option-secondary {\r
   font-size: 10.5px;\r
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
   white-space: nowrap;\r
   overflow: hidden;\r
-  text-overflow: ellipsis;
-}
-
-/* Shared searchable multi-select + removable chips. */
-.lr-chip-select {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-}
-.lr-chip-select-chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  min-height: 24px;
-}
-.lr-chip-select-chips-expanded {
-  max-height: 168px;
-  overflow-y: auto;
-  align-content: flex-start;
-  padding-right: 3px;
-  scrollbar-width: thin;
-}
-.lr-chip-select-chip,
-.lr-chip-select-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  min-height: 24px;
-  padding: 2px 4px 2px 8px;
-  border-radius: 999px;
-  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.16));
-  border: 1px solid var(--lumiverse-primary, rgba(120, 160, 255, 0.42));
-  color: var(--lumiverse-text, inherit);
-  font: inherit;
-  font-size: 11px;
-  line-height: 1.2;
-}
-.lr-chip-select-chip-missing {
-  background: rgba(255, 130, 130, 0.12);
-  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));
-}
-.lr-chip-select-chip-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
-}
-.lr-chip-select-chip-x {
-  appearance: none;
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
-  padding: 0 3px;
-  border-radius: 999px;
-  opacity: 0.68;
-}
-.lr-chip-select-chip-x:hover:not(:disabled) {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.12);
-}
-.lr-chip-select-more {
-  appearance: none;
-  cursor: pointer;
-  padding: 4px 8px;
-  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.05));
-  border-color: var(--lumiverse-border, rgba(255, 255, 255, 0.15));
-}
-.lr-chip-select-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.lr-chip-select-trigger {
-  flex: 1 1 210px;
-}
-.lr-chip-select-count,
-.lr-chip-select-empty {
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));
-  font-size: 11px;
-}
-.lr-chip-select-action {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: var(--lumiverse-primary, #8fb3ff);
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  padding: 4px 3px;
-}
-.lr-chip-select-action:hover:not(:disabled) {
-  text-decoration: underline;
-}
-.lr-chip-select-action:disabled,
-.lr-chip-select-more:disabled,
-.lr-chip-select-chip-x:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-@media (hover: none) and (pointer: coarse) {
-  .lr-chip-select-chip-x {
-    padding: 2px 6px;
-    font-size: 15px;
-  }
-}
-
-/* ─── Variables tab ───────────────────────────────────────────────────── */
+  text-overflow: ellipsis;\r
+}\r
+\r
+/* Shared searchable multi-select + removable chips. */\r
+.lr-chip-select {\r
+  display: flex;\r
+  flex-direction: column;\r
+  gap: 7px;\r
+  min-width: 0;\r
+}\r
+.lr-chip-select-chips {\r
+  display: flex;\r
+  flex-wrap: wrap;\r
+  align-items: center;\r
+  gap: 4px;\r
+  min-height: 24px;\r
+}\r
+.lr-chip-select-chips-expanded {\r
+  max-height: 168px;\r
+  overflow-y: auto;\r
+  align-content: flex-start;\r
+  padding-right: 3px;\r
+  scrollbar-width: thin;\r
+}\r
+.lr-chip-select-chip,\r
+.lr-chip-select-more {\r
+  display: inline-flex;\r
+  align-items: center;\r
+  gap: 4px;\r
+  max-width: 100%;\r
+  min-height: 24px;\r
+  padding: 2px 4px 2px 8px;\r
+  border-radius: 999px;\r
+  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.16));\r
+  border: 1px solid var(--lumiverse-primary, rgba(120, 160, 255, 0.42));\r
+  color: var(--lumiverse-text, inherit);\r
+  font: inherit;\r
+  font-size: 11px;\r
+  line-height: 1.2;\r
+}\r
+.lr-chip-select-chip-missing {\r
+  background: rgba(255, 130, 130, 0.12);\r
+  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));\r
+}\r
+.lr-chip-select-chip-label {\r
+  overflow: hidden;\r
+  text-overflow: ellipsis;\r
+  white-space: nowrap;\r
+  max-width: 220px;\r
+}\r
+.lr-chip-select-chip-x {\r
+  appearance: none;\r
+  background: none;\r
+  border: none;\r
+  color: inherit;\r
+  cursor: pointer;\r
+  font: inherit;\r
+  font-size: 13px;\r
+  line-height: 1;\r
+  padding: 0 3px;\r
+  border-radius: 999px;\r
+  opacity: 0.68;\r
+}\r
+.lr-chip-select-chip-x:hover:not(:disabled) {\r
+  opacity: 1;\r
+  background: rgba(255, 255, 255, 0.12);\r
+}\r
+.lr-chip-select-more {\r
+  appearance: none;\r
+  cursor: pointer;\r
+  padding: 4px 8px;\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.05));\r
+  border-color: var(--lumiverse-border, rgba(255, 255, 255, 0.15));\r
+}\r
+.lr-chip-select-toolbar {\r
+  display: flex;\r
+  flex-wrap: wrap;\r
+  align-items: center;\r
+  gap: 6px;\r
+}\r
+.lr-chip-select-trigger {\r
+  flex: 1 1 210px;\r
+}\r
+.lr-chip-select-count,\r
+.lr-chip-select-empty {\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
+  font-size: 11px;\r
+}\r
+.lr-chip-select-action {\r
+  appearance: none;\r
+  background: transparent;\r
+  border: none;\r
+  color: var(--lumiverse-primary, #8fb3ff);\r
+  cursor: pointer;\r
+  font: inherit;\r
+  font-size: 11px;\r
+  padding: 4px 3px;\r
+}\r
+.lr-chip-select-action:hover:not(:disabled) {\r
+  text-decoration: underline;\r
+}\r
+.lr-chip-select-action:disabled,\r
+.lr-chip-select-more:disabled,\r
+.lr-chip-select-chip-x:disabled {\r
+  cursor: not-allowed;\r
+  opacity: 0.45;\r
+}\r
+@media (hover: none) and (pointer: coarse) {\r
+  .lr-chip-select-chip-x {\r
+    padding: 2px 6px;\r
+    font-size: 15px;\r
+  }\r
+}\r
+\r
+/* ─── Variables tab ───────────────────────────────────────────────────── */\r
 \r
 .risu-vars-drawer {\r
   display: flex;\r
@@ -31823,44 +31823,44 @@ var styles_default = `.risu-compat-drawer {\r
 .risu-settings-drawer .rs-repair-row-danger {\r
   color: var(--lumiverse-warning, rgba(255, 200, 120, 0.9));\r
 }\r
-.risu-settings-drawer .rs-repair-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));
-  font-size: 11px;
-}
-.risu-settings-drawer .rs-repair-scope {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.08));
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.025);
-}
-.risu-settings-drawer .rs-repair-scope-intro,
-.risu-settings-drawer .rs-repair-target-hint {
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.58));
-  font-size: 11px;
-  line-height: 1.4;
-}
-.risu-settings-drawer .rs-repair-scope-columns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));
-  gap: 12px;
-  align-items: start;
-}
-.risu-settings-drawer .rs-repair-target-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.risu-settings-drawer .rs-repair-target-heading {
-  color: var(--lumiverse-text, inherit);
-  font-size: 12px;
-  font-weight: 600;
-}
-.risu-settings-drawer .rs-cleanup-list {
+.risu-settings-drawer .rs-repair-count {\r
+  font-variant-numeric: tabular-nums;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
+  font-size: 11px;\r
+}\r
+.risu-settings-drawer .rs-repair-scope {\r
+  display: flex;\r
+  flex-direction: column;\r
+  gap: 10px;\r
+  padding: 10px;\r
+  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.08));\r
+  border-radius: 5px;\r
+  background: rgba(255, 255, 255, 0.025);\r
+}\r
+.risu-settings-drawer .rs-repair-scope-intro,\r
+.risu-settings-drawer .rs-repair-target-hint {\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.58));\r
+  font-size: 11px;\r
+  line-height: 1.4;\r
+}\r
+.risu-settings-drawer .rs-repair-scope-columns {\r
+  display: grid;\r
+  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));\r
+  gap: 12px;\r
+  align-items: start;\r
+}\r
+.risu-settings-drawer .rs-repair-target-group {\r
+  display: flex;\r
+  flex-direction: column;\r
+  gap: 6px;\r
+  min-width: 0;\r
+}\r
+.risu-settings-drawer .rs-repair-target-heading {\r
+  color: var(--lumiverse-text, inherit);\r
+  font-size: 12px;\r
+  font-weight: 600;\r
+}\r
+.risu-settings-drawer .rs-cleanup-list {\r
   max-height: 60vh;\r
   overflow-y: auto;\r
   padding: 4px;\r
@@ -32383,7 +32383,7 @@ var styles_default = `.risu-compat-drawer {\r
 \r
 /* ─── Unified sidebar — sub-tab nav + panel hosts ───────────────────── */\r
 \r
-.lr-sidebar {
+.lr-sidebar {\r
   display: flex;\r
   flex-direction: column;\r
   gap: 0;\r
@@ -32391,8 +32391,8 @@ var styles_default = `.risu-compat-drawer {\r
   color: var(--lumiverse-text, inherit);\r
   font-size: 13px;\r
   min-width: 0;\r
-  min-height: 100%;
-}
+  min-height: 100%;\r
+}\r
 .lr-sidebar-nav {\r
   display: flex;\r
   flex-wrap: wrap;\r
@@ -32425,11 +32425,11 @@ var styles_default = `.risu-compat-drawer {\r
   border-bottom-color: var(--lumiverse-primary, #6c9cff);\r
   background: var(--lumiverse-fill, rgba(120, 160, 255, 0.08));\r
 }\r
-.lr-sidebar-panels {
-  flex: 0 0 auto;
-  min-height: 0;
-  overflow: visible;
-}
+.lr-sidebar-panels {\r
+  flex: 0 0 auto;\r
+  min-height: 0;\r
+  overflow: visible;\r
+}\r
 .lr-sidebar-panel {\r
   display: block;\r
 }\r
@@ -32809,7 +32809,7 @@ var styles_default = `.risu-compat-drawer {\r
   font-size: 10.5px;\r
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
 }\r
-.lr-modules-drawer .lrm-characters-list {
+.lr-modules-drawer .lrm-characters-list {\r
   display: flex;\r
   flex-direction: column;\r
   gap: 6px;\r
@@ -33634,45 +33634,45 @@ var styles_default = `.risu-compat-drawer {\r
 }\r
 \r
 /* Risu-faithful lorebook viewer: one line per entry, expand for read-only detail. */\r
-.lr-viewer-drawer .lrv-lb-section {
-  padding: 0;
-}
-.lr-viewer-drawer .lrv-lb-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.07));
-  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.025));
-}
-.lr-viewer-drawer .lrv-lb-legend {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));
-  font-size: 10.5px;
-}
-.lr-viewer-drawer .lrv-lb-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-.lr-viewer-drawer .lrv-lb-open-lumiverse {
-  margin-left: auto;
-  white-space: nowrap;
-}
-.lr-viewer-drawer .lrv-lb-action-error {
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--lumiverse-danger, rgba(255, 120, 120, 0.35));
-  background: rgba(255, 100, 100, 0.08);
-  color: var(--lumiverse-danger, rgba(255, 170, 170, 0.95));
-  font-size: 11px;
-  line-height: 1.4;
-}
+.lr-viewer-drawer .lrv-lb-section {\r
+  padding: 0;\r
+}\r
+.lr-viewer-drawer .lrv-lb-toolbar {\r
+  display: flex;\r
+  align-items: center;\r
+  justify-content: space-between;\r
+  flex-wrap: wrap;\r
+  gap: 8px;\r
+  padding: 8px 10px;\r
+  border-bottom: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.07));\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.025));\r
+}\r
+.lr-viewer-drawer .lrv-lb-legend {\r
+  display: flex;\r
+  align-items: center;\r
+  flex-wrap: wrap;\r
+  gap: 10px;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));\r
+  font-size: 10.5px;\r
+}\r
+.lr-viewer-drawer .lrv-lb-legend-item {\r
+  display: inline-flex;\r
+  align-items: center;\r
+  gap: 5px;\r
+  white-space: nowrap;\r
+}\r
+.lr-viewer-drawer .lrv-lb-open-lumiverse {\r
+  margin-left: auto;\r
+  white-space: nowrap;\r
+}\r
+.lr-viewer-drawer .lrv-lb-action-error {\r
+  padding: 7px 10px;\r
+  border-bottom: 1px solid var(--lumiverse-danger, rgba(255, 120, 120, 0.35));\r
+  background: rgba(255, 100, 100, 0.08);\r
+  color: var(--lumiverse-danger, rgba(255, 170, 170, 0.95));\r
+  font-size: 11px;\r
+  line-height: 1.4;\r
+}\r
 .lr-viewer-drawer .lrv-lb-group {\r
   border-top: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.05));\r
 }\r
@@ -33717,7 +33717,7 @@ var styles_default = `.risu-compat-drawer {\r
 .lr-viewer-drawer .lrv-lb-row-summary:hover {\r
   background: var(--lumiverse-surface-2, rgba(255, 255, 255, 0.03));\r
 }\r
-.lr-viewer-drawer .lrv-lb-row-disabled .lrv-lb-name { opacity: 0.5; }
+.lr-viewer-drawer .lrv-lb-row-disabled .lrv-lb-name { opacity: 0.5; }\r
 .lr-viewer-drawer .lrv-lb-status {\r
   flex: 0 0 auto;\r
   width: 8px;\r
@@ -33725,15 +33725,15 @@ var styles_default = `.risu-compat-drawer {\r
   border-radius: 50%;\r
   display: inline-block;\r
 }\r
-.lr-viewer-drawer .lrv-lb-status-constant {
-  background: #f5b73a;
-}
-.lr-viewer-drawer .lrv-lb-status-enabled {
-  background: #45bd72;
-}
-.lr-viewer-drawer .lrv-lb-status-disabled {
-  background: #e85d68;
-}
+.lr-viewer-drawer .lrv-lb-status-constant {\r
+  background: #f5b73a;\r
+}\r
+.lr-viewer-drawer .lrv-lb-status-enabled {\r
+  background: #45bd72;\r
+}\r
+.lr-viewer-drawer .lrv-lb-status-disabled {\r
+  background: #e85d68;\r
+}\r
 .lr-viewer-drawer .lrv-lb-name {\r
   flex: 1 1 auto;\r
   white-space: nowrap;\r
@@ -33767,7 +33767,7 @@ var styles_default = `.risu-compat-drawer {\r
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\r
   word-break: break-word;\r
 }\r
-.lr-viewer-drawer .lrv-lb-content {
+.lr-viewer-drawer .lrv-lb-content {\r
   margin: 0;\r
   padding: 6px 8px;\r
   background: var(--lumiverse-surface-2, rgba(255, 255, 255, 0.04));\r
@@ -33777,23 +33777,23 @@ var styles_default = `.risu-compat-drawer {\r
   line-height: 1.45;\r
   font-family: inherit;\r
   max-height: 300px;\r
-  overflow: auto;
-}
-.lr-viewer-drawer .lrv-lb-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  padding-top: 2px;
-}
-.lr-viewer-drawer .lrv-lb-toggle-entry {
-  min-width: 92px;
-}
-.lr-viewer-drawer .lrv-lb-toggle-entry:disabled,
-.lr-viewer-drawer .lrv-lb-open-lumiverse:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
+  overflow: auto;\r
+}\r
+.lr-viewer-drawer .lrv-lb-actions {\r
+  display: flex;\r
+  align-items: center;\r
+  justify-content: flex-end;\r
+  gap: 6px;\r
+  padding-top: 2px;\r
+}\r
+.lr-viewer-drawer .lrv-lb-toggle-entry {\r
+  min-width: 92px;\r
+}\r
+.lr-viewer-drawer .lrv-lb-toggle-entry:disabled,\r
+.lr-viewer-drawer .lrv-lb-open-lumiverse:disabled {\r
+  cursor: wait;\r
+  opacity: 0.55;\r
+}\r
 \r
 .lr-viewer-drawer .lrv-lb-useradds-head {\r
   padding: 10px 16px 4px;\r
@@ -39686,11 +39686,11 @@ owner: ${o.ownerCharacterId}` : ""}`;
   repairSection.className = "rs-repair-section";
   const repairHeader = document.createElement("h3");
   repairHeader.className = "rs-repair-header";
-  repairHeader.textContent = "Repair extension state";
+  repairHeader.textContent = "Repair extension card states";
   repairSection.appendChild(repairHeader);
   const repairIntro = document.createElement("p");
   repairIntro.className = "lr-settings-intro";
-  repairIntro.textContent = "Reconciles regex_scripts rows + image journals + lumirealm envelopes against each other. Use after reinstalling the extension or if cards stop loading correctly.";
+  repairIntro.textContent = "Fixes cards that may be broken from fucking around and finding out, older cards, or from a failed migration.";
   repairSection.appendChild(repairIntro);
   const repairScanBtn = document.createElement("button");
   repairScanBtn.type = "button";

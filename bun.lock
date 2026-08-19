@@ -15,7 +15,7 @@
         "fengari": "^0.1.5",
         "happy-dom": "^15.0.0",
         "juice": "^11.0.0",
-        "lumiverse-spindle-types": "0.6.15",
+        "lumiverse-spindle-types": "0.6.17",
         "playwright": "^1.59.1",
         "tsx": "^4.21.0",
         "typescript": "^5.5.0",
@@ -162,7 +162,7 @@
 
     "lodash.uniqby": ["lodash.uniqby@4.5.0", "", { "dependencies": { "lodash._baseiteratee": "~4.7.0", "lodash._baseuniq": "~4.6.0" } }, "sha512-IRt7cfTtHy6f1aRVA5n7kT8rgN3N1nH6MOWLcHfpWG2SH19E3JksLK38MktLxZDhlAjCP9jpIXkOnRXlu6oByQ=="],
 
-    "lumiverse-spindle-types": ["lumiverse-spindle-types@0.6.15", "", {}, "sha512-7wCJl3ydY9wNws/3GfxCV8DINeqyFXP87ovUW3Wa/T9SotYzRYqVHe4+M4T7ww+M37WfW3Iq+Ms7q0ompWPsxQ=="],
+    "lumiverse-spindle-types": ["lumiverse-spindle-types@0.6.17", "", {}, "sha512-mn7A+V47XihZ6cli1xtWSV/fttNhsPNgYryl0VsOyQaE6t401Q8WNkNuRPhnSgV46y0CEMySdTlIj1Jf4AYYCg=="],
 
     "mensch": ["mensch@0.3.4", "", {}, "sha512-IAeFvcOnV9V0Yk+bFhYR07O3yNina9ANIN5MoXBKYJ/RLYPurd2d0yw14MDhpr9/momp0WofT1bPUh3hkzdi/g=="],
 

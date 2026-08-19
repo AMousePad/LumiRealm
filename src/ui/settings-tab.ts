@@ -656,13 +656,13 @@ export function mountSettingsPanel(
 
   const repairHeader = document.createElement('h3');
   repairHeader.className = 'rs-repair-header';
-  repairHeader.textContent = 'Repair extension state';
+  repairHeader.textContent = 'Repair extension card states';
   repairSection.appendChild(repairHeader);
 
   const repairIntro = document.createElement('p');
   repairIntro.className = 'lr-settings-intro';
   repairIntro.textContent =
-    'Reconciles regex_scripts rows + image journals + lumirealm envelopes against each other. Use after reinstalling the extension or if cards stop loading correctly.';
+    'Fixes cards that may be broken from fucking around and finding out, older cards, or from a failed migration.';
   repairSection.appendChild(repairIntro);
 
   const repairScanBtn = document.createElement('button');
