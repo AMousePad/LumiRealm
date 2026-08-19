@@ -38231,6 +38231,8 @@ If the character has a default for this key, getChatVar will fall back to it. Ot
     if (msg.type !== "set_variables")
       return;
     log8.info(`variables-tab.set_variables: chatId=${msg.chatId} seq=${msg.seq} ts=${msg.ts}`);
+    if (activeChatId !== null && msg.chatId !== activeChatId)
+      return;
     if (snapshot && snapshot.chatId === msg.chatId && snapshot.seq > msg.seq) {
       log8.info(`variables-tab: ignoring older snapshot seq=${msg.seq} (have=${snapshot.seq})`);
       return;
@@ -44898,6 +44900,8 @@ function mountTogglesPanel(opts) {
   const unsubTranslate = subscribeTranslateEnabled(() => render());
   function handleBackendMessage(msg) {
     if (msg.type === "set_toggle_definitions") {
+      if (activeChatId !== null && msg.chatId !== activeChatId)
+        return;
       if (defs && defs.chatId === msg.chatId && defs.seq > msg.seq)
         return;
       defs = {
@@ -50375,6 +50379,7 @@ function setup(ctx) {
   cleanups.push(() => translateOrchestrator.destroy());
   const svgRasterizer = setupSvgRasterizer({ log: flog3, sendToBackend });
   let activeRisuChatId = null;
+  const isVisibleChat = (chatId) => activeRisuChatId === null || chatId === activeRisuChatId;
   const onClickCapture = (e) => {
     const path = typeof e.composedPath === "function" ? e.composedPath() : [];
     const t = path[0] ?? e.target;
@@ -50540,6 +50545,8 @@ function setup(ctx) {
       if (getDisplayResolutionMode() !== "off") {
         const prev = getDisplaySnapshot(msg.snapshot.chatId);
         setDisplaySnapshot(msg.snapshot);
+        if (!isVisibleChat(msg.snapshot.chatId))
+          return;
         if (prev) {
           const ns = msg.snapshot;
           if (prev.userName !== ns.userName || prev.charName !== ns.charName || prev.personaText !== ns.personaText || prev.personaImage !== ns.personaImage) {
@@ -50576,7 +50583,7 @@ function setup(ctx) {
           }
           applyVarDelta(msg.chatId, scope, { ...incoming });
         }
-        if (changed.length > 0)
+        if (changed.length > 0 && isVisibleChat(msg.chatId))
           display.invalidate(changed);
       }
     }
@@ -50599,7 +50606,7 @@ function setup(ctx) {
       return;
     }
     if (msg.type === "render_bg_html" || msg.type === "clear_bg_html") {
-      if (activeRisuChatId !== null && msg.chatId !== activeRisuChatId) {
+      if (!isVisibleChat(msg.chatId)) {
         flog3.info(`bg-html dispatch: ignoring ${msg.type} for background chat=${msg.chatId} (visible=${activeRisuChatId})`);
         return;
       }

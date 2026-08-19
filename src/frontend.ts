@@ -422,6 +422,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   // Capture phase to beat Lumi handlers. risu-trigger/risu-btn/risu-id survive Lumi's sanitizer
   // (richHtmlSanitizer.ts db9ef7c isAllowedCustomAttributeName).
   let activeRisuChatId: string | null = null;
+  // The backend caches every chat it has touched and pushes for all of them,
+  // while the DOM only ever shows one. Unknown-yet counts as visible so the
+  // first push after load is not dropped.
+  const isVisibleChat = (chatId: string): boolean =>
+    activeRisuChatId === null || chatId === activeRisuChatId;
   const onClickCapture = (e: Event): void => {
     const path = typeof (e as Event & { composedPath?: () => EventTarget[] }).composedPath === 'function'
       ? (e as Event & { composedPath: () => EventTarget[] }).composedPath()
@@ -596,6 +601,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       if (getDisplayResolutionMode() !== 'off') {
         const prev = getDisplaySnapshot(msg.snapshot.chatId);
         setDisplaySnapshot(msg.snapshot);
+        // Cache every chat, but only the visible one has DOM to re-resolve.
+        if (!isVisibleChat(msg.snapshot.chatId)) return;
         if (prev) {
           // Identity change (persona swap/edit): {{user}}/{{persona}}/persona image
           // resolve from these fields, and the var diff below cannot see them.
@@ -636,7 +643,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           }
           applyVarDelta(msg.chatId, scope, { ...incoming });
         }
-        if (changed.length > 0) display.invalidate(changed);
+        if (changed.length > 0 && isVisibleChat(msg.chatId)) display.invalidate(changed);
       }
       // fall through to sidebar broadcast
     }
@@ -663,9 +670,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (msg.type === 'render_bg_html' || msg.type === 'clear_bg_html') {
       // The renderer holds one mount, so any push for a background chat would
       // dismount the visible chat's overlay and its cross-rule sheets, leaving
-      // regex-injected panels unstyled until reload. Before the first
-      // set_active_chat we don't know the visible chat, so let it through.
-      if (activeRisuChatId !== null && msg.chatId !== activeRisuChatId) {
+      // regex-injected panels unstyled until reload.
+      if (!isVisibleChat(msg.chatId)) {
         flog.info(`bg-html dispatch: ignoring ${msg.type} for background chat=${msg.chatId} (visible=${activeRisuChatId})`);
         return;
       }

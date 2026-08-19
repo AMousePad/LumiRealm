@@ -370,6 +370,9 @@ export function mountTogglesPanel(opts: MountTogglesPanelOptions): TogglesTabHan
 
   function handleBackendMessage(msg: BackendToFrontend): void {
     if (msg.type === 'set_toggle_definitions') {
+      // One slot: a background chat's push would blank the panel until the
+      // next switch. CHAT_SWITCHED force-pushes, so dropping loses nothing.
+      if (activeChatId !== null && msg.chatId !== activeChatId) return;
       if (defs && defs.chatId === msg.chatId && defs.seq > msg.seq) return;
       defs = {
         chatId: msg.chatId,
