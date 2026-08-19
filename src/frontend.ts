@@ -661,6 +661,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return;
     }
     if (msg.type === 'render_bg_html' || msg.type === 'clear_bg_html') {
+      // The renderer holds one mount, so any push for a background chat would
+      // dismount the visible chat's overlay and its cross-rule sheets, leaving
+      // regex-injected panels unstyled until reload. Before the first
+      // set_active_chat we don't know the visible chat, so let it through.
+      if (activeRisuChatId !== null && msg.chatId !== activeRisuChatId) {
+        flog.info(`bg-html dispatch: ignoring ${msg.type} for background chat=${msg.chatId} (visible=${activeRisuChatId})`);
+        return;
+      }
       try {
         bgRenderer.handleMessage(msg);
       } catch (err) {

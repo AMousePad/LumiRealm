@@ -50599,6 +50599,10 @@ function setup(ctx) {
       return;
     }
     if (msg.type === "render_bg_html" || msg.type === "clear_bg_html") {
+      if (activeRisuChatId !== null && msg.chatId !== activeRisuChatId) {
+        flog3.info(`bg-html dispatch: ignoring ${msg.type} for background chat=${msg.chatId} (visible=${activeRisuChatId})`);
+        return;
+      }
       try {
         bgRenderer.handleMessage(msg);
       } catch (err2) {

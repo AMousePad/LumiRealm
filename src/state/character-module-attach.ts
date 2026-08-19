@@ -67,6 +67,8 @@ export interface CharacterModuleAttachDeps {
     userId: string | undefined,
   ) => Promise<void>;
   readonly send: (msg: BackendToFrontend, userId: string | undefined) => void;
+  /** The chat the user is actually looking at, if any. */
+  readonly visibleChatForUser: (userId: string) => string | undefined;
   readonly onActiveChatEvicted?: (chatId: string) => void;
   readonly log: { readonly info: (m: string) => void; readonly warn: (m: string) => void };
   readonly errMsg: (e: unknown) => string;
@@ -100,6 +102,7 @@ export function createCharacterModuleAttach(deps: CharacterModuleAttachDeps): Ch
     refreshToggleDefinitions,
     refreshBgHtml,
     send,
+    visibleChatForUser,
     onActiveChatEvicted,
     log,
     errMsg,
@@ -130,7 +133,15 @@ export function createCharacterModuleAttach(deps: CharacterModuleAttachDeps): Ch
     compiledByCharacter.delete(characterId);
     clearActiveLorebookForCharacter(characterId);
     log.info(`invalidateActiveForCharacter: char=${characterId} evictedChats=${evicted}`);
+    // The frontend bg-html renderer holds one mount at a time, so a push for a
+    // background chat dismounts the visible chat's overlay and its cross-rule
+    // sheets, and nothing restores them until a chat switch or reload. Evicting
+    // is enough for the others: CHAT_SWITCHED re-resolves on the way in.
+    // Unknown visible chat (no CHAT_SWITCHED seen yet) refreshes everything,
+    // as before: skipping every chat would leave the one the user is on stale.
+    const visibleChat = visibleChatForUser(userId);
     for (const chatId of evictedChats) {
+      if (visibleChat !== undefined && chatId !== visibleChat) continue;
       void (async () => {
         const reactivated = await ensureActiveCardForChat(chatId, null, userId);
         if (reactivated) {
