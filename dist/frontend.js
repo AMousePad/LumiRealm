@@ -22411,7 +22411,7 @@ var spindle_default = {
   ],
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.1.5",
+  minimum_lumiverse_version: "1.1.6",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"
@@ -30803,126 +30803,126 @@ var styles_default = `.risu-compat-drawer {\r
   overflow: hidden;\r
   text-overflow: ellipsis;\r
 }\r
-.lr-ss-option-secondary {
+.lr-ss-option-secondary {\r
   font-size: 10.5px;\r
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
   white-space: nowrap;\r
   overflow: hidden;\r
-  text-overflow: ellipsis;
-}
-
-/* Shared searchable multi-select + removable chips. */
-.lr-chip-select {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-}
-.lr-chip-select-chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  min-height: 24px;
-}
-.lr-chip-select-chips-expanded {
-  max-height: 168px;
-  overflow-y: auto;
-  align-content: flex-start;
-  padding-right: 3px;
-  scrollbar-width: thin;
-}
-.lr-chip-select-chip,
-.lr-chip-select-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  min-height: 24px;
-  padding: 2px 4px 2px 8px;
-  border-radius: 999px;
-  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.16));
-  border: 1px solid var(--lumiverse-primary, rgba(120, 160, 255, 0.42));
-  color: var(--lumiverse-text, inherit);
-  font: inherit;
-  font-size: 11px;
-  line-height: 1.2;
-}
-.lr-chip-select-chip-missing {
-  background: rgba(255, 130, 130, 0.12);
-  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));
-}
-.lr-chip-select-chip-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
-}
-.lr-chip-select-chip-x {
-  appearance: none;
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
-  padding: 0 3px;
-  border-radius: 999px;
-  opacity: 0.68;
-}
-.lr-chip-select-chip-x:hover:not(:disabled) {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.12);
-}
-.lr-chip-select-more {
-  appearance: none;
-  cursor: pointer;
-  padding: 4px 8px;
-  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.05));
-  border-color: var(--lumiverse-border, rgba(255, 255, 255, 0.15));
-}
-.lr-chip-select-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.lr-chip-select-trigger {
-  flex: 1 1 210px;
-}
-.lr-chip-select-count,
-.lr-chip-select-empty {
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));
-  font-size: 11px;
-}
-.lr-chip-select-action {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: var(--lumiverse-primary, #8fb3ff);
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  padding: 4px 3px;
-}
-.lr-chip-select-action:hover:not(:disabled) {
-  text-decoration: underline;
-}
-.lr-chip-select-action:disabled,
-.lr-chip-select-more:disabled,
-.lr-chip-select-chip-x:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-@media (hover: none) and (pointer: coarse) {
-  .lr-chip-select-chip-x {
-    padding: 2px 6px;
-    font-size: 15px;
-  }
-}
-
-/* ─── Variables tab ───────────────────────────────────────────────────── */
+  text-overflow: ellipsis;\r
+}\r
+\r
+/* Shared searchable multi-select + removable chips. */\r
+.lr-chip-select {\r
+  display: flex;\r
+  flex-direction: column;\r
+  gap: 7px;\r
+  min-width: 0;\r
+}\r
+.lr-chip-select-chips {\r
+  display: flex;\r
+  flex-wrap: wrap;\r
+  align-items: center;\r
+  gap: 4px;\r
+  min-height: 24px;\r
+}\r
+.lr-chip-select-chips-expanded {\r
+  max-height: 168px;\r
+  overflow-y: auto;\r
+  align-content: flex-start;\r
+  padding-right: 3px;\r
+  scrollbar-width: thin;\r
+}\r
+.lr-chip-select-chip,\r
+.lr-chip-select-more {\r
+  display: inline-flex;\r
+  align-items: center;\r
+  gap: 4px;\r
+  max-width: 100%;\r
+  min-height: 24px;\r
+  padding: 2px 4px 2px 8px;\r
+  border-radius: 999px;\r
+  background: var(--lumiverse-primary-subtle, rgba(120, 160, 255, 0.16));\r
+  border: 1px solid var(--lumiverse-primary, rgba(120, 160, 255, 0.42));\r
+  color: var(--lumiverse-text, inherit);\r
+  font: inherit;\r
+  font-size: 11px;\r
+  line-height: 1.2;\r
+}\r
+.lr-chip-select-chip-missing {\r
+  background: rgba(255, 130, 130, 0.12);\r
+  border-color: var(--lumiverse-danger, rgba(255, 130, 130, 0.5));\r
+}\r
+.lr-chip-select-chip-label {\r
+  overflow: hidden;\r
+  text-overflow: ellipsis;\r
+  white-space: nowrap;\r
+  max-width: 220px;\r
+}\r
+.lr-chip-select-chip-x {\r
+  appearance: none;\r
+  background: none;\r
+  border: none;\r
+  color: inherit;\r
+  cursor: pointer;\r
+  font: inherit;\r
+  font-size: 13px;\r
+  line-height: 1;\r
+  padding: 0 3px;\r
+  border-radius: 999px;\r
+  opacity: 0.68;\r
+}\r
+.lr-chip-select-chip-x:hover:not(:disabled) {\r
+  opacity: 1;\r
+  background: rgba(255, 255, 255, 0.12);\r
+}\r
+.lr-chip-select-more {\r
+  appearance: none;\r
+  cursor: pointer;\r
+  padding: 4px 8px;\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.05));\r
+  border-color: var(--lumiverse-border, rgba(255, 255, 255, 0.15));\r
+}\r
+.lr-chip-select-toolbar {\r
+  display: flex;\r
+  flex-wrap: wrap;\r
+  align-items: center;\r
+  gap: 6px;\r
+}\r
+.lr-chip-select-trigger {\r
+  flex: 1 1 210px;\r
+}\r
+.lr-chip-select-count,\r
+.lr-chip-select-empty {\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
+  font-size: 11px;\r
+}\r
+.lr-chip-select-action {\r
+  appearance: none;\r
+  background: transparent;\r
+  border: none;\r
+  color: var(--lumiverse-primary, #8fb3ff);\r
+  cursor: pointer;\r
+  font: inherit;\r
+  font-size: 11px;\r
+  padding: 4px 3px;\r
+}\r
+.lr-chip-select-action:hover:not(:disabled) {\r
+  text-decoration: underline;\r
+}\r
+.lr-chip-select-action:disabled,\r
+.lr-chip-select-more:disabled,\r
+.lr-chip-select-chip-x:disabled {\r
+  cursor: not-allowed;\r
+  opacity: 0.45;\r
+}\r
+@media (hover: none) and (pointer: coarse) {\r
+  .lr-chip-select-chip-x {\r
+    padding: 2px 6px;\r
+    font-size: 15px;\r
+  }\r
+}\r
+\r
+/* ─── Variables tab ───────────────────────────────────────────────────── */\r
 \r
 .risu-vars-drawer {\r
   display: flex;\r
@@ -31823,44 +31823,44 @@ var styles_default = `.risu-compat-drawer {\r
 .risu-settings-drawer .rs-repair-row-danger {\r
   color: var(--lumiverse-warning, rgba(255, 200, 120, 0.9));\r
 }\r
-.risu-settings-drawer .rs-repair-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));
-  font-size: 11px;
-}
-.risu-settings-drawer .rs-repair-scope {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.08));
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.025);
-}
-.risu-settings-drawer .rs-repair-scope-intro,
-.risu-settings-drawer .rs-repair-target-hint {
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.58));
-  font-size: 11px;
-  line-height: 1.4;
-}
-.risu-settings-drawer .rs-repair-scope-columns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));
-  gap: 12px;
-  align-items: start;
-}
-.risu-settings-drawer .rs-repair-target-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.risu-settings-drawer .rs-repair-target-heading {
-  color: var(--lumiverse-text, inherit);
-  font-size: 12px;
-  font-weight: 600;
-}
-.risu-settings-drawer .rs-cleanup-list {
+.risu-settings-drawer .rs-repair-count {\r
+  font-variant-numeric: tabular-nums;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
+  font-size: 11px;\r
+}\r
+.risu-settings-drawer .rs-repair-scope {\r
+  display: flex;\r
+  flex-direction: column;\r
+  gap: 10px;\r
+  padding: 10px;\r
+  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.08));\r
+  border-radius: 5px;\r
+  background: rgba(255, 255, 255, 0.025);\r
+}\r
+.risu-settings-drawer .rs-repair-scope-intro,\r
+.risu-settings-drawer .rs-repair-target-hint {\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.58));\r
+  font-size: 11px;\r
+  line-height: 1.4;\r
+}\r
+.risu-settings-drawer .rs-repair-scope-columns {\r
+  display: grid;\r
+  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));\r
+  gap: 12px;\r
+  align-items: start;\r
+}\r
+.risu-settings-drawer .rs-repair-target-group {\r
+  display: flex;\r
+  flex-direction: column;\r
+  gap: 6px;\r
+  min-width: 0;\r
+}\r
+.risu-settings-drawer .rs-repair-target-heading {\r
+  color: var(--lumiverse-text, inherit);\r
+  font-size: 12px;\r
+  font-weight: 600;\r
+}\r
+.risu-settings-drawer .rs-cleanup-list {\r
   max-height: 60vh;\r
   overflow-y: auto;\r
   padding: 4px;\r
@@ -32391,7 +32391,7 @@ var styles_default = `.risu-compat-drawer {\r
   color: var(--lumiverse-text, inherit);\r
   font-size: 13px;\r
   min-width: 0;\r
-  height: 100%;\r
+  min-height: 100%;\r
 }\r
 .lr-sidebar-nav {\r
   display: flex;\r
@@ -32426,9 +32426,9 @@ var styles_default = `.risu-compat-drawer {\r
   background: var(--lumiverse-fill, rgba(120, 160, 255, 0.08));\r
 }\r
 .lr-sidebar-panels {\r
-  flex: 1 1 auto;\r
+  flex: 0 0 auto;\r
   min-height: 0;\r
-  overflow-y: auto;\r
+  overflow: visible;\r
 }\r
 .lr-sidebar-panel {\r
   display: block;\r
@@ -32809,7 +32809,7 @@ var styles_default = `.risu-compat-drawer {\r
   font-size: 10.5px;\r
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));\r
 }\r
-.lr-modules-drawer .lrm-characters-list {
+.lr-modules-drawer .lrm-characters-list {\r
   display: flex;\r
   flex-direction: column;\r
   gap: 6px;\r
@@ -33637,6 +33637,42 @@ var styles_default = `.risu-compat-drawer {\r
 .lr-viewer-drawer .lrv-lb-section {\r
   padding: 0;\r
 }\r
+.lr-viewer-drawer .lrv-lb-toolbar {\r
+  display: flex;\r
+  align-items: center;\r
+  justify-content: space-between;\r
+  flex-wrap: wrap;\r
+  gap: 8px;\r
+  padding: 8px 10px;\r
+  border-bottom: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.07));\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.025));\r
+}\r
+.lr-viewer-drawer .lrv-lb-legend {\r
+  display: flex;\r
+  align-items: center;\r
+  flex-wrap: wrap;\r
+  gap: 10px;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));\r
+  font-size: 10.5px;\r
+}\r
+.lr-viewer-drawer .lrv-lb-legend-item {\r
+  display: inline-flex;\r
+  align-items: center;\r
+  gap: 5px;\r
+  white-space: nowrap;\r
+}\r
+.lr-viewer-drawer .lrv-lb-open-lumiverse {\r
+  margin-left: auto;\r
+  white-space: nowrap;\r
+}\r
+.lr-viewer-drawer .lrv-lb-action-error {\r
+  padding: 7px 10px;\r
+  border-bottom: 1px solid var(--lumiverse-danger, rgba(255, 120, 120, 0.35));\r
+  background: rgba(255, 100, 100, 0.08);\r
+  color: var(--lumiverse-danger, rgba(255, 170, 170, 0.95));\r
+  font-size: 11px;\r
+  line-height: 1.4;\r
+}\r
 .lr-viewer-drawer .lrv-lb-group {\r
   border-top: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.05));\r
 }\r
@@ -33681,7 +33717,7 @@ var styles_default = `.risu-compat-drawer {\r
 .lr-viewer-drawer .lrv-lb-row-summary:hover {\r
   background: var(--lumiverse-surface-2, rgba(255, 255, 255, 0.03));\r
 }\r
-.lr-viewer-drawer .lrv-lb-row-disabled .lrv-lb-row-summary { opacity: 0.45; }\r
+.lr-viewer-drawer .lrv-lb-row-disabled .lrv-lb-name { opacity: 0.5; }\r
 .lr-viewer-drawer .lrv-lb-status {\r
   flex: 0 0 auto;\r
   width: 8px;\r
@@ -33689,14 +33725,14 @@ var styles_default = `.risu-compat-drawer {\r
   border-radius: 50%;\r
   display: inline-block;\r
 }\r
-.lr-viewer-drawer .lrv-lb-status-always {\r
+.lr-viewer-drawer .lrv-lb-status-constant {\r
   background: #f5b73a;\r
 }\r
-.lr-viewer-drawer .lrv-lb-status-keyed {\r
-  background: transparent;\r
-  border: 1px solid var(--lumiverse-text-muted, rgba(255, 255, 255, 0.5));\r
-  width: 7px;\r
-  height: 7px;\r
+.lr-viewer-drawer .lrv-lb-status-enabled {\r
+  background: #45bd72;\r
+}\r
+.lr-viewer-drawer .lrv-lb-status-disabled {\r
+  background: #e85d68;\r
 }\r
 .lr-viewer-drawer .lrv-lb-name {\r
   flex: 1 1 auto;\r
@@ -33742,6 +33778,21 @@ var styles_default = `.risu-compat-drawer {\r
   font-family: inherit;\r
   max-height: 300px;\r
   overflow: auto;\r
+}\r
+.lr-viewer-drawer .lrv-lb-actions {\r
+  display: flex;\r
+  align-items: center;\r
+  justify-content: flex-end;\r
+  gap: 6px;\r
+  padding-top: 2px;\r
+}\r
+.lr-viewer-drawer .lrv-lb-toggle-entry {\r
+  min-width: 92px;\r
+}\r
+.lr-viewer-drawer .lrv-lb-toggle-entry:disabled,\r
+.lr-viewer-drawer .lrv-lb-open-lumiverse:disabled {\r
+  cursor: wait;\r
+  opacity: 0.55;\r
 }\r
 \r
 .lr-viewer-drawer .lrv-lb-useradds-head {\r
@@ -39635,11 +39686,11 @@ owner: ${o.ownerCharacterId}` : ""}`;
   repairSection.className = "rs-repair-section";
   const repairHeader = document.createElement("h3");
   repairHeader.className = "rs-repair-header";
-  repairHeader.textContent = "Repair extension state";
+  repairHeader.textContent = "Repair extension card states";
   repairSection.appendChild(repairHeader);
   const repairIntro = document.createElement("p");
   repairIntro.className = "lr-settings-intro";
-  repairIntro.textContent = "Reconciles regex_scripts rows + image journals + lumirealm envelopes against each other. Use after reinstalling the extension or if cards stop loading correctly.";
+  repairIntro.textContent = "Fixes cards that may be broken from fucking around and finding out, older cards, or from a failed migration.";
   repairSection.appendChild(repairIntro);
   const repairScanBtn = document.createElement("button");
   repairScanBtn.type = "button";
@@ -42391,7 +42442,7 @@ function pickLorebookFile() {
 var MAX_ASSET_MB = 50;
 var MAX_ASSET_BYTES = MAX_ASSET_MB * 1024 * 1024;
 function mountViewerPanel(opts) {
-  const { sendToBackend, log: log8 } = opts;
+  const { sendToBackend, log: log8, openWorldBookEditor } = opts;
   log8.info("viewer-panel: mounting");
   const root = opts.root;
   root.classList.add("lr-viewer-drawer");
@@ -42401,6 +42452,7 @@ function mountViewerPanel(opts) {
   let viewerData = null;
   let loading = false;
   let lastError = null;
+  let destroyed = false;
   let activeSubTab = "notes";
   let activeCharacterId = null;
   let pendingAutoSwitch = false;
@@ -42419,6 +42471,12 @@ function mountViewerPanel(opts) {
   let editingTriggerLua = "";
   let defaultsTextBuffer = null;
   let bgHtmlTextBuffer = null;
+  const closedLorebookGroups = new Set;
+  const openLorebookFolders = new Set;
+  const openLorebookEntries = new Set;
+  const lorebookMutationPending = new Map;
+  const lorebookNavigationPending = new Set;
+  let lorebookActionError = null;
   const intro = document.createElement("p");
   intro.className = "lrv-intro";
   intro.textContent = "Inspect, HTML, triggers, and assets for a character or module.";
@@ -42565,6 +42623,52 @@ function mountViewerPanel(opts) {
   function sourceKey2(o) {
     return `${o.kind}::${o.id}`;
   }
+  function viewerSourceKey(source) {
+    return source.kind === "character" ? `character::${source.characterId}` : `module::${source.moduleId}`;
+  }
+  function currentViewerSourceRef() {
+    const source = viewerData?.source;
+    if (!source)
+      return null;
+    return source.kind === "character" ? { kind: "character", characterId: source.characterId } : { kind: "module", moduleId: source.moduleId };
+  }
+  function resetLorebookUiState() {
+    closedLorebookGroups.clear();
+    openLorebookFolders.clear();
+    openLorebookEntries.clear();
+    lorebookMutationPending.clear();
+    lorebookNavigationPending.clear();
+    lorebookActionError = null;
+  }
+  function lorebookNavigationKey(worldBookId, entryId) {
+    return `${selectedSourceKey ?? ""}::${worldBookId}::${entryId ?? ""}`;
+  }
+  function beginOpenWorldBookEditor(worldBookId, entryId) {
+    const navigationKey = lorebookNavigationKey(worldBookId, entryId);
+    if (lorebookNavigationPending.has(navigationKey))
+      return;
+    if (!openWorldBookEditor) {
+      lorebookActionError = "This Lumiverse build does not expose the World Book Editor action.";
+      renderSurfaces();
+      return;
+    }
+    lorebookNavigationPending.add(navigationKey);
+    if (entryId)
+      openLorebookEntries.add(`${worldBookId}::${entryId}`);
+    lorebookActionError = null;
+    renderSurfaces();
+    openWorldBookEditor(worldBookId, entryId).then(() => {
+      lorebookNavigationPending.delete(navigationKey);
+      if (!destroyed)
+        renderSurfaces();
+    }).catch((err) => {
+      lorebookNavigationPending.delete(navigationKey);
+      if (destroyed)
+        return;
+      lorebookActionError = `Could not open ${entryId ? "this entry" : "this lorebook"} in Lumiverse: ${err instanceof Error ? err.message : String(err)}`;
+      renderSurfaces();
+    });
+  }
   function parseSourceKey(key2) {
     const idx = key2.indexOf("::");
     if (idx < 0)
@@ -42598,6 +42702,7 @@ function mountViewerPanel(opts) {
     assetSelectMode = false;
     assetSelected.clear();
     assetLastClickedIndex = null;
+    resetLorebookUiState();
     activeSubTab = o.kind === "character" ? "notes" : "assets";
     assetPagesShown = 1;
     renderStatus();
@@ -43896,6 +44001,49 @@ ${preview}${more}
   function renderLorebookSection(groups) {
     const det = document.createElement("section");
     det.className = "lrv-section lrv-lb-section";
+    const toolbar2 = document.createElement("div");
+    toolbar2.className = "lrv-lb-toolbar";
+    const legend = document.createElement("div");
+    legend.className = "lrv-lb-legend";
+    legend.setAttribute("aria-label", "Lorebook entry status legend");
+    const legendItems = [
+      { label: "Constant", status: "constant" },
+      { label: "Enabled", status: "enabled" },
+      { label: "Disabled", status: "disabled" }
+    ];
+    for (const item of legendItems) {
+      const legendItem = document.createElement("span");
+      legendItem.className = "lrv-lb-legend-item";
+      const dot = document.createElement("span");
+      dot.className = `lrv-lb-status lrv-lb-status-${item.status}`;
+      dot.setAttribute("aria-hidden", "true");
+      legendItem.appendChild(dot);
+      legendItem.appendChild(document.createTextNode(item.label));
+      legend.appendChild(legendItem);
+    }
+    toolbar2.appendChild(legend);
+    const bookTarget = groups.find((group) => group.groupId !== "module" && !group.moduleId) ?? groups.find((group) => group.groupId !== "module");
+    if (bookTarget) {
+      const navigationKey = lorebookNavigationKey(bookTarget.groupId);
+      const navigationPending = lorebookNavigationPending.has(navigationKey);
+      const openBookButton = document.createElement("button");
+      openBookButton.type = "button";
+      openBookButton.className = "lrv-btn lrv-lb-open-lumiverse lrv-lb-open-book";
+      openBookButton.textContent = navigationPending ? "Opening…" : "Open in Lumiverse";
+      openBookButton.disabled = navigationPending;
+      openBookButton.title = `Open ${bookTarget.groupName} in Lumiverse's World Book Editor.`;
+      openBookButton.addEventListener("click", () => {
+        beginOpenWorldBookEditor(bookTarget.groupId);
+      });
+      toolbar2.appendChild(openBookButton);
+    }
+    det.appendChild(toolbar2);
+    if (lorebookActionError) {
+      const error = document.createElement("div");
+      error.className = "lrv-lb-action-error";
+      error.textContent = lorebookActionError;
+      det.appendChild(error);
+    }
     if (groups.length === 0) {
       const empty = document.createElement("div");
       empty.className = "lrv-empty";
@@ -43914,7 +44062,14 @@ ${preview}${more}
       }
       const grpDet = document.createElement("details");
       grpDet.className = "lrv-lb-group";
-      grpDet.open = true;
+      grpDet.open = !closedLorebookGroups.has(g.groupId);
+      grpDet.dataset["worldBookId"] = g.groupId;
+      grpDet.addEventListener("toggle", () => {
+        if (grpDet.open)
+          closedLorebookGroups.delete(g.groupId);
+        else
+          closedLorebookGroups.add(g.groupId);
+      });
       const grpSum = document.createElement("summary");
       grpSum.className = "lrv-lb-group-summary";
       const display = pickLoreGroupDisplay(g);
@@ -43923,19 +44078,19 @@ ${preview}${more}
       if (isTranslated)
         grpSum.title = g.groupName;
       grpDet.appendChild(grpSum);
-      renderLorebookEntriesWithFolders(grpDet, risuEntries);
+      renderLorebookEntriesWithFolders(grpDet, g, risuEntries);
       if (userAdditions.length > 0) {
         const uaHead = document.createElement("div");
         uaHead.className = "lrv-lb-useradds-head";
         uaHead.textContent = `User Additions (${userAdditions.length})`;
         grpDet.appendChild(uaHead);
-        renderLorebookEntriesWithFolders(grpDet, userAdditions);
+        renderLorebookEntriesWithFolders(grpDet, g, userAdditions);
       }
       det.appendChild(grpDet);
     }
     return det;
   }
-  function renderLorebookEntriesWithFolders(container, entries) {
+  function renderLorebookEntriesWithFolders(container, group, entries) {
     const childrenByFolder = new Map;
     const folderKeys = new Set;
     for (const e of entries) {
@@ -43950,17 +44105,25 @@ ${preview}${more}
     for (const e of entries) {
       if (e.risuMode === "folder" && e.risuFolderKey) {
         const children = childrenByFolder.get(e.risuFolderKey) ?? [];
-        container.appendChild(renderLorebookFolderGroup(e, children));
+        container.appendChild(renderLorebookFolderGroup(group, e, children));
         continue;
       }
       if (e.risuFolderRef && folderKeys.has(e.risuFolderRef))
         continue;
-      container.appendChild(renderLorebookRow(e));
+      container.appendChild(renderLorebookRow(group, e));
     }
   }
-  function renderLorebookFolderGroup(folder, children) {
+  function renderLorebookFolderGroup(group, folder, children) {
     const det = document.createElement("details");
     det.className = "lrv-lb-folder-group";
+    const folderStateKey = `${group.groupId}::${folder.id}`;
+    det.open = openLorebookFolders.has(folderStateKey);
+    det.addEventListener("toggle", () => {
+      if (det.open)
+        openLorebookFolders.add(folderStateKey);
+      else
+        openLorebookFolders.delete(folderStateKey);
+    });
     const sum = document.createElement("summary");
     sum.className = "lrv-lb-folder-summary";
     const icon = document.createElement("span");
@@ -43981,31 +44144,50 @@ ${preview}${more}
     const body = document.createElement("div");
     body.className = "lrv-lb-folder-body";
     for (const c of children)
-      body.appendChild(renderLorebookRow(c));
+      body.appendChild(renderLorebookRow(group, c));
     det.appendChild(body);
     return det;
   }
-  function renderLorebookRow(e) {
+  function lorebookStatus(e) {
+    if (e.disabled)
+      return { kind: "disabled", label: "Disabled" };
+    if (e.constant)
+      return { kind: "constant", label: "Constant" };
+    return { kind: "enabled", label: "Enabled" };
+  }
+  function renderLorebookRow(group, e) {
     if (e.risuMode === "folder")
       return renderLorebookFolderHeader(e);
     if (e.risuMode === "child")
       return renderLorebookChildLink(e);
     const row = document.createElement("details");
     row.className = "lrv-lb-row";
+    row.dataset["entryId"] = e.id;
+    row.dataset["worldBookId"] = group.groupId;
     if (e.disabled)
       row.classList.add("lrv-lb-row-disabled");
+    const entryStateKey = `${group.groupId}::${e.id}`;
+    row.open = openLorebookEntries.has(entryStateKey);
+    row.addEventListener("toggle", () => {
+      if (row.open)
+        openLorebookEntries.add(entryStateKey);
+      else
+        openLorebookEntries.delete(entryStateKey);
+    });
     const sum = document.createElement("summary");
     sum.className = "lrv-lb-row-summary";
     const dot = document.createElement("span");
-    dot.className = e.constant ? "lrv-lb-status lrv-lb-status-always" : "lrv-lb-status lrv-lb-status-keyed";
-    dot.title = e.disabled ? "disabled" : e.constant ? "always active" : "key-based";
+    const status2 = lorebookStatus(e);
+    dot.className = `lrv-lb-status lrv-lb-status-${status2.kind}`;
+    dot.title = status2.label;
+    dot.setAttribute("aria-label", status2.label);
     sum.appendChild(dot);
     const name = document.createElement("span");
     name.className = "lrv-lb-name";
     name.textContent = lorebookEntryName(e);
     sum.appendChild(name);
     row.appendChild(sum);
-    row.appendChild(renderLorebookRowDetail(e));
+    row.appendChild(renderLorebookRowDetail(group, e));
     kickoffEntryTranslation(e, name);
     return row;
   }
@@ -44087,7 +44269,7 @@ ${preview}${more}
       return e.key.join(", ");
     return "(unnamed)";
   }
-  function renderLorebookRowDetail(e) {
+  function renderLorebookRowDetail(group, e) {
     const body = document.createElement("div");
     body.className = "lrv-lb-body";
     if (!e.constant && e.key.length > 0) {
@@ -44107,6 +44289,50 @@ ${preview}${more}
     content.className = "lrv-lb-content";
     content.textContent = e.content;
     body.appendChild(content);
+    if (group.groupId !== "module") {
+      const actions = document.createElement("div");
+      actions.className = "lrv-lb-actions";
+      const mutationKey = `${group.groupId}::${e.id}`;
+      const navigationKey = lorebookNavigationKey(group.groupId, e.id);
+      const navigationPending = lorebookNavigationPending.has(navigationKey);
+      const pendingDisabled = lorebookMutationPending.get(mutationKey);
+      const pending = pendingDisabled !== undefined;
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "lrv-btn lrv-lb-open-lumiverse lrv-lb-open-entry";
+      openButton.textContent = navigationPending ? "Opening…" : "Open in Lumiverse";
+      openButton.disabled = navigationPending;
+      openButton.title = "Open this exact entry in Lumiverse's World Book Editor.";
+      openButton.addEventListener("click", () => {
+        beginOpenWorldBookEditor(group.groupId, e.id);
+      });
+      actions.appendChild(openButton);
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "lrv-btn lrv-lb-toggle-entry";
+      toggle.textContent = pending ? pendingDisabled ? "Disabling…" : "Enabling…" : e.disabled ? "Enable entry" : "Disable entry";
+      toggle.disabled = pending;
+      toggle.addEventListener("click", () => {
+        if (lorebookMutationPending.has(mutationKey))
+          return;
+        const source = currentViewerSourceRef();
+        if (!source)
+          return;
+        lorebookMutationPending.set(mutationKey, !e.disabled);
+        openLorebookEntries.add(mutationKey);
+        lorebookActionError = null;
+        renderSurfaces();
+        sendToBackend({
+          type: "set_viewer_lorebook_entry_disabled",
+          source,
+          worldBookId: group.groupId,
+          entryId: e.id,
+          disabled: !e.disabled
+        });
+      });
+      actions.appendChild(toggle);
+      body.appendChild(actions);
+    }
     return body;
   }
   function field(label, value) {
@@ -44224,6 +44450,29 @@ ${preview}${more}
         }
         break;
       }
+      case "viewer_lorebook_entry_disabled_result": {
+        const mutationKey = `${msg.worldBookId}::${msg.entryId}`;
+        if (selectedSourceKey !== viewerSourceKey(msg.source))
+          break;
+        lorebookMutationPending.delete(mutationKey);
+        if (!msg.ok) {
+          lorebookActionError = `Could not update lorebook entry: ${msg.error ?? "unknown error"}`;
+          render();
+          break;
+        }
+        lorebookActionError = null;
+        if (viewerData) {
+          viewerData = {
+            ...viewerData,
+            lorebook: viewerData.lorebook.map((group) => group.groupId !== msg.worldBookId ? group : {
+              ...group,
+              entries: group.entries.map((entry) => entry.id === msg.entryId ? { ...entry, disabled: msg.disabled } : entry)
+            })
+          };
+        }
+        render();
+        break;
+      }
       case "viewer_data_pushed": {
         const d = msg.data;
         const expectedKey = sourceKey2(d.source.kind === "character" ? { kind: "character", id: d.source.characterId, label: d.source.name } : { kind: "module", id: d.source.moduleId, label: d.source.name });
@@ -44268,6 +44517,7 @@ ${preview}${more}
   document.addEventListener("keydown", onEscapeKeyDown, true);
   function destroy() {
     log8.info("viewer-panel: destroy");
+    destroyed = true;
     try {
       document.removeEventListener("keydown", onEscapeKeyDown, true);
     } catch {}
@@ -44729,6 +44979,12 @@ var STATE_SUB_TABS = [
 ];
 function createSidebar(opts) {
   const { ctx, sendToBackend, log: log8 } = opts;
+  const openWorldBookEditor = async (worldBookId, entryId) => {
+    const surfaces = ctx.host.surfaces;
+    if (!surfaces)
+      throw new Error("Lumiverse host action API is unavailable");
+    await surfaces.invoke({ kind: "modal", id: "world_book_editor" }, { id: worldBookId, ...entryId ? { entryId } : {} });
+  };
   log8.info("sidebar: registering single drawer tab");
   const tab = ctx.ui.registerDrawerTab({
     id: "lumirealm",
@@ -44836,7 +45092,7 @@ function createSidebar(opts) {
         break;
       }
       case "viewer":
-        handle = mountViewerPanel({ root: host, sendToBackend, log: log8 });
+        handle = mountViewerPanel({ root: host, sendToBackend, log: log8, openWorldBookEditor });
         break;
       case "state": {
         let activateSub = function(id2) {
