@@ -384,6 +384,11 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       // Card-authored position:fixed needs viewport scope, opt the chat out of
       // Lumi's bubble-CB sandbox. Gated by app_manipulation per Lumi side.
       deps.setChatStyleMode(chatId, 'extension-relaxed', userId);
+      // A push made while this chat was in the background may have been
+      // discarded by the renderer, so the send-dedupe signature can claim
+      // content the frontend never mounted. Drop it and always re-push on the
+      // way in.
+      deps.lastSentBgHtmlByChat.delete(chatId);
       deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       void deps.refreshMessagesCache(chatId, userId);

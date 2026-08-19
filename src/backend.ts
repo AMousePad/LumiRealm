@@ -1413,6 +1413,7 @@ const characterModuleAttach = createCharacterModuleAttach({
   refreshToggleDefinitions,
   refreshBgHtml,
   send,
+  visibleChatForUser: (uid) => lastActiveChatByUser.get(uid),
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
   log,
   errMsg,

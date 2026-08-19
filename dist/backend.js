@@ -36440,6 +36440,7 @@ function createLifecycleEventHandlers(deps) {
         return;
       }
       deps.setChatStyleMode(chatId, "extension-relaxed", userId);
+      deps.lastSentBgHtmlByChat.delete(chatId);
       deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       deps.refreshMessagesCache(chatId, userId);
@@ -43634,6 +43635,7 @@ function createCharacterModuleAttach(deps) {
     refreshToggleDefinitions,
     refreshBgHtml,
     send,
+    visibleChatForUser,
     onActiveChatEvicted,
     log: log8,
     errMsg: errMsg2
@@ -43662,7 +43664,10 @@ function createCharacterModuleAttach(deps) {
     compiledByCharacter.delete(characterId);
     clearActiveLorebookForCharacter(characterId);
     log8.info(`invalidateActiveForCharacter: char=${characterId} evictedChats=${evicted}`);
+    const visibleChat = visibleChatForUser(userId);
     for (const chatId of evictedChats) {
+      if (visibleChat !== undefined && chatId !== visibleChat)
+        continue;
       (async () => {
         const reactivated = await ensureActiveCardForChat(chatId, null, userId);
         if (reactivated) {
@@ -46428,6 +46433,7 @@ var characterModuleAttach = createCharacterModuleAttach({
   refreshToggleDefinitions,
   refreshBgHtml,
   send,
+  visibleChatForUser: (uid) => lastActiveChatByUser.get(uid),
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
   log: log8,
   errMsg
