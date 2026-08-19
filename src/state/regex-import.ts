@@ -2,7 +2,7 @@ import type { BackendToFrontend, FrontendToBackend, PendingRegexScriptMsg } from
 import type { parseDirectRegex } from '../payload/regex-direct-import.js';
 import type { mapRegex } from '../core/mappers/regex.js';
 import type { LumiRegexScript } from '../core/lumiverse/types.js';
-import { ensureRegexOwnership } from './regex-ownership.js';
+import { describeRegexOwnershipFailures, ensureRegexOwnership } from './regex-ownership.js';
 
 export type ImportRegexMsg = Extract<FrontendToBackend, { type: 'import_regex' }>;
 
@@ -102,7 +102,8 @@ export function createRegexImporter(deps: RegexImporterDeps): RegexImporter {
     const ownership = await ensureRegexOwnership(deps.regexApi, scripts, userId);
     if (!ownership.allOwned) {
       deps.log.warn(
-        `import_regex: ownership incomplete unowned=${ownership.unowned} failed=${ownership.failed}; ` +
+        `import_regex: ownership incomplete unowned=${ownership.unowned} failed=${ownership.failed} ` +
+          `[${describeRegexOwnershipFailures(ownership.failures)}]; ` +
           'REST import will continue without deleting anything',
       );
     }

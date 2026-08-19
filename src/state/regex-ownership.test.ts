@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { PendingRegexScriptMsg } from '../types/messages.js';
-import { ensureRegexOwnership } from './regex-ownership.js';
+import { describeRegexOwnershipFailures, ensureRegexOwnership } from './regex-ownership.js';
 
 function script(id: string): PendingRegexScriptMsg {
   return {
@@ -100,5 +100,48 @@ describe('ensureRegexOwnership', () => {
     const result = await ensureRegexOwnership(mock.value as never, [script('A-B C')], 'user-1');
     expect(result.scripts[0]?.script_id).toBe('a_b_c');
     expect(mock.created).toEqual(['a_b_c']);
+  });
+
+  test('carries the host error and offending row through to the caller', async () => {
+    const mock = api();
+    mock.value.create = async (input: { script_id?: string }) => {
+      throw new Error(`find_regex invalid for ${input.script_id}`);
+    };
+    const result = await ensureRegexOwnership(
+      mock.value as never,
+      [script('bad_one'), script('bad_two')],
+      'user-1',
+    );
+    expect(result.failed).toBe(2);
+    expect(result.failures).toEqual([
+      { scriptId: 'bad_one', name: 'bad_one', stage: 'create', message: 'find_regex invalid for bad_one' },
+      { scriptId: 'bad_two', name: 'bad_two', stage: 'create', message: 'find_regex invalid for bad_two' },
+    ]);
+    expect(describeRegexOwnershipFailures(result.failures))
+      .toBe('create:bad_one("bad_one") find_regex invalid for bad_one; '
+        + 'create:bad_two("bad_two") find_regex invalid for bad_two');
+  });
+
+  test('separates unowned rows from hard failures in the counts', async () => {
+    const mock = api([{ id: 'row-old', script_id: 'old', can_mutate: false }]);
+    mock.value.create = async () => { throw new Error('rejected'); };
+    const result = await ensureRegexOwnership(
+      mock.value as never,
+      [script('old'), script('new')],
+      'user-1',
+    );
+    expect(result).toMatchObject({ unowned: 1, failed: 1 });
+    expect(result.failures.map((f) => f.stage)).toEqual(['unowned', 'create']);
+  });
+
+  test('flags a normalized script_id collision instead of silently dropping a row', async () => {
+    const mock = api();
+    const result = await ensureRegexOwnership(
+      mock.value as never,
+      [script('A-B'), script('a_b')],
+      'user-1',
+    );
+    expect(result).toMatchObject({ created: 1, failed: 1 });
+    expect(result.failures[0]).toMatchObject({ scriptId: 'a_b', stage: 'duplicate_id' });
   });
 });

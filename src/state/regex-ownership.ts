@@ -7,6 +7,15 @@ type RegexApi = Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'>;
 type MutableRegexInput = Parameters<RegexApi['create']>[0];
 type ListedRegex = Awaited<ReturnType<RegexApi['list']>>['data'][number];
 
+export type RegexOwnershipStage = 'duplicate_id' | 'list' | 'update' | 'create' | 'unowned';
+
+export interface RegexOwnershipFailure {
+  readonly scriptId: string;
+  readonly name: string;
+  readonly stage: RegexOwnershipStage;
+  readonly message: string;
+}
+
 export interface RegexOwnershipResult {
   readonly scripts: readonly PendingRegexScriptMsg[];
   readonly allOwned: boolean;
@@ -14,6 +23,31 @@ export interface RegexOwnershipResult {
   readonly alreadyOwned: number;
   readonly unowned: number;
   readonly failed: number;
+  readonly failures: readonly RegexOwnershipFailure[];
+}
+
+const MAX_DESCRIBED_FAILURES = 5;
+
+/** Compact, host-error-preserving summary for throw sites and logs. */
+export function describeRegexOwnershipFailures(
+  failures: readonly RegexOwnershipFailure[],
+): string {
+  if (failures.length === 0) return '';
+  const shown = failures.slice(0, MAX_DESCRIBED_FAILURES).map(
+    (f) => `${f.stage}:${f.scriptId || '<empty-id>'}("${f.name}") ${f.message}`,
+  );
+  const rest = failures.length - shown.length;
+  return shown.join('; ') + (rest > 0 ? `; +${rest} more` : '');
+}
+
+function errText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
 }
 
 function normalizeScriptId(raw: string): string {
@@ -73,14 +107,26 @@ export async function ensureRegexOwnership(
   }));
   const rowsByScope = new Map<string, Map<string, ListedRegex>>();
   const seen = new Set<string>();
+  const failures: RegexOwnershipFailure[] = [];
   let created = 0;
   let alreadyOwned = 0;
   let unowned = 0;
-  let failed = 0;
+
+  const fail = (
+    script: PendingRegexScriptMsg,
+    stage: RegexOwnershipStage,
+    message: string,
+  ): void => {
+    failures.push({ scriptId: script.script_id, name: script.name, stage, message });
+  };
 
   for (const script of normalizedScripts) {
     if (!script.script_id || seen.has(script.script_id)) {
-      failed++;
+      fail(
+        script,
+        'duplicate_id',
+        script.script_id ? 'normalized script_id collides with an earlier row' : 'empty script_id',
+      );
       continue;
     }
     seen.add(script.script_id);
@@ -91,8 +137,8 @@ export async function ensureRegexOwnership(
       try {
         existingById = await listScope(api, script, userId);
         rowsByScope.set(key, existingById);
-      } catch {
-        failed++;
+      } catch (err) {
+        fail(script, 'list', errText(err));
         continue;
       }
     }
@@ -101,13 +147,14 @@ export async function ensureRegexOwnership(
     if (existing) {
       if (existing.can_mutate !== true) {
         unowned++;
+        fail(script, 'unowned', `row ${existing.id} is not mutable by this extension`);
         continue;
       }
       try {
         await api.update(existing.id, createInput(script), userId);
         alreadyOwned++;
-      } catch {
-        failed++;
+      } catch (err) {
+        fail(script, 'update', errText(err));
       }
       continue;
     }
@@ -116,10 +163,14 @@ export async function ensureRegexOwnership(
       const createdRow = await api.create(createInput(script), userId);
       created++;
       existingById.set(script.script_id, createdRow);
-    } catch {
-      failed++;
+    } catch (err) {
+      fail(script, 'create', errText(err));
     }
   }
+
+  // `unowned` rows are counted in both places, so subtract to keep `failed`
+  // meaning what it did before this returned per-row detail.
+  const failed = failures.length - unowned;
 
   return {
     scripts: normalizedScripts,
@@ -128,5 +179,6 @@ export async function ensureRegexOwnership(
     alreadyOwned,
     unowned,
     failed,
+    failures,
   };
 }
