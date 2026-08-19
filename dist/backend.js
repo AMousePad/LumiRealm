@@ -23588,7 +23588,8 @@ function translateFromCharxBundle(bundle, opts = {}) {
   let risuPayload = null;
   if (mode !== "walking-skeleton") {
     const payloadUntranslated = untranslated.utility_bot ? { utility_bot: true } : undefined;
-    const rawBg = charMap.extracted.backgroundHTML ?? null;
+    const sourceBg = charMap.extracted.backgroundHTML ?? null;
+    const rawBg = opts.backgroundHtmlOverride !== undefined ? opts.backgroundHtmlOverride : sourceBg;
     const prepared = prepareBackgroundHtmlForRuntime(rawBg, {
       regexReplaceStrings: regexScripts.map((r) => r.replace_string ?? ""),
       svgIndexer
@@ -23596,7 +23597,7 @@ function translateFromCharxBundle(bundle, opts = {}) {
     svgTemplatedSkipped += prepared.svgTemplatedSkipped;
     svgDangerousSkipped += prepared.svgDangerousSkipped;
     const bgHtmlForPayload = prepared.translated;
-    const adjustedExtracted = bgHtmlForPayload !== rawBg ? { ...charMap.extracted, backgroundHTML: bgHtmlForPayload } : charMap.extracted;
+    const adjustedExtracted = bgHtmlForPayload !== sourceBg ? { ...charMap.extracted, backgroundHTML: bgHtmlForPayload } : charMap.extracted;
     risuPayload = buildRisuPayload({
       translatorVersion: TRANSLATOR_VERSION,
       risuSpecVersion: RISU_SPEC_VERSION,
@@ -24227,6 +24228,32 @@ function makeSafeLogger(prefix) {
   };
 }
 
+// src/payload/character-regex-projection.ts
+function projectCharacterRegexScripts(rows, characterId, characterName) {
+  const fallbackFolder = `Risu \u2014 ${characterName}`.slice(0, 80);
+  return rows.map((row) => ({
+    name: row.name,
+    script_id: row.script_id,
+    find_regex: row.find_regex,
+    replace_string: row.replace_string,
+    flags: row.flags,
+    placement: [...row.placement],
+    scope: row.scope,
+    scope_id: row.scope === "character" ? characterId : row.scope_id,
+    target: row.target,
+    min_depth: row.min_depth,
+    max_depth: row.max_depth,
+    trim_strings: [...row.trim_strings],
+    run_on_edit: row.run_on_edit,
+    substitute_macros: row.substitute_macros,
+    disabled: row.disabled,
+    sort_order: row.sort_order,
+    description: row.description,
+    folder: row.folder || fallbackFolder,
+    metadata: { ...row.metadata ?? {} }
+  }));
+}
+
 // src/payload/import.ts
 var logger = makeSafeLogger("import");
 var logInfo = (msg) => logger.info(msg);
@@ -24732,51 +24759,13 @@ async function importCard(args) {
     }
     logInfo(`(6) entries done ok=${entries.length - failed} failed=${failed} elapsed=${Date.now() - tEntries}ms`);
   }
-  const folderLabel = `Risu \u2014 ${bundle.character.name}`.slice(0, 80);
-  const allRows = bundle.regexScripts.map((r) => ({
-    name: r.name,
-    script_id: r.script_id,
-    find_regex: r.find_regex,
-    replace_string: r.replace_string,
-    flags: r.flags,
-    placement: [...r.placement],
-    scope: r.scope,
-    scope_id: r.scope === "character" ? characterId : r.scope_id,
-    target: r.target,
-    min_depth: r.min_depth,
-    max_depth: r.max_depth,
-    trim_strings: [...r.trim_strings],
-    run_on_edit: r.run_on_edit,
-    substitute_macros: r.substitute_macros,
-    disabled: r.disabled,
-    sort_order: r.sort_order,
-    description: r.description,
-    folder: r.folder || folderLabel,
-    metadata: { ...r.metadata }
-  }));
-  const pendingRegexScripts = allRows.map((r) => ({
-    name: r.name,
-    script_id: r.script_id,
-    find_regex: r.find_regex,
-    replace_string: r.replace_string,
-    flags: r.flags,
-    placement: r.placement,
-    scope: r.scope,
-    scope_id: r.scope_id,
-    target: r.target,
-    min_depth: r.min_depth,
-    max_depth: r.max_depth,
-    trim_strings: r.trim_strings,
-    run_on_edit: r.run_on_edit,
-    substitute_macros: r.substitute_macros,
-    disabled: r.disabled,
-    sort_order: r.sort_order,
-    description: r.description,
-    folder: r.folder,
-    metadata: { ...r.metadata ?? {} }
+  const allRows = projectCharacterRegexScripts(bundle.regexScripts, characterId, bundle.character.name);
+  const pendingRegexScripts = allRows.map((row) => ({
+    ...row,
+    metadata: { ...row.metadata }
   }));
   const partitionedOut = allRows.length - pendingRegexScripts.length;
-  logInfo(`(8) pendingRegexScripts: total=${allRows.length} pushedToLumi=${pendingRegexScripts.length} ` + `extensionManaged=${partitionedOut} folder="${folderLabel}"`);
+  logInfo(`(8) pendingRegexScripts: total=${allRows.length} pushedToLumi=${pendingRegexScripts.length} ` + `extensionManaged=${partitionedOut}`);
   progress("saving_payload", "Saving lumirealm payload\u2026", 0.92);
   const tSave = Date.now();
   const storedRegexScripts = allRows.map((r) => ({
@@ -31694,7 +31683,7 @@ function clearActiveModulesByNamespace(chatId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.8.6",
+  version: "0.8.10",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -40304,15 +40293,13 @@ function createTriggerDispatcher(deps) {
 function createRepairOrchestrator(deps) {
   const {
     listLumirealmCharacters: listLumirealmCharacters2,
-    writeLumirealm: writeLumirealm2,
     readLumirealm: readLumirealm2,
     updateLumirealm: updateLumirealm2,
     mergeUserOverrides: mergeUserOverrides2,
     buildDetachModulesPatch: buildDetachModulesPatch2,
-    runCharacterMigration,
+    retranslateCharacter,
     readModuleEnvelope,
     refreshAttachedModule,
-    translatorMigrationChecked,
     listStaleModuleRegexIds,
     listStaleCharRegexIds,
     deleteRegexRows,
@@ -40407,31 +40394,18 @@ function createRepairOrchestrator(deps) {
         if (currentData.source === undefined) {
           skippedLegacy++;
         } else {
-          translatorMigrationChecked.delete(charId);
-          const reset = { ...currentData, translator_schema_version: 0 };
-          let wroteReset = false;
           try {
-            await writeLumirealm2(charId, reset, userId);
-            currentData = reset;
-            wroteReset = true;
+            const result = await retranslateCharacter(charId, charName, userId, currentData);
+            if (result.kind === "retranslated") {
+              retranslated++;
+              currentData = result.data;
+            } else if (result.kind === "needs_reimport") {
+              skippedLegacy++;
+            } else {
+              log8.warn(`forceRetranslateAll: retranslateCharacter(${charId}) failed: ${result.error}`);
+            }
           } catch (err) {
-            log8.warn(`forceRetranslateAll: writeLumirealm(${charId}) failed: ${errMsg2(err)}`);
-          }
-          if (wroteReset) {
-            try {
-              const kind = await runCharacterMigration(charId, charName, userId, reset, { silent: true });
-              if (kind === "migrated")
-                retranslated++;
-            } catch (err) {
-              log8.warn(`forceRetranslateAll: runCharacterMigration(${charId}) failed: ${errMsg2(err)}`);
-            }
-            try {
-              const postFetch = await readLumirealm2(charId, userId);
-              if (postFetch?.data)
-                currentData = postFetch.data;
-            } catch (err) {
-              log8.warn(`forceRetranslateAll: readLumirealm(${charId}) post-migrate failed: ${errMsg2(err)}`);
-            }
+            log8.warn(`forceRetranslateAll: retranslateCharacter(${charId}) threw: ${errMsg2(err)}`);
           }
         }
         processed++;
@@ -40541,6 +40515,95 @@ function createRepairOrchestrator(deps) {
     };
   }
   return { forceRetranslateAll, scrubDanglingModuleRefs, applyRepair };
+}
+
+// src/state/character-retranslate.ts
+async function retranslateCharacterFromCurrentSource(args, deps) {
+  const source = args.envelope.source;
+  if (!source)
+    return { kind: "needs_reimport" };
+  const t0 = Date.now();
+  try {
+    const backgroundHtmlOverride = typeof args.envelope.payload.background_html_source === "string" ? args.envelope.payload.background_html_source : undefined;
+    const translationSource = structuredClone({
+      card: source.card,
+      module: source.module
+    });
+    const bundle = translateFromStoredSource(translationSource, {
+      sourceId: `repair:${args.characterId}`,
+      mode: "full",
+      emitPackScripts: false,
+      ...backgroundHtmlOverride !== undefined ? { backgroundHtmlOverride } : {}
+    });
+    if (!bundle.risuPayload)
+      throw new Error("translator returned no risuPayload");
+    const compatibility = preValidateRequires(bundle.risuPayload.requires);
+    if (!compatibility.ok) {
+      throw new RisuCompatVersionError(compatibility.missing, deps.extensionVersion);
+    }
+    if (compatibility.degraded.length > 0) {
+      deps.log.warn(`retranslate(${args.characterId}): degraded=[${compatibility.degraded.join(", ")}]`);
+    }
+    let avatarImageId = null;
+    try {
+      avatarImageId = await deps.getAvatarImageId(args.characterId, args.userId);
+    } catch (error) {
+      deps.log.warn(`retranslate(${args.characterId}): avatar lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const indexes = buildAssetIndexes({
+      additional_assets: bundle.risuPayload.additional_assets,
+      emotion_images: bundle.risuPayload.emotion_images
+    }, source.path_to_image_id, avatarImageId);
+    const regexScripts = projectCharacterRegexScripts(bundle.regexScripts, args.characterId, bundle.character.name);
+    const payload = backgroundHtmlOverride !== undefined ? { ...bundle.risuPayload, background_html_source: backgroundHtmlOverride } : bundle.risuPayload;
+    const rebuilt = buildLumirealmData(payload, deps.extensionVersion, regexScripts, indexes.assetIndex, indexes.emotionIndex, args.envelope.imported_at, args.envelope.user_overrides, source, CURRENT_CHARACTER_SCHEMA_VERSION);
+    const next = {
+      ...args.envelope,
+      ...rebuilt
+    };
+    await deps.installCharacterRegexScripts(args.characterId, args.characterName, regexScripts, args.userId);
+    await deps.writeEnvelope(args.characterId, next, args.userId);
+    const rasterTasks = bundle.pendingSvgRasters.filter((task) => task.classification !== "templated");
+    if (rasterTasks.length > 0) {
+      deps.dispatchSvgRasterize(args.characterId, args.characterName, rasterTasks, args.userId);
+    }
+    deps.invalidateActiveForCharacter(args.characterId, args.userId);
+    deps.log.info(`retranslate(${args.characterId}): current pipeline -> v${CURRENT_CHARACTER_SCHEMA_VERSION} ` + `regex=${regexScripts.length} elapsed=${Date.now() - t0}ms`);
+    return { kind: "retranslated", data: next };
+  } catch (error) {
+    return {
+      kind: "failed",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+// src/state/character-regex-install.ts
+async function installCurrentCharacterRegexScripts(args, deps) {
+  const pending4 = args.scripts.map((script) => ({
+    ...script,
+    metadata: { ...script.metadata ?? {} }
+  }));
+  const ownership = await ensureRegexOwnership(deps.regexApi, pending4, args.userId);
+  if (!ownership.allOwned) {
+    throw new Error(`regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}`);
+  }
+  const completion = await awaitRegexInstall(args.userId, (requestId) => {
+    deps.send({
+      type: "install_regex_scripts",
+      characterId: args.characterId,
+      characterName: args.characterName,
+      scripts: ownership.scripts.map((script) => ({
+        ...script,
+        metadata: { ...script.metadata ?? {} }
+      })),
+      cleanupStale: true,
+      requestId
+    }, args.userId);
+  });
+  if (!completion.ok || !completion.cleanupCompleted) {
+    throw new Error("regex install or verified stale cleanup did not complete");
+  }
 }
 
 // src/state/repair-targets.ts
@@ -40754,27 +40817,7 @@ function createMigrationsRunner(deps) {
       extensionVersion,
       log: log8,
       installCharacterRegexScripts: async (charId, charName, scripts) => {
-        const pending4 = scripts.map((script) => ({
-          ...script,
-          metadata: { ...script.metadata ?? {} }
-        }));
-        const ownership = await ensureRegexOwnership(spindle.regex_scripts, pending4, userId);
-        if (!ownership.allOwned) {
-          throw new Error(`regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}`);
-        }
-        const completion = await awaitRegexInstall(userId, (requestId) => {
-          send({
-            type: "install_regex_scripts",
-            characterId: charId,
-            characterName: charName,
-            scripts: ownership.scripts.map((s) => ({ ...s, metadata: { ...s.metadata ?? {} } })),
-            cleanupStale: true,
-            requestId
-          }, userId);
-        });
-        if (!completion.ok || !completion.cleanupCompleted) {
-          throw new Error("regex install or verified stale cleanup did not complete");
-        }
+        await installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId }, { regexApi: spindle.regex_scripts, send });
       },
       reinstallAttachedModules: async (charId) => {
         const ids = envelope.user_overrides.attached_module_ids ?? [];
@@ -46331,15 +46374,39 @@ var repairOrchestrator = createRepairOrchestrator({
       data: e.data
     }));
   },
-  writeLumirealm: (characterId, data, userId) => writeLumirealm(charactersApi(), characterId, data, userId),
   readLumirealm: (characterId, userId) => readLumirealm(charactersApi(), characterId, userId),
   updateLumirealm: (characterId, userId, fn) => updateLumirealm(charactersApi(), characterId, userId, fn),
   mergeUserOverrides: (base, patch) => mergeUserOverrides(base, patch),
   buildDetachModulesPatch: (base, ids) => buildDetachModulesPatch(base, ids),
-  runCharacterMigration: (charId, charName, userId, env, opts) => runCharacterMigration(charId, charName, userId, env, opts),
+  retranslateCharacter: (characterId, characterName, userId, envelope) => retranslateCharacterFromCurrentSource({ characterId, characterName, userId, envelope }, {
+    extensionVersion: EXTENSION_VERSION,
+    getAvatarImageId: async (charId, uid) => {
+      const character2 = await spindle.characters.get(charId, uid);
+      return typeof character2?.image_id === "string" && character2.image_id.length > 0 ? character2.image_id : null;
+    },
+    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send }),
+    writeEnvelope: (charId, data, uid) => writeLumirealm(charactersApi(), charId, data, uid).then(() => {
+      return;
+    }),
+    dispatchSvgRasterize: (charId, charName, tasks, uid) => {
+      send({
+        type: "rasterize_svgs",
+        characterId: charId,
+        characterName: charName,
+        svgs: tasks.map((task) => ({
+          markerN: task.markerN,
+          svg: task.svg,
+          classification: task.classification,
+          width: task.width,
+          height: task.height
+        }))
+      }, uid);
+    },
+    invalidateActiveForCharacter: (charId, uid) => invalidateActiveForCharacter(charId, uid),
+    log: log8
+  }),
   readModuleEnvelope: (userId, moduleId) => readEnvelope(moduleStorage(), userId, moduleId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
-  translatorMigrationChecked,
   listStaleModuleRegexIds,
   listStaleCharRegexIds,
   deleteRegexRows: deleteRepairRegexRows,

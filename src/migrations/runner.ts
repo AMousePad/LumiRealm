@@ -18,7 +18,7 @@ import {
   recoverModuleRegexScriptIds,
 } from '../state/module-artifact-project.js';
 import { mergeUserOverrides } from '../state/lumirealm-character.js';
-import { ensureRegexOwnership } from '../state/regex-ownership.js';
+import { installCurrentCharacterRegexScripts } from '../state/character-regex-install.js';
 import { awaitRegexInstall } from './install-coordinator.js';
 import type { ModuleArtifactInstallOptions } from '../state/world-book-ops.js';
 
@@ -229,29 +229,10 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       extensionVersion,
       log,
       installCharacterRegexScripts: async (charId, charName, scripts) => {
-        const pending = scripts.map((script) => ({
-          ...script,
-          metadata: { ...(script.metadata ?? {}) },
-        }));
-        const ownership = await ensureRegexOwnership(spindle.regex_scripts, pending, userId);
-        if (!ownership.allOwned) {
-          throw new Error(
-            `regex ownership incomplete: unowned=${ownership.unowned} failed=${ownership.failed}`,
-          );
-        }
-        const completion = await awaitRegexInstall(userId, (requestId) => {
-          send({
-            type: 'install_regex_scripts',
-            characterId: charId,
-            characterName: charName,
-            scripts: ownership.scripts.map((s) => ({ ...s, metadata: { ...(s.metadata ?? {}) } })),
-            cleanupStale: true,
-            requestId,
-          }, userId);
-        });
-        if (!completion.ok || !completion.cleanupCompleted) {
-          throw new Error('regex install or verified stale cleanup did not complete');
-        }
+        await installCurrentCharacterRegexScripts(
+          { characterId: charId, characterName: charName, scripts, userId },
+          { regexApi: spindle.regex_scripts, send },
+        );
       },
       reinstallAttachedModules: async (charId) => {
         const ids = envelope.user_overrides.attached_module_ids ?? [];

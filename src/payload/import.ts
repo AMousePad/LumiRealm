@@ -19,6 +19,10 @@ import type {
 import { LUMIREALM_EXT_KEY } from './types.js';
 import { appendImageIdsToJournal } from '../state/image-journal.js';
 import { makeSafeLogger } from '../util/safe-log.js';
+import {
+  projectCharacterRegexScripts,
+  type ProjectedCharacterRegexScript,
+} from './character-regex-projection.js';
 
 const logger = makeSafeLogger('import');
 const logInfo = (msg: string): void => logger.info(msg);
@@ -36,27 +40,7 @@ export interface ImportResult {
   readonly pendingSvgRasters: readonly import('../core/svg-rasterize.js').SvgRasterTask[];
 }
 
-export interface PendingRegexScript {
-  readonly name: string;
-  readonly script_id: string;
-  readonly find_regex: string;
-  readonly replace_string: string;
-  readonly flags: string;
-  readonly placement: readonly string[];
-  readonly scope: 'global' | 'character' | 'chat';
-  readonly scope_id: string | null;
-  readonly target: 'prompt' | 'response' | 'display';
-  readonly min_depth: number | null;
-  readonly max_depth: number | null;
-  readonly trim_strings: readonly string[];
-  readonly run_on_edit: boolean;
-  readonly substitute_macros: 'none' | 'find' | 'raw' | 'escaped' | 'after';
-  readonly disabled: boolean;
-  readonly sort_order: number;
-  readonly description: string;
-  readonly folder: string;
-  readonly metadata: Record<string, unknown>;
-}
+export type PendingRegexScript = ProjectedCharacterRegexScript;
 
 function makeLowLevelAccessConsentMessage(characterName: string): string {
   return (
@@ -710,57 +694,22 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   }
 
   // Rewrite scope_id from translator's internal id to the real Lumiverse character id.
-  const folderLabel = `Risu — ${bundle.character.name}`.slice(0, 80);
-
-  const allRows: PendingRegexScript[] = bundle.regexScripts.map((r) => ({
-    name: r.name,
-    script_id: r.script_id,
-    find_regex: r.find_regex,
-    replace_string: r.replace_string,
-    flags: r.flags,
-    placement: [...r.placement],
-    scope: r.scope,
-    scope_id: r.scope === 'character' ? characterId : r.scope_id,
-    target: r.target,
-    min_depth: r.min_depth,
-    max_depth: r.max_depth,
-    trim_strings: [...r.trim_strings],
-    run_on_edit: r.run_on_edit,
-    substitute_macros: r.substitute_macros,
-    disabled: r.disabled,
-    sort_order: r.sort_order,
-    description: r.description,
-    folder: r.folder || folderLabel,
-    metadata: { ...r.metadata },
-  }));
+  const allRows = projectCharacterRegexScripts(
+    bundle.regexScripts,
+    characterId,
+    bundle.character.name,
+  );
 
   // Runtime DOM lifter handles fixed-position content post-render. No
   // translate-time portal partition, all rules go to Lumi's regex_scripts.
-  const pendingRegexScripts: PendingRegexScript[] = allRows.map((r) => ({
-    name: r.name,
-    script_id: r.script_id,
-    find_regex: r.find_regex,
-    replace_string: r.replace_string,
-    flags: r.flags,
-    placement: r.placement,
-    scope: r.scope,
-    scope_id: r.scope_id,
-    target: r.target,
-    min_depth: r.min_depth,
-    max_depth: r.max_depth,
-    trim_strings: r.trim_strings,
-    run_on_edit: r.run_on_edit,
-    substitute_macros: r.substitute_macros,
-    disabled: r.disabled,
-    sort_order: r.sort_order,
-    description: r.description,
-    folder: r.folder,
-    metadata: { ...(r.metadata ?? {}) },
+  const pendingRegexScripts: PendingRegexScript[] = allRows.map((row) => ({
+    ...row,
+    metadata: { ...row.metadata },
   }));
   const partitionedOut = allRows.length - pendingRegexScripts.length;
   logInfo(
     `(8) pendingRegexScripts: total=${allRows.length} pushedToLumi=${pendingRegexScripts.length} ` +
-      `extensionManaged=${partitionedOut} folder="${folderLabel}"`,
+      `extensionManaged=${partitionedOut}`,
   );
 
   // Lumi shallow-merges extensions (worker-host.ts); only the lumirealm key is overwritten.

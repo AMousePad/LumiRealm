@@ -44,6 +44,8 @@ export interface TranslateCharxOptions {
   readonly emitTriggers?: boolean;
   readonly emitBgHtml?: boolean;
   readonly emitPackScripts?: boolean;
+  /** Existing-character authoring override, translated with the same SVG index as the card. */
+  readonly backgroundHtmlOverride?: string | null;
 }
 
 export function translateCharx(
@@ -479,7 +481,10 @@ export function translateFromCharxBundle(
     const payloadUntranslated = untranslated.utility_bot
       ? { utility_bot: true }
       : undefined;
-    const rawBg = charMap.extracted.backgroundHTML ?? null;
+    const sourceBg = charMap.extracted.backgroundHTML ?? null;
+    const rawBg = opts.backgroundHtmlOverride !== undefined
+      ? opts.backgroundHtmlOverride
+      : sourceBg;
     const prepared = prepareBackgroundHtmlForRuntime(rawBg, {
       regexReplaceStrings: regexScripts.map((r) => r.replace_string ?? ""),
       svgIndexer,
@@ -488,7 +493,7 @@ export function translateFromCharxBundle(
     svgDangerousSkipped += prepared.svgDangerousSkipped;
     const bgHtmlForPayload = prepared.translated;
     const adjustedExtracted =
-      bgHtmlForPayload !== rawBg
+      bgHtmlForPayload !== sourceBg
         ? { ...charMap.extracted, backgroundHTML: bgHtmlForPayload }
         : charMap.extracted;
     risuPayload = buildRisuPayload({
