@@ -1,6 +1,7 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
+import { bumpDisplayResolveMemo } from './display/resolve-memo.js';
 import {
   setDisplaySnapshot,
   getDisplaySnapshot,
@@ -599,6 +600,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
     if (msg.type === 'display_snapshot') {
       if (getDisplayResolutionMode() !== 'off') {
+        // Snapshot changed: every memoized resolve result for this chat is
+        // stale, including for background chats that skip invalidation below.
+        bumpDisplayResolveMemo(msg.snapshot.chatId);
         const prev = getDisplaySnapshot(msg.snapshot.chatId);
         setDisplaySnapshot(msg.snapshot);
         // Cache every chat, but only the visible one has DOM to re-resolve.
@@ -630,6 +634,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
     if (msg.type === 'set_variables') {
       if (getDisplayResolutionMode() !== 'off' && typeof msg.characterId === 'string') {
+        bumpDisplayResolveMemo(msg.chatId);
         const snap = getDisplaySnapshot(msg.chatId);
         const changed: string[] = [];
         for (const scope of ['local', 'global', 'chat'] as const) {

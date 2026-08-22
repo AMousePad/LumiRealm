@@ -35,6 +35,7 @@ import {
   type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import { buildModuleDisplayPlan } from './module-action-plan.js';
+import { getSharedDisplayResolveMemo } from './resolve-memo.js';
 const log = makeSafeLogger('display-resolver');
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
@@ -43,6 +44,20 @@ function dbgMarks(s: string): string {
 }
 
 export type DisplayWritebackSink = (chatId: string, vars: Record<string, string>) => void;
+
+// FNV-1a, same algorithm as render-mcp-cache.ts / the host's useDisplayRegex.ts.
+function fnv1a(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function resolveMemoContextKey(ctx: SpindleDisplayContext): string {
+  return `${ctx.messageId ?? ''}|${ctx.role ?? ''}|${ctx.depth}|${ctx.messageIndex ?? -1}|${fnv1a(JSON.stringify(ctx.dynamicMacros ?? null))}`;
+}
 
 const SNAPSHOT_WAIT_MS = 4000;
 
@@ -336,6 +351,7 @@ export function createDisplayResolver(
   writeback?: DisplayWritebackSink,
   onEffect?: DisplayRuntimeEffectSink,
 ): SpindleDisplayResolver {
+  const memo = getSharedDisplayResolveMemo();
   return {
     ready(chatId: string): boolean {
       return isDisplayResolutionReady(chatId);
@@ -343,6 +359,18 @@ export function createDisplayResolver(
     async resolveBody(args: SpindleDisplayBodyArgs): Promise<SpindleDisplayResolveResult | null> {
       const chatId = args.context.chatId;
       if (!chatId) return null;
+      // Shadow mode compares FE vs BE on every call — bypass the memo so the
+      // comparison stays live.
+      const memoKey = getDisplayResolutionMode() === 'shadow'
+        ? null
+        : `body|${fnv1a(args.content)}|${resolveMemoContextKey(args.context)}`;
+      if (memoKey !== null) {
+        const memoHit = memo.get<SpindleDisplayResolveResult>(chatId, memoKey);
+        if (memoHit) {
+          log.trace(`resolveBody.memo hit chat=${chatId} msg=${args.context.messageId ?? '?'}`);
+          return memoHit;
+        }
+      }
       const snap = await getSnapshotOrWait(chatId);
       if (!snap) return null;
 
@@ -415,11 +443,15 @@ export function createDisplayResolver(
         return { content: beContent };
       }
 
-      return {
+      const result: SpindleDisplayResolveResult = {
         content: feContent,
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile,
       };
+      // Volatile results (display triggers/effects ran) have incomplete
+      // dependency sets and a null result must never poison the memo.
+      if (memoKey !== null && !recorder.volatile) memo.set(chatId, memoKey, result);
+      return result;
     },
     async resolveTemplates(args: SpindleDisplayTemplatesArgs): Promise<SpindleDisplayTemplatesResult | null> {
       const chatId = args.context.chatId;
@@ -463,6 +495,19 @@ export function createDisplayResolver(
     async applyScripts(args: SpindleDisplayScriptsArgs): Promise<SpindleDisplayResolveResult | null> {
       const chatId = args.context.chatId;
       if (!chatId) return null;
+      // Hash the FULL script payloads wholesale — field-picking misses
+      // load-bearing fields (metadata.match_actions, disabled), and no
+      // snapshot event fires on rule edits so stale keys would persist.
+      const memoKey = getDisplayResolutionMode() === 'shadow'
+        ? null
+        : `apply|${fnv1a(args.content)}|${fnv1a(JSON.stringify(args.scripts))}|${fnv1a(JSON.stringify(args.resolvedFindPatterns ?? null))}|${fnv1a(JSON.stringify(args.resolvedReplacements ?? null))}|${resolveMemoContextKey(args.context)}`;
+      if (memoKey !== null) {
+        const memoHit = memo.get<SpindleDisplayResolveResult>(chatId, memoKey);
+        if (memoHit) {
+          log.trace(`applyScripts.memo hit chat=${chatId} msg=${args.context.messageId ?? '?'}`);
+          return memoHit;
+        }
+      }
       const snap = await getSnapshotOrWait(chatId);
       if (!snap) return null;
 
@@ -496,11 +541,13 @@ export function createDisplayResolver(
         return { content: beContent };
       }
 
-      return {
+      const result: SpindleDisplayResolveResult = {
         content: feContent,
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile,
       };
+      if (memoKey !== null && !recorder.volatile) memo.set(chatId, memoKey, result);
+      return result;
     },
   };
 }
