@@ -33,7 +33,8 @@
     "web_search"
   ],
   "requested_capabilities": [
-    "base64_decode"
+    "base64_decode",
+    "dynamic_code_execution"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",
