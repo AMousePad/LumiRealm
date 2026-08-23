@@ -3,6 +3,7 @@
 // replaceSync propagates live to all adopters with one sheet shared by reference.
 
 import { setupQuoteMarks, type QuoteMarks } from './quote-marks.js';
+import { createRafBatcher, type RafBatcher } from './raf-batcher.js';
 
 interface Flog {
   error(msg: string, ...rest: unknown[]): void;
@@ -163,12 +164,42 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
     }
   }
 
+  // Body-wide MutationObserver feeds a pending-set + rAF-chunked walk instead
+  // of running a synchronous TreeWalker per mutation record. Scroll storms
+  // remount dozens of nodes per frame; without batching every one of them
+  // triggered a full subtree walk on the main thread.
+  const pendingWalkRoots = new Set<Element>();
+  const WALK_CHUNK_PER_FRAME = 64;
+  let walkScheduled = false;
+
+  function processWalkChunk(): void {
+    walkScheduled = false;
+    let taken = 0;
+    for (const node of pendingWalkRoots) {
+      pendingWalkRoots.delete(node);
+      try {
+        walkSubtree(node);
+      } catch (err) {
+        flog.warn('island-styles: deferred adoption walk failed', err);
+      }
+      if (++taken >= WALK_CHUNK_PER_FRAME) break;
+    }
+    if (pendingWalkRoots.size > 0) scheduleWalk();
+  }
+
+  function scheduleWalk(): void {
+    if (walkScheduled) return;
+    walkScheduled = true;
+    scheduleFrame(processWalkChunk);
+  }
+
   const observer = new MutationObserver((mutations) => {
     for (const m of mutations) {
       for (const node of m.addedNodes) {
-        if (node instanceof Element) walkSubtree(node);
+        if (node instanceof Element) pendingWalkRoots.add(node);
       }
     }
+    if (pendingWalkRoots.size > 0) scheduleWalk();
   });
 
   // TODO: tighten to a stable chat container if MutationObserver shows up in profiling.
@@ -216,6 +247,22 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
     }
   }
 
+  // Frame scheduler resolved lazily: non-DOM test environments (bun test
+  // without DOM globals) have no requestAnimationFrame, so guard via typeof
+  // and fall back to a macrotask. Browser behavior is unchanged (rAF).
+  function scheduleFrame(cb: () => void): void {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(cb);
+    else setTimeout(cb, 0);
+  }
+
+  // Nudges force a full style recalc in every live shadow root (~35 roots x
+  // 11 sheets on Mortal Realm). setStylesheet + setCrossRuleSheets + clear
+  // fire back-to-back on every bg-html refresh; coalesce them into at most
+  // one recalc pass per animation frame instead of one per change.
+  const nudgeBatcher: RafBatcher = createRafBatcher(scheduleFrame, (reasons) => {
+    nudgeAdopters(reasons.join('+') || 'batched');
+  });
+
   function reAdoptAll(): void {
     for (let i = adoptedRefs.length - 1; i >= 0; i--) {
       const shadow = adoptedRefs[i]!.deref();
@@ -251,7 +298,7 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
       try {
         sheet.replaceSync(css);
         lastSheetCss = css;
-        nudgeAdopters('setStylesheet');
+        nudgeBatcher.schedule('setStylesheet');
       } catch (err) {
         flog.error('island-styles: replaceSync failed', err);
       }
@@ -300,11 +347,15 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
         sheet.replaceSync('');
         lastSheetCss = null;
         lastCrossRuleKey = null;
-        nudgeAdopters('clear');
+        nudgeBatcher.schedule('clear');
       } catch { /* */ }
     },
     destroy(): void {
       try { observer.disconnect(); } catch { /* */ }
+      nudgeBatcher.dispose();
+      pendingWalkRoots.clear();
+      walkScheduled = false;
+      quoteMarks.destroy();
       if (sheet) {
         try { sheet.replaceSync(''); } catch { /* */ }
       }
