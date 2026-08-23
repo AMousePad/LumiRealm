@@ -32,14 +32,13 @@ export interface QuoteMarks {
 export function setupQuoteMarks(flog: Flog): QuoteMarks {
   // One MutationObserver per shadow root, tracked via WeakRef so scroll
   // remounts don't accumulate observers forever. pruneWatches() disconnects
-  // and drops entries whose shadow host left the DOM; the array is capped as
-  // a belt-and-braces bound.
+  // and drops entries whose shadow host left the DOM; live watchers are
+  // never evicted, so no artificial count cap exists.
   interface ShadowWatch {
     shadowRef: WeakRef<ShadowRoot>;
     observer: MutationObserver;
   }
   const watches: ShadowWatch[] = [];
-  const MAX_WATCHES = 64;
 
   function isLive(watch: ShadowWatch): boolean {
     const shadow = watch.shadowRef.deref();
@@ -174,6 +173,7 @@ export function setupQuoteMarks(flog: Flog): QuoteMarks {
 
   function walkShadow(shadow: ShadowRoot): void {
     if (!shadow) return;
+    pruneWatches();
     walkSubtree(shadow, shadow);
   }
 
@@ -223,13 +223,6 @@ export function setupQuoteMarks(flog: Flog): QuoteMarks {
     try {
       observer.observe(shadow, { childList: true, subtree: true, characterData: true });
       watches.push({ shadowRef: new WeakRef(shadow), observer });
-      if (watches.length > MAX_WATCHES) {
-        const oldest = watches.shift();
-        if (oldest) {
-          try { oldest.observer.disconnect(); } catch { /* */ }
-          flog.warn('quote-marks: watch cap hit, disconnected oldest observer');
-        }
-      }
     } catch (err) {
       flog.warn("quote-marks: observe failed", err);
     }
