@@ -10,25 +10,6 @@ import { stripCssImports, splitCssImports } from "./strip-imports.js";
 
 const CHAT_SCOPE_STYLE_ID = "risu-compat-chat-scope-css";
 
-// Image ghost-artifact guard. Author card CSS toggles .roundedImage
-// aspect-ratio 1/1 -> 1/1.35 on :hover with NO transition; an instant
-// box-height change under a stationary cursor while scrolling leaves a ~1s
-// stale composited copy of the image (amplified by scroll remounts inserting
-// fresh <img> nodes whose old layers linger under jank). Two scoped counters:
-// 1. transition on aspect-ratio so the hover toggle animates instead of
-//    snapping (final geometry identical; author `transition` declarations
-//    still win because this rule precedes author CSS).
-// 2. contain: layout paint on the image box only, clipping the img subtree so
-//    stale layers can't bleed outside it.
-// Containment is NEVER applied to [data-message-id]/:host bubbles: any
-// containment there creates a containing block for position:fixed descendants,
-// which is exactly what the blanket `contain:none !important` strip below
-// exists to avoid (the runtime DOM lifter needs fixed widgets bubble-rooted).
-// Image boxes don't host fixed-position widgets, so scoping here keeps the
-// lifter path untouched while restoring paint isolation where ghosts form.
-const IMAGE_GHOST_GUARD_CSS =
-  ".roundedImage { transition: aspect-ratio 160ms ease; contain: layout paint; }\n";
-
 function upsertChatScopeStyle(css: string): void {
   let el = document.getElementById(CHAT_SCOPE_STYLE_ID) as HTMLStyleElement | null;
   if (!el) {
@@ -173,7 +154,7 @@ export function setupBgHtmlRenderer(
           // @import is illegal in replaceSync (async-only). Google Fonts still
           // loads via the chat-scope style in document.head.
           const islandCss = stripCssImports(
-            islandLineHeight + IMAGE_GHOST_GUARD_CSS + islandImgReset + islandBundle.css,
+            islandLineHeight + islandImgReset + islandBundle.css,
           );
           islandStyles.setStylesheet(islandCss);
           flog.info(
@@ -192,10 +173,6 @@ export function setupBgHtmlRenderer(
           "[data-message-id] img { max-width: 100%; max-height: 80vh; }\n";
         const lineHeight =
           "[data-message-id] { line-height: 28px; }\n";
-        const chatScopeGhostGuard = IMAGE_GHOST_GUARD_CSS.replaceAll(
-          ".roundedImage",
-          "[data-message-id] .roundedImage",
-        );
         // Lumi sets overflow:hidden + contain:layout, which clips absolute
         // hover popups and creates a containing block for position:fixed.
         // The runtime DOM lifter handles fixed, drop both for Risu chats.
@@ -224,7 +201,6 @@ export function setupBgHtmlRenderer(
           (imports ? imports + "\n" : "")
           + lineHeight
           + imgReset
-          + chatScopeGhostGuard
           + bubbleContainment
           + rest
           + (wrappedCrossRule ? "\n" + wrappedCrossRule : "");
@@ -233,7 +209,7 @@ export function setupBgHtmlRenderer(
           `bg-html renderer: chat-scope CSS injected css_len=${chatScopeCss.length} ` +
             `(imports_hoisted_len=${imports.length}, body_len=${rest.length}, ` +
             `cross_rule_wrapped_len=${wrappedCrossRule.length}; ` +
-            `+img-reset +ghost-guard +bubble-containment preambles)`,
+            `+img-reset +bubble-containment preambles)`,
         );
       }
       flog.info(
