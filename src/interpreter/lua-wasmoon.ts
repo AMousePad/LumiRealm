@@ -169,8 +169,34 @@ interface EngineEntry {
   bound: Set<string>;
 }
 
+const MAX_ENGINE_SLOTS = 64;
+
 let factoryPromise: Promise<WasmoonFactory> | null = null;
 const engines = new Map<string, Promise<EngineEntry>>();
+
+function hashCode(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
+function slotKey(logicalKey: string, code: string): string {
+  return `${logicalKey}\u0000${hashCode(PRELUDE + '\n' + code)}`;
+}
+
+function shutdownEntry(entry: EngineEntry): void {
+  void entry.tail.then(
+    () => {
+      try {
+        entry.engine.global.close?.();
+      } catch {}
+    },
+    () => undefined,
+  );
+}
 
 async function ensureFactory(): Promise<WasmoonFactory> {
   if (factoryPromise) return factoryPromise;
@@ -186,20 +212,39 @@ async function ensureFactory(): Promise<WasmoonFactory> {
   return factoryPromise;
 }
 
-function getEngineEntry(key: string): Promise<EngineEntry> {
+function getEngineEntry(logicalKey: string, code: string): Promise<EngineEntry> {
+  const key = slotKey(logicalKey, code);
   const existing = engines.get(key);
-  if (existing) return existing;
+  if (existing) {
+    engines.delete(key);
+    engines.set(key, existing);
+    return existing;
+  }
   const created = (async (): Promise<EngineEntry> => {
     const factory = await ensureFactory();
     const engine = await factory.createEngine({ injectObjects: true });
     return { engine, code: null, tail: Promise.resolve(), current: {}, bound: new Set<string>() };
   })();
   engines.set(key, created);
+  while (engines.size > MAX_ENGINE_SLOTS) {
+    const oldest = engines.keys().next();
+    if (oldest.done) break;
+    if (oldest.value === key) break;
+    const pending = engines.get(oldest.value);
+    engines.delete(oldest.value);
+    if (pending) void pending.then(shutdownEntry, () => undefined);
+  }
   return created;
 }
 
 export function clearWasmoonEngine(key: string): void {
-  engines.delete(key);
+  for (const [slot, pending] of [...engines]) {
+    const sep = slot.indexOf('\u0000');
+    const logical = sep === -1 ? slot : slot.slice(0, sep);
+    if (logical !== key) continue;
+    engines.delete(slot);
+    if (pending) void pending.then(shutdownEntry, () => undefined);
+  }
 }
 
 export interface WasmoonExecuteOpts {
@@ -213,7 +258,7 @@ export async function executeWasmoon(
   globals: Record<string, unknown>,
   opts: WasmoonExecuteOpts,
 ): Promise<unknown> {
-  const entry = await getEngineEntry(opts.wasmoonKey);
+  const entry = await getEngineEntry(opts.wasmoonKey, code);
   const run = entry.tail.then(async () => {
     if (entry.code !== null && entry.code !== code) {
       entry.engine.global.close?.();
