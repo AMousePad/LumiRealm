@@ -14,6 +14,12 @@ export interface DisplayResolveMemo {
   get<T>(chatId: string, key: string): T | undefined;
   set(chatId: string, key: string, value: unknown): void;
   bump(chatId?: string): void;
+  /**
+   * Purge only entries whose result declared a dependency on one of `deps`.
+   * Content-keyed entries for untouched messages survive, so per-token
+   * streaming churn no longer wipes the whole chat's memo.
+   */
+  purgeDeps(chatId: string, deps: readonly string[]): void;
   size(chatId: string): number;
 }
 
@@ -60,6 +66,19 @@ export function createDisplayResolveMemo(opts?: { cap?: number }): DisplayResolv
       versions.set(chatId, (versions.get(chatId) ?? 0) + 1);
       memos.delete(chatId);
     },
+    purgeDeps(chatId: string, deps: readonly string[]): void {
+      if (deps.length === 0) return;
+      const m = memos.get(chatId);
+      if (!m) return;
+      for (const [key, entry] of m) {
+        const touched = (entry.value as { touchedVars?: unknown } | null | undefined)?.touchedVars;
+        // Resolver results always carry touchedVars as a string array. A value
+        // without that shape has unknown dependencies — purge defensively.
+        const matched = !Array.isArray(touched)
+          || deps.some((d) => (touched as readonly unknown[]).includes(d));
+        if (matched) m.delete(key);
+      }
+    },
     size(chatId: string): number {
       return memos.get(chatId)?.size ?? 0;
     },
@@ -67,7 +86,8 @@ export function createDisplayResolveMemo(opts?: { cap?: number }): DisplayResolv
 }
 
 // Module-level memo shared by the resolver created in createDisplayResolver;
-// bumped from frontend.ts on display_snapshot / set_variables.
+// bumped from frontend.ts on identity changes and dependency-purged on
+// display_snapshot / set_variables var diffs.
 let shared: DisplayResolveMemo | null = null;
 export function getSharedDisplayResolveMemo(): DisplayResolveMemo {
   if (!shared) shared = createDisplayResolveMemo();
@@ -75,4 +95,7 @@ export function getSharedDisplayResolveMemo(): DisplayResolveMemo {
 }
 export function bumpDisplayResolveMemo(chatId?: string): void {
   getSharedDisplayResolveMemo().bump(chatId);
+}
+export function purgeDisplayResolveMemoForDeps(chatId: string, deps: readonly string[]): void {
+  getSharedDisplayResolveMemo().purgeDeps(chatId, deps);
 }

@@ -33,4 +33,35 @@ describe('display resolve memo', () => {
     expect(memo.get('c1', 'k0')).toBeUndefined()
     expect(memo.get<number>('c1', 'k7')).toBe(7)
   })
+
+  test('purgeDeps drops only entries whose touchedVars intersect the dep set', () => {
+    const memo = createDisplayResolveMemo()
+    memo.set('c1', 'reads-hp', { touchedVars: ['chat:hp'] })
+    memo.set('c1', 'reads-gold', { touchedVars: ['chat:gold'] })
+    memo.set('c1', 'static', { touchedVars: [] })
+    memo.purgeDeps('c1', ['chat:hp'])
+    expect(memo.get('c1', 'reads-hp')).toBeUndefined()
+    expect(memo.get('c1', 'reads-gold')).toBeDefined()
+    expect(memo.get('c1', 'static')).toBeDefined()
+  })
+
+  test('purgeDeps purges MSG_DEP-keyed entries and defensively purges unknown shapes', () => {
+    const memo = createDisplayResolveMemo()
+    memo.set('c1', 'msg-dep', { touchedVars: ['__msg__'] })
+    memo.set('c1', 'weird', { noTouchedVars: true })
+    memo.purgeDeps('c1', ['__msg__'])
+    expect(memo.get('c1', 'msg-dep')).toBeUndefined()
+    expect(memo.get('c1', 'weird')).toBeUndefined()
+  })
+
+  test('purgeDeps is chat-scoped and a no-op on empty deps', () => {
+    const memo = createDisplayResolveMemo()
+    memo.set('c1', 'k', { touchedVars: ['chat:x'] })
+    memo.set('c2', 'k', { touchedVars: ['chat:x'] })
+    memo.purgeDeps('c1', [])
+    expect(memo.size('c1')).toBe(1)
+    memo.purgeDeps('c1', ['chat:x'])
+    expect(memo.size('c1')).toBe(0)
+    expect(memo.size('c2')).toBe(1)
+  })
 })

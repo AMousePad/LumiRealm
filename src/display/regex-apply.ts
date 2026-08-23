@@ -22,16 +22,33 @@ export interface FeRegexMatch {
   readonly namedGroups?: Record<string, string>;
 }
 
+// Compiled-regex cache. applyRegexScriptsCore compiles once per script per
+// message resolve — O(scripts) regex constructions per streaming token was a
+// measurable main-thread cost. Instances are SHARED: callers must not leave
+// lastIndex drifted (collectMatches and applyMatchActions both hard-reset it).
+const COMPILED_REGEX_CACHE_CAP = 256;
+const compiledRegexCache = new Map<string, RegExp | null>();
+
 export function compileRegex(pattern: string, flags: string): RegExp | null {
+  const key = `${flags}\u0000${pattern}`;
+  const cached = compiledRegexCache.get(key);
+  if (cached !== undefined) return cached;
+  let re: RegExp | null;
   try {
-    return new RegExp(pattern, flags);
+    re = new RegExp(pattern, flags);
   } catch {
-    return null;
+    re = null;
   }
+  compiledRegexCache.set(key, re);
+  while (compiledRegexCache.size > COMPILED_REGEX_CACHE_CAP) {
+    const oldest = compiledRegexCache.keys().next().value;
+    if (oldest === undefined) break;
+    compiledRegexCache.delete(oldest);
+  }
+  return re;
 }
 
 export function collectMatches(content: string, regex: RegExp): FeRegexMatch[] {
-  const re = new RegExp(regex.source, regex.flags);
   const matches: FeRegexMatch[] = [];
   const push = (m: RegExpExecArray): void => {
     matches.push({
@@ -41,15 +58,24 @@ export function collectMatches(content: string, regex: RegExp): FeRegexMatch[] {
       ...(m.groups ? { namedGroups: m.groups } : {}),
     });
   };
-  if (re.global || re.sticky) {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(content)) !== null) {
-      push(m);
-      if (m[0].length === 0) re.lastIndex++;
+  // Exec the shared cached instance in place instead of recompiling a throwaway
+  // clone per call. A global/sticky exec loop restores lastIndex to 0 on the
+  // terminating failed match; the finally block guarantees it regardless.
+  const savedLastIndex = regex.lastIndex;
+  regex.lastIndex = 0;
+  try {
+    if (regex.global || regex.sticky) {
+      let m: RegExpExecArray | null;
+      while ((m = regex.exec(content)) !== null) {
+        push(m);
+        if (m[0].length === 0) regex.lastIndex++;
+      }
+    } else {
+      const m = regex.exec(content);
+      if (m) push(m);
     }
-  } else {
-    const m = re.exec(content);
-    if (m) push(m);
+  } finally {
+    regex.lastIndex = savedLastIndex;
   }
   return matches;
 }

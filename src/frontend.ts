@@ -1,7 +1,7 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
-import { bumpDisplayResolveMemo } from './display/resolve-memo.js';
+import { bumpDisplayResolveMemo, purgeDisplayResolveMemoForDeps } from './display/resolve-memo.js';
 import {
   setDisplaySnapshot,
   getDisplaySnapshot,
@@ -600,20 +600,18 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
     if (msg.type === 'display_snapshot') {
       if (getDisplayResolutionMode() !== 'off') {
-        // Snapshot changed: every memoized resolve result for this chat is
-        // stale, including for background chats that skip invalidation below.
-        bumpDisplayResolveMemo(msg.snapshot.chatId);
-        const prev = getDisplaySnapshot(msg.snapshot.chatId);
+        const chatId = msg.snapshot.chatId;
+        const prev = getDisplaySnapshot(chatId);
         setDisplaySnapshot(msg.snapshot);
-        // Cache every chat, but only the visible one has DOM to re-resolve.
-        if (!isVisibleChat(msg.snapshot.chatId)) return;
         if (prev) {
           // Identity change (persona swap/edit): {{user}}/{{persona}}/persona image
           // resolve from these fields, and the var diff below cannot see them.
           const ns = msg.snapshot;
           if (prev.userName !== ns.userName || prev.charName !== ns.charName
             || prev.personaText !== ns.personaText || prev.personaImage !== ns.personaImage) {
-            display.invalidate(['*']);
+            bumpDisplayResolveMemo(chatId);
+            // Cache every chat, but only the visible one has DOM to re-resolve.
+            if (isVisibleChat(chatId)) display.invalidate(['*']);
             return;
           }
           const changed = diffSnapshotVars(prev, msg.snapshot);
@@ -623,18 +621,29 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             || pc.lastCharMessage !== nc.lastCharMessage) {
             changed.push(MSG_DEP_KEY);
           }
-          if (changed.length > 0) display.invalidate(changed);
-        } else {
-          // First snapshot for this chat: the host gates resolver use on
-          // ready() (snapshot present), so re-resolve everything now that it is.
-          display.invalidate(['*']);
+          if (changed.length > 0) {
+            // Purge only memo entries whose recorded dependencies intersect
+            // this diff; content-keyed entries for untouched messages survive
+            // streaming token churn. Host caches are keyed by raw-content
+            // hash + chatId, so per-event wipes would only double render work.
+            purgeDisplayResolveMemoForDeps(chatId, changed);
+            if (isVisibleChat(chatId)) display.invalidate(changed);
+          }
+        }
+        // No prev: first snapshot for this chat in this session. Extension-side
+        // memo wipe is free and covers exotic cases where the snapshot map was
+        // cleared while the bundle stayed alive. (True extension hot-reloads
+        // under a live host page are handled host-side: resolver
+        // re-registration wipes the host content caches, which have no TTL.)
+        if (!prev) {
+          bumpDisplayResolveMemo(chatId);
+          return;
         }
       }
       return;
     }
     if (msg.type === 'set_variables') {
       if (getDisplayResolutionMode() !== 'off' && typeof msg.characterId === 'string') {
-        bumpDisplayResolveMemo(msg.chatId);
         const snap = getDisplaySnapshot(msg.chatId);
         const changed: string[] = [];
         for (const scope of ['local', 'global', 'chat'] as const) {
@@ -648,7 +657,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           }
           applyVarDelta(msg.chatId, scope, { ...incoming });
         }
-        if (changed.length > 0 && isVisibleChat(msg.chatId)) display.invalidate(changed);
+        // Dependency-scoped memo purge instead of a chat-wide bump: streaming
+        // set_variables pushes only invalidate entries that actually read a
+        // changed var.
+        if (changed.length > 0) {
+          purgeDisplayResolveMemoForDeps(msg.chatId, changed);
+          if (isVisibleChat(msg.chatId)) display.invalidate(changed);
+        }
       }
       // fall through to sidebar broadcast
     }
