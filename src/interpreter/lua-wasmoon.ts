@@ -229,7 +229,6 @@ function getEngineEntry(logicalKey: string, code: string): Promise<EngineEntry> 
   while (engines.size > MAX_ENGINE_SLOTS) {
     const oldest = engines.keys().next();
     if (oldest.done) break;
-    if (oldest.value === key) break;
     const pending = engines.get(oldest.value);
     engines.delete(oldest.value);
     if (pending) void pending.then(shutdownEntry, () => undefined);
