@@ -6,6 +6,7 @@ import {
   setDisplaySnapshot,
   getDisplaySnapshot,
   applyVarDelta,
+  replaceVarScope,
   diffSnapshotVars,
   getDisplayResolutionMode,
   setDisplayResolutionMode,
@@ -78,6 +79,18 @@ function formatLine(msg: string, rest: readonly unknown[]): string {
 
 const LOG_STATE_LS_KEY = 'lumirealm/log-state-v1';
 
+// Non-global var reads record BOTH dep keys (evaluator context recordRead);
+// reuse the pair everywhere we synthesize deps from a bare var name.
+function varDepKeys(name: string): string[] {
+  return [`local:${name}`, `chat:${name}`];
+}
+
+// Last seen EFFECTIVE defaults (cardSide + overrides) per chat, so a
+// defaults-only set_variables push (viewer override edits) can be diffed —
+// the scopes maps are identical in that case and the snapshot's
+// scriptstateDefaults is card-side raw, blind to overrides.
+const lastEffectiveDefaultsByChat = new Map<string, Readonly<Record<string, string>>>();
+
 function hydrateLogStateFromLocalStorage(): void {
   try {
     const raw = localStorage.getItem(LOG_STATE_LS_KEY);
@@ -113,7 +126,22 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       // Mirror editDisplay writes into the local snapshot so init-once guards
       // see their guard var set next render. Without it the guard never engages,
       // init re-runs every render, and writeback clobbers committed progress.
+      const prevSnap = getDisplaySnapshot(chatId);
       applyVarDelta(chatId, 'local', vars);
+      // Writeback vars are otherwise invisible to invalidation: the backend
+      // echo is consumed as an own-write (no set_variables/display_snapshot
+      // follows), so purge ONLY memo entries whose recorded touchedVars
+      // intersect what actually changed, and let the visible chat re-resolve
+      // them. Value-equality guard keeps idempotent guard writes a no-op.
+      const changed: string[] = [];
+      for (const [k, v] of Object.entries(vars)) {
+        if (prevSnap && prevSnap.vars.local[k] === v) continue;
+        changed.push(...varDepKeys(k));
+      }
+      if (changed.length > 0) {
+        purgeDisplayResolveMemoForDeps(chatId, changed);
+        if (isVisibleChat(chatId)) display.invalidate(changed);
+      }
       ctx.sendToBackend({ type: 'display_writeback', chatId, vars });
     },
     (effect) => {
@@ -643,9 +671,20 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return;
     }
     if (msg.type === 'set_variables') {
-      if (getDisplayResolutionMode() !== 'off' && typeof msg.characterId === 'string') {
+      if (getDisplayResolutionMode() !== 'off') {
         const snap = getDisplaySnapshot(msg.chatId);
         const changed: string[] = [];
+        // Effective-defaults drift (overrides edited): scopes are unchanged,
+        // only msg.defaults moved. Diff against the last observed map; seed
+        // silently on first sight to avoid a chat-open purge storm.
+        const lastDefaults = lastEffectiveDefaultsByChat.get(msg.chatId);
+        if (lastDefaults) {
+          const dkeys = new Set([...Object.keys(lastDefaults), ...Object.keys(msg.defaults)]);
+          for (const k of dkeys) {
+            if (lastDefaults[k] !== msg.defaults[k]) changed.push(...varDepKeys(k));
+          }
+        }
+        lastEffectiveDefaultsByChat.set(msg.chatId, msg.defaults);
         for (const scope of ['local', 'global', 'chat'] as const) {
           const incoming = msg.scopes[scope] ?? {};
           const cur = { ...(snap?.vars[scope] ?? {}) };
@@ -655,7 +694,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           for (const k of Object.keys(cur)) {
             if (!(k in incoming)) changed.push(`${scope}:${k}`);
           }
-          applyVarDelta(msg.chatId, scope, { ...incoming });
+          // Replace, don't merge: deletions must drop from the snapshot or
+          // the resolver keeps reading a ghost value instead of falling back.
+          replaceVarScope(msg.chatId, scope, { ...incoming });
         }
         // Dependency-scoped memo purge instead of a chat-wide bump: streaming
         // set_variables pushes only invalidate entries that actually read a
@@ -664,6 +705,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           purgeDisplayResolveMemoForDeps(msg.chatId, changed);
           if (isVisibleChat(msg.chatId)) display.invalidate(changed);
         }
+        // Cache maintenance no longer needs a character id; only the sidebar
+        // broadcast below does.
+        if (typeof msg.characterId !== 'string') return;
       }
       // fall through to sidebar broadcast
     }

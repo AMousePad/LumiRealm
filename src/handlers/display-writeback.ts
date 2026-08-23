@@ -2,6 +2,7 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { Handler } from './types.js';
 import { expectChatChange } from '../state/own-chat-change.js';
+import { invalidateMacroInterceptorForVars } from '../state/macro-interceptor-cache.js';
 import { invalidateRecentFlush } from '../state/recent-flush-cache.js';
 import { runChatMetadataExclusive } from '../state/chat-metadata-queue.js';
 
@@ -27,6 +28,13 @@ export function createDisplayWritebackHandlers(): { display_writeback: Handler<'
           expectChatChange(chatId);
           await spindle.chats.update(chatId, { metadata: { ...meta, chat_variables: cv } as never }, ctx.userId);
           invalidateRecentFlush(chatId);
+          // Own-write echo is consumed upstream (no set_variables follows);
+          // purge prompt-time interceptor entries that read these vars using
+          // their recorded touchedVars — never the whole chat.
+          invalidateMacroInterceptorForVars(
+            chatId,
+            Object.keys(vars).flatMap((k) => [`local:${k}`, `chat:${k}`]),
+          );
           ctx.log.info(`display_writeback chat=${chatId} changed=${changed}`);
         });
       } catch (err) {

@@ -388,7 +388,14 @@ export function createDisplayResolver(
             body,
             args.context,
             (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })),
-            (vars) => writeback?.(chatId, vars),
+            (vars) => {
+              // A chain that wrote vars composed part of its output from
+              // pre-write reads (buildInput captures the snapshot up front);
+              // such results have incomplete deps and must not be cached
+              // anywhere until a value-guarded re-resolve confirms them.
+              if (Object.keys(vars).length > 0) recorder.volatile = true;
+              writeback?.(chatId, vars);
+            },
             onEffect,
           );
         }
