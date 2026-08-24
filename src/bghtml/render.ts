@@ -149,7 +149,8 @@ export function setupBgHtmlRenderer(
           const islandImgReset =
             "img { max-width: 100%; }\n";
           const islandScrollSuppression =
-            ':host-context([data-scrolling]) :where(*:not(button):not(button *):not(a):not(a *):not(input):not(input *):not(textarea):not(textarea *):not(select):not(select *):not(option):not(option *):not([role="button"]):not([role="button"] *):not([role="link"]):not([role="link"] *)) { transition: none !important; animation: none !important; }\n';
+            ':host([data-lumi-scrolling]) :where(*:not(button):not(button *):not(a):not(a *):not(input):not(input *):not(textarea):not(textarea *):not(select):not(select *):not(option):not(option *):not([role="button"]):not([role="button"] *):not([role="link"]):not([role="link"] *)) { transition: none !important; animation: none !important; }\n' +
+            ':host([data-lumi-scrolling]) .roundedImage { transition: none !important; animation: none !important; }\n';
           // 28px absolute line-height mirrors Tailwind prose. Lumi's 1.65 unitless
           // ratio collapses bar-overlap layouts in cards with fixed-height text-box.
           const islandLineHeight = ':host { line-height: 28px; }\n';

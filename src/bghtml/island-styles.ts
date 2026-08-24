@@ -27,6 +27,7 @@ export interface SetupIslandStylesOptions {
 export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {}): IslandStyles {
   let sheet: CSSStyleSheet | null = null;
   let envSheet: CSSStyleSheet | null = null;
+  let destroyed = false;
   const allOwnedSheets = new WeakSet<CSSStyleSheet>();
   try {
     sheet = new CSSStyleSheet();
@@ -78,6 +79,40 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
   const adopted = new WeakSet<ShadowRoot>();
   const adoptedRefs: WeakRef<ShadowRoot>[] = [];
 
+  function syncScrollState(host: Element): void {
+    if (!host.closest('[data-message-id]')) {
+      host.removeAttribute('data-lumi-scrolling');
+      return;
+    }
+    const scrollContainer = host.closest('[data-chat-scroll="true"]');
+    const scrolling = scrollContainer?.hasAttribute('data-scrolling') ?? false;
+    if (scrolling) host.setAttribute('data-lumi-scrolling', '');
+    else host.removeAttribute('data-lumi-scrolling');
+  }
+
+  function syncAllScrollStates(): void {
+    if (destroyed) return;
+    for (let i = adoptedRefs.length - 1; i >= 0; i--) {
+      const shadow = adoptedRefs[i]!.deref();
+      if (!shadow) {
+        adoptedRefs.splice(i, 1);
+        continue;
+      }
+      if (shadow.host instanceof Element) syncScrollState(shadow.host);
+    }
+  }
+
+  function clearAllScrollStates(): void {
+    for (let i = adoptedRefs.length - 1; i >= 0; i--) {
+      const shadow = adoptedRefs[i]!.deref();
+      if (!shadow) {
+        adoptedRefs.splice(i, 1);
+        continue;
+      }
+      if (shadow.host instanceof Element) shadow.host.removeAttribute('data-lumi-scrolling');
+    }
+  }
+
   // outsideChatShadowCount surging indicates Lumi started shadow-wrapping
   // non-chat surfaces (extractHtmlIslands drift).
   let adoptionCount = 0;
@@ -101,6 +136,7 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
       // Lumi's ISLAND_BASE_CSS applies a different prose baseline that conflicts.
       if (shadow.host instanceof Element) {
         shadow.host.classList.add('not-island-prose');
+        syncScrollState(shadow.host);
       }
       const initialBase = shadow.querySelector('style[data-lumi-island-base]');
       if (initialBase) initialBase.remove();
@@ -138,10 +174,17 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
     // Only inject into open shadows inside [data-message-id] chat bubbles.
     const root = el.shadowRoot;
     if (!root || root.mode !== 'open') return;
-    if (el.closest('[data-message-id]')) {
+    const inChat = !!el.closest('[data-message-id]');
+    if (inChat) {
+      // A virtualized host can be moved between scroll containers without a
+      // new ShadowRoot. Refresh the mirror before the adoption fast path returns.
+      syncScrollState(el);
       chatShadowCount++;
       injectInto(root);
     } else {
+      // A previously adopted host can be reparented out of chat. Do not leave
+      // the chat-only marker on unrelated shadow content.
+      el.removeAttribute('data-lumi-scrolling');
       outsideChatShadowCount++;
     }
   }
@@ -193,18 +236,51 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
     scheduleFrame(processWalkChunk);
   }
 
+  function mutationTouchesChat(mutation: MutationRecord): boolean {
+    if (mutation.target instanceof Element && mutation.target.closest('[data-message-id]')) {
+      return true;
+    }
+    for (const node of mutation.removedNodes) {
+      if (node instanceof Element && (node.matches('[data-message-id]') || node.closest('[data-message-id]'))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   const observer = new MutationObserver((mutations) => {
+    let scrollStateDirty = false;
     for (const m of mutations) {
+      if (
+        m.type === 'attributes' &&
+        m.attributeName === 'data-scrolling' &&
+        m.target instanceof Element &&
+        m.target.matches('[data-chat-scroll="true"]')
+      ) {
+        // Only the chat scroll gate can affect adopted message shadows.
+        scrollStateDirty = true;
+      }
+      if (m.type === 'childList' && mutationTouchesChat(m)) {
+        // Reparenting an already-adopted host changes its nearest scroll
+        // container without changing the ShadowRoot identity.
+        scrollStateDirty = true;
+      }
       for (const node of m.addedNodes) {
         if (node instanceof Element) pendingWalkRoots.add(node);
       }
     }
+    if (scrollStateDirty) scheduleScrollStateSync();
     if (pendingWalkRoots.size > 0) scheduleWalk();
   });
 
   // TODO: tighten to a stable chat container if MutationObserver shows up in profiling.
   try {
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['data-scrolling'],
+      childList: true,
+      subtree: true,
+    });
   } catch (err) {
     flog.error('island-styles: observer.observe failed', err);
   }
@@ -253,6 +329,16 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
   function scheduleFrame(cb: () => void): void {
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(cb);
     else setTimeout(cb, 0);
+  }
+
+  let scrollSyncScheduled = false;
+  function scheduleScrollStateSync(): void {
+    if (scrollSyncScheduled || destroyed) return;
+    scrollSyncScheduled = true;
+    scheduleFrame(() => {
+      scrollSyncScheduled = false;
+      syncAllScrollStates();
+    });
   }
 
   // Nudges force a full style recalc in every live shadow root (~35 roots x
@@ -351,11 +437,14 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
       } catch { /* */ }
     },
     destroy(): void {
+      destroyed = true;
+      scrollSyncScheduled = false;
       try { observer.disconnect(); } catch { /* */ }
       nudgeBatcher.dispose();
       pendingWalkRoots.clear();
       walkScheduled = false;
       quoteMarks.destroy();
+      clearAllScrollStates();
       if (sheet) {
         try { sheet.replaceSync(''); } catch { /* */ }
       }
