@@ -30,8 +30,31 @@ export interface QuoteMarks {
 }
 
 export function setupQuoteMarks(flog: Flog): QuoteMarks {
-  const watched = new WeakSet<ShadowRoot>();
-  const observers: MutationObserver[] = [];
+  // One MutationObserver per shadow root, tracked via WeakRef so scroll
+  // remounts don't accumulate observers forever. pruneWatches() disconnects
+  // and drops entries whose shadow host left the DOM; live watchers are
+  // never evicted, so no artificial count cap exists.
+  interface ShadowWatch {
+    shadowRef: WeakRef<ShadowRoot>;
+    observer: MutationObserver;
+  }
+  const watches: ShadowWatch[] = [];
+
+  function isLive(watch: ShadowWatch): boolean {
+    const shadow = watch.shadowRef.deref();
+    if (!shadow) return false;
+    const host = shadow.host;
+    return host instanceof Element && host.isConnected;
+  }
+
+  function pruneWatches(): void {
+    for (let i = watches.length - 1; i >= 0; i--) {
+      const watch = watches[i]!;
+      if (isLive(watch)) continue;
+      try { watch.observer.disconnect(); } catch { /* */ }
+      watches.splice(i, 1);
+    }
+  }
 
   function shouldSkipText(textNode: Node, root: Node): boolean {
     let p: Node | null = textNode.parentNode;
@@ -150,12 +173,16 @@ export function setupQuoteMarks(flog: Flog): QuoteMarks {
 
   function walkShadow(shadow: ShadowRoot): void {
     if (!shadow) return;
+    pruneWatches();
     walkSubtree(shadow, shadow);
   }
 
   function watchShadow(shadow: ShadowRoot): void {
-    if (watched.has(shadow)) return;
-    watched.add(shadow);
+    if (!shadow) return;
+    pruneWatches();
+    for (const watch of watches) {
+      if (watch.shadowRef.deref() === shadow) return;
+    }
 
     let scheduled = false;
     const pending = new Set<Node>();
@@ -195,7 +222,7 @@ export function setupQuoteMarks(flog: Flog): QuoteMarks {
     });
     try {
       observer.observe(shadow, { childList: true, subtree: true, characterData: true });
-      observers.push(observer);
+      watches.push({ shadowRef: new WeakRef(shadow), observer });
     } catch (err) {
       flog.warn("quote-marks: observe failed", err);
     }
@@ -205,10 +232,10 @@ export function setupQuoteMarks(flog: Flog): QuoteMarks {
     walkShadow,
     watchShadow,
     destroy() {
-      for (const o of observers) {
-        try { o.disconnect(); } catch { /* */ }
+      for (const watch of watches) {
+        try { watch.observer.disconnect(); } catch { /* */ }
       }
-      observers.length = 0;
+      watches.length = 0;
     },
   };
 }

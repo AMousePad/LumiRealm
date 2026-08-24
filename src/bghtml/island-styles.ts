@@ -3,6 +3,7 @@
 // replaceSync propagates live to all adopters with one sheet shared by reference.
 
 import { setupQuoteMarks, type QuoteMarks } from './quote-marks.js';
+import { createRafBatcher, type RafBatcher } from './raf-batcher.js';
 
 interface Flog {
   error(msg: string, ...rest: unknown[]): void;
@@ -26,6 +27,7 @@ export interface SetupIslandStylesOptions {
 export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {}): IslandStyles {
   let sheet: CSSStyleSheet | null = null;
   let envSheet: CSSStyleSheet | null = null;
+  let destroyed = false;
   const allOwnedSheets = new WeakSet<CSSStyleSheet>();
   try {
     sheet = new CSSStyleSheet();
@@ -77,6 +79,40 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
   const adopted = new WeakSet<ShadowRoot>();
   const adoptedRefs: WeakRef<ShadowRoot>[] = [];
 
+  function syncScrollState(host: Element): void {
+    if (!host.closest('[data-message-id]')) {
+      host.removeAttribute('data-lumi-scrolling');
+      return;
+    }
+    const scrollContainer = host.closest('[data-chat-scroll="true"]');
+    const scrolling = scrollContainer?.hasAttribute('data-scrolling') ?? false;
+    if (scrolling) host.setAttribute('data-lumi-scrolling', '');
+    else host.removeAttribute('data-lumi-scrolling');
+  }
+
+  function syncAllScrollStates(): void {
+    if (destroyed) return;
+    for (let i = adoptedRefs.length - 1; i >= 0; i--) {
+      const shadow = adoptedRefs[i]!.deref();
+      if (!shadow) {
+        adoptedRefs.splice(i, 1);
+        continue;
+      }
+      if (shadow.host instanceof Element) syncScrollState(shadow.host);
+    }
+  }
+
+  function clearAllScrollStates(): void {
+    for (let i = adoptedRefs.length - 1; i >= 0; i--) {
+      const shadow = adoptedRefs[i]!.deref();
+      if (!shadow) {
+        adoptedRefs.splice(i, 1);
+        continue;
+      }
+      if (shadow.host instanceof Element) shadow.host.removeAttribute('data-lumi-scrolling');
+    }
+  }
+
   // outsideChatShadowCount surging indicates Lumi started shadow-wrapping
   // non-chat surfaces (extractHtmlIslands drift).
   let adoptionCount = 0;
@@ -100,6 +136,7 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
       // Lumi's ISLAND_BASE_CSS applies a different prose baseline that conflicts.
       if (shadow.host instanceof Element) {
         shadow.host.classList.add('not-island-prose');
+        syncScrollState(shadow.host);
       }
       const initialBase = shadow.querySelector('style[data-lumi-island-base]');
       if (initialBase) initialBase.remove();
@@ -137,10 +174,17 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
     // Only inject into open shadows inside [data-message-id] chat bubbles.
     const root = el.shadowRoot;
     if (!root || root.mode !== 'open') return;
-    if (el.closest('[data-message-id]')) {
+    const inChat = !!el.closest('[data-message-id]');
+    if (inChat) {
+      // A virtualized host can be moved between scroll containers without a
+      // new ShadowRoot. Refresh the mirror before the adoption fast path returns.
+      syncScrollState(el);
       chatShadowCount++;
       injectInto(root);
     } else {
+      // A previously adopted host can be reparented out of chat. Do not leave
+      // the chat-only marker on unrelated shadow content.
+      el.removeAttribute('data-lumi-scrolling');
       outsideChatShadowCount++;
     }
   }
@@ -163,17 +207,80 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
     }
   }
 
-  const observer = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      for (const node of m.addedNodes) {
-        if (node instanceof Element) walkSubtree(node);
+  // Body-wide MutationObserver feeds a pending-set + rAF-chunked walk instead
+  // of running a synchronous TreeWalker per mutation record. Scroll storms
+  // remount dozens of nodes per frame; without batching every one of them
+  // triggered a full subtree walk on the main thread.
+  const pendingWalkRoots = new Set<Element>();
+  const WALK_CHUNK_PER_FRAME = 64;
+  let walkScheduled = false;
+
+  function processWalkChunk(): void {
+    walkScheduled = false;
+    let taken = 0;
+    for (const node of pendingWalkRoots) {
+      pendingWalkRoots.delete(node);
+      try {
+        walkSubtree(node);
+      } catch (err) {
+        flog.warn('island-styles: deferred adoption walk failed', err);
+      }
+      if (++taken >= WALK_CHUNK_PER_FRAME) break;
+    }
+    if (pendingWalkRoots.size > 0) scheduleWalk();
+  }
+
+  function scheduleWalk(): void {
+    if (walkScheduled) return;
+    walkScheduled = true;
+    scheduleFrame(processWalkChunk);
+  }
+
+  function mutationTouchesChat(mutation: MutationRecord): boolean {
+    if (mutation.target instanceof Element && mutation.target.closest('[data-message-id]')) {
+      return true;
+    }
+    for (const node of mutation.removedNodes) {
+      if (node instanceof Element && (node.matches('[data-message-id]') || node.closest('[data-message-id]'))) {
+        return true;
       }
     }
+    return false;
+  }
+
+  const observer = new MutationObserver((mutations) => {
+    let scrollStateDirty = false;
+    for (const m of mutations) {
+      if (
+        m.type === 'attributes' &&
+        m.attributeName === 'data-scrolling' &&
+        m.target instanceof Element &&
+        m.target.matches('[data-chat-scroll="true"]')
+      ) {
+        // Only the chat scroll gate can affect adopted message shadows.
+        scrollStateDirty = true;
+      }
+      if (m.type === 'childList' && mutationTouchesChat(m)) {
+        // Reparenting an already-adopted host changes its nearest scroll
+        // container without changing the ShadowRoot identity.
+        scrollStateDirty = true;
+      }
+      for (const node of m.addedNodes) {
+        if (node instanceof Element) pendingWalkRoots.add(node);
+      }
+    }
+    if (scrollStateDirty) scheduleScrollStateSync();
+    if (pendingWalkRoots.size > 0) scheduleWalk();
   });
 
   // TODO: tighten to a stable chat container if MutationObserver shows up in profiling.
   try {
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['data-scrolling'],
+      childList: true,
+      subtree: true,
+    });
   } catch (err) {
     flog.error('island-styles: observer.observe failed', err);
   }
@@ -216,6 +323,32 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
     }
   }
 
+  // Frame scheduler resolved lazily: non-DOM test environments (bun test
+  // without DOM globals) have no requestAnimationFrame, so guard via typeof
+  // and fall back to a macrotask. Browser behavior is unchanged (rAF).
+  function scheduleFrame(cb: () => void): void {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(cb);
+    else setTimeout(cb, 0);
+  }
+
+  let scrollSyncScheduled = false;
+  function scheduleScrollStateSync(): void {
+    if (scrollSyncScheduled || destroyed) return;
+    scrollSyncScheduled = true;
+    scheduleFrame(() => {
+      scrollSyncScheduled = false;
+      syncAllScrollStates();
+    });
+  }
+
+  // Nudges force a full style recalc in every live shadow root (~35 roots x
+  // 11 sheets on Mortal Realm). setStylesheet + setCrossRuleSheets + clear
+  // fire back-to-back on every bg-html refresh; coalesce them into at most
+  // one recalc pass per animation frame instead of one per change.
+  const nudgeBatcher: RafBatcher = createRafBatcher(scheduleFrame, (reasons) => {
+    nudgeAdopters(reasons.join('+') || 'batched');
+  });
+
   function reAdoptAll(): void {
     for (let i = adoptedRefs.length - 1; i >= 0; i--) {
       const shadow = adoptedRefs[i]!.deref();
@@ -251,7 +384,7 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
       try {
         sheet.replaceSync(css);
         lastSheetCss = css;
-        nudgeAdopters('setStylesheet');
+        nudgeBatcher.schedule('setStylesheet');
       } catch (err) {
         flog.error('island-styles: replaceSync failed', err);
       }
@@ -300,11 +433,18 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
         sheet.replaceSync('');
         lastSheetCss = null;
         lastCrossRuleKey = null;
-        nudgeAdopters('clear');
+        nudgeBatcher.schedule('clear');
       } catch { /* */ }
     },
     destroy(): void {
+      destroyed = true;
+      scrollSyncScheduled = false;
       try { observer.disconnect(); } catch { /* */ }
+      nudgeBatcher.dispose();
+      pendingWalkRoots.clear();
+      walkScheduled = false;
+      quoteMarks.destroy();
+      clearAllScrollStates();
       if (sheet) {
         try { sheet.replaceSync(''); } catch { /* */ }
       }

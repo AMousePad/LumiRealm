@@ -126,6 +126,21 @@ export function applyVarDelta(
   });
 }
 
+// Whole-scope replace: deletions in `values` must actually delete (Risu
+// getVar falls back to "null" for missing keys — merged ghosts break that).
+export function replaceVarScope(
+  chatId: string,
+  scope: 'local' | 'global' | 'chat',
+  values: Record<string, string>,
+): void {
+  const prev = snapshots.get(chatId);
+  if (!prev) return;
+  snapshots.set(chatId, {
+    ...prev,
+    vars: { ...prev.vars, [scope]: { ...values } },
+  });
+}
+
 export function clearDisplaySnapshot(chatId: string): void {
   snapshots.delete(chatId);
 }
@@ -138,6 +153,19 @@ export function diffSnapshotVars(prev: DisplaySnapshot, next: DisplaySnapshot): 
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
     for (const k of keys) {
       if (a[k] !== b[k]) changed.push(`${scope}:${k}`);
+    }
+  }
+  // Card-side scriptstate_defaults feed local/chat-scope misses (evaluator
+  // context shadows env lookups with these). A defaults-only edit must
+  // invalidate entries that read through the fallback, which the recorder
+  // logged as local:<k> + chat:<k>.
+  const pa = prev.scriptstateDefaults ?? {};
+  const pb = next.scriptstateDefaults ?? {};
+  const dkeys = new Set([...Object.keys(pa), ...Object.keys(pb)]);
+  for (const k of dkeys) {
+    if (pa[k] !== pb[k]) {
+      changed.push(`local:${k}`);
+      changed.push(`chat:${k}`);
     }
   }
   return changed;

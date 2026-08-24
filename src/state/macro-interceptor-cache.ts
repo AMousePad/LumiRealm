@@ -103,6 +103,27 @@ export function invalidateMacroInterceptorForChat(chatId: string): void {
   if (removed > 0) log.debug(`invalidate chat=${chatId} entries=${removed}`);
 }
 
+// Dep-scoped twin of invalidateMacroInterceptorForChat: drop only entries
+// whose recorded touchedVars intersect `deps`. Entries with a malformed
+// touchedVars shape are purged defensively (mirrors resolve-memo.purgeDeps);
+// empty arrays are static and survive.
+export function invalidateMacroInterceptorForVars(chatId: string, deps: readonly string[]): void {
+  if (deps.length === 0) return;
+  const prefix = `${chatId}::`;
+  let removed = 0;
+  for (const [k, v] of cache) {
+    if (!k.startsWith(prefix)) continue;
+    const touched = v.touchedVars;
+    const matched = !Array.isArray(touched)
+      || deps.some((d) => (touched as readonly string[]).includes(d));
+    if (matched) {
+      cache.delete(k);
+      removed += 1;
+    }
+  }
+  if (removed > 0) log.debug(`invalidate-vars chat=${chatId} deps=${deps.length} entries=${removed}`);
+}
+
 export function resetMacroInterceptorCache(): void {
   cache.clear();
   hitCount = 0;
