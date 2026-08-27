@@ -174,16 +174,26 @@ export function createImportHandlers(deps: ImportHandlerDeps): {
       }
     },
     register_svg_raster_index: async (msg, ctx) => {
+      // Migration/repair re-translation and bg-html edits also dispatch
+      // rasterize_svgs, with no import in flight. Those replies gate on
+      // character ownership: operator-scoped characterGet only returns rows
+      // the sender owns.
       const pendingForSvgCheck = deps.pendingImportCompletions.get(msg.characterId);
-      if (!pendingForSvgCheck) {
-        deps.log.warn(`register_svg_raster_index: no pending import char=${msg.characterId} sender=${ctx.userId},rejecting (late replay or fabrication)`);
-        ctx.send({ type: 'error', message: 'register_svg_raster_index: no pending import' }, ctx.userId);
-        return;
-      }
-      if (pendingForSvgCheck.ownerUserId !== ctx.userId) {
+      if (pendingForSvgCheck && pendingForSvgCheck.ownerUserId !== ctx.userId) {
         deps.log.warn(`register_svg_raster_index: ownership mismatch char=${msg.characterId} owner=${pendingForSvgCheck.ownerUserId} sender=${ctx.userId}`);
         ctx.send({ type: 'error', message: 'register_svg_raster_index: ownership mismatch' }, ctx.userId);
         return;
+      }
+      if (!pendingForSvgCheck) {
+        let owned: unknown = null;
+        try {
+          owned = await deps.characterGet(msg.characterId, ctx.userId);
+        } catch { /* treated as not owned */ }
+        if (!owned) {
+          deps.log.warn(`register_svg_raster_index: no pending import and sender does not own char=${msg.characterId} sender=${ctx.userId}, rejecting (late replay or fabrication)`);
+          ctx.send({ type: 'error', message: 'register_svg_raster_index: sender does not own character' }, ctx.userId);
+          return;
+        }
       }
       const total = Object.keys(msg.imageIdByMarker).length;
       const successful = Object.values(msg.imageIdByMarker).filter(
@@ -200,11 +210,13 @@ export function createImportHandlers(deps: ImportHandlerDeps): {
           userId: ctx.userId,
         });
       } catch (err) {
-        deps.log.warn(`register_svg_raster_index: applySvgRasterIndex failed char=${msg.characterId}: ${deps.errMsg(err)} — finalizing import without SVG raster`);
+        deps.log.warn(`register_svg_raster_index: applySvgRasterIndex failed char=${msg.characterId}: ${deps.errMsg(err)}, finalizing without SVG raster`);
       }
-      pendingForSvgCheck.hasPendingSvgRaster = false;
-      deps.log.info(`register_svg_raster_index: cleared svg-pending flag char=${msg.characterId}`);
-      await deps.maybeFinalizeImport(msg.characterId);
+      if (pendingForSvgCheck) {
+        pendingForSvgCheck.hasPendingSvgRaster = false;
+        deps.log.info(`register_svg_raster_index: cleared svg-pending flag char=${msg.characterId}`);
+        await deps.maybeFinalizeImport(msg.characterId);
+      }
     },
     delete_card: async (msg, ctx) => {
       const opId = `delete-card-${msg.characterId}-${Date.now()}`;

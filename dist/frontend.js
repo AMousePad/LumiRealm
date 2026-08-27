@@ -46872,17 +46872,22 @@ async function rasterizeOne(svg, width, height) {
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx)
-      return null;
-    ctx.drawImage(img, 0, 0, w, h);
-    const blobOut = await new Promise((resolve) => {
-      canvas.toBlob((b) => resolve(b), "image/png");
-    });
-    if (!blobOut)
-      return null;
-    const buf = await blobOut.arrayBuffer();
-    return new Uint8Array(buf);
+    try {
+      const ctx = canvas.getContext("2d");
+      if (!ctx)
+        return null;
+      ctx.drawImage(img, 0, 0, w, h);
+      const blobOut = await new Promise((resolve) => {
+        canvas.toBlob((b) => resolve(b), "image/png");
+      });
+      if (!blobOut)
+        return null;
+      const buf = await blobOut.arrayBuffer();
+      return new Uint8Array(buf);
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   } catch {
     return null;
   } finally {
@@ -46962,16 +46967,17 @@ function setupSvgRasterizer(opts) {
       imageIdByMarker
     });
   }
+  let batchChain = Promise.resolve();
   return {
     handleRasterizeSvgsMessage(msg) {
-      rasterizeBatch(msg).catch((err) => {
+      batchChain = batchChain.then(() => rasterizeBatch(msg).catch((err) => {
         log8.error(`svg-raster: rasterizeBatch threw char=${msg.characterId}: ${err.message}`);
         sendToBackend({
           type: "register_svg_raster_index",
           characterId: msg.characterId,
           imageIdByMarker: {}
         });
-      });
+      }));
     }
   };
 }
