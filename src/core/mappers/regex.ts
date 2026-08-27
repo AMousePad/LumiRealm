@@ -6,9 +6,11 @@ import type {
   LumiRegexMacroMode,
   LumiRegexScope,
 } from "../lumiverse/types.js";
-import { wrapIslandMergeIfNeeded, wrapForIslandTriggerIfNeeded } from "./island-merge.js";
 import { newUuid, nowMs } from "./util.js";
-import { normalizeReplaceStringForSanitizer } from "../../util/sanitizer-doc-shape.js";
+import {
+  normalizeReplaceStringForSanitizer,
+  stripDocBoundaries,
+} from "../../util/sanitizer-doc-shape.js";
 import { applyIframePolicy } from "./iframe-policy.js";
 import { unprefixHtmlClasses, normalizeIncompleteHtmlEntities, unprefixCssInStyleBlocks } from "../../bghtml/rewriter.js";
 
@@ -111,7 +113,9 @@ export function normalizeMatchActionDisplayReplaceString(
   });
 }
 
-// Keep every Risu display-regex source on one Lumiverse renderer adaptation.
+// Display rows store the author's raw fragment (Risu parity): the display
+// resolver wraps the whole resolved message in one island, so no per-rule
+// island wrapper exists and cross-rule tag balance survives storage.
 export function normalizeDisplayReplaceString(
   replaceString: string,
   options: {
@@ -122,16 +126,12 @@ export function normalizeDisplayReplaceString(
   const action = options.action === true;
   const preTransformed = options.preTransformed === true;
   let normalized = replaceString;
-  if (!preTransformed && !action) {
-    normalized = wrapIslandMergeIfNeeded(normalized);
-  }
   if (!preTransformed) {
     normalized = applyIframePolicy(normalized).html;
   }
-  if (!preTransformed && !action) {
-    normalized = wrapForIslandTriggerIfNeeded(normalized);
-  }
-  normalized = normalizeReplaceStringForSanitizer(normalized);
+  normalized = (!preTransformed && !action)
+    ? stripDocBoundaries(normalized)
+    : normalizeReplaceStringForSanitizer(normalized);
   if (!preTransformed && normalized.length > 0) {
     normalized = unprefixHtmlClasses(normalized);
     normalized = unprefixCssInStyleBlocks(normalized);

@@ -26,6 +26,7 @@ import {
 } from './snapshot.js';
 import { type FeRegexScript } from './regex-apply.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
+import { wrapResolvedContentAsIsland } from './fragment-assembly.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
 import {
@@ -67,7 +68,7 @@ function buildInput(
   return {
     template: content,
     phase: 'display',
-    // Risu Chat.svelte renders with rmVar: the setvar family hides, never executes.
+    // Risu renders display with rmVar: the setvar family hides, never executes.
     rmVar: true,
     chatId: snap.chatId,
     characterId: snap.characterId,
@@ -470,6 +471,7 @@ export function createDisplayResolver(
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
         feContent = await runApply(snap, args, recorder, onEffect);
+        feContent = wrapResolvedContentAsIsland(feContent);
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;

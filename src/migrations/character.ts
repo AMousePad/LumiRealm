@@ -5,6 +5,8 @@ import { translateFromStoredSource } from '../core/pipeline/translate.js';
 import { prepareBackgroundHtmlForRuntime } from '../core/mappers/background-html.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
+import { stripLegacyIslandWrappers } from '../core/mappers/island-merge.js';
+import { regexRowTargetsDisplay } from './regex-row.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import type { SvgRasterTask } from '../core/svg-rasterize.js';
 import {
@@ -418,6 +420,31 @@ async function applyV23CorrectCharXSpelling(
   return {
     nextEnvelope: args.envelope,
     notes: [`corrected ${result.updated} CharX regex folder spelling(s)`],
+  };
+}
+
+async function applyV24StripLegacyIslandWrappers(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const result = await deps.applyCharacterRegexRowPatch(
+    args.characterId,
+    args.userId,
+    (row) => {
+      if (!regexRowTargetsDisplay(row['target'])) return null;
+      const rs = row['replace_string'];
+      if (typeof rs !== 'string') return null;
+      const next = stripLegacyIslandWrappers(rs);
+      return next === rs ? null : { replace_string: next };
+    },
+  );
+  return {
+    nextEnvelope: args.envelope,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`,
+    ],
   };
 }
 
@@ -919,6 +946,22 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
     description: 'Correct the generated CardX folder spelling to CharX.',
     touches: ['regex_scripts'],
     apply: applyV23CorrectCharXSpelling,
+  },
+  {
+    version: 24,
+    description:
+      'Strip retired per-rule island wrappers from display replace_strings; rows store the raw author fragment and the resolver wraps the whole message. In-place per row, preserves user disable + edits.',
+    touches: ['regex_scripts'],
+    apply: applyV24StripLegacyIslandWrappers,
+  },
+  // v24 shipped with a scalar target gate; live rows carry target as an
+  // array, so the step stamped without patching. Corrected re-run.
+  {
+    version: 25,
+    description:
+      'Re-run the legacy island-wrapper strip with the array-shaped target gate.',
+    touches: ['regex_scripts'],
+    apply: applyV24StripLegacyIslandWrappers,
   },
 ];
 
