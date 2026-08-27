@@ -175,7 +175,7 @@ export function setupBgHtmlRenderer(
           "[data-message-id] { line-height: 28px; }\n";
         // Lumi sets overflow:hidden + contain:layout, which clips absolute
         // hover popups and creates a containing block for position:fixed.
-        // The runtime DOM lifter handles fixed, drop both for Risu chats.
+        // The per-chat extension-relaxed mode handles fixed, drop both for Risu chats.
         const bubbleContainment =
           "[data-message-id] { overflow: visible !important; contain: none !important; }\n";
         // Cross-rule styles wrapped in `[data-message-id] { ... }` via CSS Nesting
