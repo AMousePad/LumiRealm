@@ -12,13 +12,14 @@ const META_LINK_TITLE_BASE_RE = /<\/?(?:meta|title|base|link)\b[^>]*>/gi;
 const TITLE_BLOCK_RE = /<title\b[^>]*>[\s\S]*?<\/title\s*>/gi;
 const LEADING_WS_RE = /^\s+/;
 
-// Lumi shadow-islands depth-zero block wrappers from this set. A fragment
-// leading with <style> instead gets head-routed by DOMPurify and dropped
-// (CSS lost), which is why the wrap below exists.
+// Lumi shadow-islands depth-zero block wrappers from this set. Content that
+// doesn't start with one falls to a fallback path that fires on the first
+// style line, creating an island whose first element IS style. DOMPurify routes
+// a leading style to head-insertion mode and drops it (CSS lost), so we wrap.
 const STRATEGY1_BLOCK_TAGS_RE = /^<(?:div|section|article|aside|nav|main|header|footer|form|fieldset|figure|details)\b/i;
 
-export const STYLE_WRAP_OPEN = '<div data-lr-style-wrap class="not-island-prose">';
-export const STYLE_WRAP_CLOSE = '</div>';
+const STYLE_WRAP_OPEN = '<div data-lr-style-wrap class="not-island-prose">';
+const STYLE_WRAP_CLOSE = '</div>';
 
 function firstNonCommentElementIsBlockWrapper(html: string): boolean {
   let i = 0;
@@ -43,8 +44,11 @@ function firstNonCommentElementIsBlockWrapper(html: string): boolean {
   return false;
 }
 
-export function stripDocBoundaries(html: string): string {
-  if (!DOC_BOUNDARY_RE.test(html)) return html;
+export function normalizeReplaceStringForSanitizer(html: string): string {
+  // Fast path: no doc-boundary tags and no <style>.
+  if (!DOC_BOUNDARY_RE.test(html) && !HAS_STYLE_RE.test(html)) {
+    return html;
+  }
 
   let out = html;
 
@@ -70,18 +74,10 @@ export function stripDocBoundaries(html: string): string {
   out = out.replace(HEAD_ORPHAN_RE, '');
   out = out.replace(META_LINK_TITLE_BASE_RE, '');
 
-  return out;
-}
-
-export function normalizeReplaceStringForSanitizer(html: string): string {
-  if (!DOC_BOUNDARY_RE.test(html) && !HAS_STYLE_RE.test(html)) {
-    return html;
-  }
-
-  let out = stripDocBoundaries(html);
-
-  // A style-led island gets its <style> head-routed and dropped by
-  // DOMPurify, so style-bearing fragments not led by a block element wrap.
+  // Wrap with data-lr-style-wrap when the fragment has style but doesn't
+  // start with a block element (otherwise the island leads with style and
+  // DOMPurify drops it). Idempotent: already-block-led and portal-wrapped
+  // fragments skip wrapping.
   out = out.replace(LEADING_WS_RE, '');
   if (HAS_STYLE_RE.test(out) && !firstNonCommentElementIsBlockWrapper(out)) {
     out = STYLE_WRAP_OPEN + out + STYLE_WRAP_CLOSE;

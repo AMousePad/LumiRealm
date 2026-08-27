@@ -38,9 +38,9 @@ function makeDeps(overrides: Partial<ModuleMigrationDeps> = {}): ModuleMigration
 describe('module migration dependencies', () => {
   test('keeps the historical migration registry', () => {
     expect(MODULE_MIGRATIONS.map(({ version }) => version)).toEqual([
-      5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+      5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17,
     ]);
-    expect(CURRENT_MODULE_SCHEMA_VERSION).toBe(19);
+    expect(CURRENT_MODULE_SCHEMA_VERSION).toBe(17);
   });
 
   test('v5 refreshes attachments and keeps operational failures nonfatal', async () => {
@@ -112,7 +112,7 @@ describe('module migration dependencies', () => {
     expect(patches).toEqual([{ substitute_macros: 'after' }, null, null]);
   });
 
-  test('v12 leaves raw display rows unchanged (rows store raw fragments)', async () => {
+  test('v12 normalizes only display rows', async () => {
     const patches: Array<Record<string, unknown> | null> = [];
     await step(12).apply(args, makeDeps({
       applyModuleRegexRowPatch: async (_moduleId, patch) => {
@@ -125,33 +125,10 @@ describe('module migration dependencies', () => {
       },
     }));
 
-    expect(patches).toEqual([null, null]);
-  });
-
-  test('v19 strips legacy island wrappers from display rows across target shapes', async () => {
-    const legacy = '<div data-lr-style-wrap class="not-island-prose">'
-      + '<style data-risu-island-trigger></style>'
-      + '<div class="x">UI</div>'
-      + '</div>';
-    const patches: Array<Record<string, unknown> | null> = [];
-    await step(19).apply(args, makeDeps({
-      applyModuleRegexRowPatch: async (_moduleId, patch) => {
-        patches.push(patch({ target: ['display'], replace_string: legacy }));
-        patches.push(patch({ target: '["display"]', replace_string: legacy }));
-        patches.push(patch({ target: 'display', replace_string: legacy }));
-        patches.push(patch({ target: ['display'], replace_string: '<div class="raw">x</div>' }));
-        patches.push(patch({ target: ['prompt'], replace_string: legacy }));
-        return { scanned: 5, updated: 3, failed: 0 };
-      },
-    }));
-
-    expect(patches).toEqual([
-      { replace_string: '<div class="x">UI</div>' },
-      { replace_string: '<div class="x">UI</div>' },
-      { replace_string: '<div class="x">UI</div>' },
-      null,
-      null,
-    ]);
+    expect(patches[0]?.['replace_string']).toStartWith(
+      '<div data-lr-style-wrap class="not-island-prose">',
+    );
+    expect(patches[1]).toBeNull();
   });
 
   test('v14 moves only CBS-action rows to find mode', async () => {

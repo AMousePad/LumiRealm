@@ -6,8 +6,6 @@ import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
 import { projectModuleLorebookForCreate } from '../state/world-book-ops.js';
 import { normalizeModuleDisplayReplaceString } from '../state/module-artifact-project.js';
-import { stripLegacyIslandWrappers } from '../core/mappers/island-merge.js';
-import { regexRowTargetsDisplay } from './regex-row.js';
 import {
   LEGACY_ENTRY_HASH_FIELDS_V1,
   computeEntrySourceHashWithFields,
@@ -350,27 +348,6 @@ async function applyV12NormalizeDisplayRows(
   };
 }
 
-async function applyV18StripLegacyIslandWrappers(
-  args: ModuleMigrationStepArgs,
-  deps: ModuleMigrationDeps,
-): Promise<ModuleMigrationStepResult> {
-  const result = await deps.applyModuleRegexRowPatch(args.env.id, (row) => {
-    if (!regexRowTargetsDisplay(row['target'])) return null;
-    const rs = row['replace_string'];
-    if (typeof rs !== 'string') return null;
-    const next = stripLegacyIslandWrappers(rs);
-    return next === rs ? null : { replace_string: next };
-  });
-  return {
-    nextEnv: args.env,
-    notes: [
-      `scanned=${result.scanned}`,
-      `updated=${result.updated}`,
-      `failed=${result.failed}`,
-    ],
-  };
-}
-
 async function applyV14UseFindMacroMode(
   args: ModuleMigrationStepArgs,
   deps: ModuleMigrationDeps,
@@ -480,22 +457,6 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
     description: 'Group uncategorized module regex rows.',
     touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
     apply: applyV17BackfillRegexFolders,
-  },
-  {
-    version: 18,
-    description:
-      'Strip retired per-rule island wrappers from module display replace_strings; rows store the raw author fragment and the resolver wraps the whole message. In-place per row, preserves user disable + edits.',
-    touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
-    apply: applyV18StripLegacyIslandWrappers,
-  },
-  // v18 shipped with a scalar target gate; live rows carry target as an
-  // array, so the step stamped without patching. Corrected re-run.
-  {
-    version: 19,
-    description:
-      'Re-run the legacy island-wrapper strip with the array-shaped target gate.',
-    touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
-    apply: applyV18StripLegacyIslandWrappers,
   },
 ];
 

@@ -23522,206 +23522,6 @@ ${replacement}`
   return { handled: false, content };
 }
 
-// src/util/sanitizer-doc-shape.ts
-var DOC_BOUNDARY_RE = /<!doctype|<\/?(?:html|head|body|meta|title|base|link)\b/i;
-var HAS_STYLE_RE = /<style[\s>]/i;
-var DOCTYPE_RE = /<!DOCTYPE[^>]*>/gi;
-var HTML_TAG_RE = /<\/?html\b[^>]*>/gi;
-var BODY_TAG_RE = /<\/?body\b[^>]*>/gi;
-var HEAD_BLOCK_RE = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/gi;
-var HEAD_ORPHAN_RE = /<\/?head\b[^>]*>/gi;
-var STYLE_INNER_RE = /<style\b[^>]*>[\s\S]*?<\/style\s*>/gi;
-var META_LINK_TITLE_BASE_RE = /<\/?(?:meta|title|base|link)\b[^>]*>/gi;
-var TITLE_BLOCK_RE = /<title\b[^>]*>[\s\S]*?<\/title\s*>/gi;
-var LEADING_WS_RE = /^\s+/;
-var STRATEGY1_BLOCK_TAGS_RE = /^<(?:div|section|article|aside|nav|main|header|footer|form|fieldset|figure|details)\b/i;
-var STYLE_WRAP_OPEN = '<div data-lr-style-wrap class="not-island-prose">';
-var STYLE_WRAP_CLOSE = "</div>";
-function firstNonCommentElementIsBlockWrapper(html) {
-  let i = 0;
-  const n = html.length;
-  while (i < n) {
-    const ch = html.charCodeAt(i);
-    if (ch === 32 || ch === 9 || ch === 10 || ch === 13 || ch === 12) {
-      i++;
-      continue;
-    }
-    if (ch === 60 && html.charCodeAt(i + 1) === 33 && html.charCodeAt(i + 2) === 45 && html.charCodeAt(i + 3) === 45) {
-      const close = html.indexOf("-->", i + 4);
-      if (close < 0)
-        return false;
-      i = close + 3;
-      continue;
-    }
-    return STRATEGY1_BLOCK_TAGS_RE.test(html.slice(i));
-  }
-  return false;
-}
-function stripDocBoundaries(html) {
-  if (!DOC_BOUNDARY_RE.test(html))
-    return html;
-  let out = html;
-  out = out.replace(DOCTYPE_RE, "");
-  out = out.replace(HTML_TAG_RE, "");
-  out = out.replace(BODY_TAG_RE, "");
-  out = out.replace(HEAD_BLOCK_RE, (_match, headContent) => {
-    const titleScrubbed = headContent.replace(TITLE_BLOCK_RE, "");
-    const styles = [];
-    STYLE_INNER_RE.lastIndex = 0;
-    let m;
-    while ((m = STYLE_INNER_RE.exec(titleScrubbed)) !== null) {
-      styles.push(m[0]);
-    }
-    return styles.join(`
-`);
-  });
-  out = out.replace(HEAD_ORPHAN_RE, "");
-  out = out.replace(META_LINK_TITLE_BASE_RE, "");
-  return out;
-}
-function normalizeReplaceStringForSanitizer(html) {
-  if (!DOC_BOUNDARY_RE.test(html) && !HAS_STYLE_RE.test(html)) {
-    return html;
-  }
-  let out = stripDocBoundaries(html);
-  out = out.replace(LEADING_WS_RE, "");
-  if (HAS_STYLE_RE.test(out) && !firstNonCommentElementIsBlockWrapper(out)) {
-    out = STYLE_WRAP_OPEN + out + STYLE_WRAP_CLOSE;
-  }
-  return out;
-}
-
-// src/core/mappers/island-merge.ts
-var ISLAND_TRIGGER_PREFIX = `<style data-risu-island-trigger></style>`;
-
-// src/display/fragment-assembly.ts
-var BLOCK_TAGS = new Set([
-  "div",
-  "section",
-  "article",
-  "aside",
-  "nav",
-  "main",
-  "header",
-  "footer",
-  "form",
-  "fieldset",
-  "figure",
-  "details"
-]);
-var RAWTEXT_TAGS = new Set(["style", "script", "textarea", "title", "xmp"]);
-var CLOSE_NAME_RE = /^<\/([a-zA-Z][a-zA-Z0-9-]*)/;
-var OPEN_NAME_RE = /^<([a-zA-Z][a-zA-Z0-9-]*)/;
-function nextBlockTag(text, from) {
-  let i = from;
-  const n = text.length;
-  while (i < n) {
-    const lt = text.indexOf("<", i);
-    if (lt < 0)
-      return null;
-    if (text.startsWith("<!--", lt)) {
-      const end2 = text.indexOf("-->", lt + 4);
-      if (end2 < 0)
-        return null;
-      i = end2 + 3;
-      continue;
-    }
-    const next = text.charCodeAt(lt + 1);
-    if (next === 47) {
-      const m2 = CLOSE_NAME_RE.exec(text.slice(lt, lt + 40));
-      if (!m2) {
-        i = lt + 2;
-        continue;
-      }
-      const gt = text.indexOf(">", lt + 2);
-      const end2 = gt < 0 ? n : gt + 1;
-      const name2 = m2[1].toLowerCase();
-      if (BLOCK_TAGS.has(name2))
-        return { start: lt, end: end2, name: name2, kind: "close" };
-      i = end2;
-      continue;
-    }
-    if (next === 33 || next === 63) {
-      const gt = text.indexOf(">", lt + 1);
-      i = gt < 0 ? n : gt + 1;
-      continue;
-    }
-    const m = OPEN_NAME_RE.exec(text.slice(lt, lt + 40));
-    if (!m) {
-      i = lt + 1;
-      continue;
-    }
-    const name = m[1].toLowerCase();
-    let j = lt + 1 + m[1].length;
-    let quote = "";
-    while (j < n) {
-      const ch = text[j];
-      if (quote) {
-        if (ch === quote)
-          quote = "";
-      } else if (ch === '"' || ch === "'") {
-        quote = ch;
-      } else if (ch === ">") {
-        break;
-      }
-      j++;
-    }
-    const end = j >= n ? n : j + 1;
-    const selfClosing = text[j - 1] === "/";
-    if (RAWTEXT_TAGS.has(name) && !selfClosing) {
-      const closeRe = new RegExp(`</${name}\\s*>`, "ig");
-      closeRe.lastIndex = end;
-      const cm = closeRe.exec(text);
-      i = cm ? cm.index + cm[0].length : n;
-      continue;
-    }
-    if (BLOCK_TAGS.has(name) && !selfClosing) {
-      return { start: lt, end, name, kind: "open" };
-    }
-    i = end;
-  }
-  return null;
-}
-function popThrough(stack, name) {
-  const idx = stack.lastIndexOf(name);
-  if (idx < 0)
-    return false;
-  stack.length = idx;
-  return true;
-}
-function normalizeBlockBalance(text) {
-  const stack = [];
-  const parts = [];
-  let kept = 0;
-  let pos = 0;
-  let tok;
-  while ((tok = nextBlockTag(text, pos)) !== null) {
-    if (tok.kind === "open") {
-      stack.push(tok.name);
-    } else if (!popThrough(stack, tok.name)) {
-      parts.push(text.slice(kept, tok.start));
-      kept = tok.end;
-    }
-    pos = tok.end;
-  }
-  parts.push(text.slice(kept));
-  for (let i = stack.length - 1;i >= 0; i--) {
-    parts.push(`</${stack[i]}>`);
-  }
-  return parts.join("");
-}
-var STYLE_TAG_RE = /<style[\s>]/i;
-function hasIslandWorthyContent(text) {
-  return nextBlockTag(text, 0) !== null || STYLE_TAG_RE.test(text);
-}
-var RISU_CHAT_METRICS_STYLE = "font-size:calc(0.875rem * var(--lumiverse-font-scale, 1));" + "line-height:calc(1.25rem * var(--lumiverse-font-scale, 1))";
-var MESSAGE_ISLAND_OPEN = `${STYLE_WRAP_OPEN.slice(0, -1)} style="${RISU_CHAT_METRICS_STYLE}">`;
-function wrapResolvedContentAsIsland(content) {
-  if (!content || !hasIslandWorthyContent(content))
-    return content;
-  return MESSAGE_ISLAND_OPEN + ISLAND_TRIGGER_PREFIX + normalizeBlockBalance(content) + STYLE_WRAP_CLOSE;
-}
-
 // src/interpreter/risu-chat-view.ts
 function buildRisuChatView(input) {
   const messages = input.messages.map((m) => ({ ...m }));
@@ -24785,6 +24585,69 @@ var BASE_SAMPLER_KEYS = new Set([
   "top_p",
   "top_k"
 ]);
+
+// src/util/sanitizer-doc-shape.ts
+var DOC_BOUNDARY_RE = /<!doctype|<\/?(?:html|head|body|meta|title|base|link)\b/i;
+var HAS_STYLE_RE = /<style[\s>]/i;
+var DOCTYPE_RE = /<!DOCTYPE[^>]*>/gi;
+var HTML_TAG_RE = /<\/?html\b[^>]*>/gi;
+var BODY_TAG_RE = /<\/?body\b[^>]*>/gi;
+var HEAD_BLOCK_RE = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/gi;
+var HEAD_ORPHAN_RE = /<\/?head\b[^>]*>/gi;
+var STYLE_INNER_RE = /<style\b[^>]*>[\s\S]*?<\/style\s*>/gi;
+var META_LINK_TITLE_BASE_RE = /<\/?(?:meta|title|base|link)\b[^>]*>/gi;
+var TITLE_BLOCK_RE = /<title\b[^>]*>[\s\S]*?<\/title\s*>/gi;
+var LEADING_WS_RE = /^\s+/;
+var STRATEGY1_BLOCK_TAGS_RE = /^<(?:div|section|article|aside|nav|main|header|footer|form|fieldset|figure|details)\b/i;
+var STYLE_WRAP_OPEN = '<div data-lr-style-wrap class="not-island-prose">';
+var STYLE_WRAP_CLOSE = "</div>";
+function firstNonCommentElementIsBlockWrapper(html) {
+  let i = 0;
+  const n = html.length;
+  while (i < n) {
+    const ch = html.charCodeAt(i);
+    if (ch === 32 || ch === 9 || ch === 10 || ch === 13 || ch === 12) {
+      i++;
+      continue;
+    }
+    if (ch === 60 && html.charCodeAt(i + 1) === 33 && html.charCodeAt(i + 2) === 45 && html.charCodeAt(i + 3) === 45) {
+      const close = html.indexOf("-->", i + 4);
+      if (close < 0)
+        return false;
+      i = close + 3;
+      continue;
+    }
+    return STRATEGY1_BLOCK_TAGS_RE.test(html.slice(i));
+  }
+  return false;
+}
+function normalizeReplaceStringForSanitizer(html) {
+  if (!DOC_BOUNDARY_RE.test(html) && !HAS_STYLE_RE.test(html)) {
+    return html;
+  }
+  let out = html;
+  out = out.replace(DOCTYPE_RE, "");
+  out = out.replace(HTML_TAG_RE, "");
+  out = out.replace(BODY_TAG_RE, "");
+  out = out.replace(HEAD_BLOCK_RE, (_match, headContent) => {
+    const titleScrubbed = headContent.replace(TITLE_BLOCK_RE, "");
+    const styles = [];
+    STYLE_INNER_RE.lastIndex = 0;
+    let m;
+    while ((m = STYLE_INNER_RE.exec(titleScrubbed)) !== null) {
+      styles.push(m[0]);
+    }
+    return styles.join(`
+`);
+  });
+  out = out.replace(HEAD_ORPHAN_RE, "");
+  out = out.replace(META_LINK_TITLE_BASE_RE, "");
+  out = out.replace(LEADING_WS_RE, "");
+  if (HAS_STYLE_RE.test(out) && !firstNonCommentElementIsBlockWrapper(out)) {
+    out = STYLE_WRAP_OPEN + out + STYLE_WRAP_CLOSE;
+  }
+  return out;
+}
 // src/interpreter/runtime/als-compat.ts
 var {AsyncLocalStorage} = (() => ({}));
 function createAls() {
@@ -26562,6 +26425,24 @@ var ENTRY_HASH_FIELDS = [
   ...LEGACY_ENTRY_HASH_FIELDS_V1,
   "exclude_greeting"
 ];
+// src/core/mappers/island-merge.ts
+var VOID_ELEMENTS = new Set([
+  "input",
+  "img",
+  "br",
+  "hr",
+  "meta",
+  "link",
+  "source",
+  "track",
+  "wbr",
+  "area",
+  "base",
+  "col",
+  "embed",
+  "param"
+]);
+
 // src/core/mappers/iframe-policy.ts
 var BOOL_PARAMS = new Set(["autoplay", "controls", "loop", "mute", "playsinline", "rel"]);
 var NUMBER_PARAMS = new Set(["end", "start"]);
@@ -30584,7 +30465,6 @@ function createDisplayResolver(writeback, onEffect) {
       const recorder = { touched: new Set, volatile: false };
       try {
         feContent = await runApply(snap, args, recorder, onEffect);
-        feContent = wrapResolvedContentAsIsland(feContent);
       } catch (err) {
         log6.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
