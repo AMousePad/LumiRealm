@@ -258,8 +258,8 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
     },
     setCrossRuleSheets(cssParts: readonly string[]): void {
       // Same content-skip as setStylesheet. Cross-rule sheets fire
-      // alongside setStylesheet on every bg-html refresh. The 9-sheet
-      // bundle is ~62KB on Mortal Realm , re-parsing on byte-identical
+      // alongside setStylesheet on every bg-html refresh. On island-heavy
+      // cards the 9-sheet bundle is ~62KB, and re-parsing byte-identical
       // input was the bulk of the chat-open lag.
       const key = cssParts.length + '\x1f' + cssParts.join('\x1e');
       if (lastCrossRuleKey === key) {

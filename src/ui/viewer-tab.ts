@@ -79,8 +79,8 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   // The next cards_updated retries the switch, then clears the flag.
   let pendingAutoSwitch = false;
   // Asset virtualization , only the visible window of tiles is mounted at any
-  // time. Module-grade asset counts (Cheongwon ships 1500+) used to require
-  // pagination; now scrolling reveals tiles on demand without DOM blowup.
+  // time. Module-heavy cards can ship 1500+ assets, which used to require
+  // pagination. Now scrolling reveals tiles on demand without DOM blowup.
   // Tile dimensions are fixed so absolute positioning works.
   const ASSET_TILE_MIN_W = 140;
   const ASSET_TILE_H = 220;

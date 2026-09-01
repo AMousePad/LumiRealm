@@ -112,7 +112,8 @@ register("risu", (_c, a) => {
 // the baseline applying, matching Risu's cascade.
 // Risu emits the label raw, so card-authored HTML entity glyphs must survive (only
 // escape a bare ampersand that does not start a valid entity). Angle brackets stay
-// escaped for Lumi-sanitizer safety, matching the Cheongwon nav-arrow case.
+// escaped for Lumi-sanitizer safety, matching cards that use angle-bracket
+// glyphs as nav arrows in button labels.
 const BARE_AMP_RE = /&(?!#x[0-9a-fA-F]+;|#[0-9]+;|[a-zA-Z][a-zA-Z0-9]*;)/g;
 function escapeButtonLabel(s: string): string {
   return s.replace(BARE_AMP_RE, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

@@ -1,7 +1,6 @@
 // Risu parity: parse a standalone lorebook JSON file (Risu native or CCSv3)
-// and project to Risu's loreBook[] shape. Mirrors
-// g:/git/Risuai/src/ts/process/lorebook.svelte.ts:663-740 (importLoreBook +
-// convertExternalLorebook).
+// and project to Risu's loreBook[] shape. Mirrors Risu's importLoreBook and
+// convertExternalLorebook.
 
 import type { LoreBook } from '../core/schemas/lorebook.js';
 

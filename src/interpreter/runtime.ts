@@ -296,8 +296,8 @@ export async function makeRisuTriggerRuntime(
 
   // Nested runTrigger reuses parent varsCache; only outermost runtime flushes.
   // Per-await timing: every step here is an IPC round-trip in Spindle; the
-  // editDisplay listenEdit chain creates a fresh runtime per trigger (16x for
-  // Mortal Realm), so the factory cost dominates the wall-clock budget.
+  // editDisplay listenEdit chain creates a fresh runtime per trigger (16x on
+  // a 16-trigger card), so the factory cost dominates the wall-clock budget.
   //
   // PRELOAD FAST-PATH: when caller passes `opts.preloaded`, we skip the
   // matching IPC fetch and reuse the provided snapshot. Used by
@@ -855,10 +855,10 @@ export async function makeRisuTriggerRuntime(
         // No-op write: Lua read the message via `getChat(N)`, did some logic
         // that didn't actually mutate the body, then wrote the same string
         // back. Cards do this routinely as part of "set var X then nudge"
-        // patterns (Alternate Hunters V2 ToggleSysSettings , flips
-        // `ui_sys_stat` and re-writes the same already-resolved greeting,
-        // expecting the next render to re-evaluate `{{getvar::ui_sys_stat}}`
-        // in the display-regex panel rule).
+        // patterns (a settings-toggle trigger flips `ui_sys_stat` and
+        // re-writes the same already-resolved greeting, expecting the next
+        // render to re-evaluate `{{getvar::ui_sys_stat}}` in the
+        // display-regex panel rule).
         //
         // Skip when the value is identical to what's already stored. Lua's
         // intent ("nudge a re-render") is satisfied by the

@@ -776,7 +776,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   try {
     // display_owner: true MUST match writeLumirealm. The host gates FE-owned display on
     // character.extensions.lumirealm.display_owner, so omitting it imports an unowned
-    // character that silently dead-zones (quirks §1.44).
+    // character that silently dead-zones.
     await args.spindle.characters.update(
       characterId,
       { extensions: { [LUMIREALM_EXT_KEY]: { ...withTranslations, display_owner: true } } },

@@ -1,5 +1,5 @@
-// Risu parity: process/scripts.ts processScriptCache. Identical templates
-// fire 3+ times per chat-open on Cheongwon-grade cards.
+// Risu parity: Risu's processScriptCache. Identical templates
+// fire 3+ times per chat-open on module-heavy cards.
 
 import { makeSafeLogger } from '../util/safe-log.js';
 

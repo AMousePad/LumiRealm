@@ -2,7 +2,7 @@
 // snapshot ONCE outside the per-trigger loop and shares it across all
 // triggers in the same chain. Plus a short-TTL cross-chain cache so a burst
 // of render-MCP calls (e.g. 14 visible messages on chat-open with a
-// listenEdit-heavy card like Mortal Realm) shares a single fetch.
+// listenEdit-heavy card) shares a single fetch.
 //
 // Risu invariant: each trigger still gets a fresh Lua VM (preserved). Only
 // the *data* the Lua reads is shared. editDisplay listeners can't write

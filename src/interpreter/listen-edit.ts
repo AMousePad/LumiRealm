@@ -69,10 +69,10 @@ export async function runListenEditChain<T>(
   // in the same chain (no chat mutations between triggers , editDisplay's
   // commit:false gates writes), so the snapshot is safely shareable.
   //
-  // Mortal Realm: the per-trigger state reads (local/global vars + messages +
-  // character/lorebook) collapse to one parallel preload + 16× Lua (or zero
-  // state reads if the cross-chain cache hits), which kills the IPC channel
-  // contention that caused 4.5s stalls in the editDisplay path.
+  // On a 16-trigger listenEdit chain, the per-trigger state reads (local/global
+  // vars + messages + character/lorebook) collapse to one parallel preload +
+  // 16x Lua (or zero state reads if the cross-chain cache hits), which kills
+  // the IPC channel contention that caused 4.5s stalls in the editDisplay path.
   const tPreload = Date.now();
   const preloaded = opts.preloaded ?? await preloadForListenEditChain(
     api,
