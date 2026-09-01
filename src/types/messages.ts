@@ -561,6 +561,9 @@ export type BackendToFrontend =
   | {
       type: 'display_snapshot';
       snapshot: DisplaySnapshot;
+      // 'gui-reload' = Risu ReloadGUIPointer analog: FE must invalidate ['*']
+      // instead of var-diffing (explicit reloadDisplay or dirty trigger flush).
+      reason?: 'gui-reload';
     }
   // `seq` is monotonic per-chat; pushes only when snapshot changes (or on explicit request).
   | {

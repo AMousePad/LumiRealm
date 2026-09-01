@@ -20,12 +20,14 @@ var __toESM = (mod, isNodeMode, target) => {
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
   const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-  for (let key of __getOwnPropNames(mod))
-    if (!__hasOwnProp.call(to, key))
-      __defProp(to, key, {
-        get: __accessProp.bind(mod, key),
-        enumerable: true
-      });
+  if (mod && typeof mod === "object" || typeof mod === "function") {
+    for (let key of __getOwnPropNames(mod))
+      if (!__hasOwnProp.call(to, key))
+        __defProp(to, key, {
+          get: __accessProp.bind(mod, key),
+          enumerable: true
+        });
+  }
   if (canCache)
     cache.set(mod, to);
   return to;
@@ -3958,113 +3960,113 @@ var init_types = __esm(() => {
 // node_modules/zod/v3/external.js
 var exports_external = {};
 __export(exports_external, {
-  void: () => voidType,
-  util: () => util,
-  unknown: () => unknownType,
-  union: () => unionType,
-  undefined: () => undefinedType,
-  tuple: () => tupleType,
-  transformer: () => effectsType,
-  symbol: () => symbolType,
-  string: () => stringType,
-  strictObject: () => strictObjectType,
-  setErrorMap: () => setErrorMap,
-  set: () => setType,
-  record: () => recordType,
-  quotelessJson: () => quotelessJson,
-  promise: () => promiseType,
-  preprocess: () => preprocessType,
-  pipeline: () => pipelineType,
-  ostring: () => ostring,
-  optional: () => optionalType,
-  onumber: () => onumber,
-  oboolean: () => oboolean,
-  objectUtil: () => objectUtil,
-  object: () => objectType,
-  number: () => numberType,
-  nullable: () => nullableType,
-  null: () => nullType,
-  never: () => neverType,
-  nativeEnum: () => nativeEnumType,
-  nan: () => nanType,
-  map: () => mapType,
-  makeIssue: () => makeIssue,
-  literal: () => literalType,
-  lazy: () => lazyType,
-  late: () => late,
-  isValid: () => isValid,
-  isDirty: () => isDirty,
-  isAsync: () => isAsync,
-  isAborted: () => isAborted,
-  intersection: () => intersectionType,
-  instanceof: () => instanceOfType,
-  getParsedType: () => getParsedType,
-  getErrorMap: () => getErrorMap,
-  function: () => functionType,
-  enum: () => enumType,
-  effect: () => effectsType,
-  discriminatedUnion: () => discriminatedUnionType,
-  defaultErrorMap: () => en_default,
-  datetimeRegex: () => datetimeRegex,
-  date: () => dateType,
-  custom: () => custom,
-  coerce: () => coerce,
-  boolean: () => booleanType,
-  bigint: () => bigIntType,
-  array: () => arrayType,
-  any: () => anyType,
-  addIssueToContext: () => addIssueToContext,
-  ZodVoid: () => ZodVoid,
-  ZodUnknown: () => ZodUnknown,
-  ZodUnion: () => ZodUnion,
-  ZodUndefined: () => ZodUndefined,
-  ZodType: () => ZodType,
-  ZodTuple: () => ZodTuple,
-  ZodTransformer: () => ZodEffects,
-  ZodSymbol: () => ZodSymbol,
-  ZodString: () => ZodString,
-  ZodSet: () => ZodSet,
-  ZodSchema: () => ZodType,
-  ZodRecord: () => ZodRecord,
-  ZodReadonly: () => ZodReadonly,
-  ZodPromise: () => ZodPromise,
-  ZodPipeline: () => ZodPipeline,
-  ZodParsedType: () => ZodParsedType,
-  ZodOptional: () => ZodOptional,
-  ZodObject: () => ZodObject,
-  ZodNumber: () => ZodNumber,
-  ZodNullable: () => ZodNullable,
-  ZodNull: () => ZodNull,
-  ZodNever: () => ZodNever,
-  ZodNativeEnum: () => ZodNativeEnum,
-  ZodNaN: () => ZodNaN,
-  ZodMap: () => ZodMap,
-  ZodLiteral: () => ZodLiteral,
-  ZodLazy: () => ZodLazy,
-  ZodIssueCode: () => ZodIssueCode,
-  ZodIntersection: () => ZodIntersection,
-  ZodFunction: () => ZodFunction,
-  ZodFirstPartyTypeKind: () => ZodFirstPartyTypeKind,
-  ZodError: () => ZodError,
-  ZodEnum: () => ZodEnum,
-  ZodEffects: () => ZodEffects,
-  ZodDiscriminatedUnion: () => ZodDiscriminatedUnion,
-  ZodDefault: () => ZodDefault,
-  ZodDate: () => ZodDate,
-  ZodCatch: () => ZodCatch,
-  ZodBranded: () => ZodBranded,
-  ZodBoolean: () => ZodBoolean,
-  ZodBigInt: () => ZodBigInt,
-  ZodArray: () => ZodArray,
-  ZodAny: () => ZodAny,
-  Schema: () => ZodType,
-  ParseStatus: () => ParseStatus,
-  OK: () => OK,
-  NEVER: () => NEVER,
-  INVALID: () => INVALID,
-  EMPTY_PATH: () => EMPTY_PATH,
+  BRAND: () => BRAND,
   DIRTY: () => DIRTY,
-  BRAND: () => BRAND
+  EMPTY_PATH: () => EMPTY_PATH,
+  INVALID: () => INVALID,
+  NEVER: () => NEVER,
+  OK: () => OK,
+  ParseStatus: () => ParseStatus,
+  Schema: () => ZodType,
+  ZodAny: () => ZodAny,
+  ZodArray: () => ZodArray,
+  ZodBigInt: () => ZodBigInt,
+  ZodBoolean: () => ZodBoolean,
+  ZodBranded: () => ZodBranded,
+  ZodCatch: () => ZodCatch,
+  ZodDate: () => ZodDate,
+  ZodDefault: () => ZodDefault,
+  ZodDiscriminatedUnion: () => ZodDiscriminatedUnion,
+  ZodEffects: () => ZodEffects,
+  ZodEnum: () => ZodEnum,
+  ZodError: () => ZodError,
+  ZodFirstPartyTypeKind: () => ZodFirstPartyTypeKind,
+  ZodFunction: () => ZodFunction,
+  ZodIntersection: () => ZodIntersection,
+  ZodIssueCode: () => ZodIssueCode,
+  ZodLazy: () => ZodLazy,
+  ZodLiteral: () => ZodLiteral,
+  ZodMap: () => ZodMap,
+  ZodNaN: () => ZodNaN,
+  ZodNativeEnum: () => ZodNativeEnum,
+  ZodNever: () => ZodNever,
+  ZodNull: () => ZodNull,
+  ZodNullable: () => ZodNullable,
+  ZodNumber: () => ZodNumber,
+  ZodObject: () => ZodObject,
+  ZodOptional: () => ZodOptional,
+  ZodParsedType: () => ZodParsedType,
+  ZodPipeline: () => ZodPipeline,
+  ZodPromise: () => ZodPromise,
+  ZodReadonly: () => ZodReadonly,
+  ZodRecord: () => ZodRecord,
+  ZodSchema: () => ZodType,
+  ZodSet: () => ZodSet,
+  ZodString: () => ZodString,
+  ZodSymbol: () => ZodSymbol,
+  ZodTransformer: () => ZodEffects,
+  ZodTuple: () => ZodTuple,
+  ZodType: () => ZodType,
+  ZodUndefined: () => ZodUndefined,
+  ZodUnion: () => ZodUnion,
+  ZodUnknown: () => ZodUnknown,
+  ZodVoid: () => ZodVoid,
+  addIssueToContext: () => addIssueToContext,
+  any: () => anyType,
+  array: () => arrayType,
+  bigint: () => bigIntType,
+  boolean: () => booleanType,
+  coerce: () => coerce,
+  custom: () => custom,
+  date: () => dateType,
+  datetimeRegex: () => datetimeRegex,
+  defaultErrorMap: () => en_default,
+  discriminatedUnion: () => discriminatedUnionType,
+  effect: () => effectsType,
+  enum: () => enumType,
+  function: () => functionType,
+  getErrorMap: () => getErrorMap,
+  getParsedType: () => getParsedType,
+  instanceof: () => instanceOfType,
+  intersection: () => intersectionType,
+  isAborted: () => isAborted,
+  isAsync: () => isAsync,
+  isDirty: () => isDirty,
+  isValid: () => isValid,
+  late: () => late,
+  lazy: () => lazyType,
+  literal: () => literalType,
+  makeIssue: () => makeIssue,
+  map: () => mapType,
+  nan: () => nanType,
+  nativeEnum: () => nativeEnumType,
+  never: () => neverType,
+  null: () => nullType,
+  nullable: () => nullableType,
+  number: () => numberType,
+  object: () => objectType,
+  objectUtil: () => objectUtil,
+  oboolean: () => oboolean,
+  onumber: () => onumber,
+  optional: () => optionalType,
+  ostring: () => ostring,
+  pipeline: () => pipelineType,
+  preprocess: () => preprocessType,
+  promise: () => promiseType,
+  quotelessJson: () => quotelessJson,
+  record: () => recordType,
+  set: () => setType,
+  setErrorMap: () => setErrorMap,
+  strictObject: () => strictObjectType,
+  string: () => stringType,
+  symbol: () => symbolType,
+  transformer: () => effectsType,
+  tuple: () => tupleType,
+  undefined: () => undefinedType,
+  union: () => unionType,
+  unknown: () => unknownType,
+  util: () => util,
+  void: () => voidType
 });
 var init_external = __esm(() => {
   init_errors();
@@ -4084,12 +4086,12 @@ var init_zod = __esm(() => {
 // src/core/svg-rasterize.ts
 var exports_svg_rasterize = {};
 __export(exports_svg_rasterize, {
-  substituteSvgMarkers: () => substituteSvgMarkers,
-  inferDimensions: () => inferDimensions,
-  extractAndReplaceSvgs: () => extractAndReplaceSvgs,
-  classifySvg: () => classifySvg,
+  SVG_PENDING_ATTR: () => SVG_PENDING_ATTR,
   SvgIndexer: () => SvgIndexer,
-  SVG_PENDING_ATTR: () => SVG_PENDING_ATTR
+  classifySvg: () => classifySvg,
+  extractAndReplaceSvgs: () => extractAndReplaceSvgs,
+  inferDimensions: () => inferDimensions,
+  substituteSvgMarkers: () => substituteSvgMarkers
 });
 
 class SvgIndexer {
@@ -4283,7 +4285,7 @@ function normalizeRoleToLumi(r) {
 }
 
 // node_modules/fengari-web/dist/fengari-web.bundle.js
-var require_fengari_web_bundle = __commonJS((exports, module) => {
+var require_fengari_web_bundle = __commonJS(function(exports, module) {
   module.exports = function(t) {
     var e = {};
     function n(r) {
@@ -6599,7 +6601,7 @@ Based on: ` + r.LUA_COPYRIGHT;
               Xt(t2, t2.stack[i2], t2.stack[St(0, s2, o2)]);
               break;
             case N: {
-              let { B: n3, C: r2 } = o2;
+              let n3 = o2.B, r2 = o2.C;
               t2.top = s2 + r2 + 1, re(t2, r2 - n3 + 1);
               let a2 = s2 + n3;
               Tt.setobjs2s(t2, i2, a2), Et.adjust_top(t2, e2.top);
@@ -6637,7 +6639,7 @@ Based on: ` + r.LUA_COPYRIGHT;
             case st: {
               let r2 = o2.B;
               if (r2 !== 0 && Et.adjust_top(t2, i2 + r2), !Et.luaD_precall(t2, i2, u)) {
-                let r3 = t2.ci, a2 = r3.previous, u2 = r3.func, l3 = r3.funcOff, s3 = a2.funcOff, o3 = r3.l_base + u2.value.p.numparams;
+                let r3 = t2.ci, { previous: a2, func: u2, funcOff: l3 } = r3, s3 = a2.funcOff, o3 = r3.l_base + u2.value.p.numparams;
                 n2.p.p.length > 0 && xt.luaF_close(t2, a2.l_base);
                 for (let e3 = 0;l3 + e3 < o3; e3++)
                   Tt.setobjs2s(t2, s3 + e3, l3 + e3);
@@ -6683,7 +6685,7 @@ Based on: ` + r.LUA_COPYRIGHT;
               t2.stack[i2 + 1].ttisnil() || (Tt.setobjs2s(t2, i2, i2 + 1), e2.l_savedpc += o2.sBx);
               break;
             case tt: {
-              let { B: n3, C: r2 } = o2;
+              let n3 = o2.B, r2 = o2.C;
               n3 === 0 && (n3 = t2.top - i2 - 1), r2 === 0 && (At(e2.l_code[e2.l_savedpc].opcode === w), r2 = e2.l_code[e2.l_savedpc++].Ax);
               let a2 = t2.stack[i2].value, u2 = (r2 - 1) * x + n3;
               for (;n3 > 0; n3--)
@@ -6834,7 +6836,7 @@ Based on: ` + r.LUA_COPYRIGHT;
     const l = n(39);
     t.exports.luaL_openlibs = l.luaL_openlibs;
   }, function(t, e, n) {
-    const { LUA_MULTRET: r, LUA_OPBNOT: a, LUA_OPEQ: u, LUA_OPLE: l, LUA_OPLT: s, LUA_OPUNM: o, LUA_REGISTRYINDEX: i, LUA_RIDX_GLOBALS: c, LUA_VERSION_NUM: _, constant_types: { LUA_NUMTAGS: f, LUA_TBOOLEAN: p, LUA_TCCL: L, LUA_TFUNCTION: h, LUA_TLCF: d, LUA_TLCL: A, LUA_TLIGHTUSERDATA: g, LUA_TLNGSTR: T, LUA_TNIL: x, LUA_TNONE: b, LUA_TNUMFLT: O, LUA_TNUMINT: k, LUA_TSHRSTR: v, LUA_TTABLE: E, LUA_TTHREAD: U, LUA_TUSERDATA: m }, thread_status: { LUA_OK: N }, from_userstring: R, to_luastring: S } = n(1), { api_check: w } = n(4), I = n(11), y = n(8), { luaU_dump: M } = n(37), P = n(13), C = n(6), D = n(12), { luaS_bless: V, luaS_new: B, luaS_newliteral: G } = n(10), K = n(14), { LUAI_MAXSTACK: F } = n(3), j = n(15), H = n(9), { ZIO: X } = n(19), z = C.TValue, Y = C.CClosure, J = function(t2) {
+    const { LUA_MULTRET: r, LUA_OPBNOT: a, LUA_OPEQ: u, LUA_OPLE: l, LUA_OPLT: s, LUA_OPUNM: o, LUA_REGISTRYINDEX: i, LUA_RIDX_GLOBALS: c, LUA_VERSION_NUM: _, constant_types: { LUA_NUMTAGS: f, LUA_TBOOLEAN: p, LUA_TCCL: L, LUA_TFUNCTION: h, LUA_TLCF: d, LUA_TLCL: A, LUA_TLIGHTUSERDATA: g, LUA_TLNGSTR: T, LUA_TNIL: x, LUA_TNONE: b, LUA_TNUMFLT: O, LUA_TNUMINT: k, LUA_TSHRSTR: v, LUA_TTABLE: E, LUA_TTHREAD: U, LUA_TUSERDATA: m }, thread_status: { LUA_OK: N }, from_userstring: R, to_luastring: S } = n(1), { api_check: w } = n(4), I = n(11), y = n(8), { luaU_dump: M } = n(37), P = n(13), C = n(6), D = n(12), { luaS_bless: V, luaS_new: B, luaS_newliteral: G } = n(10), K = n(14), { LUAI_MAXSTACK: F } = n(3), j = n(15), H = n(9), { ZIO: X } = n(19), { TValue: z, CClosure: Y } = C, J = function(t2) {
       t2.top++, w(t2, t2.top <= t2.ci.top, "stack overflow");
     }, Z = function(t2, e2) {
       w(t2, e2 < t2.top - t2.ci.funcOff, "not enough elements in the stack");
@@ -9824,7 +9826,7 @@ Based on: ` + r.LUA_COPYRIGHT;
     }, pack: function(t2) {
       let e2 = new X, n2 = new Gt(t2), r2 = { s: at(t2, 1), off: 0 }, a2 = 1, u2 = 0;
       for (S(t2), $(t2, e2);r2.off < r2.s.length; ) {
-        let l2 = Xt(n2, u2, r2), s2 = l2.opt, o2 = l2.size, i2 = l2.ntoalign;
+        let l2 = Xt(n2, u2, r2), { opt: s2, size: o2, ntoalign: i2 } = l2;
         for (u2 += i2 + o2;i2-- > 0; )
           z(e2, 0);
         switch (a2++, s2) {
@@ -9874,7 +9876,7 @@ Based on: ` + r.LUA_COPYRIGHT;
     }, packsize: function(t2) {
       let e2 = new Gt(t2), n2 = { s: at(t2, 1), off: 0 }, r2 = 0;
       for (;n2.off < n2.s.length; ) {
-        let a2 = Xt(e2, r2, n2), u2 = a2.opt, l2 = a2.size, s2 = a2.ntoalign;
+        let a2 = Xt(e2, r2, n2), { opt: u2, size: l2, ntoalign: s2 } = a2;
         switch (W(t2, r2 <= 2147483647 - (l2 += s2), 1, "format result too large"), r2 += l2, u2) {
           case 4:
           case 5:
@@ -9908,7 +9910,7 @@ Based on: ` + r.LUA_COPYRIGHT;
     }, unpack: function(t2) {
       let e2 = new Gt(t2), n2 = { s: at(t2, 1), off: 0 }, r2 = at(t2, 2), a2 = r2.length, u2 = Ot(ot(t2, 3, 1), a2) - 1, l2 = 0;
       for (W(t2, u2 <= a2 && u2 >= 0, 3, "initial position out of string");n2.off < n2.s.length; ) {
-        let s2 = Xt(e2, u2, n2), o2 = s2.opt, i2 = s2.size, c2 = s2.ntoalign;
+        let s2 = Xt(e2, u2, n2), { opt: o2, size: i2, ntoalign: c2 } = s2;
         switch (u2 + c2 + i2 > a2 && Q(t2, 2, Tt("data string too short")), u2 += c2, rt(t2, 2, "too many results"), l2++, o2) {
           case 0:
           case 1: {
@@ -10196,14 +10198,14 @@ Based on: ` + r.LUA_COPYRIGHT;
         return t3 & r && (e3[n3++] = 99), t3 & l && (e3[n3++] = 114), t3 & u && (e3[n3++] = 108), e3.subarray(0, n3);
       }(a2, n2)), M(t2, d(e2)), 3;
     }, getinfo: function(t2) {
-      let e2 = new f, n2 = Ot(t2), r2 = n2.arg, a2 = n2.thread, u2 = ht(t2, r2 + 2, "flnStu");
+      let e2 = new f, n2 = Ot(t2), { arg: r2, thread: a2 } = n2, u2 = ht(t2, r2 + 2, "flnStu");
       if (bt(t2, a2, 3), U(t2, r2 + 1))
         u2 = y(t2, xt(">%s"), u2), B(t2, r2 + 1), at(t2, a2, 1);
       else if (!b(a2, ot(t2, r2 + 1), e2))
         return D(t2), 1;
       return g(a2, u2, e2) || lt(t2, r2 + 2, "invalid option"), R(t2), Tt(u2, 83) > -1 && (kt(t2, xt("source", true), e2.source), kt(t2, xt("short_src", true), e2.short_src), vt(t2, xt("linedefined", true), e2.linedefined), vt(t2, xt("lastlinedefined", true), e2.lastlinedefined), kt(t2, xt("what", true), e2.what)), Tt(u2, 108) > -1 && vt(t2, xt("currentline", true), e2.currentline), Tt(u2, 117) > -1 && (vt(t2, xt("nups", true), e2.nups), vt(t2, xt("nparams", true), e2.nparams), Et(t2, xt("isvararg", true), e2.isvararg)), Tt(u2, 110) > -1 && (kt(t2, xt("name", true), e2.name), kt(t2, xt("namewhat", true), e2.namewhat)), Tt(u2, 116) > -1 && Et(t2, xt("istailcall", true), e2.istailcall), Tt(u2, 76) > -1 && Ut(t2, a2, xt("activelines", true)), Tt(u2, 102) > -1 && Ut(t2, a2, xt("func", true)), 1;
     }, getlocal: function(t2) {
-      let e2 = Ot(t2), n2 = e2.thread, r2 = e2.arg, a2 = new f, u2 = ot(t2, r2 + 2);
+      let e2 = Ot(t2), { thread: n2, arg: r2 } = e2, a2 = new f, u2 = ot(t2, r2 + 2);
       if (U(t2, r2 + 1))
         return B(t2, r2 + 1), V(t2, T(t2, null, u2)), 1;
       {
@@ -10223,7 +10225,7 @@ Based on: ` + r.LUA_COPYRIGHT;
     }, getuservalue: function(t2) {
       return et(t2, 1) !== _ ? D(t2) : k(t2, 1), 1;
     }, sethook: function(t2) {
-      let e2, n2, c2, _2, f2 = Ot(t2), p2 = f2.thread, L2 = f2.arg;
+      let e2, n2, c2, _2, f2 = Ot(t2), { thread: p2, arg: L2 } = f2;
       if (m(t2, L2 + 1))
         Y(t2, L2 + 1), c2 = null, e2 = 0, n2 = 0;
       else {
@@ -10237,7 +10239,7 @@ Based on: ` + r.LUA_COPYRIGHT;
       let h2 = W(t2, L2 + 1);
       return _2.set(p2, h2), H(p2, c2, e2, n2), 0;
     }, setlocal: function(t2) {
-      let e2 = Ot(t2), n2 = e2.thread, r2 = e2.arg, a2 = new f, u2 = ot(t2, r2 + 1), l2 = ot(t2, r2 + 2);
+      let e2 = Ot(t2), { thread: n2, arg: r2 } = e2, a2 = new f, u2 = ot(t2, r2 + 1), l2 = ot(t2, r2 + 2);
       if (!b(n2, u2, a2))
         return lt(t2, r2 + 1, "level out of range");
       st(t2, r2 + 3), Y(t2, r2 + 3), bt(t2, n2, 1), at(t2, n2, 1);
@@ -10251,7 +10253,7 @@ Based on: ` + r.LUA_COPYRIGHT;
     }, setuservalue: function(t2) {
       return ct(t2, 1, _), st(t2, 2), Y(t2, 2), Z(t2, 1), 1;
     }, traceback: function(t2) {
-      let e2 = Ot(t2), n2 = e2.thread, r2 = e2.arg, a2 = Q(t2, r2 + 1);
+      let e2 = Ot(t2), { thread: n2, arg: r2 } = e2, a2 = Q(t2, r2 + 1);
       if (a2 !== null || m(t2, r2 + 1)) {
         let e3 = Lt(t2, r2 + 2, t2 === n2 ? 1 : 0);
         dt(t2, n2, a2, e3);
@@ -13282,44 +13284,6 @@ var init_catalog = __esm(() => {
   init_loader();
 });
 // src/core/cbs/runtime/mock.ts
-class MockVariableStore {
-  data = {
-    local: new Map,
-    global: new Map,
-    temp: new Map
-  };
-  get(scope, name) {
-    return this.data[scope].get(name) ?? "";
-  }
-  set(scope, name, value) {
-    this.data[scope].set(name, value);
-  }
-  add(scope, name, delta) {
-    this.data[scope].set(name, String(Number(this.data[scope].get(name) ?? "0") + delta));
-  }
-  has(scope, name) {
-    return this.data[scope].has(name);
-  }
-  delete(scope, name) {
-    this.data[scope].delete(name);
-  }
-}
-
-class MockFunctionRegistry {
-  table = new Map;
-  define(name, body, argNames) {
-    this.table.set(name, { body, argNames });
-  }
-  get(name) {
-    return this.table.get(name) ?? null;
-  }
-  delete(name) {
-    this.table.delete(name);
-  }
-  has(name) {
-    return this.table.has(name);
-  }
-}
 var init_mock = () => {};
 
 // src/core/cbs/runtime/index.ts
@@ -16954,9 +16918,9 @@ var init_dispatch = __esm(() => {
 // src/interpreter/evaluator/scanner.ts
 var exports_scanner = {};
 __export(exports_scanner, {
-  risuEscape: () => risuEscape,
+  evaluate: () => evaluate,
   normalizeMacroName: () => normalizeMacroName,
-  evaluate: () => evaluate
+  risuEscape: () => risuEscape
 });
 function splitMacroArgs(payload) {
   const colon = payload.indexOf(":");
@@ -17253,22 +17217,22 @@ function mergeLlmText(content, text) {
 // src/payload/lorebook-decorator-runtime.ts
 var exports_lorebook_decorator_runtime = {};
 __export(exports_lorebook_decorator_runtime, {
-  runWorldInfoInterceptor: () => runWorldInfoInterceptor,
-  readPositionPtName: () => readPositionPtName,
-  parseInjectPlan: () => parseInjectPlan,
-  keepActivateAfterMatchPredicate: () => keepActivateAfterMatchPredicate,
-  isGreetingPredicate: () => isGreetingPredicate,
-  excludeKeysPredicate: () => excludeKeysPredicate,
-  excludeKeysAllPredicate: () => excludeKeysAllPredicate,
-  evaluatePreActivationGates: () => evaluatePreActivationGates,
-  entryMatchedScanWindow: () => entryMatchedScanWindow,
-  dontActivateAfterMatchPredicate: () => dontActivateAfterMatchPredicate,
-  computeInjectAndPositionPlans: () => computeInjectAndPositionPlans,
-  applyInjectMerge: () => applyInjectMerge,
-  applyInjectAtToMessages: () => applyInjectAtToMessages,
-  activateOnlyEveryPredicate: () => activateOnlyEveryPredicate,
+  TIER2_PRE_ACTIVATION_GATES: () => TIER2_PRE_ACTIVATION_GATES,
   activateOnlyAfterPredicate: () => activateOnlyAfterPredicate,
-  TIER2_PRE_ACTIVATION_GATES: () => TIER2_PRE_ACTIVATION_GATES
+  activateOnlyEveryPredicate: () => activateOnlyEveryPredicate,
+  applyInjectAtToMessages: () => applyInjectAtToMessages,
+  applyInjectMerge: () => applyInjectMerge,
+  computeInjectAndPositionPlans: () => computeInjectAndPositionPlans,
+  dontActivateAfterMatchPredicate: () => dontActivateAfterMatchPredicate,
+  entryMatchedScanWindow: () => entryMatchedScanWindow,
+  evaluatePreActivationGates: () => evaluatePreActivationGates,
+  excludeKeysAllPredicate: () => excludeKeysAllPredicate,
+  excludeKeysPredicate: () => excludeKeysPredicate,
+  isGreetingPredicate: () => isGreetingPredicate,
+  keepActivateAfterMatchPredicate: () => keepActivateAfterMatchPredicate,
+  parseInjectPlan: () => parseInjectPlan,
+  readPositionPtName: () => readPositionPtName,
+  runWorldInfoInterceptor: () => runWorldInfoInterceptor
 });
 function readDecorators(entry) {
   const raw = entry.extensions["_risu_decorators"];
@@ -26855,6 +26819,7 @@ function makeVarsApi(state) {
   }
   function getVar(name) {
     const n = toStr(name);
+    state.onVarRead?.(n);
     const local = getLocal(n);
     if (local !== undefined)
       return toStr(local);
@@ -28595,11 +28560,13 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const dirty = { value: false };
   const localScopes = new Map;
   const tempVars = displayMode ? {} : undefined;
+  const onVarRead = opts.onVarRead;
   const _vars = makeVarsApi({
     varsCache,
     localScopes,
     dirty,
     characterId,
+    ...onVarRead ? { onVarRead: (n) => onVarRead(n, "chat") } : {},
     ...preloaded?.scriptstateDefaults !== undefined ? { scriptstateDefaults: preloaded.scriptstateDefaults } : {},
     ...tempVars !== undefined ? { tempVars } : {}
   });
@@ -28817,7 +28784,11 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     return {
       getChatVar: (_id, key) => getVar(toStr(key)),
       setChatVar: (_id, key, value) => setVar(toStr(key), toStr(value)),
-      getGlobalVar: (_id, key) => globalVarsCache[toStr(key)] ?? "null",
+      getGlobalVar: (_id, key) => {
+        const k = toStr(key);
+        onVarRead?.(k, "global");
+        return globalVarsCache[k] ?? "null";
+      },
       stopChat: (_id) => {
         stopSending = true;
       },
@@ -29280,6 +29251,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       const preview = Object.entries(varsCache).slice(0, 10).map(([k, v]) => `${k}=${JSON.stringify(String(v).slice(0, 40))}`).join(" ");
       flog(`varsCache_sample: ${preview}${Object.keys(varsCache).length > 10 ? " \u2026" : ""}`);
     }
+    const wasDirty = dirty.value;
     if (dirty.value) {
       try {
         await saveVars(api, varsCache, portalChatId);
@@ -29291,6 +29263,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     dirty.value = false;
     await chatMutationTail;
     flog(`DONE`);
+    return wasDirty;
   }
   const publicApi = {
     get stopSending() {
@@ -31225,11 +31198,13 @@ ${err.stack ?? ""}`);
     } finally {
       if (outFlags && rt.stopSending)
         outFlags.stopSending = true;
-      await rt.flush();
+      const flushedDirty = await rt.flush();
+      if (outFlags && flushedDirty)
+        outFlags.varsFlushed = true;
     }
   });
 }
-async function dispatchByManualName(ctx, manualName, onError) {
+async function dispatchByManualName(ctx, manualName, onError, outFlags) {
   const dlog = makeSafeLogger("dispatcher").info;
   const matches = ctx.compiledTriggers.filter((t) => {
     const firstEffect = t.source?.effect?.[0];
@@ -31242,7 +31217,7 @@ async function dispatchByManualName(ctx, manualName, onError) {
   let fired = 0;
   for (const entry of matches) {
     try {
-      await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS, { binding: "manual", displayMode: false });
+      await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS, { binding: "manual", displayMode: false }, outFlags);
       fired++;
       dlog(`dispatchByManualName: fired entry name=${entry.name} type=${entry.type} binding=${entry.binding}`);
     } catch (err) {
@@ -36758,6 +36733,7 @@ async function runListenEditChain(triggers2, mode, value, meta, api, data, scrip
         ...opts.chatId !== undefined ? { chatId: opts.chatId } : {},
         ...opts.characterId !== undefined ? { characterId: opts.characterId } : {},
         ...opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {},
+        ...opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {},
         preloaded
       });
       const factoryMs = Date.now() - tFactoryStart;
@@ -40152,6 +40128,7 @@ function createTriggerDispatcher(deps) {
     const scriptNS = makeDispatcherScriptNS();
     const effectiveTriggerId = triggerId ?? String(Math.random()).slice(2, 10);
     const t0 = Date.now();
+    let varsFlushed = false;
     for (const trigger of luaTriggers) {
       const firstEffect = trigger.effect[0];
       if (!firstEffect)
@@ -40180,7 +40157,8 @@ function createTriggerDispatcher(deps) {
           entry: triggerName,
           args: [effectiveTriggerId]
         });
-        await runtime2.flush();
+        if (await runtime2.flush())
+          varsFlushed = true;
       } catch (err) {
         log8.error(`dispatchManualTrigger: Lua failed triggerName=${triggerName}: ${errMsg2(err)}`);
       }
@@ -40200,6 +40178,7 @@ function createTriggerDispatcher(deps) {
           resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true })
         });
         await withDispatchContext(seams, async () => {
+          const outFlags = { stopSending: false, varsFlushed: false };
           const fired = await dispatchByManualName({
             compiledTriggers: compiled,
             api,
@@ -40210,18 +40189,20 @@ function createTriggerDispatcher(deps) {
             const msg = err instanceof Error ? err.message : String(err);
             log8.error(`dispatchManualTrigger: comment-matched trigger "${name}" threw: ${msg}`);
             toastFor(userId, "error", `lumirealm: ${name},${msg}`, { title: "lumirealm trigger error" });
-          });
+          }, outFlags);
+          if (outFlags.varsFlushed)
+            varsFlushed = true;
           log8.info(`dispatchManualTrigger: comment-matched dispatch fired=${fired}/${commentMatchedTriggers.length}`);
         });
       } catch (err) {
         log8.error(`dispatchManualTrigger: comment-matched dispatch threw: ${errMsg2(err)}`);
       }
     }
-    log8.info(`dispatchManualTrigger: done triggerName=${triggerName} elapsed=${Date.now() - t0}ms`);
+    log8.info(`dispatchManualTrigger: done triggerName=${triggerName} elapsed=${Date.now() - t0}ms varsFlushed=${varsFlushed}`);
     invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
-    await refreshVariables(active, chatId, userId);
+    await refreshVariables(active, chatId, userId, varsFlushed ? { guiReload: true } : undefined);
   }
   async function dispatchButtonClick(chatId, btn, btnId, userId) {
     const active = await ensureActiveCardForChat(chatId, null, userId);
@@ -40241,6 +40222,7 @@ function createTriggerDispatcher(deps) {
     const scriptNS = makeDispatcherScriptNS();
     const effectiveId = btnId ?? String(Math.random()).slice(2, 10);
     const t0 = Date.now();
+    let varsFlushed = false;
     for (const trigger of luaTriggers) {
       const firstEffect = trigger.effect[0];
       if (!firstEffect)
@@ -40269,16 +40251,17 @@ function createTriggerDispatcher(deps) {
           entry: "onButtonClick",
           args: [effectiveId, btn]
         });
-        await runtime2.flush();
+        if (await runtime2.flush())
+          varsFlushed = true;
       } catch (err) {
         log8.error(`dispatchButtonClick: Lua failed btn="${btn}": ${errMsg2(err)}`);
       }
     }
-    log8.info(`dispatchButtonClick: done btn="${btn}" elapsed=${Date.now() - t0}ms`);
+    log8.info(`dispatchButtonClick: done btn="${btn}" elapsed=${Date.now() - t0}ms varsFlushed=${varsFlushed}`);
     invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
-    await refreshVariables(active, chatId, userId);
+    await refreshVariables(active, chatId, userId, varsFlushed ? { guiReload: true } : undefined);
   }
   return { runBinding, dispatchManualTrigger, dispatchButtonClick };
 }
@@ -42442,7 +42425,7 @@ function createVariablesTogglesService(deps) {
     } else {
       log8.debug(`variables.refresh: unchanged chat=${chatId} seq=${result.entry.seq}`);
     }
-    deps.pushDisplaySnapshot?.(active, chatId, userId, scopes);
+    deps.pushDisplaySnapshot?.(active, chatId, userId, scopes, opts?.guiReload ? { guiReload: true } : undefined);
   }
   async function writeLocalVariable(chatId, key4, value, userId) {
     const trimmedKey = key4.trim();
@@ -45475,7 +45458,7 @@ function scheduleStateChangedRefresh2(chatId, userId) {
     invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
-    await refreshVariables(active, chatId, userId);
+    await refreshVariables(active, chatId, userId, { guiReload: true });
     log8.debug(`scheduleStateChangedRefresh: completed chat=${chatId} elapsed=${Date.now() - t0}ms`);
   }, (err) => log8.error(`scheduleStateChangedRefresh: refresh threw chat=${chatId}: ${errMsg(err)}`));
 }
@@ -45971,7 +45954,7 @@ var variablesTogglesService = createVariablesTogglesService({
   ensureActiveCardForChat,
   refreshBgHtml,
   send,
-  pushDisplaySnapshot: (active, chatId, userId, vars) => {
+  pushDisplaySnapshot: (active, chatId, userId, vars, opts) => {
     if (!FE_DISPLAY_ENABLED)
       return;
     assembleDisplaySnapshot({
@@ -45991,7 +45974,11 @@ var variablesTogglesService = createVariablesTogglesService({
         return compiled.filter((e) => e.type === "library");
       }
     }, active, chatId, userId, vars).then((snapshot) => {
-      send({ type: "display_snapshot", snapshot }, userId);
+      send({
+        type: "display_snapshot",
+        snapshot,
+        ...opts?.guiReload ? { reason: "gui-reload" } : {}
+      }, userId);
     }).catch((err) => {
       log8.warn(`pushDisplaySnapshot: assemble failed chat=${chatId}: ${errMsg(err)}`);
     });

@@ -30,6 +30,7 @@ export async function runEditDisplayChain(
   resolveTemplate: (text: string) => Promise<string>,
   onVarWrite: DisplayVarWriteback,
   onEffect?: DisplayRuntimeEffectSink,
+  onVarRead?: (name: string, scope: 'chat' | 'global') => void,
 ): Promise<string> {
   if (snap.luaTriggers.length === 0) return content;
   const api = makeSnapshotHostApi(snap, onVarWrite, onEffect);
@@ -56,6 +57,7 @@ export async function runEditDisplayChain(
       preloaded: buildPreloaded(snap),
       // Risu owns one engine per hook mode and recreates it when source changes.
       wasmoonKey: 'editDisplay',
+      ...(onVarRead ? { onVarRead } : {}),
     },
   );
 }

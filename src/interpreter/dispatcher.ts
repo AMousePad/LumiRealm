@@ -178,7 +178,7 @@ async function runInterpretedTrigger(
   data: DispatchData,
   scriptNS: DispatcherScriptNS,
   invocation: TriggerInvocation,
-  outFlags?: { stopSending: boolean },
+  outFlags?: { stopSending: boolean; varsFlushed?: boolean },
 ): Promise<void> {
   await withTriggerDepth(async () => {
     const rLog = makeSafeLogger(`runTrigger[${entry.name}]`);
@@ -200,7 +200,8 @@ async function runInterpretedTrigger(
       throw err;
     } finally {
       if (outFlags && rt.stopSending) outFlags.stopSending = true;
-      await rt.flush();
+      const flushedDirty = await rt.flush();
+      if (outFlags && flushedDirty) outFlags.varsFlushed = true;
     }
   });
 }
@@ -209,6 +210,7 @@ export async function dispatchByManualName(
   ctx: DispatchCtx,
   manualName: string,
   onError?: (err: unknown, triggerName: string) => void,
+  outFlags?: { stopSending: boolean; varsFlushed?: boolean },
 ): Promise<number> {
   const dlog = makeSafeLogger('dispatcher').info;
   const matches = ctx.compiledTriggers.filter((t) => {
@@ -227,6 +229,7 @@ export async function dispatchByManualName(
         ctx.data,
         ctx.scriptNS,
         { binding: 'manual', displayMode: false },
+        outFlags,
       );
       fired++;
       dlog(`dispatchByManualName: fired entry name=${entry.name} type=${entry.type} binding=${entry.binding}`);

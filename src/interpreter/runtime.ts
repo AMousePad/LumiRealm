@@ -217,7 +217,8 @@ export interface RisuTriggerRuntime {
     readonly content: string;
   }[];
   // lifecycle
-  flush(): Promise<void>;
+  // Resolves true when a dirty var write was persisted (Risu varChanged analog).
+  flush(): Promise<boolean>;
   warnDroppedTriggerCode(label?: string): void;
 }
 
@@ -562,11 +563,13 @@ export async function makeRisuTriggerRuntime(
   const dirty: { value: boolean } = { value: false };
   const localScopes = new Map<number, Map<string, string>>();
   const tempVars = displayMode ? {} : undefined;
+  const onVarRead = opts.onVarRead;
   const _vars = makeVarsApi({
     varsCache,
     localScopes,
     dirty,
     characterId,
+    ...(onVarRead ? { onVarRead: (n: string) => onVarRead(n, 'chat') } : {}),
     ...(preloaded?.scriptstateDefaults !== undefined
       ? { scriptstateDefaults: preloaded.scriptstateDefaults }
       : {}),
@@ -784,7 +787,11 @@ export async function makeRisuTriggerRuntime(
     return {
       getChatVar: (_id: unknown, key: unknown) => getVar(toStr(key)),
       setChatVar: (_id: unknown, key: unknown, value: unknown) => setVar(toStr(key), toStr(value)),
-      getGlobalVar: (_id: unknown, key: unknown) => globalVarsCache[toStr(key)] ?? 'null',
+      getGlobalVar: (_id: unknown, key: unknown) => {
+        const k = toStr(key);
+        onVarRead?.(k, 'global');
+        return globalVarsCache[k] ?? 'null';
+      },
       stopChat: (_id: unknown) => { stopSending = true; },
       // Risu parity: fire-and-forget. Returning the Promise would force Lua to await or leak an unhandledRejection on modal-infra throw.
       alertError: (_id: unknown, value: unknown) => {
@@ -1245,7 +1252,7 @@ export async function makeRisuTriggerRuntime(
   function loopTick(): number { return ++loopCounter.value; }
   function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, Math.max(1, Number(ms) || 1))); }
 
-  async function flush(): Promise<void> {
+  async function flush(): Promise<boolean> {
     const flog = _logFlush.info;
     // Persist on dirty=true even when frame is inherited: Risu's two-stage
     // cycle (parent fires runTrigger, child writes, parent returns without
@@ -1257,6 +1264,7 @@ export async function makeRisuTriggerRuntime(
       const preview = Object.entries(varsCache).slice(0, 10).map(([k,v]) => `${k}=${JSON.stringify(String(v).slice(0, 40))}`).join(' ');
       flog(`varsCache_sample: ${preview}${Object.keys(varsCache).length > 10 ? ' …' : ''}`);
     }
+    const wasDirty = dirty.value;
     if (dirty.value) {
       try {
         await saveVars(api, varsCache, portalChatId);
@@ -1268,6 +1276,7 @@ export async function makeRisuTriggerRuntime(
     dirty.value = false;
     await chatMutationTail;
     flog(`DONE`);
+    return wasDirty;
   }
 
   const publicApi: RisuTriggerRuntime = {

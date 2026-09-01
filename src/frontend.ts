@@ -603,6 +603,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         setDisplaySnapshot(msg.snapshot);
         // Cache every chat, but only the visible one has DOM to re-resolve.
         if (!isVisibleChat(msg.snapshot.chatId)) return;
+        // Risu ReloadGUIPointer analog: reloadDisplay/v2UpdateGUI and dirty
+        // trigger flushes repaint everything, independent of the var diff.
+        if (msg.reason === 'gui-reload') {
+          display.invalidate(['*']);
+          return;
+        }
         if (prev) {
           // Identity change (persona swap/edit): {{user}}/{{persona}}/persona image
           // resolve from these fields, and the var diff below cannot see them.

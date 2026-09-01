@@ -386,7 +386,9 @@ function scheduleStateChangedRefresh(chatId: string, userId: string | undefined)
       invalidateRenderMcpForChat(chatId);
       invalidateMacroInterceptorForChat(chatId);
       await refreshBgHtml(active, chatId, userId);
-      await refreshVariables(active, chatId, userId);
+      // Risu's reloadDisplay/v2UpdateGUI bump ReloadGUIPointer (full repaint).
+      // guiReload makes the FE invalidate ['*'] once the fresh snapshot lands.
+      await refreshVariables(active, chatId, userId, { guiReload: true });
       log.debug(`scheduleStateChangedRefresh: completed chat=${chatId} elapsed=${Date.now() - t0}ms`);
     },
     (err) => log.error(`scheduleStateChangedRefresh: refresh threw chat=${chatId}: ${errMsg(err)}`),
@@ -1026,7 +1028,7 @@ const variablesTogglesService = createVariablesTogglesService({
   ensureActiveCardForChat,
   refreshBgHtml,
   send,
-  pushDisplaySnapshot: (active, chatId, userId, vars) => {
+  pushDisplaySnapshot: (active, chatId, userId, vars, opts) => {
     if (!FE_DISPLAY_ENABLED) return;
     void assembleDisplaySnapshot(
       {
@@ -1051,7 +1053,13 @@ const variablesTogglesService = createVariablesTogglesService({
       userId,
       vars,
     )
-      .then((snapshot) => { send({ type: 'display_snapshot', snapshot }, userId); })
+      .then((snapshot) => {
+        send({
+          type: 'display_snapshot',
+          snapshot,
+          ...(opts?.guiReload ? { reason: 'gui-reload' as const } : {}),
+        }, userId);
+      })
       .catch((err) => { log.warn(`pushDisplaySnapshot: assemble failed chat=${chatId}: ${errMsg(err)}`); });
   },
   log,

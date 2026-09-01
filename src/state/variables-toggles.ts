@@ -143,6 +143,7 @@ export interface VariablesTogglesDeps {
     chatId: string,
     userId: string,
     vars: { local: Record<string, string>; global: Record<string, string>; chat: Record<string, string> },
+    opts?: { guiReload?: boolean },
   ) => void;
   readonly log: {
     readonly info: (m: string) => void;
@@ -157,7 +158,7 @@ export interface VariablesTogglesService {
     active: ActiveCard,
     chatId: string,
     userId: string | undefined,
-    opts?: { force?: boolean },
+    opts?: { force?: boolean; guiReload?: boolean },
   ) => Promise<void>;
   readonly writeLocalVariable: (
     chatId: string,
@@ -197,7 +198,7 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
     active: ActiveCard,
     chatId: string,
     userId: string | undefined,
-    opts?: { force?: boolean },
+    opts?: { force?: boolean; guiReload?: boolean },
   ): Promise<void> {
     if (userId === undefined) {
       log.debug(`variables.refresh: skip chat=${chatId},userId not yet captured`);
@@ -248,7 +249,7 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
     } else {
       log.debug(`variables.refresh: unchanged chat=${chatId} seq=${result.entry.seq}`);
     }
-    deps.pushDisplaySnapshot?.(active, chatId, userId, scopes);
+    deps.pushDisplaySnapshot?.(active, chatId, userId, scopes, opts?.guiReload ? { guiReload: true } : undefined);
   }
 
   async function writeLocalVariable(

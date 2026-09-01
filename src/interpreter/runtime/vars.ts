@@ -17,6 +17,8 @@ export interface VarsState {
   // Boxed so reference is shared across module boundaries.
   readonly dirty: { value: boolean };
   readonly characterId: string | null;
+  // FE display dep recording: Lua var reads are invisible to the CBS recorder.
+  readonly onVarRead?: (name: string) => void;
 }
 
 export interface VarsApi {
@@ -40,6 +42,7 @@ export function makeVarsApi(state: VarsState): VarsApi {
 
   function getVar(name: string): string {
     const n = toStr(name);
+    state.onVarRead?.(n);
     const local = getLocal(n);
     if (local !== undefined) return toStr(local);
     const fromCache = state.varsCache['$' + n];

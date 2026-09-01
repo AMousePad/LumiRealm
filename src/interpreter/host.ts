@@ -208,6 +208,9 @@ export interface TriggerRuntimeOpts {
   /** Backs Lua `cbs(value)`. Used by listenEdit chains that don't run
    *  inside a dispatch-context window. */
   readonly resolveTemplate?: (text: string) => Promise<string>;
+  /** FE display dep recording: reports Lua-side var reads (getChatVar/getState/
+   *  getGlobalVar) that the CBS recorder cannot see. */
+  readonly onVarRead?: (name: string, scope: 'chat' | 'global') => void;
 }
 
 export interface RegexRuntimeOpts {

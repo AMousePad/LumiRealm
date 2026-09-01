@@ -363,6 +363,15 @@ export function createDisplayResolver(
             (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })),
             (vars) => writeback?.(chatId, vars),
             onEffect,
+            // Same key shape as the CBS recorder so snapshot-diff invalidation
+            // matches entries whose var reads happened inside Lua.
+            (name, scope) => {
+              if (scope === 'global') recorder.touched.add(`global:${name}`);
+              else {
+                recorder.touched.add(`chat:${name}`);
+                recorder.touched.add(`local:${name}`);
+              }
+            },
           );
         }
         const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);

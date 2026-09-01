@@ -48,7 +48,7 @@ export interface TriggerDispatcherDeps {
     active: ActiveCard,
     chatId: string,
     userId: string | undefined,
-    opts?: { force?: boolean },
+    opts?: { force?: boolean; guiReload?: boolean },
   ) => Promise<void>;
   readonly toastFor: (
     userId: string | undefined,
@@ -289,6 +289,8 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
     const scriptNS = makeDispatcherScriptNS();
     const effectiveTriggerId = triggerId ?? String(Math.random()).slice(2, 10);
     const t0 = Date.now();
+    // Risu bumps ReloadGUIPointer at trigger end when vars changed.
+    let varsFlushed = false;
     for (const trigger of luaTriggers) {
       const firstEffect = trigger.effect[0];
       if (!firstEffect) continue;
@@ -317,7 +319,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           entry: triggerName,
           args: [effectiveTriggerId],
         });
-        await runtime.flush();
+        if (await runtime.flush()) varsFlushed = true;
       } catch (err) {
         log.error(`dispatchManualTrigger: Lua failed triggerName=${triggerName}: ${errMsg(err)}`);
       }
@@ -338,6 +340,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
         });
         await withDispatchContext(seams, async () => {
+          const outFlags = { stopSending: false, varsFlushed: false };
           const fired = await dispatchByManualName(
             {
               compiledTriggers: compiled,
@@ -352,7 +355,9 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
               log.error(`dispatchManualTrigger: comment-matched trigger "${name}" threw: ${msg}`);
               toastFor(userId, 'error', `lumirealm: ${name},${msg}`, { title: 'lumirealm trigger error' });
             },
+            outFlags,
           );
+          if (outFlags.varsFlushed) varsFlushed = true;
           log.info(`dispatchManualTrigger: comment-matched dispatch fired=${fired}/${commentMatchedTriggers.length}`);
         });
       } catch (err) {
@@ -360,11 +365,11 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       }
     }
 
-    log.info(`dispatchManualTrigger: done triggerName=${triggerName} elapsed=${Date.now() - t0}ms`);
+    log.info(`dispatchManualTrigger: done triggerName=${triggerName} elapsed=${Date.now() - t0}ms varsFlushed=${varsFlushed}`);
     invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
-    await refreshVariables(active, chatId, userId);
+    await refreshVariables(active, chatId, userId, varsFlushed ? { guiReload: true } : undefined);
   }
 
   async function dispatchButtonClick(
@@ -396,6 +401,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
     const scriptNS = makeDispatcherScriptNS();
     const effectiveId = btnId ?? String(Math.random()).slice(2, 10);
     const t0 = Date.now();
+    let varsFlushed = false;
     for (const trigger of luaTriggers) {
       const firstEffect = trigger.effect[0];
       if (!firstEffect) continue;
@@ -424,16 +430,16 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           entry: 'onButtonClick',
           args: [effectiveId, btn],
         });
-        await runtime.flush();
+        if (await runtime.flush()) varsFlushed = true;
       } catch (err) {
         log.error(`dispatchButtonClick: Lua failed btn="${btn}": ${errMsg(err)}`);
       }
     }
-    log.info(`dispatchButtonClick: done btn="${btn}" elapsed=${Date.now() - t0}ms`);
+    log.info(`dispatchButtonClick: done btn="${btn}" elapsed=${Date.now() - t0}ms varsFlushed=${varsFlushed}`);
     invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
-    await refreshVariables(active, chatId, userId);
+    await refreshVariables(active, chatId, userId, varsFlushed ? { guiReload: true } : undefined);
   }
 
   return { runBinding, dispatchManualTrigger, dispatchButtonClick };

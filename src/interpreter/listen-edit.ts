@@ -26,6 +26,7 @@ export interface ListenEditOpts {
   readonly resolveTemplate?: (text: string) => Promise<string>;
   readonly preloaded?: TriggerRuntimePreloaded;
   readonly wasmoonKey?: string;
+  readonly onVarRead?: (name: string, scope: 'chat' | 'global') => void;
 }
 
 export async function runListenEditChain<T>(
@@ -106,6 +107,7 @@ export async function runListenEditChain<T>(
           ...(opts.chatId !== undefined ? { chatId: opts.chatId } : {}),
           ...(opts.characterId !== undefined ? { characterId: opts.characterId } : {}),
           ...(opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {}),
+          ...(opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {}),
           // Hand the per-chain snapshot to the runtime so it skips its own
           // repeated state fetches (local/global vars, messages, character/lorebook).
           preloaded,
