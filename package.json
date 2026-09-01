@@ -11,15 +11,15 @@
     "build:backend": "bun build src/backend.ts --outfile dist/backend.js --target bun",
     "build:runner": "bun build src/regex-runner.ts --outfile dist/regex-runner.js --target bun",
     "build:frontend": "bun build src/frontend.ts --outfile dist/frontend.js --target browser --external module",
-    "build:patch": "bun local/scripts/patch-bundle.ts",
-    "check:fe-hazards": "bun local/scripts/check-fe-hazards.ts",
+    "build:patch": "bun scripts/patch-bundle.ts",
+    "check:fe-hazards": "bun scripts/check-fe-hazards.ts",
     "build": "bun run typecheck && bun run build:backend && bun run build:runner && bun run build:frontend && bun run check:fe-hazards && bun run build:patch",
-    "test": "bun local/tools/run-tests.ts --fast",
-    "test:fast": "bun local/tools/run-tests.ts --fast",
-    "test:slow": "bun local/tools/run-tests.ts --slow",
-    "test:all": "bun local/tools/run-tests.ts --all",
-    "test:parallel": "bun local/tools/test-parallel.ts",
-    "deploy": "powershell.exe -File local/scripts/deploy.ps1"
+    "test": "bun scripts/run-tests.ts --fast",
+    "test:fast": "bun scripts/run-tests.ts --fast",
+    "test:slow": "bun scripts/run-tests.ts --slow",
+    "test:all": "bun scripts/run-tests.ts --all",
+    "test:parallel": "bun scripts/test-parallel.ts",
+    "deploy": "powershell.exe -File scripts/deploy.ps1"
   },
   "dependencies": {
     "fengari-web": "^0.1.4",

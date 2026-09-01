@@ -2,7 +2,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const RISU_CBS = "G:/git/Risuai/src/ts/cbs.ts";
+const RISUAI_DIR = process.env['RISUAI_DIR'];
+if (!RISUAI_DIR || !fs.existsSync(RISUAI_DIR)) {
+  console.log("audit-handler-parity: set RISUAI_DIR to a RisuAI checkout to run this gate, skipping.");
+  process.exit(0);
+}
+
+const RISU_CBS = path.join(RISUAI_DIR, "src/ts/cbs.ts");
 const HANDLERS_DIR = "src/risu-compat/handlers";
 
 interface RisuMacro {
@@ -215,10 +221,10 @@ function main() {
   if (stubs.length > 0) {
     console.log(`=== STUBS (registered, return literal placeholder) ===`);
     for (const s of stubs) {
-      console.log(`- ${s.handler.name}  (${path.basename(s.handler.filePath)}:${s.handler.startLine}) — ${s.reason}`);
+      console.log(`- ${s.handler.name}  (${path.basename(s.handler.filePath)}:${s.handler.startLine}): ${s.reason}`);
       if (s.risu) {
         const peek = s.risu.body.split("\n").slice(0, 4).join(" / ").replace(/\s+/g, " ").slice(0, 200);
-        console.log(`    risu cbs.ts:${s.risu.startLine} — ${peek}`);
+        console.log(`    risu cbs.ts:${s.risu.startLine}: ${peek}`);
       } else {
         console.log(`    NO RISU SOURCE FOUND for "${s.handler.name}"`);
       }
@@ -229,10 +235,10 @@ function main() {
   if (suspects.length > 0) {
     console.log(`=== SUSPECTS (short body, "always" comment, unsupported) ===`);
     for (const s of suspects) {
-      console.log(`- ${s.handler.name}  (${path.basename(s.handler.filePath)}:${s.handler.startLine}) — ${s.reason}`);
+      console.log(`- ${s.handler.name}  (${path.basename(s.handler.filePath)}:${s.handler.startLine}): ${s.reason}`);
       if (s.risu) {
         const peek = s.risu.body.split("\n").slice(0, 4).join(" / ").replace(/\s+/g, " ").slice(0, 200);
-        console.log(`    risu cbs.ts:${s.risu.startLine} — ${peek}`);
+        console.log(`    risu cbs.ts:${s.risu.startLine}: ${peek}`);
       }
     }
     console.log();
