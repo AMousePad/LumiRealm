@@ -21,6 +21,7 @@ function settingsToWire(s: RisuCompatSettings): {
   readonly auxDebugCaptureResponse: RisuCompatSettings['auxDebugCaptureResponse'];
   readonly legacyMediaFindings: RisuCompatSettings['legacyMediaFindings'];
   readonly translateEnabled: RisuCompatSettings['translateEnabled'];
+  readonly skipAssetThumbnails: RisuCompatSettings['skipAssetThumbnails'];
 } {
   return {
     schema_version: 1,
@@ -36,6 +37,7 @@ function settingsToWire(s: RisuCompatSettings): {
     auxDebugCaptureResponse: s.auxDebugCaptureResponse,
     legacyMediaFindings: s.legacyMediaFindings,
     translateEnabled: s.translateEnabled,
+    skipAssetThumbnails: s.skipAssetThumbnails,
   };
 }
 

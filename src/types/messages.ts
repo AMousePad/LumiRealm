@@ -242,6 +242,7 @@ export type FrontendToBackend =
         readonly auxDebugCaptureResponse?: boolean;
         readonly legacyMediaFindings?: boolean;
         readonly translateEnabled?: boolean;
+        readonly skipAssetThumbnails?: boolean;
       };
     }
   // Browser-translated cache writeback, one message per scope per language.
@@ -603,6 +604,7 @@ export type BackendToFrontend =
         readonly auxDebugCaptureResponse: boolean;
         readonly legacyMediaFindings: boolean;
         readonly translateEnabled: boolean;
+        readonly skipAssetThumbnails: boolean;
       };
     }
   // Emitted when the user enables request/response capture toggles in Settings → Debug.

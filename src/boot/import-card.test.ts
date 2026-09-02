@@ -8,11 +8,13 @@ interface UploadItem {
   readonly data: Uint8Array;
   readonly filename?: string;
   readonly owner_character_id?: string;
+  readonly skip_thumbnail_processing?: boolean;
 }
 
 interface HarnessOptions {
   readonly worldBook?: boolean;
   readonly avatar?: boolean;
+  readonly skipAssetThumbnails?: boolean;
   readonly uploadMany?: (
     items: readonly UploadItem[],
     call: number,
@@ -138,6 +140,7 @@ function harness(options: HarnessOptions = {}) {
     pendingImportCompletions: new Map(),
     enterAssetUpload: () => {},
     exitAssetUpload: () => {},
+    getSkipAssetThumbnails: async () => options.skipAssetThumbnails === true,
     nudgeGc: () => {},
     refreshRisuAssetMap: async () => {},
     send: (message) => sent.push(message as typeof sent[number]),
@@ -234,6 +237,30 @@ describe('card import current APIs', () => {
     expect(h.storageValues.get('lumirealm/image_journal/char-1.json')).toMatchObject({
       imageIds: Array.from({ length: 65 }, (_, index) => `asset-${index + 1}`),
     });
+  });
+
+  test('skipAssetThumbnails setting stamps skip_thumbnail_processing on every asset item', async () => {
+    const h = harness({ skipAssetThumbnails: true });
+    await h.orchestrator.importCardFromBytes(
+      cardBytes(false, false, [1, 1, 1]),
+      'card.charx',
+      'user-1',
+    );
+
+    expect(h.batches.flat()).toHaveLength(3);
+    expect(h.batches.flat().every((item) => item.skip_thumbnail_processing === true)).toBe(true);
+  });
+
+  test('default settings leave skip_thumbnail_processing off asset items', async () => {
+    const h = harness();
+    await h.orchestrator.importCardFromBytes(
+      cardBytes(false, false, [1, 1]),
+      'card.charx',
+      'user-1',
+    );
+
+    expect(h.batches.flat()).toHaveLength(2);
+    expect(h.batches.flat().every((item) => item.skip_thumbnail_processing === undefined)).toBe(true);
   });
 
   test('starts a new batch after the 16 MiB byte boundary', async () => {

@@ -58,6 +58,7 @@ function makeMockDeps(overrides: {
   writeEnvelope?: ModuleUploaderDeps['writeEnvelope'];
   appendToJournal?: ModuleUploaderDeps['appendToJournal'];
   sniff?: ModuleUploaderDeps['sniffImageMime'];
+  skipAssetThumbnails?: boolean;
 } = {}): { deps: ModuleUploaderDeps; state: MockState } {
   const state: MockState = {
     decodeCalls: 0,
@@ -108,6 +109,7 @@ function makeMockDeps(overrides: {
     },
     guessMimeType: (path) => path.endsWith('.png') ? 'image/png' : 'application/octet-stream',
     sniffImageMime: overrides.sniff ?? (() => null),
+    getSkipAssetThumbnails: async () => overrides.skipAssetThumbnails === true,
     uploadImageOne: overrides.uploadOne ?? (async (input, userId) => {
       state.uploadOneCalls.push({ filename: input.filename, mime: input.mime_type, userId });
       return { id: `img-${state.uploadOneCalls.length}` };
@@ -258,6 +260,43 @@ describe('createModuleUploader: asset upload (batched path)', () => {
     expect(state.uploadManyCalls[0]!.items).toHaveLength(2);
     expect(state.uploadOneCalls).toHaveLength(0);
     expect(Object.keys(result.envelope.asset_index)).toEqual(['a.png', 'b.png']);
+  });
+
+  test('skipAssetThumbnails stamps skip_thumbnail_processing on asset items, never on the icon', async () => {
+    const body = defaultModuleBody();
+    body.assets = [['a.png', '', ''], ['b.png', '', '']];
+    body.icon = '';
+    const capturedOne: Array<boolean | undefined> = [];
+    const { deps, state } = makeMockDeps({
+      decoded: {
+        module: {},
+        assets: [new Uint8Array([1]), new Uint8Array([2])],
+        icon: { data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), ext: 'png' },
+      },
+      parse: { success: true, data: body },
+      skipAssetThumbnails: true,
+      uploadOne: async (input) => {
+        capturedOne.push(input.skip_thumbnail_processing);
+        return { id: 'icon-1' };
+      },
+    });
+    const u = createModuleUploader(deps);
+    await u.upload(new Uint8Array(0), 'm.risum', 'u-1');
+    expect(state.uploadManyCalls).toHaveLength(1);
+    expect(state.uploadManyCalls[0]!.items.every((i) => i.skip_thumbnail_processing === true)).toBe(true);
+    expect(capturedOne).toEqual([undefined]);
+  });
+
+  test('default settings leave skip_thumbnail_processing off module asset items', async () => {
+    const body = defaultModuleBody();
+    body.assets = [['a.png', '', '']];
+    const { deps, state } = makeMockDeps({
+      decoded: { module: {}, assets: [new Uint8Array([1])] },
+      parse: { success: true, data: body },
+    });
+    const u = createModuleUploader(deps);
+    await u.upload(new Uint8Array(0), 'm.risum', 'u-1');
+    expect(state.uploadManyCalls[0]!.items.every((i) => i.skip_thumbnail_processing === undefined)).toBe(true);
   });
 
   test('individual asset failure counted, others uploaded', async () => {

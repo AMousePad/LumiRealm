@@ -39521,6 +39521,30 @@ function mountSettingsPanel(opts) {
   legacyMediaRow.appendChild(legacyMediaText);
   paritySectionHost.appendChild(legacyMediaRow);
   debugBody.appendChild(paritySectionHost);
+  const importSectionHost = document.createElement("div");
+  importSectionHost.className = "rs-subsection";
+  const importHeader = document.createElement("div");
+  importHeader.className = "rs-subsection-header";
+  const importTitle = document.createElement("h4");
+  importTitle.className = "rs-subsection-title";
+  importTitle.textContent = "Import";
+  importHeader.appendChild(importTitle);
+  importSectionHost.appendChild(importHeader);
+  const skipThumbsRow = document.createElement("label");
+  skipThumbsRow.className = "rs-checkbox-row";
+  const skipThumbsCheck = document.createElement("input");
+  skipThumbsCheck.type = "checkbox";
+  skipThumbsCheck.className = "rs-checkbox";
+  skipThumbsCheck.id = "rs-skip-asset-thumbs";
+  skipThumbsRow.htmlFor = "rs-skip-asset-thumbs";
+  const skipThumbsText = document.createElement("span");
+  skipThumbsText.className = "rs-checkbox-label";
+  skipThumbsText.textContent = "Skip asset thumbnails";
+  skipThumbsText.title = "On by default. Upload card and module assets without generating thumbnails. Saves processing time and disk space. Applies to future imports only. Lumi surfaces that use thumbnails fall back to the full-size image.";
+  skipThumbsRow.appendChild(skipThumbsCheck);
+  skipThumbsRow.appendChild(skipThumbsText);
+  importSectionHost.appendChild(skipThumbsRow);
+  debugBody.appendChild(importSectionHost);
   const logsHost = document.createElement("div");
   logsHost.className = "rs-subsection lr-settings-logs-host";
   const logsHeader = document.createElement("div");
@@ -40252,6 +40276,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
   }
   function renderParityChecks() {
     legacyMediaCheck.checked = settings?.legacyMediaFindings === true;
+    skipThumbsCheck.checked = settings?.skipAssetThumbnails === true;
   }
   function render() {
     renderConnectionSelect();
@@ -40383,6 +40408,13 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       patch: { legacyMediaFindings: legacyMediaCheck.checked }
     });
   });
+  skipThumbsCheck.addEventListener("change", () => {
+    log8.info(`settings-tab: skipAssetThumbnails=${skipThumbsCheck.checked}`);
+    sendToBackend({
+      type: "update_settings",
+      patch: { skipAssetThumbnails: skipThumbsCheck.checked }
+    });
+  });
   sendToBackend({ type: "request_settings" });
   sendToBackend({ type: "request_connections_list" });
   async function deleteRepairRegexRows(msg) {
@@ -40434,7 +40466,8 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
         submodelPrefillCompat: msg.settings.submodelPrefillCompat,
         auxDebugCaptureRequest: msg.settings.auxDebugCaptureRequest,
         auxDebugCaptureResponse: msg.settings.auxDebugCaptureResponse,
-        legacyMediaFindings: msg.settings.legacyMediaFindings
+        legacyMediaFindings: msg.settings.legacyMediaFindings,
+        skipAssetThumbnails: msg.settings.skipAssetThumbnails
       };
       lastSavedTs = Date.now();
       render();

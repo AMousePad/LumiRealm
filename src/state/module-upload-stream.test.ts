@@ -31,6 +31,7 @@ function uploader(
     pairAssets: () => [],
     guessMimeType: () => 'application/octet-stream',
     sniffImageMime: () => null,
+    getSkipAssetThumbnails: async () => false,
     uploadImageOne: async () => ({ id: `one-${++uploadedOne}` }),
     uploadImageMany: async (items, opts) => {
       batches.push(items.length);

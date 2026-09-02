@@ -51,6 +51,7 @@ export interface ImageUploadInput {
   readonly data: Uint8Array;
   readonly mime_type: string;
   readonly filename: string;
+  readonly skip_thumbnail_processing?: boolean;
 }
 export interface ImageUploadResult {
   readonly id?: string;
@@ -66,6 +67,7 @@ export interface ModuleUploaderDeps {
   readonly pairAssets: typeof pairModuleAssetsForUpload;
   readonly guessMimeType: (path: string) => string;
   readonly sniffImageMime: (bytes: Uint8Array) => { ext: string; mime: string } | null;
+  readonly getSkipAssetThumbnails: (userId: string) => Promise<boolean>;
   readonly uploadImageOne: (input: ImageUploadInput, userId: string) => Promise<{ id?: string } | null>;
   readonly uploadImageMany: (
     items: readonly ImageUploadInput[],
@@ -249,9 +251,10 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
       };
 
       if (totalCount > 0) {
+        const skipThumbnails = await deps.getSkipAssetThumbnails(userId);
         deps.log.info(
           `processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` +
-            `(module=${moduleBody.id}, batched)`,
+            `(module=${moduleBody.id}, batched, skipThumbnails=${skipThumbnails})`,
         );
         let i = 0;
         let deferred: { sourceIndex: number; bytes: Uint8Array } | undefined;
@@ -276,7 +279,12 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
             const sniff = deps.sniffImageMime(bytes);
             const uploadFilename = sniff ? `${meta.path}.${sniff.ext}` : meta.path;
             const uploadMime = sniff?.mime ?? meta.mimeType;
-            batchItems.push({ data: bytes, mime_type: uploadMime, filename: uploadFilename });
+            batchItems.push({
+              data: bytes,
+              mime_type: uploadMime,
+              filename: uploadFilename,
+              ...(skipThumbnails ? { skip_thumbnail_processing: true } : {}),
+            });
             batchAssetNames.push(meta.path);
             batchSniffedExts.push(sniff?.ext);
             batchBytes += bytes.byteLength;

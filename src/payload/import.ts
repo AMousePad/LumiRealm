@@ -255,6 +255,7 @@ export interface SpindleImportApi {
         filename?: string;
         owner_character_id?: string;
         owner_chat_id?: string;
+        skip_thumbnail_processing?: boolean;
       }>,
       options?: { userId?: string; concurrency?: number },
     ): Promise<Array<{ id?: string; error?: string }>>;
@@ -270,6 +271,7 @@ export interface ImportCardArgs {
   readonly spindle: SpindleImportApi;
   readonly userStorage: UserStorageLike;
   readonly onProgress?: (phase: string, message: string, fraction: number | null) => void;
+  readonly skipAssetThumbnails?: boolean;
 }
 
 export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
@@ -548,7 +550,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   if (totalAssetCount > 0) {
     logInfo(
       `(5b) uploading ${totalAssetCount} assets totalBytes=${totalAssetBytes} ` +
-        `via spindle.images.uploadMany (batched)`,
+        `via spindle.images.uploadMany (batched, skipThumbnails=${args.skipAssetThumbnails === true})`,
     );
     const BATCH_MAX_ITEMS = 64;
     const BATCH_MAX_BYTES = 16 * 1024 * 1024;
@@ -559,6 +561,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
         mime_type: string;
         filename: string;
         owner_character_id: string;
+        skip_thumbnail_processing?: boolean;
       }> = [];
       const batchPaths: string[] = [];
       let batchBytes = 0;
@@ -572,6 +575,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
           mime_type: guessMimeType(path),
           filename: path.split('/').pop() ?? 'asset.bin',
           owner_character_id: characterId,
+          ...(args.skipAssetThumbnails === true ? { skip_thumbnail_processing: true } : {}),
         });
         batchPaths.push(path);
         batchBytes += data.byteLength;

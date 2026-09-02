@@ -24446,7 +24446,7 @@ async function importCard(args) {
   let assetUploadFailures = 0;
   const uploadMany = args.spindle.images.uploadMany.bind(args.spindle.images);
   if (totalAssetCount > 0) {
-    logInfo(`(5b) uploading ${totalAssetCount} assets totalBytes=${totalAssetBytes} ` + `via spindle.images.uploadMany (batched)`);
+    logInfo(`(5b) uploading ${totalAssetCount} assets totalBytes=${totalAssetBytes} ` + `via spindle.images.uploadMany (batched, skipThumbnails=${args.skipAssetThumbnails === true})`);
     const BATCH_MAX_ITEMS = 64;
     const BATCH_MAX_BYTES = 16 * 1024 * 1024;
     let i = 0;
@@ -24467,7 +24467,8 @@ async function importCard(args) {
           data,
           mime_type: guessMimeType(path),
           filename: path.split("/").pop() ?? "asset.bin",
-          owner_character_id: characterId
+          owner_character_id: characterId,
+          ...args.skipAssetThumbnails === true ? { skip_thumbnail_processing: true } : {}
         });
         batchPaths.push(path);
         batchBytes += data.byteLength;
@@ -27803,7 +27804,8 @@ var DEFAULT_SETTINGS = {
   auxDebugCaptureRequest: false,
   auxDebugCaptureResponse: false,
   legacyMediaFindings: false,
-  translateEnabled: true
+  translateEnabled: true,
+  skipAssetThumbnails: true
 };
 var SETTINGS_PATH = "lumirealm/settings.json";
 function isStoredSettings(v) {
@@ -27909,6 +27911,9 @@ function normalizeSettingsPatch(patch) {
   if ("translateEnabled" in p) {
     out.translateEnabled = !!p.translateEnabled;
   }
+  if ("skipAssetThumbnails" in p) {
+    out.skipAssetThumbnails = !!p.skipAssetThumbnails;
+  }
   return out;
 }
 async function loadSettings(storage, userId) {
@@ -27933,7 +27938,8 @@ async function loadSettings(storage, userId) {
       auxDebugCaptureRequest: stored.auxDebugCaptureRequest === true,
       auxDebugCaptureResponse: stored.auxDebugCaptureResponse === true,
       legacyMediaFindings: stored.legacyMediaFindings === true,
-      translateEnabled: stored.translateEnabled === undefined ? true : stored.translateEnabled === true
+      translateEnabled: stored.translateEnabled === undefined ? true : stored.translateEnabled === true,
+      skipAssetThumbnails: stored.skipAssetThumbnails === undefined ? true : stored.skipAssetThumbnails === true
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -33445,7 +33451,8 @@ function createModuleUploader(deps) {
         }, userId);
       };
       if (totalCount > 0) {
-        deps.log.info(`processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` + `(module=${moduleBody.id}, batched)`);
+        const skipThumbnails = await deps.getSkipAssetThumbnails(userId);
+        deps.log.info(`processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` + `(module=${moduleBody.id}, batched, skipThumbnails=${skipThumbnails})`);
         let i = 0;
         let deferred;
         while (i < pending2.length) {
@@ -33468,7 +33475,12 @@ function createModuleUploader(deps) {
             const sniff = deps.sniffImageMime(bytes);
             const uploadFilename = sniff ? `${meta.path}.${sniff.ext}` : meta.path;
             const uploadMime = sniff?.mime ?? meta.mimeType;
-            batchItems.push({ data: bytes, mime_type: uploadMime, filename: uploadFilename });
+            batchItems.push({
+              data: bytes,
+              mime_type: uploadMime,
+              filename: uploadFilename,
+              ...skipThumbnails ? { skip_thumbnail_processing: true } : {}
+            });
             batchAssetNames.push(meta.path);
             batchSniffedExts.push(sniff?.ext);
             batchBytes += bytes.byteLength;
@@ -34094,7 +34106,8 @@ function settingsToWire(s) {
     auxDebugCaptureRequest: s.auxDebugCaptureRequest,
     auxDebugCaptureResponse: s.auxDebugCaptureResponse,
     legacyMediaFindings: s.legacyMediaFindings,
-    translateEnabled: s.translateEnabled
+    translateEnabled: s.translateEnabled,
+    skipAssetThumbnails: s.skipAssetThumbnails
   };
 }
 function createSettingsHandlers(deps) {
@@ -42902,6 +42915,7 @@ function createImportCardOrchestrator(deps) {
     pendingImportCompletions,
     enterAssetUpload,
     exitAssetUpload,
+    getSkipAssetThumbnails,
     nudgeGc,
     refreshRisuAssetMap,
     send,
@@ -42950,6 +42964,7 @@ function createImportCardOrchestrator(deps) {
       },
       requestConsent: (opts) => requestConsent(opts, userId)
     };
+    const skipAssetThumbnails = await getSkipAssetThumbnails(userId);
     enterAssetUpload();
     try {
       const result = await importCard({
@@ -42957,6 +42972,7 @@ function createImportCardOrchestrator(deps) {
         fileName,
         extensionVersion,
         userId,
+        skipAssetThumbnails,
         spindle: spindleImportApi,
         userStorage: userStorage(),
         onProgress: (phase, message, fraction) => {
@@ -45474,6 +45490,7 @@ var settingsService = createSettingsService({
   errMsg
 });
 var getSettingsForUser = settingsService.getSettingsForUser;
+var getSkipAssetThumbnails = async (uid) => (await getSettingsForUser(uid)).skipAssetThumbnails;
 var getCachedSettingsSync = settingsService.getCachedSettingsSync;
 var applySettingsPatch = settingsService.applySettingsPatch;
 var makeAuxDebugCapture = settingsService.makeAuxDebugCapture;
@@ -45630,6 +45647,7 @@ var importCardOrchestrator = createImportCardOrchestrator({
   exitAssetUpload: () => {
     assetUploadsInFlight--;
   },
+  getSkipAssetThumbnails,
   nudgeGc: (reason) => nudgeGc(reason),
   refreshRisuAssetMap: (charId, userId) => refreshRisuAssetMap(charId, userId),
   send,
@@ -46178,6 +46196,7 @@ var moduleUploader = createModuleUploader({
   pairAssets: pairModuleAssetsForUpload,
   guessMimeType,
   sniffImageMime,
+  getSkipAssetThumbnails,
   uploadImageOne: (input, userId) => spindle.images.upload(input, userId),
   uploadImageMany: (items, opts) => spindle.images.uploadMany(items, opts),
   appendToJournal: (uid, moduleId, ids) => appendModuleImageIdsToJournal(journalStorage(), uid, moduleId, ids),

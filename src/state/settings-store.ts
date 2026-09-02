@@ -42,6 +42,8 @@ export interface RisuCompatSettings {
   readonly legacyMediaFindings: boolean;
   /** Browser-translated module/lorebook display, ON by default. Display-only. */
   readonly translateEnabled: boolean;
+  /** Upload card/module assets with skip_thumbnail_processing. ON by default, applies at import time only. */
+  readonly skipAssetThumbnails: boolean;
 }
 
 export const DEFAULT_SETTINGS: RisuCompatSettings = {
@@ -58,6 +60,7 @@ export const DEFAULT_SETTINGS: RisuCompatSettings = {
   auxDebugCaptureResponse: false,
   legacyMediaFindings: false,
   translateEnabled: true,
+  skipAssetThumbnails: true,
 };
 
 export const SETTINGS_PATH = "lumirealm/settings.json";
@@ -152,6 +155,9 @@ export function normalizeSettingsPatch(patch: unknown): Partial<RisuCompatSettin
   if ("translateEnabled" in p) {
     out.translateEnabled = !!p.translateEnabled;
   }
+  if ("skipAssetThumbnails" in p) {
+    out.skipAssetThumbnails = !!p.skipAssetThumbnails;
+  }
   return out;
 }
 
@@ -182,6 +188,7 @@ export async function loadSettings(
       auxDebugCaptureResponse?: unknown;
       legacyMediaFindings?: unknown;
       translateEnabled?: unknown;
+      skipAssetThumbnails?: unknown;
     };
     return {
       schema_version: 1,
@@ -205,6 +212,7 @@ export async function loadSettings(
       auxDebugCaptureResponse: stored.auxDebugCaptureResponse === true,
       legacyMediaFindings: stored.legacyMediaFindings === true,
       translateEnabled: stored.translateEnabled === undefined ? true : stored.translateEnabled === true,
+      skipAssetThumbnails: stored.skipAssetThumbnails === undefined ? true : stored.skipAssetThumbnails === true,
     };
   } catch {
     return DEFAULT_SETTINGS;

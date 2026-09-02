@@ -416,6 +416,8 @@ const settingsService = createSettingsService({
   errMsg,
 });
 const getSettingsForUser = settingsService.getSettingsForUser;
+const getSkipAssetThumbnails = async (uid: string): Promise<boolean> =>
+  (await getSettingsForUser(uid)).skipAssetThumbnails;
 const getCachedSettingsSync = settingsService.getCachedSettingsSync;
 const applySettingsPatch = settingsService.applySettingsPatch;
 const makeAuxDebugCapture = settingsService.makeAuxDebugCapture;
@@ -591,6 +593,7 @@ const importCardOrchestrator = createImportCardOrchestrator({
   pendingImportCompletions,
   enterAssetUpload: () => { assetUploadsInFlight++; },
   exitAssetUpload: () => { assetUploadsInFlight--; },
+  getSkipAssetThumbnails,
   // Trampolines for wiring declared further down.
   nudgeGc: (reason) => nudgeGc(reason),
   refreshRisuAssetMap: (charId, userId) => refreshRisuAssetMap(charId, userId),
@@ -1286,6 +1289,7 @@ const moduleUploader = createModuleUploader({
   pairAssets: pairModuleAssetsForUpload,
   guessMimeType,
   sniffImageMime,
+  getSkipAssetThumbnails,
   uploadImageOne: (input, userId) => spindle.images.upload(input, userId),
   uploadImageMany: (items, opts) => spindle.images.uploadMany(items as never, opts),
   appendToJournal: (uid, moduleId, ids) =>
