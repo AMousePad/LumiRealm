@@ -15,7 +15,6 @@ import {
 import { puaEncodeFeMacros, puaDecodeFeMacros } from '../util/pua-roundtrip.js';
 import { panelTrace } from '../util/perf.js';
 import { perfEnabled, perfRecord } from '../util/perf.js';
-import { stripDocBoundaries } from '../util/sanitizer-doc-shape.js';
 import {
   lookupRenderMcp,
   lookupInFlightRenderMcp,
@@ -633,10 +632,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           }
         }
 
-        // Persisted content must stay wrap-free: the style-wrap div is a
-        // display-time concern, and baking it into storage leaks it through
-        // copy/paste and prompts. Doc-shell stripping alone is storage-safe.
-        const finalContent = stripDocBoundaries(working);
+        // Persisted content is stored verbatim, Risu-parity. Doc-shape
+        // normalization here destroyed card pseudo-markup like <title> for good.
+        const finalContent = working;
 
         if (finalContent === ctx.content) {
           log.trace(
@@ -646,7 +644,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         }
         if (ctx.messageId) rememberOurWrite(ctx.chatId, ctx.messageId, finalContent);
         log.trace(
-          `messageContentProcessor.exit #${seq} path=transformed chat=${ctx.chatId} origin=${ctx.origin} msg=${ctx.messageId ?? '<new>'} raw_len=${ctx.content.length} final_len=${finalContent.length} doc_normalized=${finalContent !== working} ensure=${tB - tA}ms total=${Date.now() - tStart}ms`,
+          `messageContentProcessor.exit #${seq} path=transformed chat=${ctx.chatId} origin=${ctx.origin} msg=${ctx.messageId ?? '<new>'} raw_len=${ctx.content.length} final_len=${finalContent.length} ensure=${tB - tA}ms total=${Date.now() - tStart}ms`,
         );
         return { content: finalContent };
       } finally {

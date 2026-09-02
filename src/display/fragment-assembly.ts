@@ -142,8 +142,10 @@ const RISU_CHAT_METRICS_STYLE =
   'font-size:calc(0.875rem * var(--lumiverse-font-scale, 1));'
   + 'line-height:calc(1.25rem * var(--lumiverse-font-scale, 1))';
 
+// data-message-prose opts into the host's top-level markdown paragraph
+// semantics. Message islands only, the translate-time style wrap must not.
 export const MESSAGE_ISLAND_OPEN =
-  `${STYLE_WRAP_OPEN.slice(0, -1)} style="${RISU_CHAT_METRICS_STYLE}">`;
+  `${STYLE_WRAP_OPEN.slice(0, -1)} data-message-prose style="${RISU_CHAT_METRICS_STYLE}">`;
 
 // Pure-markdown and inline-only messages keep the host's prose rendering.
 // Block structure or styles get the Risu-parity single context.

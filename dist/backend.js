@@ -39061,14 +39061,14 @@ function createLumiInterceptors(deps) {
             log8.warn(`messageContentProcessor: at-actions editoutput threw: ${errMsg2(err)}. ` + `Continuing with pre-action content.`);
           }
         }
-        const finalContent = stripDocBoundaries(working);
+        const finalContent = working;
         if (finalContent === ctx.content) {
           log8.trace(`messageContentProcessor.exit #${seq} path=noop chat=${ctx.chatId} origin=${ctx.origin} msg=${ctx.messageId ?? "<new>"} ensure=${tB - tA}ms total=${Date.now() - tStart}ms`);
           return;
         }
         if (ctx.messageId)
           rememberOurWrite(ctx.chatId, ctx.messageId, finalContent);
-        log8.trace(`messageContentProcessor.exit #${seq} path=transformed chat=${ctx.chatId} origin=${ctx.origin} msg=${ctx.messageId ?? "<new>"} raw_len=${ctx.content.length} final_len=${finalContent.length} doc_normalized=${finalContent !== working} ensure=${tB - tA}ms total=${Date.now() - tStart}ms`);
+        log8.trace(`messageContentProcessor.exit #${seq} path=transformed chat=${ctx.chatId} origin=${ctx.origin} msg=${ctx.messageId ?? "<new>"} raw_len=${ctx.content.length} final_len=${finalContent.length} ensure=${tB - tA}ms total=${Date.now() - tStart}ms`);
         return { content: finalContent };
       } finally {
         mcpInFlight--;

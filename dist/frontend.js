@@ -23672,7 +23672,7 @@ function hasIslandWorthyContent(text) {
   return nextBlockTag(text, 0) !== null || STYLE_TAG_RE.test(text);
 }
 var RISU_CHAT_METRICS_STYLE = "font-size:calc(0.875rem * var(--lumiverse-font-scale, 1));" + "line-height:calc(1.25rem * var(--lumiverse-font-scale, 1))";
-var MESSAGE_ISLAND_OPEN = `${STYLE_WRAP_OPEN.slice(0, -1)} style="${RISU_CHAT_METRICS_STYLE}">`;
+var MESSAGE_ISLAND_OPEN = `${STYLE_WRAP_OPEN.slice(0, -1)} data-message-prose style="${RISU_CHAT_METRICS_STYLE}">`;
 function wrapResolvedContentAsIsland(content) {
   if (!content || !hasIslandWorthyContent(content))
     return content;
@@ -45779,7 +45779,7 @@ function setupBgHtmlRenderer(ctx, flog3, islandStyles) {
       if (chatBundle) {
         const imgReset = `[data-message-id] img { max-width: 100%; max-height: 80vh; }
 `;
-        const lineHeight = `[data-message-id] { line-height: 28px; }
+        const lineHeight = `[data-message-id] :where(div[class*="prose"]) > :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) { line-height: 28px; }
 `;
         const bubbleContainment = `[data-message-id] { overflow: visible !important; contain: none !important; }
 `;

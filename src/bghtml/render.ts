@@ -171,8 +171,10 @@ export function setupBgHtmlRenderer(
         // Card inline styles always win over this.
         const imgReset =
           "[data-message-id] img { max-width: 100%; max-height: 80vh; }\n";
+        // Scoped to markdown blocks, not the bubble: line-height inherits, and a
+        // bubble-wide rule leaks into widgets other extensions inject into the prose.
         const lineHeight =
-          "[data-message-id] { line-height: 28px; }\n";
+          '[data-message-id] :where(div[class*="prose"]) > :where(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) { line-height: 28px; }\n';
         // Lumi sets overflow:hidden + contain:layout, which clips absolute
         // hover popups and creates a containing block for position:fixed.
         // The per-chat extension-relaxed mode handles fixed, drop both for Risu chats.
