@@ -103,6 +103,59 @@ describe('rescopeRisuEnvironment — chat-shell baseline append', () => {
   });
 });
 
+describe('rescopeRisuEnvironment — quote dialogue colour mapping', () => {
+  test('--FontColorQuote2 hex default gains --lumiverse-prose-dialogue with original hex as fallback', () => {
+    const out = rescopeRisuEnvironment(':root{--FontColorQuote2:#8c8d93}');
+    expect(out.css).toContain('--FontColorQuote2:var(--lumiverse-prose-dialogue,#8c8d93)');
+    expect(out.quoteVarHits).toBe(1);
+  });
+
+  test('whitespace after the colon is tolerated', () => {
+    const out = rescopeRisuEnvironment(':root{--FontColorQuote2: #8c8d93}');
+    expect(out.css).toContain('--FontColorQuote2:var(--lumiverse-prose-dialogue,#8c8d93)');
+    expect(out.quoteVarHits).toBe(1);
+  });
+
+  test('--FontColorQuote1 (single quotes / thoughts) keeps the Risu default untouched', () => {
+    const out = rescopeRisuEnvironment(':root{--FontColorQuote1:#8c8d93}');
+    expect(out.css).toContain('--FontColorQuote1:#8c8d93');
+    expect(out.css).not.toContain('--FontColorQuote1:var(');
+    expect(out.quoteVarHits).toBe(0);
+  });
+
+  test('var(--FontColorQuote2) usage sites are not rewritten, only the definition', () => {
+    const css = ':root{--FontColorQuote2:#8c8d93}.chattext mark[risu-mark=quote2]{color:var(--FontColorQuote2)}';
+    const out = rescopeRisuEnvironment(css);
+    expect(out.css).toContain('mark[risu-mark=quote2]{color:var(--FontColorQuote2)}');
+    expect(out.quoteVarHits).toBe(1);
+  });
+
+  test('author inline-colour exemption is appended for both quote kinds', () => {
+    const out = rescopeRisuEnvironment('');
+    expect(out.css).toContain(
+      ':host :where(font,span[style*="color"]) mark[risu-mark=quote1],' +
+        ':host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}',
+    );
+  });
+
+  test('exemption appears AFTER any rescoped quote rule so it wins the in-sheet tie at equal specificity', () => {
+    const out = rescopeRisuEnvironment('.chattext mark[risu-mark=quote2]{color:var(--FontColorQuote2)}');
+    const ruleIdx = out.css.indexOf(':host mark[risu-mark=quote2]');
+    const exemptionIdx = out.css.indexOf(':where(font,span[style*="color"]) mark[risu-mark=quote2]');
+    expect(ruleIdx).toBeGreaterThanOrEqual(0);
+    expect(exemptionIdx).toBeGreaterThan(ruleIdx);
+  });
+
+  test('REAL bundle: exactly one quote2 definition is rewritten', async () => {
+    const bundle = await Bun.file(
+      new URL('../../src/bghtml/risu-environment.css', import.meta.url),
+    ).text();
+    const out = rescopeRisuEnvironment(bundle);
+    expect(out.quoteVarHits).toBe(1);
+    expect(out.css).toContain('--FontColorQuote2:var(--lumiverse-prose-dialogue,');
+  });
+});
+
 describe('rescopeRisuEnvironment — empty / minimal inputs', () => {
   test('empty input → minimal baseline-only output', () => {
     const out = rescopeRisuEnvironment('');

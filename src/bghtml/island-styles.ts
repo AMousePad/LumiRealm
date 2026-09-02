@@ -62,8 +62,13 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
           `${envSheet.cssRules.length} top-level rules ` +
           `(rewrites: :root=${rescoped.rootHits} .prose=${rescoped.proseHits} ` +
           `.prose-invert=${rescoped.proseInvertHits} .chattext=${rescoped.chattextHits} ` +
-          `.chat-width=${rescoped.chatWidthHits})`,
+          `.chat-width=${rescoped.chatWidthHits} quote2var=${rescoped.quoteVarHits})`,
       );
+      if (rescoped.quoteVarHits === 0) {
+        flog.warn(
+          'island-styles: quote2 dialogue-colour rewrite matched nothing, bundle format may have changed and island quotes will fall back to the Risu default grey',
+        );
+      }
     } catch (err) {
       flog.error(
         'island-styles: Risu environment sheet construction failed (falling back to per-card sheet only)',
@@ -327,6 +332,7 @@ interface RescopeResult {
   readonly proseInvertHits: number;
   readonly chattextHits: number;
   readonly chatWidthHits: number;
+  readonly quoteVarHits: number;
 }
 
 export function rescopeRisuEnvironment(input: string): RescopeResult {
@@ -343,12 +349,19 @@ export function rescopeRisuEnvironment(input: string): RescopeResult {
   // (?!,) skips already-paired :root,:host (Tailwind v4 @theme output)
   const rootHits = (css.match(/:root\b(?!,)/g) ?? []).length;
   css = css.replaceAll(/:root\b(?!,)/g, ':root,:host');
+  const quoteVarHits = (css.match(/--FontColorQuote2:\s*#[0-9a-fA-F]{3,8}/g) ?? []).length;
+  css = css.replaceAll(
+    /--FontColorQuote2:\s*(#[0-9a-fA-F]{3,8})/g,
+    '--FontColorQuote2:var(--lumiverse-prose-dialogue,$1)',
+  );
   // overflow:visible !important defeats Lumi's `_htmlIsland_*` host
   // `overflow: hidden` (set from outside the shadow at equal specificity, so
   // :host loses without !important). Font-size / line-height are intentionally
   // not set here, so Lumi's --lumiverse-font-scale inheritance reaches card content.
   css +=
-    '\n:host{overflow:visible !important}\n';
+    '\n:host{overflow:visible !important}\n' +
+    ':host :where(font,span[style*="color"]) mark[risu-mark=quote1],' +
+    ':host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}\n';
 
   return {
     css,
@@ -357,5 +370,6 @@ export function rescopeRisuEnvironment(input: string): RescopeResult {
     proseInvertHits,
     chattextHits,
     chatWidthHits,
+    quoteVarHits,
   };
 }

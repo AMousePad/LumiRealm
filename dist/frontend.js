@@ -22330,7 +22330,7 @@ var require_url_parse = __commonJS(function(exports, module) {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.8.11",
+  version: "0.9.0",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -46002,7 +46002,10 @@ function setupIslandStyles(flog3, opts = {}) {
       envSheet = new CSSStyleSheet;
       allOwnedSheets.add(envSheet);
       envSheet.replaceSync(rescoped.css);
-      flog3.info(`island-styles: Risu environment sheet built ${opts.riskuEnvironmentCss.length}->${rescoped.css.length} bytes, ` + `${envSheet.cssRules.length} top-level rules ` + `(rewrites: :root=${rescoped.rootHits} .prose=${rescoped.proseHits} ` + `.prose-invert=${rescoped.proseInvertHits} .chattext=${rescoped.chattextHits} ` + `.chat-width=${rescoped.chatWidthHits})`);
+      flog3.info(`island-styles: Risu environment sheet built ${opts.riskuEnvironmentCss.length}->${rescoped.css.length} bytes, ` + `${envSheet.cssRules.length} top-level rules ` + `(rewrites: :root=${rescoped.rootHits} .prose=${rescoped.proseHits} ` + `.prose-invert=${rescoped.proseInvertHits} .chattext=${rescoped.chattextHits} ` + `.chat-width=${rescoped.chatWidthHits} quote2var=${rescoped.quoteVarHits})`);
+      if (rescoped.quoteVarHits === 0) {
+        flog3.warn("island-styles: quote2 dialogue-colour rewrite matched nothing, bundle format may have changed and island quotes will fall back to the Risu default grey");
+      }
     } catch (err) {
       flog3.error("island-styles: Risu environment sheet construction failed (falling back to per-card sheet only)", err);
       envSheet = null;
@@ -46232,8 +46235,11 @@ function rescopeRisuEnvironment(input) {
   css = css.replaceAll(/\.chat-width\b/g, ":host");
   const rootHits = (css.match(/:root\b(?!,)/g) ?? []).length;
   css = css.replaceAll(/:root\b(?!,)/g, ":root,:host");
+  const quoteVarHits = (css.match(/--FontColorQuote2:\s*#[0-9a-fA-F]{3,8}/g) ?? []).length;
+  css = css.replaceAll(/--FontColorQuote2:\s*(#[0-9a-fA-F]{3,8})/g, "--FontColorQuote2:var(--lumiverse-prose-dialogue,$1)");
   css += `
 :host{overflow:visible !important}
+` + ':host :where(font,span[style*="color"]) mark[risu-mark=quote1],' + `:host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}
 `;
   return {
     css,
@@ -46241,7 +46247,8 @@ function rescopeRisuEnvironment(input) {
     proseHits,
     proseInvertHits,
     chattextHits,
-    chatWidthHits
+    chatWidthHits,
+    quoteVarHits
   };
 }
 
