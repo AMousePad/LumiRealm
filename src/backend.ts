@@ -544,7 +544,7 @@ const deleteRepairRegexRows = async (userId: string, ids: readonly string[]): Pr
   return result.deleted;
 };
 
-const captureUserId = makeCaptureUserId({
+const { captureUserId, markFrontendReady } = makeCaptureUserId({
   capturedUserIds,
   getSettingsForUser,
   seedGlobalModules: async (uid) => {
@@ -1975,6 +1975,7 @@ const handlerRegistry: HandlerRegistry = {
 
 spindle.onFrontendMessage(userScoped(async (raw, userId) => {
   captureUserId(userId, 'frontend-message');
+  markFrontendReady(userId);
   const msg = raw as FrontendToBackend;
   if (!HIGH_VOLUME_FRONTEND_MSG_TYPES.has(msg.type)) {
     log.trace(`frontend msg type=${msg.type} userId=${userId ?? '<none>'}`);

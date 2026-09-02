@@ -42862,22 +42862,9 @@ function makeCaptureUserId(deps) {
     errMsg: errMsg2
   } = deps;
   const { notifyMissingPermsForUser } = deps;
-  return (userId, where) => {
-    if (!userId || capturedUserIds.has(userId))
-      return;
-    capturedUserIds.add(userId);
-    log8.info(`captureUserId: bootstrap from ${where} userId=${userId}`);
-    try {
-      notifyMissingPermsForUser(userId);
-    } catch (err) {
-      log8.warn(`captureUserId: notifyMissingPermsForUser failed for user=${userId}: ${errMsg2(err)}`);
-    }
-    getSettingsForUser(userId).catch((err) => {
-      log8.warn(`captureUserId: settings preload failed for user=${userId}: ${errMsg2(err)}`);
-    });
-    seedGlobalModules(userId).catch((err) => {
-      log8.warn(`captureUserId: global module seed failed for user=${userId}: ${errMsg2(err)}`);
-    });
+  const frontendReadyUsers = new Set;
+  const migrationWaiters = new Map;
+  const runMigrationChain = (userId) => {
     setTimeout(() => {
       (async () => {
         try {
@@ -42903,6 +42890,39 @@ function makeCaptureUserId(deps) {
       })();
     }, MASS_MIGRATION_DEFER_MS);
   };
+  const captureUserId = (userId, where) => {
+    if (!userId || capturedUserIds.has(userId))
+      return;
+    capturedUserIds.add(userId);
+    log8.info(`captureUserId: bootstrap from ${where} userId=${userId}`);
+    try {
+      notifyMissingPermsForUser(userId);
+    } catch (err) {
+      log8.warn(`captureUserId: notifyMissingPermsForUser failed for user=${userId}: ${errMsg2(err)}`);
+    }
+    getSettingsForUser(userId).catch((err) => {
+      log8.warn(`captureUserId: settings preload failed for user=${userId}: ${errMsg2(err)}`);
+    });
+    seedGlobalModules(userId).catch((err) => {
+      log8.warn(`captureUserId: global module seed failed for user=${userId}: ${errMsg2(err)}`);
+    });
+    if (frontendReadyUsers.has(userId)) {
+      runMigrationChain(userId);
+    } else {
+      migrationWaiters.set(userId, () => runMigrationChain(userId));
+    }
+  };
+  const markFrontendReady = (userId) => {
+    if (!userId || frontendReadyUsers.has(userId))
+      return;
+    frontendReadyUsers.add(userId);
+    const waiter = migrationWaiters.get(userId);
+    if (waiter) {
+      migrationWaiters.delete(userId);
+      waiter();
+    }
+  };
+  return { captureUserId, markFrontendReady };
 }
 
 // src/boot/import-card.ts
@@ -45609,7 +45629,7 @@ var deleteRepairRegexRows = async (userId, ids) => {
   }
   return result.deleted;
 };
-var captureUserId = makeCaptureUserId({
+var { captureUserId, markFrontendReady } = makeCaptureUserId({
   capturedUserIds,
   getSettingsForUser,
   seedGlobalModules: async (uid) => {
@@ -46820,6 +46840,7 @@ var handlerRegistry = {
 };
 spindle.onFrontendMessage(userScoped(async (raw, userId) => {
   captureUserId(userId, "frontend-message");
+  markFrontendReady(userId);
   const msg = raw;
   if (!HIGH_VOLUME_FRONTEND_MSG_TYPES.has(msg.type)) {
     log8.trace(`frontend msg type=${msg.type} userId=${userId ?? "<none>"}`);
