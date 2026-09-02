@@ -146,6 +146,30 @@ describe('rescopeRisuEnvironment — quote dialogue colour mapping', () => {
     expect(exemptionIdx).toBeGreaterThan(ruleIdx);
   });
 
+  test('nested-emphasis exemption is appended for coloured containers and quote marks', () => {
+    const out = rescopeRisuEnvironment('');
+    expect(out.css).toContain(
+      ':host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong,x-em){color:inherit}',
+    );
+    expect(out.css).toContain(
+      ':host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong) :is(em,strong){color:inherit}',
+    );
+  });
+
+  test('emphasis exemption appears AFTER rescoped em/strong colour rules so it wins the in-sheet tie', () => {
+    const out = rescopeRisuEnvironment(
+      '.chattext em{color:var(--FontColorItalic)}.chattext em strong{color:var(--FontColorItalicBold)}',
+    );
+    const emRuleIdx = out.css.indexOf(':host em{color:var(--FontColorItalic)}');
+    const nestedRuleIdx = out.css.indexOf(':host em strong{color:var(--FontColorItalicBold)}');
+    const singleExemptIdx = out.css.indexOf(':is(em,strong,x-em){color:inherit}');
+    const nestedExemptIdx = out.css.indexOf(':is(em,strong) :is(em,strong){color:inherit}');
+    expect(emRuleIdx).toBeGreaterThanOrEqual(0);
+    expect(nestedRuleIdx).toBeGreaterThanOrEqual(0);
+    expect(singleExemptIdx).toBeGreaterThan(emRuleIdx);
+    expect(nestedExemptIdx).toBeGreaterThan(nestedRuleIdx);
+  });
+
   test('REAL bundle: exactly one quote2 definition is rewritten', async () => {
     const bundle = await Bun.file(
       new URL('../../src/bghtml/risu-environment.css', import.meta.url),

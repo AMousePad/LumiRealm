@@ -46240,6 +46240,8 @@ function rescopeRisuEnvironment(input) {
   css += `
 :host{overflow:visible !important}
 ` + ':host :where(font,span[style*="color"]) mark[risu-mark=quote1],' + `:host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}
+` + `:host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong,x-em){color:inherit}
+` + `:host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong) :is(em,strong){color:inherit}
 `;
   return {
     css,

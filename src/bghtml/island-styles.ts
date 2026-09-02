@@ -361,7 +361,13 @@ export function rescopeRisuEnvironment(input: string): RescopeResult {
   css +=
     '\n:host{overflow:visible !important}\n' +
     ':host :where(font,span[style*="color"]) mark[risu-mark=quote1],' +
-    ':host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}\n';
+    ':host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}\n' +
+    // Emphasis inside author-coloured containers or quote marks inherits the
+    // surrounding colour, mirroring Lumi's proseDialogue and font/span[style]
+    // nested exemptions. :where/:is pin specificity to tie the rescoped
+    // em/strong rules per nesting tier, so later card sheets still win.
+    ':host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong,x-em){color:inherit}\n' +
+    ':host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong) :is(em,strong){color:inherit}\n';
 
   return {
     css,
