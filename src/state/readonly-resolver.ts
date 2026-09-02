@@ -216,7 +216,6 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       template,
       phase: 'display',
       ...(rmVar ? { rmVar: true } : {}),
-      wrapIslands: false,
     });
   }
 
@@ -249,7 +248,6 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
           template,
           phase: 'display',
           ...(opts?.rmVar === true ? { rmVar: true } : {}),
-          wrapIslands: false,
         }),
       );
       log.debug(

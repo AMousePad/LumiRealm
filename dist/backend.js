@@ -38642,7 +38642,6 @@ async function buildBackendPipelineInput(chatId, characterId, userId, deps, pers
       ...chatVars ? { chat: chatVars } : {}
     },
     legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
-    wrapIslands: false,
     lorebook: activeLore,
     ...activeCard && deps.modulesByNamespaceFromCard(activeCard) ? { modulesByNamespace: deps.modulesByNamespaceFromCard(activeCard) } : {},
     ...getDecoratorBuffers(chatId)?.positionPt ? { positionPt: getDecoratorBuffers(chatId).positionPt } : {}
@@ -39700,8 +39699,7 @@ function createReadonlyResolver(deps) {
       ...ctxInput,
       template,
       phase: "display",
-      ...rmVar ? { rmVar: true } : {},
-      wrapIslands: false
+      ...rmVar ? { rmVar: true } : {}
     });
   }
   async function resolveMany(templates, chatId, characterId, userId, opts) {
@@ -39719,8 +39717,7 @@ function createReadonlyResolver(deps) {
         ...ctxInput,
         template,
         phase: "display",
-        ...opts?.rmVar === true ? { rmVar: true } : {},
-        wrapIslands: false
+        ...opts?.rmVar === true ? { rmVar: true } : {}
       }));
       log8.debug(`resolveReadonlyMany: DONE chat=${chatId} entries=${templates.length} ` + `elapsed=${Date.now() - t0}ms`);
       return resolved;

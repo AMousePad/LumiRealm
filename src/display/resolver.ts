@@ -480,6 +480,8 @@ export function createDisplayResolver(
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
         feContent = await runApply(snap, args, recorder, onEffect);
+        // The wrap must stay after runApply: its at-action effects persist the
+        // in-flight string, and island markup must never reach storage.
         feContent = wrapResolvedContentAsIsland(feContent);
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);

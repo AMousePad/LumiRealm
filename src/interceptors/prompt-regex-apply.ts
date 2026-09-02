@@ -157,7 +157,6 @@ export async function buildBackendPipelineInput(
       ...(chatVars ? { chat: chatVars } : {}),
     },
     legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
-    wrapIslands: false,
     lorebook: activeLore,
     ...(activeCard && deps.modulesByNamespaceFromCard(activeCard)
       ? { modulesByNamespace: deps.modulesByNamespaceFromCard(activeCard)! }

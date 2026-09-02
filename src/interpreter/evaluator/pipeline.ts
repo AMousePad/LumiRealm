@@ -13,7 +13,6 @@ export interface RunPipelineInput extends Omit<BuildEvaluatorCtxInput, "commit">
   readonly template: string;
   /** Controls the dry-fire gate on mutating handlers. */
   readonly phase: PipelinePhase;
-  readonly wrapIslands?: boolean;
 }
 
 export interface RunPipelineOptions {
