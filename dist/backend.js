@@ -28851,7 +28851,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           _logSetChat.warn(`out-of-range index=${index} ` + `(real=${real}, messagesCache.length=${messagesCache.length}): ignored`);
           return;
         }
-        const raw = normalizeReplaceStringForSanitizer(toStr(value));
+        const raw = toStr(value);
         const msgId = messagesCache[real].id;
         const prevContent = messagesCache[real].content;
         if (raw === prevContent) {
@@ -28896,7 +28896,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         messagesCache.splice(start, 1);
       },
       addChat: (_id, role, value) => {
-        const raw = normalizeReplaceStringForSanitizer(toStr(value));
+        const raw = toStr(value);
         const lumiRole = risuRoleToLumi(toStr(role));
         const entry = { id: "", role: lumiRole, content: raw };
         messagesCache.push(entry);

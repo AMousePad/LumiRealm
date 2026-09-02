@@ -23480,73 +23480,8 @@ ${replacement}`
 }
 
 // src/util/sanitizer-doc-shape.ts
-var DOC_BOUNDARY_RE = /<!doctype|<\/?(?:html|head|body|meta|title|base|link)\b/i;
-var HAS_STYLE_RE = /<style[\s>]/i;
-var DOCTYPE_RE = /<!DOCTYPE[^>]*>/gi;
-var HTML_TAG_RE = /<\/?html\b[^>]*>/gi;
-var BODY_TAG_RE = /<\/?body\b[^>]*>/gi;
-var HEAD_BLOCK_RE = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/gi;
-var HEAD_ORPHAN_RE = /<\/?head\b[^>]*>/gi;
-var STYLE_INNER_RE = /<style\b[^>]*>[\s\S]*?<\/style\s*>/gi;
-var META_LINK_TITLE_BASE_RE = /<\/?(?:meta|title|base|link)\b[^>]*>/gi;
-var TITLE_BLOCK_RE = /<title\b[^>]*>[\s\S]*?<\/title\s*>/gi;
-var LEADING_WS_RE = /^\s+/;
-var STRATEGY1_BLOCK_TAGS_RE = /^<(?:div|section|article|aside|nav|main|header|footer|form|fieldset|figure|details)\b/i;
 var STYLE_WRAP_OPEN = '<div data-lr-style-wrap class="not-island-prose">';
 var STYLE_WRAP_CLOSE = "</div>";
-function firstNonCommentElementIsBlockWrapper(html) {
-  let i = 0;
-  const n = html.length;
-  while (i < n) {
-    const ch = html.charCodeAt(i);
-    if (ch === 32 || ch === 9 || ch === 10 || ch === 13 || ch === 12) {
-      i++;
-      continue;
-    }
-    if (ch === 60 && html.charCodeAt(i + 1) === 33 && html.charCodeAt(i + 2) === 45 && html.charCodeAt(i + 3) === 45) {
-      const close = html.indexOf("-->", i + 4);
-      if (close < 0)
-        return false;
-      i = close + 3;
-      continue;
-    }
-    return STRATEGY1_BLOCK_TAGS_RE.test(html.slice(i));
-  }
-  return false;
-}
-function stripDocBoundaries(html) {
-  if (!DOC_BOUNDARY_RE.test(html))
-    return html;
-  let out = html;
-  out = out.replace(DOCTYPE_RE, "");
-  out = out.replace(HTML_TAG_RE, "");
-  out = out.replace(BODY_TAG_RE, "");
-  out = out.replace(HEAD_BLOCK_RE, (_match, headContent) => {
-    const titleScrubbed = headContent.replace(TITLE_BLOCK_RE, "");
-    const styles = [];
-    STYLE_INNER_RE.lastIndex = 0;
-    let m;
-    while ((m = STYLE_INNER_RE.exec(titleScrubbed)) !== null) {
-      styles.push(m[0]);
-    }
-    return styles.join(`
-`);
-  });
-  out = out.replace(HEAD_ORPHAN_RE, "");
-  out = out.replace(META_LINK_TITLE_BASE_RE, "");
-  return out;
-}
-function normalizeReplaceStringForSanitizer(html) {
-  if (!DOC_BOUNDARY_RE.test(html) && !HAS_STYLE_RE.test(html)) {
-    return html;
-  }
-  let out = stripDocBoundaries(html);
-  out = out.replace(LEADING_WS_RE, "");
-  if (HAS_STYLE_RE.test(out) && !firstNonCommentElementIsBlockWrapper(out)) {
-    out = STYLE_WRAP_OPEN + out + STYLE_WRAP_CLOSE;
-  }
-  return out;
-}
 
 // src/core/mappers/island-merge.ts
 var ISLAND_TRIGGER_PREFIX = `<style data-risu-island-trigger></style>`;
@@ -25577,7 +25512,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           _logSetChat.warn(`out-of-range index=${index} ` + `(real=${real}, messagesCache.length=${messagesCache.length}): ignored`);
           return;
         }
-        const raw = normalizeReplaceStringForSanitizer(toStr(value));
+        const raw = toStr(value);
         const msgId = messagesCache[real].id;
         const prevContent = messagesCache[real].content;
         if (raw === prevContent) {
@@ -25622,7 +25557,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         messagesCache.splice(start, 1);
       },
       addChat: (_id, role, value) => {
-        const raw = normalizeReplaceStringForSanitizer(toStr(value));
+        const raw = toStr(value);
         const lumiRole = risuRoleToLumi(toStr(role));
         const entry = { id: "", role: lumiRole, content: raw };
         messagesCache.push(entry);

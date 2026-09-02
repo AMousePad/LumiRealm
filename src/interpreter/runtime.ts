@@ -32,7 +32,6 @@ import {
 import { toStr } from '../util/coerce.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import { samplersToWire } from '../util/samplers-wire.js';
-import { normalizeReplaceStringForSanitizer } from '../util/sanitizer-doc-shape.js';
 import { risuRoleToLumi, lumiRoleToRisu } from '../util/role-coerce.js';
 
 const _logStateChanged    = makeSafeLogger('runtime.stateChanged');
@@ -846,9 +845,9 @@ export async function makeRisuTriggerRuntime(
           );
           return;
         }
-        // Doc-boundary normalize. Strips DOCTYPE/html/head/body tags, wraps
-        // leading style so DOMPurify keeps the CSS.
-        const raw = normalizeReplaceStringForSanitizer(toStr(value));
+        // Persist verbatim, Risu parity. Normalizing here stripped card
+        // pseudo-markup like <title> and baked the style wrap into storage.
+        const raw = toStr(value);
         const msgId = messagesCache[real]!.id;
         const prevContent = messagesCache[real]!.content;
 
@@ -917,7 +916,7 @@ export async function makeRisuTriggerRuntime(
         messagesCache.splice(start, 1);
       },
       addChat: (_id: unknown, role: unknown, value: unknown) => {
-        const raw = normalizeReplaceStringForSanitizer(toStr(value));
+        const raw = toStr(value);
         const lumiRole = risuRoleToLumi(toStr(role));
         const entry: HostMessage = { id: '', role: lumiRole, content: raw };
         messagesCache.push(entry);
