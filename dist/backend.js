@@ -39061,7 +39061,7 @@ function createLumiInterceptors(deps) {
             log8.warn(`messageContentProcessor: at-actions editoutput threw: ${errMsg2(err)}. ` + `Continuing with pre-action content.`);
           }
         }
-        const finalContent = normalizeReplaceStringForSanitizer(working);
+        const finalContent = stripDocBoundaries(working);
         if (finalContent === ctx.content) {
           log8.trace(`messageContentProcessor.exit #${seq} path=noop chat=${ctx.chatId} origin=${ctx.origin} msg=${ctx.messageId ?? "<new>"} ensure=${tB - tA}ms total=${Date.now() - tStart}ms`);
           return;

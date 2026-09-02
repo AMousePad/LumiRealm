@@ -15,7 +15,7 @@ import {
 import { puaEncodeFeMacros, puaDecodeFeMacros } from '../util/pua-roundtrip.js';
 import { panelTrace } from '../util/perf.js';
 import { perfEnabled, perfRecord } from '../util/perf.js';
-import { normalizeReplaceStringForSanitizer } from '../util/sanitizer-doc-shape.js';
+import { stripDocBoundaries } from '../util/sanitizer-doc-shape.js';
 import {
   lookupRenderMcp,
   lookupInFlightRenderMcp,
@@ -633,7 +633,10 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           }
         }
 
-        const finalContent = normalizeReplaceStringForSanitizer(working);
+        // Persisted content must stay wrap-free: the style-wrap div is a
+        // display-time concern, and baking it into storage leaks it through
+        // copy/paste and prompts. Doc-shell stripping alone is storage-safe.
+        const finalContent = stripDocBoundaries(working);
 
         if (finalContent === ctx.content) {
           log.trace(
