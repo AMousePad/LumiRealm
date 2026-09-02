@@ -667,6 +667,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       sendDisplayAuthority(msg.chatId);
       if (activeRisuChatId !== prevChatId) {
         if (sidebar) sidebar.setActiveChatId(activeRisuChatId);
+        if (getDisplayResolutionMode() !== 'off' && msg.chatId && getDisplaySnapshot(msg.chatId)) {
+          display.invalidate(['*']);
+        }
       }
       // Fall through to sidebar broadcast so the viewer panel can read
       // msg.characterId for its auto-follow + Current button.

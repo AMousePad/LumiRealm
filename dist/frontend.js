@@ -50636,6 +50636,9 @@ function setup(ctx) {
       if (activeRisuChatId !== prevChatId) {
         if (sidebar)
           sidebar.setActiveChatId(activeRisuChatId);
+        if (getDisplayResolutionMode() !== "off" && msg.chatId && getDisplaySnapshot(msg.chatId)) {
+          display.invalidate(["*"]);
+        }
       }
       sidebar?.handleBackendMessage(msg);
       return;
