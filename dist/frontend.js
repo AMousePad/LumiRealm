@@ -45754,7 +45754,7 @@ function setupBgHtmlRenderer(ctx, flog3, islandStyles) {
         let islandBundle;
         try {
           islandBundle = splitAndRewriteBgBundle(msg.bgHtml, {
-            scopePrefix: "",
+            scopePrefix: ":host ",
             rewriteUniversalToHost: false,
             rewriteClassNames: false
           });

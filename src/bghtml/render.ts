@@ -133,8 +133,10 @@ export function setupBgHtmlRenderer(
         let islandBundle;
         try {
           islandBundle = splitAndRewriteBgBundle(msg.bgHtml, {
-            scopePrefix: "",
-            // Adopted shadows aren't ours, :host conventions don't apply.
+            // Risu prepends .chattext to card selectors, letting card rules tie
+            // its own text rules and win by order. :host reproduces that inside
+            // island shadows, and the card sheet is adopted after the env sheet.
+            scopePrefix: ":host ",
             rewriteUniversalToHost: false,
             rewriteClassNames: false,
           });
