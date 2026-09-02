@@ -963,6 +963,10 @@ export interface BridgeStatusBroadcast {
 // caller. Survives between calls so the banner reflects the last outcome.
 const lastDialFailure = new Map<string, readonly string[]>();
 
+// Deliberately never requested in the manifest, so the banner must not ask
+// users to grant them. The bridge stays degraded without them by choice.
+const UNADVERTISED_BRIDGE_PERMS = new Set(['memories', 'regex_scripts_unrestricted']);
+
 function parseInheritanceError(message: string): readonly string[] | null {
   // Host throws: 'Shared RPC endpoint "X" requires requester "R" to inherit
   // owner "O" permissions: a, b, c'. We wrap that in 'could not read pending
@@ -970,7 +974,9 @@ function parseInheritanceError(message: string): readonly string[] | null {
   // on is preserved either way.
   const m = /requires requester "[^"]+" to inherit owner "[^"]+" permissions: ([^]+?)$/.exec(message);
   if (!m) return null;
-  const perms = m[1]!.split(/,\s*/).map((s) => s.trim()).filter((s) => s.length > 0);
+  const perms = m[1]!.split(/,\s*/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !UNADVERTISED_BRIDGE_PERMS.has(s));
   return perms.length > 0 ? perms : null;
 }
 

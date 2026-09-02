@@ -22330,7 +22330,7 @@ var require_url_parse = __commonJS(function(exports, module) {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.9.0",
+  version: "0.9.1",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",

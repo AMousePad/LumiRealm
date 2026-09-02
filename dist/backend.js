@@ -31608,7 +31608,7 @@ function clearActiveModulesByNamespace(chatId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.9.0",
+  version: "0.9.1",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -45246,11 +45246,12 @@ async function dispatchMutation(req, mutations) {
   return { ok: false, error: "unknown mutation op" };
 }
 var lastDialFailure = new Map;
+var UNADVERTISED_BRIDGE_PERMS = new Set(["memories", "regex_scripts_unrestricted"]);
 function parseInheritanceError(message) {
   const m = /requires requester "[^"]+" to inherit owner "[^"]+" permissions: ([^]+?)$/.exec(message);
   if (!m)
     return null;
-  const perms = m[1].split(/,\s*/).map((s) => s.trim()).filter((s) => s.length > 0);
+  const perms = m[1].split(/,\s*/).map((s) => s.trim()).filter((s) => s.length > 0 && !UNADVERTISED_BRIDGE_PERMS.has(s));
   return perms.length > 0 ? perms : null;
 }
 function buildBridgeBroadcast() {
