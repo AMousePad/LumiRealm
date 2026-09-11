@@ -40639,7 +40639,25 @@ function createLumiInterceptors(deps) {
           },
           variables: {
             local: ctx.env.variables.local,
-            global: ctx.env.variables.global,
+            global: (() => {
+              const g = { ...ctx.env.variables.global || {} };
+              if (ctx.env.variables.local) {
+                for (const [k, v] of Object.entries(ctx.env.variables.local)) {
+                  if (k.startsWith("toggle_") && !(k in g)) {
+                    g[k] = v;
+                  }
+                }
+              }
+              const pVars = ctx.env?.extra?.promptVariables;
+              if (pVars && typeof pVars === "object") {
+                for (const [k, v] of Object.entries(pVars)) {
+                  if (k.startsWith("toggle_") && !(k in g)) {
+                    g[k] = String(v);
+                  }
+                }
+              }
+              return g;
+            })(),
             chat: ctx.env.variables.chat
           },
           system: {

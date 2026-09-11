@@ -3,6 +3,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { decodeRisuPreset, isRisuPresetBytes, type RisuPresetRaw } from '../src/core/preset/risup-decoder.js';
 import { translateRisuPreset, type TranslatedRisuPreset } from '../src/core/preset/risup-translator.js';
+import { evaluate } from '../src/interpreter/evaluator/scanner.js';
+import { buildEvaluatorContext } from '../src/interpreter/evaluator/context.js';
 
 interface MockContext {
   charName: string;
@@ -38,8 +40,37 @@ function pad(str: string, width: number): string {
   return str + ' '.repeat(width - str.length);
 }
 
-// 1. Simulate RisuAI prompt assembly (matching PocketRisu src/ts/process/index.svelte.ts)
-function simulateRisuAssembly(raw: RisuPresetRaw, ctx: MockContext = DEFAULT_MOCK) {
+function evalCbs(template: string, vars: Record<string, string>, ctx: MockContext = DEFAULT_MOCK): string {
+  const evalCtx = buildEvaluatorContext({
+    chatId: 'compare-chat-1',
+    commit: false,
+    userName: ctx.userName,
+    charName: ctx.charName,
+    character: {
+      description: ctx.charDesc,
+      personality: ctx.charPersonality,
+      scenario: ctx.charScenario,
+    },
+    chat: {
+      messages: ctx.chatHistory.map((m, i) => ({
+        id: `m-${i}`,
+        role: m.role,
+        content: m.content,
+        is_user: m.role === 'user',
+      })),
+      messageCount: ctx.chatHistory.length,
+    } as any,
+    variables: {
+      local: { ...vars },
+      global: { ...vars },
+      chat: {},
+    },
+  });
+  return evaluate(template, evalCtx);
+}
+
+// 1. Simulate RisuAI prompt assembly with variable evaluation
+function simulateRisuAssembly(raw: RisuPresetRaw, vars: Record<string, string>, ctx: MockContext = DEFAULT_MOCK) {
   const messages: Array<{ role: string; content: string; source: string }> = [];
   const template = raw.promptTemplate || [];
 
@@ -54,7 +85,10 @@ function simulateRisuAssembly(raw: RisuPresetRaw, ctx: MockContext = DEFAULT_MOC
       case 'persona': {
         const body = ctx.userPersona;
         const formatted = inner ? inner.replace('{{slot}}', body) : (text || body);
-        messages.push({ role, content: formatted, source: `persona (${item.name || 'User Persona'})` });
+        const evaluated = evalCbs(formatted, vars, ctx);
+        if (evaluated.trim()) {
+          messages.push({ role, content: evaluated, source: `persona (${item.name || 'User Persona'})` });
+        }
         break;
       }
       case 'description': {
@@ -62,7 +96,10 @@ function simulateRisuAssembly(raw: RisuPresetRaw, ctx: MockContext = DEFAULT_MOC
         if (ctx.charPersonality) desc += `\n\nDescription of {{char}}: ${ctx.charPersonality}`;
         if (ctx.charScenario) desc += `\n\nCircumstances and context of the dialogue: ${ctx.charScenario}`;
         const formatted = inner ? inner.replace('{{slot}}', desc) : (text || desc);
-        messages.push({ role, content: formatted, source: `description (${item.name || 'Character Description'})` });
+        const evaluated = evalCbs(formatted, vars, ctx);
+        if (evaluated.trim()) {
+          messages.push({ role, content: evaluated, source: `description (${item.name || 'Character Description'})` });
+        }
         break;
       }
       case 'lorebook': {
@@ -78,44 +115,44 @@ function simulateRisuAssembly(raw: RisuPresetRaw, ctx: MockContext = DEFAULT_MOC
       case 'authornote': {
         const note = '[Author\'s Note: Maintain immersive historical tone]';
         const formatted = inner ? inner.replace('{{slot}}', note) : (text || note);
-        messages.push({ role, content: formatted, source: `authornote (${item.name || 'Note'})` });
+        const evaluated = evalCbs(formatted, vars, ctx);
+        if (evaluated.trim()) {
+          messages.push({ role, content: evaluated, source: `authornote (${item.name || 'Note'})` });
+        }
         break;
       }
       case 'jailbreak': {
         const jb = text || '{{jailbreak}}';
-        messages.push({ role, content: jb, source: `jailbreak (${item.name || 'Jailbreak'})` });
+        const evaluated = evalCbs(jb, vars, ctx);
+        if (evaluated.trim()) {
+          messages.push({ role, content: evaluated, source: `jailbreak (${item.name || 'Jailbreak'})` });
+        }
         break;
       }
       case 'postEverything': {
-        // End marker for depth-0 lorebooks / instructions
         break;
       }
       case 'plain':
       default: {
         if (text) {
-          messages.push({ role, content: text, source: `plain (${item.name || type})` });
+          const evaluated = evalCbs(text, vars, ctx);
+          if (evaluated.trim()) {
+            messages.push({ role, content: evaluated, source: `plain (${item.name || type})` });
+          }
         }
         break;
       }
     }
   }
 
-  // Macro resolution
-  return messages.map((m) => ({
-    role: m.role,
-    content: m.content
-      .replaceAll('{{char}}', ctx.charName)
-      .replaceAll('{{user}}', ctx.userName),
-    source: m.source,
-  }));
+  return messages;
 }
 
-// 2. Simulate Lumiverse Loom prompt assembly (matching prompt-assembly.service.ts)
-function simulateLumiverseAssembly(trans: TranslatedRisuPreset, ctx: MockContext = DEFAULT_MOCK) {
+// 2. Simulate Lumiverse Loom prompt assembly with variable evaluation
+function simulateLumiverseAssembly(trans: TranslatedRisuPreset, vars: Record<string, string>, ctx: MockContext = DEFAULT_MOCK) {
   const blocks = [...(trans.preset.prompt_order || [])].filter((b) => b.enabled !== false);
   const chatHistoryIdx = blocks.findIndex((b) => b.marker === 'chat_history');
 
-  // Reorder non-marker blocks by position (reorderBlocksByPosition)
   if (chatHistoryIdx >= 0) {
     const moveToAfter = new Set<number>();
     const moveToBefore = new Set<number>();
@@ -148,7 +185,7 @@ function simulateLumiverseAssembly(trans: TranslatedRisuPreset, ctx: MockContext
   const messages: Array<{ role: string; content: string; source: string }> = [];
 
   for (const block of blocks) {
-    if (block.marker === 'category') continue; // Category divider
+    if (block.marker === 'category') continue;
 
     if (block.marker === 'chat_history') {
       for (const msg of ctx.chatHistory) {
@@ -161,16 +198,20 @@ function simulateLumiverseAssembly(trans: TranslatedRisuPreset, ctx: MockContext
       let desc = ctx.charDesc;
       if (ctx.charPersonality) desc += `\n\nDescription of {{char}}: ${ctx.charPersonality}`;
       if (ctx.charScenario) desc += `\n\nCircumstances and context of the dialogue: ${ctx.charScenario}`;
-      const template = block.content || '{{description}}';
-      const content = template.replaceAll('{{description}}', desc);
-      messages.push({ role: block.role, content, source: `char_description (${block.name})` });
+      const template = (block.content || '{{description}}').replaceAll('{{description}}', desc);
+      const evaluated = evalCbs(template, vars, ctx);
+      if (evaluated.trim()) {
+        messages.push({ role: block.role, content: evaluated, source: `char_description (${block.name})` });
+      }
       continue;
     }
 
     if (block.marker === 'persona_description') {
-      const template = block.content || '{{persona}}';
-      const content = template.replaceAll('{{persona}}', ctx.userPersona);
-      messages.push({ role: block.role, content, source: `persona_description (${block.name})` });
+      const template = (block.content || '{{persona}}').replaceAll('{{persona}}', ctx.userPersona);
+      const evaluated = evalCbs(template, vars, ctx);
+      if (evaluated.trim()) {
+        messages.push({ role: block.role, content: evaluated, source: `persona_description (${block.name})` });
+      }
       continue;
     }
 
@@ -180,25 +221,28 @@ function simulateLumiverseAssembly(trans: TranslatedRisuPreset, ctx: MockContext
     }
 
     if (block.marker === 'jailbreak') {
-      messages.push({ role: block.role, content: block.content || '', source: `jailbreak (${block.name})` });
+      const evaluated = evalCbs(block.content || '', vars, ctx);
+      if (evaluated.trim()) {
+        messages.push({ role: block.role, content: evaluated, source: `jailbreak (${block.name})` });
+      }
       continue;
     }
 
     if (block.content) {
-      messages.push({ role: block.role, content: block.content, source: `block (${block.name})` });
+      const evaluated = evalCbs(block.content, vars, ctx);
+      if (evaluated.trim()) {
+        messages.push({ role: block.role, content: evaluated, source: `block (${block.name})` });
+      }
     }
   }
 
-  return messages.map((m) => ({
-    role: m.role,
-    content: m.content
-      .replaceAll('{{char}}', ctx.charName)
-      .replaceAll('{{user}}', ctx.userName),
-    source: m.source,
-  }));
+  return messages;
 }
 
-export async function comparePresetFile(filePath: string, doDryRun = false) {
+export async function comparePresetFile(
+  filePath: string,
+  options: { doDryRun?: boolean; testToggles?: boolean; customVars?: Record<string, string> } = {},
+) {
   if (!fs.existsSync(filePath)) {
     console.error(`File not found: ${filePath}`);
     return;
@@ -218,6 +262,18 @@ export async function comparePresetFile(filePath: string, doDryRun = false) {
   console.log(`File: ${filePath}`);
   console.log(`Risu Version: ${raw.presetVersion ?? 'legacy'}`);
   console.log(`Target Model: Risu: ${raw.aiModel ?? '(unspecified)'} | SubModel: ${raw.subModel ?? '(unspecified)'}`);
+
+  // Extract all toggle defaults
+  const defaultVars: Record<string, string> = {};
+  const loomBlocks = trans.preset.prompt_order || [];
+  const toggleCategories = loomBlocks.filter((b) => b.marker === 'category');
+  for (const cat of toggleCategories) {
+    for (const v of cat.variables || []) {
+      defaultVars[v.name] = String(v.defaultValue ?? '');
+    }
+  }
+
+  const activeVars = { ...defaultVars, ...(options.customVars || {}) };
 
   // 1. Samplers
   console.log(`\n${subSep}`);
@@ -264,9 +320,6 @@ export async function comparePresetFile(filePath: string, doDryRun = false) {
   console.log('-'.repeat(125));
 
   const risuItems = raw.promptTemplate || [];
-  const loomBlocks = trans.preset.prompt_order || [];
-
-  // Filter category blocks from direct 1:1 row index for display
   const nonCategoryLoom = loomBlocks.filter((b) => b.marker !== 'category');
   const maxRows = Math.max(risuItems.length, nonCategoryLoom.length);
 
@@ -295,13 +348,14 @@ export async function comparePresetFile(filePath: string, doDryRun = false) {
   if (raw.customPromptTemplateToggle) {
     const lines = raw.customPromptTemplateToggle.split('\n').filter((l) => l.trim().length > 0);
     console.log(`Raw Toggle DSL Lines: ${lines.length}`);
-    const toggleCategories = loomBlocks.filter((b) => b.marker === 'category');
     console.log(`Created Category Blocks in Loom: ${toggleCategories.length}`);
     for (const cat of toggleCategories) {
       console.log(`  📁 Category "${cat.name}": ${cat.variables?.length ?? 0} variable(s)`);
       if (cat.variables) {
         for (const v of cat.variables) {
-          console.log(`     - [${v.type}] ${v.name} ("${v.label}") default="${v.defaultValue}"`);
+          const currentVal = activeVars[v.name];
+          const isOverridden = options.customVars && options.customVars[v.name] !== undefined;
+          console.log(`     - [${v.type}] ${v.name} ("${v.label}") default="${v.defaultValue}" ${isOverridden ? `[ACTIVE OVERRIDE: "${currentVal}"]` : ''}`);
         }
       }
     }
@@ -324,14 +378,89 @@ export async function comparePresetFile(filePath: string, doDryRun = false) {
     }
   }
 
-  // 5. Dry Run Comparison
-  if (doDryRun) {
+  // 5. Toggle Sensitivity Mutation Tests
+  if (options.testToggles) {
     console.log(`\n${subSep}`);
-    console.log(`5. SIMULATED PROMPT DRY RUN (RisuAI vs Lumiverse Assembly)`);
+    console.log(`5. TOGGLE MUTATION SENSITIVITY TESTS`);
+    console.log(`${subSep}`);
+    const allVars: Array<{ name: string; label: string; type: string; defaultValue: string; options?: string[] }> = [];
+    for (const cat of toggleCategories) {
+      for (const v of cat.variables || []) {
+        allVars.push({
+          name: v.name,
+          label: v.label,
+          type: v.type,
+          defaultValue: String(v.defaultValue ?? ''),
+          options: (v as any).options?.map((o: any) => o.value),
+        });
+      }
+    }
+
+    console.log(`Testing ${allVars.length} toggle variable(s) for prompt effects...\n`);
+
+    const baseRisu = simulateRisuAssembly(raw, defaultVars);
+    const baseLumi = simulateLumiverseAssembly(trans, defaultVars);
+    const baseRisuLen = baseRisu.reduce((acc, m) => acc + m.content.length, 0);
+    const baseLumiLen = baseLumi.reduce((acc, m) => acc + m.content.length, 0);
+
+    let alteredCount = 0;
+
+    for (const v of allVars) {
+      let mutatedVal = '1';
+      if (v.type === 'switch') {
+        mutatedVal = v.defaultValue === '1' ? '0' : '1';
+      } else if (v.type === 'select' && v.options && v.options.length > 1) {
+        mutatedVal = v.defaultValue === v.options[0] ? v.options[1]! : v.options[0]!;
+      } else if (v.type === 'text') {
+        mutatedVal = v.defaultValue ? '' : 'TestCustomValue';
+      }
+
+      const mutVars = { ...defaultVars, [v.name]: mutatedVal };
+      const mutRisu = simulateRisuAssembly(raw, mutVars);
+      const mutLumi = simulateLumiverseAssembly(trans, mutVars);
+
+      const rLen = mutRisu.reduce((acc, m) => acc + m.content.length, 0);
+      const lLen = mutLumi.reduce((acc, m) => acc + m.content.length, 0);
+
+      const rDelta = rLen - baseRisuLen;
+      const lDelta = lLen - baseLumiLen;
+
+      if (rDelta !== 0 || lDelta !== 0) {
+        alteredCount++;
+        const deltaSignR = rDelta > 0 ? `+${rDelta}` : `${rDelta}`;
+        const deltaSignL = lDelta > 0 ? `+${lDelta}` : `${lDelta}`;
+
+        console.log(`🔘 Toggle ${v.name} ("${v.label}"):`);
+        console.log(`   Changed ${v.defaultValue} -> ${mutatedVal} | Prompt length delta: Risu: ${deltaSignR} chars, Lumiverse: ${deltaSignL} chars`);
+
+        // Find which block changed
+        for (let idx = 0; idx < Math.min(baseRisu.length, mutRisu.length); idx++) {
+          if (baseRisu[idx]!.content !== mutRisu[idx]!.content) {
+            const diffBlock = mutRisu[idx]!;
+            const excerpt = diffBlock.content.slice(0, 140).replace(/[\r\n]+/g, ' ');
+            console.log(`   Affected block: ${diffBlock.source} -> Excerpt: "${excerpt}..."`);
+            break;
+          }
+        }
+        console.log();
+      }
+    }
+
+    if (alteredCount === 0) {
+      console.log(`(None of the tested variables produced prompt-level text diffs in the sample context)`);
+    } else {
+      console.log(`Summary: ${alteredCount} out of ${allVars.length} toggles actively branch and mutate prompt text.`);
+    }
+  }
+
+  // 6. Dry Run Comparison
+  if (options.doDryRun) {
+    console.log(`\n${subSep}`);
+    console.log(`6. SIMULATED PROMPT DRY RUN (Active Variables Applied)`);
     console.log(`${subSep}`);
 
-    const risuMsgs = simulateRisuAssembly(raw);
-    const lumiMsgs = simulateLumiverseAssembly(trans);
+    const risuMsgs = simulateRisuAssembly(raw, activeVars);
+    const lumiMsgs = simulateLumiverseAssembly(trans, activeVars);
 
     console.log(`Risu Output Messages: ${risuMsgs.length}`);
     console.log(`Lumiverse Output Messages: ${lumiMsgs.length}`);
@@ -357,8 +486,8 @@ export async function comparePresetFile(filePath: string, doDryRun = false) {
 
     console.log(`\n[Risu First System Message]:\n${rFirst ? rFirst.content.slice(0, 300) : '(none)'}`);
     console.log(`\n[Lumiverse First System Message]:\n${lFirst ? lFirst.content.slice(0, 300) : '(none)'}`);
-  } else {
-    console.log(`\n(Pass --dry-run to simulate and display the side-by-side prompt message assembly)`);
+  } else if (!options.testToggles) {
+    console.log(`\n(Pass --dry-run to simulate prompt assembly, or --test-toggles to test all variable permutations)`);
   }
 
   console.log(`\n${sep}\n`);
@@ -368,16 +497,39 @@ export async function comparePresetFile(filePath: string, doDryRun = false) {
 async function main() {
   const args = process.argv.slice(2);
   const doDryRun = args.includes('--dry-run');
-  const filteredArgs = args.filter((a) => a !== '--dry-run');
+  const testToggles = args.includes('--test-toggles');
 
-  if (filteredArgs.length === 0 || filteredArgs[0] === '--help') {
-    console.log(`Usage: bun tools/compare-preset.ts <path-to-preset.risup|json> [--dry-run]`);
-    console.log(`       bun tools/compare-preset.ts --all [presets-dir] [--dry-run]`);
+  const customVars: Record<string, string> = {};
+  const remainingArgs: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === '--dry-run' || a === '--test-toggles') continue;
+    if (a === '--var' && i + 1 < args.length) {
+      const eq = args[i + 1]!.indexOf('=');
+      if (eq !== -1) {
+        const k = args[i + 1]!.slice(0, eq).trim();
+        const v = args[i + 1]!.slice(eq + 1).trim();
+        customVars[k] = v;
+      }
+      i++;
+      continue;
+    }
+    remainingArgs.push(a);
+  }
+
+  if (remainingArgs.length === 0 || remainingArgs[0] === '--help') {
+    console.log(`Usage: bun tools/compare-preset.ts <path-to-preset.risup|json> [options]`);
+    console.log(`Options:`);
+    console.log(`  --dry-run             Simulate side-by-side prompt assembly`);
+    console.log(`  --test-toggles        Automatically test mutating all preset variables and report diffs`);
+    console.log(`  --var <name>=<value>  Override specific toggle variable (can be used multiple times)`);
+    console.log(`  --all [dir]           Run comparison across all presets in directory`);
     return;
   }
 
-  if (filteredArgs[0] === '--all') {
-    const dir = filteredArgs[1] || 'E:/presets';
+  if (remainingArgs[0] === '--all') {
+    const dir = remainingArgs[1] || 'E:/presets';
     if (!fs.existsSync(dir)) {
       console.error(`Directory not found: ${dir}`);
       return;
@@ -385,12 +537,12 @@ async function main() {
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.risup') || f.endsWith('.risupreset') || f.endsWith('.json'));
     console.log(`Found ${files.length} preset files in ${dir}\n`);
     for (const file of files) {
-      await comparePresetFile(path.join(dir, file), doDryRun);
+      await comparePresetFile(path.join(dir, file), { doDryRun, testToggles, customVars });
     }
     return;
   }
 
-  await comparePresetFile(filteredArgs[0]!, doDryRun);
+  await comparePresetFile(remainingArgs[0]!, { doDryRun, testToggles, customVars });
 }
 
 if (import.meta.main) {
