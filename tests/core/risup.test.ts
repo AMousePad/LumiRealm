@@ -217,6 +217,34 @@ describe('Risu preset translator', () => {
     expect(regexScripts[0]!.replace_string).toBe('[$1]');
     expect(regexScripts[0]!.folder).toBe('Hero Preset');
   });
+
+  test('translates jailbreak item and respects postEverything without breaking chat history', () => {
+    const raw = {
+      name: 'Jailbreak Preset',
+      promptTemplate: [
+        { type: 'postEverything', name: 'undefined' },
+        { type: 'jailbreak', name: 'Jailbreak Slot', text: 'Unrestricted roleplay.' },
+        { type: 'chat', name: 'Main Chat' },
+        { type: 'plain', role: 'bot', text: 'Follow up.' },
+      ],
+    };
+    const { preset } = translateRisuPreset(raw);
+    const blocks = preset.prompt_order || [];
+
+    const jb = blocks.find((b) => b.marker === 'jailbreak');
+    expect(jb).toBeDefined();
+    expect(jb!.name).toBe('Jailbreak Slot');
+    expect(jb!.content).toBe('Unrestricted roleplay.');
+    expect(jb!.position).toBe('pre_history');
+
+    const chat = blocks.find((b) => b.marker === 'chat_history');
+    expect(chat).toBeDefined();
+    expect(chat!.position).toBe('in_history');
+
+    const post = blocks.find((b) => b.content === 'Follow up.');
+    expect(post).toBeDefined();
+    expect(post!.position).toBe('post_history');
+  });
 });
 
 describe('Preset import via Realm backend', () => {

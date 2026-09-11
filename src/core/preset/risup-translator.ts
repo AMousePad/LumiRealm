@@ -316,8 +316,24 @@ export function translateRisuPromptBlocks(
       group: null,
           parameters: { cache_breakpoint: true },
         } as PromptBlockDTO);
+      } else if (type === 'jailbreak') {
+        blocks.push({
+          id: newUuid(),
+          name: name || 'Jailbreak',
+          role: role === 'assistant' ? 'assistant' : (role === 'user' ? 'user' : 'system'),
+          enabled,
+          position: seenChat ? 'post_history' : 'pre_history',
+          depth: 0,
+          order: nextOrder++,
+          marker: 'jailbreak',
+          content: text || '{{jailbreak}}',
+          isLocked: false,
+          color: null,
+          injectionTrigger: [],
+          group: null,
+        } as PromptBlockDTO);
       } else if (type === 'postEverything') {
-        seenChat = true;
+        // End-injected prompts marker in Risu; do not prematurely override chat history.
       } else {
         blocks.push({
           id: newUuid(),

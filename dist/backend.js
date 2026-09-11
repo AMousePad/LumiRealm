@@ -20721,9 +20721,23 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           group: null,
           parameters: { cache_breakpoint: true }
         });
-      } else if (type === "postEverything") {
-        seenChat = true;
-      } else {
+      } else if (type === "jailbreak") {
+        blocks.push({
+          id: newUuid(),
+          name: name || "Jailbreak",
+          role: role === "assistant" ? "assistant" : role === "user" ? "user" : "system",
+          enabled,
+          position: seenChat ? "post_history" : "pre_history",
+          depth: 0,
+          order: nextOrder++,
+          marker: "jailbreak",
+          content: text || "{{jailbreak}}",
+          isLocked: false,
+          color: null,
+          injectionTrigger: [],
+          group: null
+        });
+      } else if (type === "postEverything") {} else {
         blocks.push({
           id: newUuid(),
           name: name || String(type),
