@@ -186,6 +186,7 @@ export interface TriggerRuntimeOpts {
   readonly chatId?: string;
   /** Pre-fetched chat-state snapshot — see `TriggerRuntimePreloaded`. */
   readonly preloaded?: TriggerRuntimePreloaded;
+  readonly moduleLorebooks?: readonly unknown[];
   // Backend uses this to filter MESSAGE_EDITED self-echoes from Lua setChat.
   readonly rememberOurWrite?: (chatId: string, msgId: string, content: string) => void;
   readonly stateChanged?: () => void;

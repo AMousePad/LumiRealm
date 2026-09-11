@@ -139,6 +139,9 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
     const scriptNS = makeDispatcherScriptNS();
     registerManualTriggers(scriptNS, compiled, api);
     const settings = getCachedSettingsSync(userId);
+    const moduleLorebooks = Object.values(
+      (active.card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {},
+    ).flat();
     const seams = buildDispatchSeams({
       chatId,
       binding,
@@ -147,6 +150,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       stateChanged: makeStateChangedCallback(chatId, userId),
       auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
       resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+      moduleLorebooks,
     });
     // Risu finalizes editOutput/list actions and stores the edited assistant
     // message before firing the structured output trigger. The trigger must
@@ -298,6 +302,9 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       if (luaCode.length === 0) continue;
       try {
         const settings = getCachedSettingsSync(userId);
+        const moduleLorebooks = Object.values(
+          (active.card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {},
+        ).flat();
         const seams = buildDispatchSeams({
           chatId,
           binding: 'manual',
@@ -306,6 +313,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           stateChanged: makeStateChangedCallback(chatId, userId),
           auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
           resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+          moduleLorebooks,
         });
         const runtime = await makeRisuTriggerRuntime(api, { characterId }, scriptNS, {
           ...seams,
@@ -330,6 +338,9 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
         const compiled = prepareTriggers(active.card.risuPayload, characterId);
         registerManualTriggers(scriptNS, compiled, api);
         const settings = getCachedSettingsSync(userId);
+        const moduleLorebooks = Object.values(
+          (active.card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {},
+        ).flat();
         const seams = buildDispatchSeams({
           chatId,
           binding: 'manual',
@@ -338,6 +349,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           stateChanged: makeStateChangedCallback(chatId, userId),
           auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
           resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+          moduleLorebooks,
         });
         await withDispatchContext(seams, async () => {
           const outFlags = { stopSending: false, varsFlushed: false };

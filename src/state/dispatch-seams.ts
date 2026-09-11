@@ -21,6 +21,7 @@ export interface DispatchSeams {
   readonly imageConnectionId: string | null;
   readonly imageModelOverride: string | null;
   readonly naiSettings: RisuCompatSettings['naiSettings'];
+  readonly moduleLorebooks?: readonly unknown[];
 }
 
 export interface BuildDispatchSeamsArgs {
@@ -31,6 +32,7 @@ export interface BuildDispatchSeamsArgs {
   readonly stateChanged: () => void;
   readonly auxDebugCapture: DispatchAuxDebugCapture | undefined;
   readonly resolveTemplate: (text: string) => Promise<string>;
+  readonly moduleLorebooks?: readonly unknown[];
 }
 
 // Single source of truth for the dispatch-context / runtime-opts shape that
@@ -72,6 +74,7 @@ export function buildDispatchSeams(args: BuildDispatchSeamsArgs): DispatchSeams 
     imageConnectionId: args.settings.imageConnectionId,
     imageModelOverride: args.settings.imageModelOverride,
     naiSettings: args.settings.naiSettings,
+    ...(args.moduleLorebooks ? { moduleLorebooks: args.moduleLorebooks } : {}),
   };
   if (args.auxDebugCapture) seams.auxDebugCapture = args.auxDebugCapture;
   return seams;

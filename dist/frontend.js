@@ -24055,6 +24055,10 @@ function makeLorebookApi(api, lorebook) {
   };
 }
 
+// src/interpreter/evaluator/index.ts
+init_scanner();
+init_dispatch();
+
 // src/interpreter/runtime/display-state.ts
 function makeDisplayStateApi(initialDisplayState = "", initialRequestState = []) {
   const displayState = { text: toStr(initialDisplayState) };
@@ -24921,6 +24925,24 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         }
       }
     } catch {}
+    const extraLorebooks = opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+    if (Array.isArray(extraLorebooks) && extraLorebooks.length > 0) {
+      for (const raw of extraLorebooks) {
+        if (!raw || typeof raw !== "object")
+          continue;
+        const r = raw;
+        lorebook.entries.push({
+          id: typeof r.id === "string" ? r.id : `module-lore-${lorebook.entries.length}`,
+          ...typeof r.worldBookId === "string" ? { worldBookId: r.worldBookId } : {},
+          key: Array.isArray(r.key) ? r.key : typeof r.key === "string" ? r.key : [],
+          content: typeof r.content === "string" ? r.content : "",
+          comment: typeof r.comment === "string" ? r.comment : "",
+          orderValue: typeof r.orderValue === "number" ? r.orderValue : typeof r.insertorder === "number" ? r.insertorder : 100,
+          disabled: typeof r.disabled === "boolean" ? r.disabled : false,
+          constant: typeof r.constant === "boolean" ? r.constant : false
+        });
+      }
+    }
   }
   const _factoryTotal = Date.now() - _factoryStart;
   _logMake.info(`factory.timing total=${_factoryTotal}ms vars=${_tVars}ms (src=${_varsSrc}) ` + `msgs=${_tMsgs}ms (n=${_msgsCount} src=${_msgsSrc}) chars.get=${_tCharGet}ms ` + `lore=${_tLore}ms (books=${_bookCount} entries=${_entryCount} src=${_loreSrc}) ` + `inherited=${isInheritedVarsCache} chatId=${portalChatId ?? "<none>"} ` + `binding=${binding} characterId=${characterId ?? "<none>"}`);
@@ -25735,9 +25757,94 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         }
       },
       loadLoreBooksMain: (_id, _reserve) => {
-        return Promise.resolve(JSON.stringify(lorebook.entries.map((e) => toStr(e.content))));
+        const evalCtx = buildEvaluatorContext({
+          chatId: portalChatId ?? "",
+          commit: false,
+          suppressVarPersist: true,
+          userName: "User",
+          charName: "Char",
+          character: { description: "" },
+          chat: {
+            messages: messagesCache.map((m) => ({
+              role: m.role === "user" ? "user" : m.role === "system" ? "system" : "assistant",
+              content: m.content,
+              createdAt: m.createdAt ?? Date.now()
+            }))
+          },
+          variables: {
+            global: { ...globalVarsCache },
+            local: { ...varsCache },
+            chat: { ...varsCache }
+          }
+        });
+        const out = lorebook.entries.map((e) => {
+          let content = toStr(e.content);
+          if (content.includes("{{")) {
+            try {
+              content = evaluate(content, evalCtx);
+            } catch {}
+          }
+          return {
+            ...e,
+            name: toStr(e.comment || e.id),
+            comment: toStr(e.comment),
+            content,
+            key: Array.isArray(e.key) ? e.key.join(", ") : toStr(e.key),
+            order: e.orderValue ?? 100,
+            alwaysActive: !e.disabled
+          };
+        });
+        return Promise.resolve(JSON.stringify(out));
       },
-      getLoreBooksMain: (_id, _search) => JSON.stringify(getAllLorebooks()),
+      getLoreBooksMain: (_id, search) => {
+        const searchStr = typeof search === "string" ? search.trim() : "";
+        const matches = searchStr ? lorebook.entries.filter((e) => {
+          if (toStr(e.comment) === searchStr)
+            return true;
+          if (toStr(e.id) === searchStr)
+            return true;
+          const keys = keyToArray(e.key);
+          return keys.some((k) => k === searchStr);
+        }) : lorebook.entries;
+        const evalCtx = buildEvaluatorContext({
+          chatId: portalChatId ?? "",
+          commit: false,
+          suppressVarPersist: true,
+          userName: "User",
+          charName: "Char",
+          character: { description: "" },
+          chat: {
+            messages: messagesCache.map((m) => ({
+              role: m.role === "user" ? "user" : m.role === "system" ? "system" : "assistant",
+              content: m.content,
+              createdAt: m.createdAt ?? Date.now()
+            }))
+          },
+          variables: {
+            global: { ...globalVarsCache },
+            local: { ...varsCache },
+            chat: { ...varsCache }
+          }
+        });
+        const out = matches.map((e) => {
+          let content = toStr(e.content);
+          if (content.includes("{{")) {
+            try {
+              content = evaluate(content, evalCtx);
+            } catch {}
+          }
+          return {
+            ...e,
+            id: e.id,
+            comment: toStr(e.comment),
+            content,
+            key: Array.isArray(e.key) ? e.key.join(", ") : toStr(e.key),
+            order: e.orderValue ?? 100,
+            alwaysActive: !e.disabled
+          };
+        });
+        return JSON.stringify(out);
+      },
       upsertLocalLoreBook: (_id, name, content, opts) => {
         const o = opts || {};
         createLorebook(name, o["key"] || name, content, o["order"] || 0);
@@ -29430,7 +29537,8 @@ async function runInterpretedTrigger(entry, api, data, scriptNS, invocation, out
       displayMode: invocation.displayMode,
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
       binding: invocation.binding,
-      characterId: entry.rtOpts.characterId
+      characterId: entry.rtOpts.characterId,
+      ...invocation.moduleLorebooks ? { moduleLorebooks: invocation.moduleLorebooks } : {}
     });
     try {
       await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {

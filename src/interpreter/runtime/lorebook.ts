@@ -24,7 +24,7 @@ export interface LorebookApi {
   setLorebookAlwaysActive(index: unknown, value: boolean): Promise<void>;
 }
 
-function keyToArray(k: unknown): string[] {
+export function keyToArray(k: unknown): string[] {
   if (Array.isArray(k)) return k.map(toStr).filter(Boolean);
   const s = toStr(k);
   return s ? s.split(',').map((p) => p.trim()).filter(Boolean) : [];

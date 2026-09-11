@@ -47,6 +47,7 @@ export interface DispatchContext {
   imageConnectionId?: string | null;
   imageModelOverride?: string | null;
   naiSettings?: import('../../state/settings-store.js').NaiSettings;
+  moduleLorebooks?: readonly unknown[];
 }
 
 export interface AuxDebugCaptureEvent {
