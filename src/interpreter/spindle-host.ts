@@ -386,6 +386,36 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     },
   };
 
+  if (typeof spindle !== 'undefined' && spindle.imageGen) {
+    (host as { imageGen?: HostApi['imageGen'] }).imageGen = {
+      async generate(prompt: string, opts) {
+        const input: Record<string, unknown> = {
+          prompt,
+          negativePrompt: opts?.negativePrompt,
+          ...(opts?.connectionId ? { connection_id: opts.connectionId } : {}),
+          ...(opts?.model ? { model: opts.model } : {}),
+          ...(opts?.parameters ? { parameters: opts.parameters } : {}),
+          ...(uid !== undefined ? { userId: uid } : {}),
+          ...(opts?.includeDataUrl !== undefined ? { includeDataUrl: opts.includeDataUrl } : {}),
+        };
+        const res = await spindle.imageGen.generate(input as any);
+        return res as { imageId?: string; imageUrl?: string; imageDataUrl?: string } | string;
+      },
+    };
+  }
+
+  if (typeof spindle !== 'undefined' && spindle.images) {
+    (host as { images?: HostApi['images'] }).images = {
+      async uploadFromDataUrl(dataUrl: string, name?: string): Promise<string | { id: string }> {
+        const res = await spindle.images.uploadFromDataUrl(dataUrl, name, uid);
+        return typeof res === 'string' ? res : res.id;
+      },
+      getUrl(id: string): string {
+        return `/api/v1/images/${id}`;
+      },
+    };
+  }
+
   void characterId; // surfaced via ctx for future expansion
   return host;
 }

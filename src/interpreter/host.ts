@@ -114,6 +114,19 @@ export interface HostApi {
       readonly is_default: boolean;
     }[]>;
   };
+  readonly imageGen?: {
+    generate(prompt: string, opts?: {
+      negativePrompt?: string;
+      connectionId?: string;
+      model?: string;
+      parameters?: Record<string, unknown>;
+      includeDataUrl?: boolean;
+    }): Promise<{ imageId?: string; imageUrl?: string; imageDataUrl?: string } | string>;
+  };
+  readonly images?: {
+    uploadFromDataUrl(dataUrl: string, name?: string): Promise<string | { id: string }>;
+    getUrl?(id: string): string;
+  };
   readonly tokens?: {
     count(text: string): Promise<number>;
   };

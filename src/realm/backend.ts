@@ -1,6 +1,9 @@
 import type { RealmFrontendToBackend, RealmBackendToFrontend } from './messages.js';
 import { searchRealm, getRealmInfo, downloadRealmCard } from './api.js';
 import { convertToCharx, type ImportFormatConversion } from './import-formats/index.js';
+import type { RegexScriptCreateDTO, RegexScriptDTO, UserPresetCreateDTO, UserPresetDTO } from 'lumiverse-spindle-types';
+import { isRisuPresetBytes, decodeRisuPreset } from '../core/preset/risup-decoder.js';
+import { translateRisuPreset } from '../core/preset/risup-translator.js';
 
 export interface RealmBackendLog {
   info(msg: string): void;
@@ -12,6 +15,10 @@ export interface RealmBackendDeps {
   readonly send: (msg: RealmBackendToFrontend, userId: string | undefined) => void;
   readonly log: RealmBackendLog;
   readonly importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) => Promise<void>;
+  readonly createPreset?: (input: UserPresetCreateDTO, userId?: string) => Promise<UserPresetDTO>;
+  readonly createRegexScript?: (input: RegexScriptCreateDTO, userId?: string) => Promise<RegexScriptDTO>;
+  readonly notifyImportProgress?: (progress: { type: 'import_progress'; phase: string; message: string; fraction: number | null; error?: string | null }, userId?: string) => void;
+  readonly toast?: (msg: string, kind?: 'info' | 'error' | 'warning' | 'success') => void;
 }
 
 export interface RealmBackendHandle {
@@ -131,7 +138,43 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     }
   }
 
+    async function importPresetFromBytes(bytes: Uint8Array, fileName: string, userId: string): Promise<void> {
+    log.info(`importPresetFromBytes: decoding preset from ${fileName} (${bytes.byteLength} bytes)`);
+    deps.notifyImportProgress?.({ type: 'import_progress', phase: 'decoding', message: `Decoding preset ${fileName}`, fraction: 0.2, error: null }, userId);
+    const raw = await decodeRisuPreset(bytes, fileName);
+    deps.notifyImportProgress?.({ type: 'import_progress', phase: 'translating', message: `Translating preset ${raw.name || fileName}`, fraction: 0.5, error: null }, userId);
+    const { preset: presetInput, regexScripts } = translateRisuPreset(raw, fileName);
+
+    if (!deps.createPreset) {
+      throw new Error('Host preset creation is unavailable');
+    }
+
+    deps.notifyImportProgress?.({ type: 'import_progress', phase: 'saving_payload', message: `Saving preset to Lumiverse`, fraction: 0.8, error: null }, userId);
+    const created = await deps.createPreset(presetInput, userId);
+    log.info(`importPresetFromBytes: created preset id=${created.id} name="${created.name}"`);
+
+    let regexImported = 0;
+    if (regexScripts.length > 0 && deps.createRegexScript) {
+      for (const rs of regexScripts) {
+        try {
+          await deps.createRegexScript(rs, userId);
+          regexImported++;
+        } catch (err) {
+          log.warn(`importPresetFromBytes: regex script creation failed for "${rs.name}": ${errMessage(err)}`);
+        }
+      }
+      log.info(`importPresetFromBytes: imported ${regexImported}/${regexScripts.length} regex scripts for preset "${created.name}"`);
+    }
+
+    deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexImported > 0 ? `, ${regexImported} regex` : ''})`, 'success');
+    deps.notifyImportProgress?.({ type: 'import_progress', phase: 'done', message: `Preset "${created.name}" imported successfully`, fraction: 1.0, error: null }, userId);
+  }
+
   async function importAnyFormat(bytes: Uint8Array, fileName: string, userId: string): Promise<void> {
+    if (isRisuPresetBytes(bytes, fileName)) {
+      await importPresetFromBytes(bytes, fileName, userId);
+      return;
+    }
     let conv: ImportFormatConversion;
     try {
       conv = convertToCharx(bytes, fileName);

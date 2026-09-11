@@ -311,6 +311,11 @@ function axLLM(id, prompt, useMultimodal, options)
 end
 
 -- Risu parity: cards write cbs("...") and get a string. JS-side cbsMain is async because resolveTemplate routes through resolveReadonly IPC.
+-- PocketRisu updateDisplay alias to reloadDisplay.
+if type(updateDisplay) ~= 'function' and type(reloadDisplay) == 'function' then
+  updateDisplay = reloadDisplay
+end
+
 function cbs(value)
   return cbsMain(value):await()
 end

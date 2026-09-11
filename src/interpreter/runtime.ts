@@ -974,6 +974,9 @@ export async function makeRisuTriggerRuntime(
       reloadDisplay: (_id: unknown) => {
         notifyStateChanged('reloadDisplay');
       },
+      updateDisplay: (_id: unknown) => {
+        notifyStateChanged('updateDisplay');
+      },
       reloadChat: (_id: unknown, _index: unknown) => {
         notifyStateChanged('reloadChat');
       },
@@ -1178,7 +1181,62 @@ export async function makeRisuTriggerRuntime(
       },
       similarity: luaReject('similarity', 'requires vector-store bridge'),
       request: luaReject('request', 'arbitrary-URL fetch from user Lua is out of scope'),
-      generateImage: luaReject('generateImage', 'requires image-gen pipeline'),
+      generateImage: async (
+        _id: unknown,
+        promptVal: unknown,
+        negVal: unknown,
+        optionsVal: unknown,
+      ): Promise<string> => {
+        if (!lowLevelAccess) {
+          return 'Error: lowLevelAccess required';
+        }
+        if (!api.imageGen?.generate) {
+          return 'Error: image generation not available on this host';
+        }
+        try {
+          const prompt = toStr(promptVal);
+          const negativePrompt = negVal ? toStr(negVal) : undefined;
+          let parameters: Record<string, unknown> | undefined = undefined;
+          if (typeof optionsVal === 'string' && optionsVal.trim().startsWith('{')) {
+            try {
+              parameters = JSON.parse(optionsVal);
+            } catch {
+              // ignore json parse error
+            }
+          } else if (typeof optionsVal === 'object' && optionsVal !== null) {
+            parameters = optionsVal as Record<string, unknown>;
+          }
+          const res = await api.imageGen.generate(prompt, {
+            ...(negativePrompt !== undefined ? { negativePrompt } : {}),
+            ...(parameters !== undefined ? { parameters } : {}),
+          });
+          let imageId: string | undefined;
+          if (typeof res === 'string') {
+            if (res.startsWith('data:')) {
+              if (api.images?.uploadFromDataUrl) {
+                const up = await api.images.uploadFromDataUrl(res);
+                imageId = typeof up === 'string' ? up : up?.id;
+              }
+            } else {
+              imageId = res;
+            }
+          } else if (typeof res === 'object' && res !== null) {
+            const r = res as { imageId?: string; imageUrl?: string; imageDataUrl?: string };
+            if (r.imageId) {
+              imageId = r.imageId;
+            } else if (r.imageDataUrl && api.images?.uploadFromDataUrl) {
+              const up = await api.images.uploadFromDataUrl(r.imageDataUrl);
+              imageId = typeof up === 'string' ? up : up?.id;
+            }
+          }
+          if (imageId) {
+            return `{{inlay::${imageId}}}`;
+          }
+          return 'Error: image generation returned no image';
+        } catch (err) {
+          return `Error: image generation failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
       // Emits resolved HTML directly. Sentinel wouldn't survive DB write without a re-parse pass.
       getCharacterImageMain: async (_id: unknown) => {
         try {

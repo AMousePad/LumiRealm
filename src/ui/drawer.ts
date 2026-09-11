@@ -12,7 +12,7 @@ import { pickNativeFile } from './native-file-picker.js';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
-const ACCEPT_EXTENSIONS = ['.charx', '.png', '.json', '.jpg', '.jpeg'];
+const ACCEPT_EXTENSIONS = ['.charx', '.png', '.json', '.jpg', '.jpeg', '.risup', '.risupreset', '.risum'];
 
 const UPLOAD_ENDPOINT = '/api/v1/spindle-uploads';
 const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
