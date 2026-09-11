@@ -44142,7 +44142,7 @@ function createVariablesTogglesService(deps) {
     const fetched = await readLumirealm(characterId, userId);
     if (!fetched || !fetched.data)
       return { wireRows: [], attribution: {}, keyCount: 0 };
-    const attachedIds = fetched.data.user_overrides.attached_module_ids ?? [];
+    const attachedIds = resolveEffectiveModuleIds(getGlobalModuleIds(userId), fetched.data.user_overrides.attached_module_ids);
     const envelopes = attachedIds.length > 0 ? await readAttachedModuleEnvelopes(userId, attachedIds) : [];
     const attribution = {};
     const wireRows = [];

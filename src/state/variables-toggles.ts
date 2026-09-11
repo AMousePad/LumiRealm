@@ -3,7 +3,8 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { AttributionWire, BackendToFrontend, SidebarToggleWire } from '../types/messages.js';
 import type { LumirealmCharacterData } from '../payload/types.js';
-import type { ModuleEnvelope } from './modules-store.js';
+import { resolveEffectiveModuleIds, type ModuleEnvelope } from './modules-store.js';
+import { getGlobalModuleIds } from './global-modules-cache.js';
 import {
   extractToggleKeys,
   parseToggleSyntax,
@@ -322,7 +323,10 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
   }> {
     const fetched = await readLumirealm(characterId, userId);
     if (!fetched || !fetched.data) return { wireRows: [], attribution: {}, keyCount: 0 };
-    const attachedIds = fetched.data.user_overrides.attached_module_ids ?? [];
+    const attachedIds = resolveEffectiveModuleIds(
+      getGlobalModuleIds(userId),
+      fetched.data.user_overrides.attached_module_ids,
+    );
     const envelopes = attachedIds.length > 0
       ? await readAttachedModuleEnvelopes(userId, attachedIds)
       : [];
