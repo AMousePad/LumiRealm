@@ -317,5 +317,18 @@ describe('Preset import via Realm backend', () => {
     expect(createdRegex[0].folder).toBe('Import Integration Test');
     expect(toasts.length).toBe(1);
     expect(toasts[0]).toContain('Import Integration Test');
-  });
+      // Ensure all translated blocks conform to allowed PromptBlock schema
+    const ALLOWED_BLOCK_KEYS = new Set([
+      'id', 'name', 'content', 'role', 'enabled', 'position', 'depth',
+      'marker', 'isLocked', 'color', 'injectionTrigger', 'characterTagTrigger',
+      'group', 'categoryMode', 'variables',
+    ]);
+    for (const block of createdPresetInput.prompt_order) {
+      for (const key of Object.keys(block)) {
+        expect(ALLOWED_BLOCK_KEYS.has(key)).toBe(true);
+      }
+      expect((block as any).order).toBeUndefined();
+      expect((block as any).parameters).toBeUndefined();
+    }
+});
 });

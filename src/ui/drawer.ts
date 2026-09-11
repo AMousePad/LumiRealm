@@ -64,8 +64,8 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   const importBtn = document.createElement('button');
   importBtn.type = 'button';
   importBtn.className = 'lrm-btn lrm-btn-primary';
-  importBtn.textContent = 'Upload card';
-  importBtn.title = 'Pick a .charx, .png, .json, or .jpg/.jpeg character file.';
+  importBtn.textContent = 'Upload file…';
+  importBtn.title = 'Pick a character card (.charx, .png, .json) or preset (.risup, .risupreset) file.';
   actionRow.appendChild(importBtn);
   root.appendChild(actionRow);
 

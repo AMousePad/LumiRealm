@@ -101,7 +101,6 @@ export function translateRisuPromptBlocks(
 ): { blocks: PromptBlockDTO[]; defaultsByBlockId: Record<string, Record<string, unknown>> } {
   const blocks: PromptBlockDTO[] = [];
   const defaultsByBlockId: Record<string, Record<string, unknown>> = {};
-  let nextOrder = 0;
 
   // 1. Structural category blocks for toggle groups
   for (const group of toggleGroups) {
@@ -119,7 +118,6 @@ export function translateRisuPromptBlocks(
       enabled: true,
       position: 'pre_history',
       depth: 0,
-      order: nextOrder++,
       marker: 'category',
       content: '',
       isLocked: false,
@@ -139,7 +137,6 @@ export function translateRisuPromptBlocks(
       enabled: true,
       position: 'pre_history',
       depth: 0,
-      order: nextOrder++,
       marker: 'category',
       content: '',
       isLocked: false,
@@ -176,7 +173,6 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: null,
           content: text,
           isLocked: false,
@@ -194,7 +190,6 @@ export function translateRisuPromptBlocks(
             enabled: true,
             position: 'in_history',
             depth: 0,
-            order: nextOrder++,
             marker: 'chat_history',
             content: '',
             isLocked: false,
@@ -210,7 +205,6 @@ export function translateRisuPromptBlocks(
             enabled,
             position: 'in_history',
             depth: 0,
-            order: nextOrder++,
             marker: null,
             content: text,
             isLocked: false,
@@ -227,7 +221,6 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: 'persona_description',
           content: text || '{{persona}}',
           isLocked: false,
@@ -243,7 +236,6 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: 'char_description',
           content: text || '{{description}}',
           isLocked: false,
@@ -259,7 +251,6 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: seenChat ? 'world_info_after' : 'world_info_before',
           content: text,
           isLocked: false,
@@ -275,7 +266,6 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: null,
           content: text || '{{authors_note}}',
           isLocked: false,
@@ -291,7 +281,6 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: null,
           content: text,
           isLocked: false,
@@ -307,14 +296,12 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: null,
           content: text,
           isLocked: false,
           color: null,
           injectionTrigger: [],
       group: null,
-          parameters: { cache_breakpoint: true },
         } as PromptBlockDTO);
       } else if (type === 'jailbreak') {
         blocks.push({
@@ -324,7 +311,6 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: 'jailbreak',
           content: text || '{{jailbreak}}',
           isLocked: false,
@@ -342,7 +328,6 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          order: nextOrder++,
           marker: null,
           content: text,
           isLocked: false,
@@ -362,7 +347,6 @@ export function translateRisuPromptBlocks(
       enabled: true,
       position: 'in_history',
       depth: 0,
-      order: nextOrder++,
       marker: 'chat_history',
       content: '',
       isLocked: false,

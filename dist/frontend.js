@@ -37072,8 +37072,8 @@ function mountCardsPanel(opts) {
   const importBtn = document.createElement("button");
   importBtn.type = "button";
   importBtn.className = "lrm-btn lrm-btn-primary";
-  importBtn.textContent = "Upload card";
-  importBtn.title = "Pick a .charx, .png, .json, or .jpg/.jpeg character file.";
+  importBtn.textContent = "Upload file…";
+  importBtn.title = "Pick a character card (.charx, .png, .json) or preset (.risup, .risupreset) file.";
   actionRow.appendChild(importBtn);
   root.appendChild(actionRow);
   const state = {
@@ -41364,6 +41364,7 @@ function mountModulesPanel(opts) {
   const SUB_TABS = [
     { id: "characters", label: "Characters", title: "Imported Risu cards. Click any row to manage attached modules." },
     { id: "modules", label: "Modules", title: "Module library. Click any row for details / delete." },
+    { id: "presets", label: "Presets", title: "Import RisuAI presets (.risup) into Lumiverse Loom presets." },
     { id: "lorebooks", label: "Lorebooks", title: "Standalone lorebook import. Creates an unattached world_book; attach via Lumiverse." },
     { id: "regex", label: "Regex", title: "Standalone Risu regex import. Installs global regex rules grouped under a folder." }
   ];
@@ -41489,10 +41490,29 @@ function mountModulesPanel(opts) {
   const rxStatus = document.createElement("div");
   rxStatus.className = "lrm-lorebook-status";
   regexBody.appendChild(rxStatus);
+  const presetsBody = document.createElement("section");
+  presetsBody.className = "lrm-section-body lrm-tab-body";
+  const presetDesc = document.createElement("div");
+  presetDesc.className = "lrm-section-desc";
+  presetDesc.textContent = "Import RisuAI prompt presets (.risup, .risupreset, or .json). Presets are converted into native Lumiverse Loom presets with prompt blocks, categories, custom variables, sampler overrides, and embedded regex rules.";
+  presetsBody.appendChild(presetDesc);
+  const presetToolbar = document.createElement("div");
+  presetToolbar.className = "lrm-toolbar";
+  const presetUploadBtn = document.createElement("button");
+  presetUploadBtn.type = "button";
+  presetUploadBtn.className = "lrm-btn lrm-btn-primary";
+  presetUploadBtn.textContent = "Upload preset (.risup)…";
+  presetUploadBtn.title = "Pick a RisuAI preset (.risup, .risupreset, or .json) file to import into Lumiverse Loom presets.";
+  presetToolbar.appendChild(presetUploadBtn);
+  presetsBody.appendChild(presetToolbar);
+  const presetStatus = document.createElement("div");
+  presetStatus.className = "lrm-lorebook-status";
+  presetsBody.appendChild(presetStatus);
   const panelsHost = document.createElement("div");
   panelsHost.className = "lr-subtab-panels";
   panelsHost.appendChild(charBody);
   panelsHost.appendChild(libBody);
+  panelsHost.appendChild(presetsBody);
   panelsHost.appendChild(lorebooksBody);
   panelsHost.appendChild(regexBody);
   root.appendChild(panelsHost);
@@ -41505,6 +41525,7 @@ function mountModulesPanel(opts) {
     }
     charBody.hidden = id !== "characters";
     libBody.hidden = id !== "modules";
+    presetsBody.hidden = id !== "presets";
     lorebooksBody.hidden = id !== "lorebooks";
     regexBody.hidden = id !== "regex";
   }
@@ -41947,6 +41968,80 @@ filename: ${m.filename}`;
     log.info("modules-panel: refresh clicked");
     sendToBackend({ type: "request_modules" });
   });
+  let presetImportInFlight = false;
+  presetUploadBtn.addEventListener("click", () => {
+    onPresetUploadClicked();
+  });
+  async function onPresetUploadClicked() {
+    if (presetImportInFlight)
+      return;
+    let file = null;
+    try {
+      file = await pickNativeFile([".risup", ".risupreset", ".json"]);
+    } catch (err) {
+      setPresetStatus(`File pick failed: ${errMsg(err)}`, true);
+      return;
+    }
+    if (!file)
+      return;
+    presetImportInFlight = true;
+    presetUploadBtn.disabled = true;
+    const fileName = file.name;
+    const totalBytes = file.size;
+    setPresetStatus(`Uploading "${fileName}" (${(totalBytes / 1024).toFixed(1)} KB)…`, false);
+    let cancelled = false;
+    opts.onImportStart?.(fileName, () => {
+      cancelled = true;
+      if (activeTus) {
+        activeTus.abort(true).catch(() => {});
+        activeTus = null;
+      }
+      presetImportInFlight = false;
+      presetUploadBtn.disabled = false;
+      setPresetStatus("Import cancelled", false);
+    }, totalBytes);
+    const upload = new Upload(file, {
+      endpoint: UPLOAD_ENDPOINT3,
+      chunkSize: UPLOAD_CHUNK_BYTES3,
+      retryDelays: [0, 1000, 3000, 5000, 1e4],
+      removeFingerprintOnSuccess: true,
+      metadata: {
+        filename: fileName,
+        extension: EXTENSION_IDENTIFIER3
+      },
+      onError: (err) => {
+        activeTus = null;
+        if (cancelled)
+          return;
+        presetImportInFlight = false;
+        presetUploadBtn.disabled = false;
+        setPresetStatus(`Upload failed: ${errMsg(err)}`, true);
+      },
+      onProgress: (bytesSent, bytesTotal) => {
+        opts.onUploadProgress?.(bytesSent, bytesTotal);
+      },
+      onSuccess: () => {
+        activeTus = null;
+        if (cancelled)
+          return;
+        const uploadId = upload.url?.split("/").pop();
+        if (!uploadId) {
+          presetImportInFlight = false;
+          presetUploadBtn.disabled = false;
+          setPresetStatus("Could not read upload ID from endpoint", true);
+          return;
+        }
+        setPresetStatus(`Processing "${fileName}" on server…`, false);
+        sendToBackend({ type: "import_card_from_upload", uploadId, fileName });
+      }
+    });
+    activeTus = upload;
+    upload.start();
+  }
+  function setPresetStatus(msg, isError) {
+    presetStatus.textContent = msg;
+    presetStatus.classList.toggle("lrm-status-error", isError);
+  }
   let lorebookImportInFlight = false;
   lbUploadBtn.addEventListener("click", () => {
     onLorebookUploadClicked();
@@ -42216,6 +42311,19 @@ filename: ${m.filename}`;
         onStandaloneRegexInstall(msg);
         break;
       case "import_progress":
+        if (presetImportInFlight) {
+          if (msg.phase === "done") {
+            presetImportInFlight = false;
+            presetUploadBtn.disabled = false;
+            setPresetStatus(msg.message, false);
+          } else if (msg.phase === "error") {
+            presetImportInFlight = false;
+            presetUploadBtn.disabled = false;
+            setPresetStatus(msg.message || msg.error || "Import failed", true);
+          } else {
+            setPresetStatus(msg.message, false);
+          }
+        }
         if (processingTimer) {
           if (msg.phase === "done") {
             finishModuleUpload();
