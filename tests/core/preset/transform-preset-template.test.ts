@@ -23,4 +23,10 @@ describe('transformPresetTemplate', () => {
     const output = transformPresetTemplate(input);
     expect(output).toBe('{{#if {{risuNot::{{risuContains::{{var::toggle_tags}}::nsfw}}}}}}{{eq::{{risuLength::foo}}::3}}{{/if}}');
   });
+
+  it('normalizes {{#if_pure ...}} and {{/if_pure}} to standard if tags', () => {
+    const input = '{{#if_pure {{? {{getglobalvar::toggle_cueinput}}=1}}}}Name: {{/if}}{{/if_pure}}';
+    const output = transformPresetTemplate(input);
+    expect(output).toBe('{{#if {{risuCalc::{{var::toggle_cueinput}}=1}}}}Name: {{/if}}{{/if}}');
+  });
 });

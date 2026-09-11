@@ -136,7 +136,11 @@ export function transformPresetTemplate(template: string): string {
   // 2. Map variable getters: {{getglobalvar::toggle_*}} -> {{var::toggle_*}}
   result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, '{{var::$1}}');
 
-  // 3. Map common CBS helpers to namespaced compatibility macros
+  // 3. Normalize pure-if conditionals: {{#if_pure ...}} -> {{#if ...}}, {{/if_pure}} -> {{/if}}
+  result = result.replace(/\{\{#if_pure\b/g, '{{#if');
+  result = result.replace(/\{\{\/if_pure\}\}/g, '{{/if}}');
+
+  // 4. Map common CBS helpers to namespaced compatibility macros
   result = result.replace(/\{\{contains::/g, '{{risuContains::');
   result = result.replace(/\{\{length::/g, '{{risuLength::');
   result = result.replace(/\{\{and::/g, '{{risuAnd::');

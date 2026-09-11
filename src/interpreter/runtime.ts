@@ -49,6 +49,7 @@ const _logAxLLMMain       = makeSafeLogger('runtime.axLLMMain');
 const _logFlush           = makeSafeLogger('runtime.flush');
 const _logLuaPrint        = makeSafeLogger('runtime.lua');
 const _logCbs             = makeSafeLogger('runtime.cbs');
+const _logImageGen        = makeSafeLogger('runtime.imageGen');
 
 type WasmoonExec = (
   code: string,
@@ -1257,11 +1258,15 @@ export async function makeRisuTriggerRuntime(
             ...baseParameters,
             ...(callerParameters || {}),
           };
+          if (typeof parameters.seed === 'number' && parameters.seed < 0) {
+            delete parameters.seed;
+          }
 
           const effectiveNegativePrompt = negativePrompt
             ?? (typeof parameters.negativePrompt === 'string' ? parameters.negativePrompt : undefined)
             ?? (naiSettings?.negativePrompt || undefined);
 
+          _logImageGen.info(`generateImage: dispatching prompt="${prompt.slice(0, 100)}" conn=${imageConnectionId ?? '<default>'}`);
           const res = await api.imageGen.generate(prompt, {
             ...(effectiveNegativePrompt !== undefined ? { negativePrompt: effectiveNegativePrompt } : {}),
             ...(imageConnectionId ? { connectionId: imageConnectionId } : {}),
@@ -1288,11 +1293,15 @@ export async function makeRisuTriggerRuntime(
             }
           }
           if (imageId) {
+            _logImageGen.info(`generateImage: success imageId=${imageId}`);
             return `{{inlay::${imageId}}}`;
           }
+          _logImageGen.warn(`generateImage: failed — no image returned`);
           return 'Error: image generation returned no image';
         } catch (err) {
-          return `Error: image generation failed: ${err instanceof Error ? err.message : String(err)}`;
+          const msg = err instanceof Error ? err.message : String(err);
+          _logImageGen.warn(`generateImage: threw — ${msg}`);
+          return `Error: image generation failed: ${msg}`;
         }
       },
       // Emits resolved HTML directly. Sentinel wouldn't survive DB write without a re-parse pass.

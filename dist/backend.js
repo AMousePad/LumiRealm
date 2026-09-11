@@ -20549,6 +20549,8 @@ function transformPresetTemplate(template) {
     }
   }
   result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, "{{var::$1}}");
+  result = result.replace(/\{\{#if_pure\b/g, "{{#if");
+  result = result.replace(/\{\{\/if_pure\}\}/g, "{{/if}}");
   result = result.replace(/\{\{contains::/g, "{{risuContains::");
   result = result.replace(/\{\{length::/g, "{{risuLength::");
   result = result.replace(/\{\{and::/g, "{{risuAnd::");
@@ -30393,6 +30395,7 @@ var _logAxLLMMain = makeSafeLogger("runtime.axLLMMain");
 var _logFlush = makeSafeLogger("runtime.flush");
 var _logLuaPrint = makeSafeLogger("runtime.lua");
 var _logCbs = makeSafeLogger("runtime.cbs");
+var _logImageGen = makeSafeLogger("runtime.imageGen");
 var _wasmoonExec = null;
 var _wasmoonEnabled = true;
 var _cbsUnresolvedAlertFired = false;
@@ -31300,7 +31303,11 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
             ...baseParameters,
             ...callerParameters || {}
           };
+          if (typeof parameters.seed === "number" && parameters.seed < 0) {
+            delete parameters.seed;
+          }
           const effectiveNegativePrompt = negativePrompt ?? (typeof parameters.negativePrompt === "string" ? parameters.negativePrompt : undefined) ?? (naiSettings?.negativePrompt || undefined);
+          _logImageGen.info(`generateImage: dispatching prompt="${prompt2.slice(0, 100)}" conn=${imageConnectionId ?? "<default>"}`);
           const res = await api.imageGen.generate(prompt2, {
             ...effectiveNegativePrompt !== undefined ? { negativePrompt: effectiveNegativePrompt } : {},
             ...imageConnectionId ? { connectionId: imageConnectionId } : {},
@@ -31327,11 +31334,15 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
             }
           }
           if (imageId) {
+            _logImageGen.info(`generateImage: success imageId=${imageId}`);
             return `{{inlay::${imageId}}}`;
           }
+          _logImageGen.warn(`generateImage: failed \u2014 no image returned`);
           return "Error: image generation returned no image";
         } catch (err) {
-          return `Error: image generation failed: ${err instanceof Error ? err.message : String(err)}`;
+          const msg = err instanceof Error ? err.message : String(err);
+          _logImageGen.warn(`generateImage: threw \u2014 ${msg}`);
+          return `Error: image generation failed: ${msg}`;
         }
       },
       getCharacterImageMain: async (_id) => {
