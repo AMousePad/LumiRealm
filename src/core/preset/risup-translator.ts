@@ -214,34 +214,42 @@ export function translateRisuPromptBlocks(
           } as PromptBlockDTO);
         }
       } else if (type === 'persona') {
+        const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
+        const personaContent = rawInner
+          ? (rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{persona}}') : rawInner)
+          : (text || '{{persona}}');
         blocks.push({
           id: newUuid(),
           name: name || 'User Persona',
-          role: role === 'system' ? 'user' : role,
+          role,
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
           marker: 'persona_description',
-          content: text || '{{persona}}',
+          content: personaContent,
           isLocked: false,
           color: null,
           injectionTrigger: [],
-      group: null,
+          group: null,
         } as PromptBlockDTO);
       } else if (type === 'description') {
+        const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
+        const descContent = rawInner
+          ? (rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{description}}') : rawInner)
+          : (text || '{{description}}');
         blocks.push({
           id: newUuid(),
           name: name || 'Character Description',
-          role: role === 'system' ? 'user' : role,
+          role,
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
           marker: 'char_description',
-          content: text || '{{description}}',
+          content: descContent,
           isLocked: false,
           color: null,
           injectionTrigger: [],
-      group: null,
+          group: null,
         } as PromptBlockDTO);
       } else if (type === 'lorebook') {
         blocks.push({
@@ -256,9 +264,13 @@ export function translateRisuPromptBlocks(
           isLocked: false,
           color: null,
           injectionTrigger: [],
-      group: null,
+          group: null,
         } as PromptBlockDTO);
       } else if (type === 'authornote') {
+        const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
+        const anContent = rawInner
+          ? (rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{authors_note}}') : rawInner)
+          : (text || '{{authors_note}}');
         blocks.push({
           id: newUuid(),
           name: name || "Author's Note",
@@ -267,11 +279,11 @@ export function translateRisuPromptBlocks(
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
           marker: null,
-          content: text || '{{authors_note}}',
+          content: anContent,
           isLocked: false,
           color: null,
           injectionTrigger: [],
-      group: null,
+          group: null,
         } as PromptBlockDTO);
       } else if (type === 'memory') {
         blocks.push({
