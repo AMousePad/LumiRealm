@@ -421,6 +421,9 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       if (luaCode.length === 0) continue;
       try {
         const settings = getCachedSettingsSync(userId);
+        const moduleLorebooks = Object.values(
+          (active.card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {},
+        ).flat();
         const seams = buildDispatchSeams({
           chatId,
           binding: 'manual',
@@ -429,11 +432,13 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           stateChanged: makeStateChangedCallback(chatId, userId),
           auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
           resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+          moduleLorebooks,
         });
         const runtime = await makeRisuTriggerRuntime(api, { characterId }, scriptNS, {
           ...seams,
           characterId,
           lowLevelAccess: Boolean(trigger.lowLevelAccess),
+          moduleLorebooks,
         });
         log.info(
           `dispatchButtonClick: invoking onButtonClick args=[${effectiveId}, ${btn}] chatId=${chatId}`,

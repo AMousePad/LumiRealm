@@ -24925,8 +24925,9 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         }
       }
     } catch {}
-    const extraLorebooks = opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
-    if (Array.isArray(extraLorebooks) && extraLorebooks.length > 0) {
+    const rawExtra = opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+    const extraLorebooks = Array.isArray(rawExtra) ? rawExtra : rawExtra && typeof rawExtra === "object" ? Object.values(rawExtra).flat() : [];
+    if (extraLorebooks.length > 0) {
       for (const raw of extraLorebooks) {
         if (!raw || typeof raw !== "object")
           continue;

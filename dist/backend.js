@@ -30532,8 +30532,9 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         }
       }
     } catch {}
-    const extraLorebooks = opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
-    if (Array.isArray(extraLorebooks) && extraLorebooks.length > 0) {
+    const rawExtra = opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+    const extraLorebooks = Array.isArray(rawExtra) ? rawExtra : rawExtra && typeof rawExtra === "object" ? Object.values(rawExtra).flat() : [];
+    if (extraLorebooks.length > 0) {
       for (const raw of extraLorebooks) {
         if (!raw || typeof raw !== "object")
           continue;
@@ -42365,6 +42366,7 @@ function createTriggerDispatcher(deps) {
         continue;
       try {
         const settings = getCachedSettingsSync(userId);
+        const moduleLorebooks = Object.values(active.card.risuPayload.extra?.runtime_module_lorebooks ?? {}).flat();
         const seams = buildDispatchSeams({
           chatId,
           binding: "manual",
@@ -42372,12 +42374,14 @@ function createTriggerDispatcher(deps) {
           rememberOurWrite,
           stateChanged: makeStateChangedCallback(chatId, userId),
           auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
-          resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true })
+          resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+          moduleLorebooks
         });
         const runtime = await makeRisuTriggerRuntime(api, { characterId }, scriptNS, {
           ...seams,
           characterId,
-          lowLevelAccess: Boolean(trigger.lowLevelAccess)
+          lowLevelAccess: Boolean(trigger.lowLevelAccess),
+          moduleLorebooks
         });
         log.info(`dispatchButtonClick: invoking onButtonClick args=[${effectiveId}, ${btn}] chatId=${chatId}`);
         await runtime.runLua(luaCode, {

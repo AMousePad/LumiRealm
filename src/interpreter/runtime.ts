@@ -410,8 +410,13 @@ export async function makeRisuTriggerRuntime(
         }
       }
     } catch { /* world_books permission not granted */ }
-    const extraLorebooks = (opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? []) as readonly unknown[];
-    if (Array.isArray(extraLorebooks) && extraLorebooks.length > 0) {
+    const rawExtra = opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+    const extraLorebooks = Array.isArray(rawExtra)
+      ? rawExtra
+      : (rawExtra && typeof rawExtra === 'object')
+      ? Object.values(rawExtra as unknown as Record<string, unknown>).flat()
+      : [];
+    if (extraLorebooks.length > 0) {
       for (const raw of extraLorebooks) {
         if (!raw || typeof raw !== 'object') continue;
         const r = raw as Record<string, unknown>;
