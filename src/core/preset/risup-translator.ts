@@ -95,6 +95,60 @@ export function parseRisuToggleSyntax(template: string | undefined): ParsedToggl
   return groups.filter((g) => g.variables.length > 0);
 }
 
+
+/**
+ * Translates embedded Risu CBS expressions in preset blocks into Lumiverse-compatible macros.
+ * Recursively maps {{? expr}} -> {{risuCalc::expr}}, variable lookups, and boolean helpers.
+ */
+export function transformPresetTemplate(template: string): string {
+  if (!template || typeof template !== 'string' || !template.includes('{{')) {
+    return template;
+  }
+
+  // 1. Balanced brace parser for {{? ...}} -> {{risuCalc::...}}
+  let result = '';
+  let i = 0;
+  const n = template.length;
+  while (i < n) {
+    if (template.slice(i, i + 3) === '{{?') {
+      let depth = 1;
+      let j = i + 3;
+      while (j < n && depth > 0) {
+        if (template.slice(j, j + 2) === '{{') {
+          depth++;
+          j += 2;
+        } else if (template.slice(j, j + 2) === '}}') {
+          depth--;
+          j += 2;
+        } else {
+          j++;
+        }
+      }
+      const expr = template.slice(i + 3, j - 2).trim();
+      result += `{{risuCalc::${expr}}}`;
+      i = j;
+    } else {
+      result += template[i];
+      i++;
+    }
+  }
+
+  // 2. Map variable getters: {{getglobalvar::toggle_*}} -> {{var::toggle_*}}
+  result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, '{{var::$1}}');
+
+  // 3. Map common CBS helpers to namespaced compatibility macros
+  result = result.replace(/\{\{contains::/g, '{{risuContains::');
+  result = result.replace(/\{\{length::/g, '{{risuLength::');
+  result = result.replace(/\{\{and::/g, '{{risuAnd::');
+  result = result.replace(/\{\{or::/g, '{{risuOr::');
+  result = result.replace(/\{\{any::/g, '{{risuAny::');
+  result = result.replace(/\{\{not::/g, '{{risuNot::');
+  result = result.replace(/\{\{equal::/g, '{{eq::');
+  result = result.replace(/\{\{not_equal::/g, '{{ne::');
+
+  return result;
+}
+
 export function translateRisuPromptBlocks(
   template: readonly Record<string, unknown>[] | undefined,
   toggleGroups: readonly ParsedToggleGroup[],
@@ -158,7 +212,8 @@ export function translateRisuPromptBlocks(
           : rawRole === 'user'
           ? 'user'
           : 'system';
-      const text = typeof item['text'] === 'string' ? item['text'] : '';
+      const rawText = typeof item['text'] === 'string' ? item['text'] : '';
+      const text = transformPresetTemplate(rawText);
       const name = typeof item['name'] === 'string' && item['name'].trim() && item['name'] !== 'undefined'
         ? item['name'].trim()
         : null;

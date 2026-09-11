@@ -20518,6 +20518,47 @@ function parseRisuToggleSyntax(template) {
   }
   return groups.filter((g) => g.variables.length > 0);
 }
+function transformPresetTemplate(template) {
+  if (!template || typeof template !== "string" || !template.includes("{{")) {
+    return template;
+  }
+  let result = "";
+  let i = 0;
+  const n = template.length;
+  while (i < n) {
+    if (template.slice(i, i + 3) === "{{?") {
+      let depth = 1;
+      let j = i + 3;
+      while (j < n && depth > 0) {
+        if (template.slice(j, j + 2) === "{{") {
+          depth++;
+          j += 2;
+        } else if (template.slice(j, j + 2) === "}}") {
+          depth--;
+          j += 2;
+        } else {
+          j++;
+        }
+      }
+      const expr = template.slice(i + 3, j - 2).trim();
+      result += `{{risuCalc::${expr}}}`;
+      i = j;
+    } else {
+      result += template[i];
+      i++;
+    }
+  }
+  result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, "{{var::$1}}");
+  result = result.replace(/\{\{contains::/g, "{{risuContains::");
+  result = result.replace(/\{\{length::/g, "{{risuLength::");
+  result = result.replace(/\{\{and::/g, "{{risuAnd::");
+  result = result.replace(/\{\{or::/g, "{{risuOr::");
+  result = result.replace(/\{\{any::/g, "{{risuAny::");
+  result = result.replace(/\{\{not::/g, "{{risuNot::");
+  result = result.replace(/\{\{equal::/g, "{{eq::");
+  result = result.replace(/\{\{not_equal::/g, "{{ne::");
+  return result;
+}
 function translateRisuPromptBlocks(template, toggleGroups) {
   const blocks = [];
   const defaultsByBlockId = {};
@@ -20566,7 +20607,8 @@ function translateRisuPromptBlocks(template, toggleGroups) {
       const type = typeof item["type"] === "string" ? item["type"] : "plain";
       const rawRole = typeof item["role"] === "string" ? item["role"] : "system";
       const role = rawRole === "bot" || rawRole === "assistant" || rawRole === "char" ? "assistant" : rawRole === "user" ? "user" : "system";
-      const text = typeof item["text"] === "string" ? item["text"] : "";
+      const rawText = typeof item["text"] === "string" ? item["text"] : "";
+      const text = transformPresetTemplate(rawText);
       const name = typeof item["name"] === "string" && item["name"].trim() && item["name"] !== "undefined" ? item["name"].trim() : null;
       const type2 = typeof item["type2"] === "string" ? item["type2"] : "normal";
       const enabled = type2 !== "disabled" && item["enabled"] !== false;
@@ -41386,6 +41428,146 @@ function createLumiInterceptors(deps) {
   };
 }
 
+// src/interpreter/spindle-macros.ts
+init_risu_helpers();
+var log8 = makeSafeLogger("spindle-macros");
+function getArg(ctx, index) {
+  const args = ctx?.args;
+  if (Array.isArray(args)) {
+    return args[index] == null ? "" : String(args[index]);
+  }
+  return "";
+}
+function getArgs(ctx) {
+  const args = ctx?.args;
+  if (Array.isArray(args)) {
+    return args.map((a) => a == null ? "" : String(a));
+  }
+  return [];
+}
+function isTruthy2(val) {
+  const s = String(val == null ? "" : val).trim().toLowerCase();
+  return s === "1" || s === "true";
+}
+function evalRisuCalc(ctx) {
+  const expr = getArg(ctx, 0);
+  if (!expr)
+    return "0";
+  const c = ctx;
+  const readLocal = (name) => {
+    return c?.env?.variables?.local?.get?.(name) ?? "";
+  };
+  const readGlobal = (name) => {
+    return c?.env?.variables?.global?.get?.(name) ?? "";
+  };
+  try {
+    const num = calcString(expr, readLocal, readGlobal);
+    return Number.isFinite(num) ? String(num) : "0";
+  } catch {
+    return "0";
+  }
+}
+function registerSpindleMacros() {
+  const MACRO_CATEGORY = "extension:lumirealm";
+  const macros = [
+    {
+      name: "risuCalc",
+      aliases: ["cbsCalc", "littleDevilCalc"],
+      category: MACRO_CATEGORY,
+      description: "Evaluates RisuAI math/boolean expressions (+, -, *, /, ^, %, <, >, <=, >=, =, !=, &, |, !).",
+      returnType: "number",
+      handler: (ctx) => evalRisuCalc(ctx)
+    },
+    {
+      name: "risuContains",
+      aliases: ["littleDevilContains"],
+      category: MACRO_CATEGORY,
+      description: "Case-sensitive substring matching (returns 1 or 0).",
+      returnType: "integer",
+      handler: (ctx) => {
+        const text = getArg(ctx, 0);
+        const needle = getArg(ctx, 1);
+        return text.includes(needle) ? "1" : "0";
+      }
+    },
+    {
+      name: "risuLength",
+      aliases: ["littleDevilLength"],
+      category: MACRO_CATEGORY,
+      description: "Returns length of string.",
+      returnType: "integer",
+      handler: (ctx) => {
+        return String(getArg(ctx, 0).length);
+      }
+    },
+    {
+      name: "risuNot",
+      aliases: ["littleDevilNot"],
+      category: MACRO_CATEGORY,
+      description: "Boolean negation (returns 1 or 0).",
+      returnType: "integer",
+      handler: (ctx) => {
+        return isTruthy2(getArg(ctx, 0)) ? "0" : "1";
+      }
+    },
+    {
+      name: "risuAnd",
+      aliases: ["littleDevilAnd"],
+      category: MACRO_CATEGORY,
+      description: "Variadic boolean AND (returns 1 or 0).",
+      returnType: "integer",
+      handler: (ctx) => {
+        const args = getArgs(ctx);
+        return args.length === 0 || args.every(isTruthy2) ? "1" : "0";
+      }
+    },
+    {
+      name: "risuOr",
+      aliases: ["littleDevilOr"],
+      category: MACRO_CATEGORY,
+      description: "Variadic boolean OR (returns 1 or 0).",
+      returnType: "integer",
+      handler: (ctx) => {
+        return getArgs(ctx).some(isTruthy2) ? "1" : "0";
+      }
+    },
+    {
+      name: "risuAny",
+      category: MACRO_CATEGORY,
+      description: "Variadic boolean OR / any truthy (returns 1 or 0).",
+      returnType: "integer",
+      handler: (ctx) => {
+        return getArgs(ctx).some(isTruthy2) ? "1" : "0";
+      }
+    }
+  ];
+  for (const m of macros) {
+    try {
+      spindle.registerMacro({
+        name: m.name,
+        category: m.category,
+        description: m.description,
+        returnType: m.returnType,
+        handler: m.handler
+      });
+      if (m.aliases) {
+        for (const alias of m.aliases) {
+          spindle.registerMacro({
+            name: alias,
+            category: m.category,
+            description: m.description,
+            returnType: m.returnType,
+            handler: m.handler
+          });
+        }
+      }
+    } catch (err) {
+      log8.warn(`Failed to register macro ${m.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  log8.info(`Registered ${macros.length} Spindle compatibility macros for Lumiverse prompt assembly`);
+}
+
 // src/interceptors/prompt-regex-runner-client.ts
 var RUNNER_ENTRY = "dist/regex-runner.js";
 var RUNNER_KIND = "lumirealm-prompt-regex";
@@ -47299,7 +47481,7 @@ function logUid() {
 function userScoped(handler) {
   return (raw, userId) => userId ? userIdAls.run(userId, () => handler(raw, userId)) : handler(raw, userId);
 }
-var log8 = {
+var log9 = {
   error(msg) {
     spindle.log.error(`[lumirealm] ${msg}`);
     logStore.push("error", "backend", msg, logUid());
@@ -47325,13 +47507,13 @@ var log8 = {
     logStore.push("trace", "backend", msg, logUid());
   }
 };
-log8.info(`backend boot: version=${EXTENSION_VERSION} features=[lorebook-cache,worldbook-events]`);
+log9.info(`backend boot: version=${EXTENSION_VERSION} features=[lorebook-cache,worldbook-events]`);
 var hostVersionCheck = checkHostVersion(runtimeVersionInfo.hostVersion, MINIMUM_LUMIVERSE_VERSION);
 var hostVersionTag = hostVersionCheck.needsUpdate ? "WARN" : "ok";
-log8.info(`host-version: lumiverse=${runtimeVersionInfo.hostVersion} min=${MINIMUM_LUMIVERSE_VERSION} ${hostVersionTag}`);
+log9.info(`host-version: lumiverse=${runtimeVersionInfo.hostVersion} min=${MINIMUM_LUMIVERSE_VERSION} ${hostVersionTag}`);
 if (hostVersionCheck.needsUpdate)
-  log8.warn(hostVersionCheck.message);
-initPermissions(log8);
+  log9.warn(hostVersionCheck.message);
+initPermissions(log9);
 subscribeToMissingChanges((missing) => {
   const purposes = {};
   for (const p of missing)
@@ -47344,13 +47526,13 @@ subscribeToMissingChanges((missing) => {
         purposes
       }, userId);
     } catch (err) {
-      log8.warn(`permissions.changed: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
+      log9.warn(`permissions.changed: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
     }
   }
   if (missing.length > 0) {
-    log8.warn(`permissions.changed: broadcast notify_missing_permissions to ${capturedUserIds.size} user(s) missing=[${missing.join(",")}]`);
+    log9.warn(`permissions.changed: broadcast notify_missing_permissions to ${capturedUserIds.size} user(s) missing=[${missing.join(",")}]`);
   } else {
-    log8.info(`permissions.changed: all required perms granted, broadcast empty set to ${capturedUserIds.size} user(s) to auto-dismiss`);
+    log9.info(`permissions.changed: all required perms granted, broadcast empty set to ${capturedUserIds.size} user(s) to auto-dismiss`);
   }
 });
 function broadcastBridgeStatus(payload) {
@@ -47358,7 +47540,7 @@ function broadcastBridgeStatus(payload) {
     try {
       spindle.sendToFrontend({ type: "notify_bridge_status", ...payload }, userId);
     } catch (err) {
-      log8.warn(`bridge_status: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
+      log9.warn(`bridge_status: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
     }
   }
 }
@@ -47379,14 +47561,14 @@ subscribeToMissingChanges(() => {
   (async () => {
     const missing = await probeLumiagentBridge();
     if (missing && missing.length > 0) {
-      log8.warn(`permissions.changed: lumiagent bridge probe failed, LumiRealm missing=[${missing.join(",")}]`);
+      log9.warn(`permissions.changed: lumiagent bridge probe failed, LumiRealm missing=[${missing.join(",")}]`);
       broadcastBridgeStatus({
         offline: true,
         missingPermissions: missing,
         forCaller: "lumiagent"
       });
     } else {
-      log8.info(`permissions.changed: lumiagent bridge probe ok (or endpoint absent), clearing any banner`);
+      log9.info(`permissions.changed: lumiagent bridge probe ok (or endpoint absent), clearing any banner`);
       broadcastBridgeStatus({ offline: false, missingPermissions: [] });
     }
   })();
@@ -47422,11 +47604,11 @@ function modulesByNamespaceFromCard(card) {
 var variableState = new VariableStateStore;
 var toggleState = new ToggleStateStore;
 function scheduleStateChangedRefresh2(chatId, userId) {
-  log8.debug(`scheduleStateChangedRefresh: scheduling for chat=${chatId}`);
+  log9.debug(`scheduleStateChangedRefresh: scheduling for chat=${chatId}`);
   scheduleStateChangedRefresh(chatId, async () => {
     const active = activeCardByChat.get(chatId);
     if (!active) {
-      log8.debug(`scheduleStateChangedRefresh: skipped (no active card) chat=${chatId}`);
+      log9.debug(`scheduleStateChangedRefresh: skipped (no active card) chat=${chatId}`);
       return;
     }
     const t0 = Date.now();
@@ -47434,8 +47616,8 @@ function scheduleStateChangedRefresh2(chatId, userId) {
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
     await refreshVariables(active, chatId, userId, { guiReload: true });
-    log8.debug(`scheduleStateChangedRefresh: completed chat=${chatId} elapsed=${Date.now() - t0}ms`);
-  }, (err) => log8.error(`scheduleStateChangedRefresh: refresh threw chat=${chatId}: ${errMsg(err)}`));
+    log9.debug(`scheduleStateChangedRefresh: completed chat=${chatId} elapsed=${Date.now() - t0}ms`);
+  }, (err) => log9.error(`scheduleStateChangedRefresh: refresh threw chat=${chatId}: ${errMsg(err)}`));
 }
 function makeStateChangedCallback(chatId, userId) {
   return () => scheduleStateChangedRefresh2(chatId, userId);
@@ -47445,7 +47627,7 @@ var settingsService = createSettingsService({
   userStorage,
   listConnections: (userId) => spindle.connections.list(userId),
   send,
-  log: log8,
+  log: log9,
   errMsg
 });
 var getSettingsForUser = settingsService.getSettingsForUser;
@@ -47461,7 +47643,7 @@ var worldBookIdsByCharacter = new Map;
 function journalStorage() {
   return spindle.userStorage;
 }
-var consentApi = createConsentApi({ send, log: log8 });
+var consentApi = createConsentApi({ send, log: log9 });
 var requestConsent = consentApi.requestConsent;
 var pendingConsents = consentApi.pendingConsents;
 var deleteCardByChar = makeDeleteCardByChar({
@@ -47473,7 +47655,7 @@ var deleteCardByChar = makeDeleteCardByChar({
   listCards,
   pushCards,
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
-  log: log8
+  log: log9
 });
 var orphanDetectBuilders = createOrphanDetectBuilders({
   journalStorage,
@@ -47486,7 +47668,7 @@ var orphanDetectBuilders = createOrphanDetectBuilders({
   },
   listModuleStore: (userId) => listModules(moduleStorage(), userId),
   readModuleEnvelope: (userId, moduleId) => readEnvelope(moduleStorage(), userId, moduleId),
-  log: log8,
+  log: log9,
   errMsg
 });
 var buildOrphanDetectDeps = orphanDetectBuilders.buildOrphanDetectDeps;
@@ -47536,7 +47718,7 @@ var orphanOrchestrator = createOrphanOrchestrator({
     const modules = await listModules(moduleStorage(), userId);
     return buildRepairTargetSummary(entries, modules);
   },
-  log: log8,
+  log: log9,
   errMsg
 });
 var scanOrphanedImages = (userId) => orphanOrchestrator.scanOrphanedImages(userId);
@@ -47549,11 +47731,11 @@ var recompileDerivedPayloadForCharacter = async (characterId, userId) => {
       const result = recompileDerivedPayload(cur);
       if (result === null)
         return cur;
-      log8.info(`recompile-derived: char=${characterId} rebuilt [${result.changed.join(",")}]`);
+      log9.info(`recompile-derived: char=${characterId} rebuilt [${result.changed.join(",")}]`);
       return result.next;
     });
   } catch (err) {
-    log8.warn(`recompile-derived: char=${characterId} failed: ${errMsg(err)}`);
+    log9.warn(`recompile-derived: char=${characterId} failed: ${errMsg(err)}`);
   }
 };
 var deleteRepairRegexRows = async (userId, ids) => {
@@ -47585,10 +47767,10 @@ var { captureUserId, markFrontendReady } = makeCaptureUserId({
     try {
       spindle.sendToFrontend({ type: "notify_missing_permissions", missing, purposes }, userId);
     } catch (err) {
-      log8.warn(`captureUserId.notify: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
+      log9.warn(`captureUserId.notify: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
     }
   },
-  log: log8,
+  log: log9,
   errMsg
 });
 var scanRepairTargets = (userId) => orphanOrchestrator.scanRepairTargets(userId);
@@ -47613,7 +47795,7 @@ var importCardOrchestrator = createImportCardOrchestrator({
   listCards,
   pushCards,
   toastFor,
-  log: log8,
+  log: log9,
   errMsg
 });
 var importCardFromBytes = importCardOrchestrator.importCardFromBytes;
@@ -47624,7 +47806,7 @@ function blockedByRepair(userId, messageType) {
     return false;
   if (!repairInFlightByUser.has(userId))
     return false;
-  log8.info(`${messageType}: blocked by in-flight repair for user=${userId}`);
+  log9.info(`${messageType}: blocked by in-flight repair for user=${userId}`);
   toastFor(userId, "warning", "A repair is in progress. Try again once it finishes.", { title: "lumirealm" });
   return true;
 }
@@ -47644,14 +47826,14 @@ function userStorage() {
 }
 function send(msg, userId) {
   if (userId === undefined) {
-    log8.error(`send: refusing to broadcast type=${msg.type} (no userId)`);
+    log9.error(`send: refusing to broadcast type=${msg.type} (no userId)`);
     return;
   }
   spindle.sendToFrontend(msg, userId);
 }
 function toastFor(userId, kind, message, options) {
   if (userId === undefined) {
-    log8.warn(`toastFor(broadcast): no userId for kind=${kind}, fanning out to all users`);
+    log9.warn(`toastFor(broadcast): no userId for kind=${kind}, fanning out to all users`);
     spindle.toast[kind](message, options ?? {});
     return;
   }
@@ -47666,9 +47848,9 @@ async function ensureLogStateLoaded(userId) {
 }
 async function listCards(userId) {
   const t0 = Date.now();
-  log8.debug(`listCards: start userId=${userId ?? "<none>"}`);
+  log9.debug(`listCards: start userId=${userId ?? "<none>"}`);
   if (userId === undefined) {
-    log8.info(`listCards: userId not yet captured, returning empty`);
+    log9.info(`listCards: userId not yet captured, returning empty`);
     return [];
   }
   const entries = await listLumirealmCharacters(charactersApi(), userId, {
@@ -47690,7 +47872,7 @@ async function listCards(userId) {
     };
   });
   summaries.sort((a, b) => (b.last_opened_at ?? 0) - (a.last_opened_at ?? 0) || b.stored_at - a.stored_at);
-  log8.debug(`listCards: done count=${summaries.length} elapsed=${Date.now() - t0}ms`);
+  log9.debug(`listCards: done count=${summaries.length} elapsed=${Date.now() - t0}ms`);
   return summaries;
 }
 function pushCards(cards, userId) {
@@ -47724,9 +47906,9 @@ var PROMPT_REGEX_ENV = (() => {
 var PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE = typeof spindle.promptRegex?.setOwnedChats === "function";
 var PROMPT_REGEX_ACTIVE = PROMPT_REGEX_ENV && PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE;
 if (PROMPT_REGEX_ENV && !PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE) {
-  log8.warn("Inline prompt regex is enabled (LUMIREALM_PROMPT_REGEX) and backendProcesses is available, but " + "spindle.promptRegex.setOwnedChats is missing on this host; declining prompt-regex ownership so the host " + "keeps its own pass (a host that cannot be told to skip would otherwise double-apply). Upgrade Lumiverse to " + "enable inline prompt regex.");
+  log9.warn("Inline prompt regex is enabled (LUMIREALM_PROMPT_REGEX) and backendProcesses is available, but " + "spindle.promptRegex.setOwnedChats is missing on this host; declining prompt-regex ownership so the host " + "keeps its own pass (a host that cannot be told to skip would otherwise double-apply). Upgrade Lumiverse to " + "enable inline prompt regex.");
 }
-var promptRegexRunnerClient = PROMPT_REGEX_ACTIVE ? createPromptRegexRunnerClient({ log: log8, errMsg }) : null;
+var promptRegexRunnerClient = PROMPT_REGEX_ACTIVE ? createPromptRegexRunnerClient({ log: log9, errMsg }) : null;
 var promptRegexOwnedByUser = new Map;
 var promptRegexOwnedSnapshot = "";
 function syncPromptRegexOwnedChats() {
@@ -47745,7 +47927,7 @@ function syncPromptRegexOwnedChats() {
   try {
     api.setOwnedChats([...owned]);
   } catch (err) {
-    log8.warn(`syncPromptRegexOwnedChats: ${err.message}`);
+    log9.warn(`syncPromptRegexOwnedChats: ${err.message}`);
   }
 }
 function dropPromptRegexOwnershipForChat(chatId) {
@@ -47779,7 +47961,7 @@ async function touchCharacterRecency(characterId, userId) {
         return;
       await writeCharacterRecency(userStorage(), userId, touchRecency(cur, characterId, Date.now()));
     } catch (err) {
-      log8.debug(`touchCharacterRecency: ${errMsg(err)}`);
+      log9.debug(`touchCharacterRecency: ${errMsg(err)}`);
     }
   });
   return recencyWriteChain;
@@ -47788,7 +47970,7 @@ function sendSetActiveChat(activeChatId, activeCharacterId, userId) {
   try {
     send({ type: "set_active_chat", chatId: activeChatId, characterId: activeCharacterId }, userId);
   } catch (err) {
-    log8.warn(`sendSetActiveChat: ${err.message}`);
+    log9.warn(`sendSetActiveChat: ${err.message}`);
   }
   if (activeCharacterId !== null)
     touchCharacterRecency(activeCharacterId, userId);
@@ -47805,7 +47987,7 @@ function sendSetActiveChat(activeChatId, activeCharacterId, userId) {
             return;
           if (promptRegexOwnedByUser.get(claimingUser) !== claimedChat)
             return;
-          log8.error(`prompt-regex: runner warm-up failed for chat=${claimedChat}; dropping ownership so the host resumes its own prompt-regex pass.`);
+          log9.error(`prompt-regex: runner warm-up failed for chat=${claimedChat}; dropping ownership so the host resumes its own prompt-regex pass.`);
           promptRegexOwnedByUser.delete(claimingUser);
           syncPromptRegexOwnedChats();
         });
@@ -47816,15 +47998,15 @@ function sendSetActiveChat(activeChatId, activeCharacterId, userId) {
     syncPromptRegexOwnedChats();
   }
 }
-var nudgeGc = makeNudgeGc(log8, errMsg);
-var refreshPersonaImage = makeRefreshPersonaImage({ log: log8, errMsg });
-var seedAuthorsNoteFromDepthPrompt = makeSeedAuthorsNoteFromDepthPrompt({ log: log8, errMsg });
+var nudgeGc = makeNudgeGc(log9, errMsg);
+var refreshPersonaImage = makeRefreshPersonaImage({ log: log9, errMsg });
+var seedAuthorsNoteFromDepthPrompt = makeSeedAuthorsNoteFromDepthPrompt({ log: log9, errMsg });
 var maybeFinalizeImport = makeMaybeFinalizeImport({
   pendingImportCompletions,
   send,
   listCards,
   pushCards,
-  log: log8,
+  log: log9,
   errMsg
 });
 var activeCardLoader = createActiveCardLoader({
@@ -47856,7 +48038,7 @@ var activeCardLoader = createActiveCardLoader({
   seedAuthorsNoteFromDepthPrompt: (chatId, userId, ext) => seedAuthorsNoteFromDepthPrompt(chatId, userId, ext),
   runCharacterMigration: (charId, charName, userId, env, opts) => migrationsRunner.runCharacterMigration(charId, charName, userId, env, opts),
   toastFor,
-  log: log8,
+  log: log9,
   errMsg
 });
 var ensureActiveCardForChat = activeCardLoader.ensureActiveCardForChat;
@@ -47864,7 +48046,7 @@ var readonlyResolver = createReadonlyResolver({
   activeCardByChat,
   getCachedSettingsSync,
   modulesByNamespaceFromCard,
-  log: log8,
+  log: log9,
   errMsg
 });
 var resolveReadonly = readonlyResolver.resolve;
@@ -47904,7 +48086,7 @@ var bgHtmlRefresher = createBgHtmlRefresher({
   lastSentBgHtmlByChat,
   listLiveCharacterCrossRuleRules,
   send,
-  log: log8,
+  log: log9,
   errMsg
 });
 var refreshBgHtml = bgHtmlRefresher.refresh;
@@ -47918,7 +48100,7 @@ var applySvgRasterIndex = createApplySvgRasterIndex({
   invalidateMacroInterceptorForChat,
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
   refreshBgHtml,
-  log: log8,
+  log: log9,
   errMsg
 });
 var TRANSLATE_TARGET_LANG = "en";
@@ -47957,10 +48139,10 @@ var variablesTogglesService = createVariablesTogglesService({
         ...opts?.guiReload ? { reason: "gui-reload" } : {}
       }, userId);
     }).catch((err) => {
-      log8.warn(`pushDisplaySnapshot: assemble failed chat=${chatId}: ${errMsg(err)}`);
+      log9.warn(`pushDisplaySnapshot: assemble failed chat=${chatId}: ${errMsg(err)}`);
     });
   },
-  log: log8,
+  log: log9,
   errMsg
 });
 var refreshVariables = variablesTogglesService.refreshVariables;
@@ -47977,7 +48159,7 @@ var triggerDispatcher = createTriggerDispatcher({
   refreshBgHtml,
   refreshVariables,
   toastFor,
-  log: log8,
+  log: log9,
   errMsg
 });
 var runBinding = triggerDispatcher.runBinding;
@@ -47997,9 +48179,14 @@ createLumiInterceptors({
   resolveReadonlyMany,
   runMessageVarPass: (chatId, characterId, uid) => messageVarPass.run(chatId, characterId, uid),
   runBinding,
-  log: log8,
+  log: log9,
   errMsg
 }).registerAll();
+try {
+  registerSpindleMacros();
+} catch (err) {
+  log9.warn(`registerSpindleMacros failed: ${errMsg(err)}`);
+}
 var messagesCacheInflight = new Map;
 async function refreshMessagesCache(chatId, _userId) {
   if (!chatId)
@@ -48021,7 +48208,7 @@ async function refreshMessagesCache(chatId, _userId) {
       });
       setCachedMessages(chatId, msgs);
     } catch (err) {
-      log8.warn(`refreshMessagesCache: chat=${chatId} failed: ${errMsg(err)}`);
+      log9.warn(`refreshMessagesCache: chat=${chatId} failed: ${errMsg(err)}`);
     } finally {
       messagesCacheInflight.delete(chatId);
     }
@@ -48034,7 +48221,7 @@ var messageVarPass = createMessageVarPass({
   refreshMessagesCache,
   invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
-  log: log8,
+  log: log9,
   errMsg
 });
 var lifecycleHandlers = createLifecycleEventHandlers({
@@ -48077,7 +48264,7 @@ var lifecycleHandlers = createLifecycleEventHandlers({
   sendSetActiveChat,
   setChatStyleMode: (chatId, mode, userId) => {
     spindle.chat.setStyleMode(chatId, mode, userId).catch((err) => {
-      log8.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
+      log9.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
     });
   },
   listCards,
@@ -48091,7 +48278,7 @@ var lifecycleHandlers = createLifecycleEventHandlers({
   deleteImageIds,
   emitOperationProgress,
   chatsGet: (chatId, userId) => spindle.chats.get(chatId, userId),
-  log: log8,
+  log: log9,
   errMsg
 });
 spindle.on("SETTINGS_UPDATED", userScoped(lifecycleHandlers.SETTINGS_UPDATED));
@@ -48165,7 +48352,7 @@ var moduleUploader = createModuleUploader({
   },
   emitProgress: (frame, userId) => send(frame, userId),
   currentTranslatorSchemaVersion: CURRENT_MODULE_SCHEMA_VERSION,
-  log: log8,
+  log: log9,
   errMsg
 });
 async function processModuleUpload(bytesIn, fileName, userId) {
@@ -48180,7 +48367,7 @@ async function processRisumUpload(uploadId, fileName, userId) {
   assetUploadsInFlight++;
   try {
     const source = await openRisumUpload((offset) => readUploadChunk(uploadId, offset, userId));
-    log8.info(`processModuleUpload: file=${fileName} bytes=${source.size} userId=${userId} mode=chunked`);
+    log9.info(`processModuleUpload: file=${fileName} bytes=${source.size} userId=${userId} mode=chunked`);
     return await moduleUploader.uploadSource(source, fileName, userId);
   } finally {
     assetUploadsInFlight--;
@@ -48203,7 +48390,7 @@ var modulePushes = createModulePushes({
   listCards,
   pushCards,
   send,
-  log: log8,
+  log: log9,
   errMsg
 });
 var pushModules = modulePushes.pushModules;
@@ -48219,13 +48406,13 @@ var viewerAssembly = createViewerAssembly({
   fetchWorldBookMeta: async (wbId, userId) => spindle.world_books.get(wbId, userId),
   listWorldBookEntries: (wbId, opts) => spindle.world_books.entries.list(wbId, opts),
   translateLang: TRANSLATE_TARGET_LANG,
-  log: log8,
+  log: log9,
   errMsg
 });
 var worldBookOps = createWorldBookOps({
   charactersAttachedTo: (moduleId, userId) => characterModuleAttach.charactersAttachedTo(moduleId, userId),
   send,
-  log: log8,
+  log: log9,
   errMsg
 });
 worldBookOps.deleteModuleWorldBookEverywhere;
@@ -48246,7 +48433,7 @@ var assetTriggerMutate = createAssetTriggerMutate({
     const stats = await deleteImageIds(safe, userId, context);
     return { deleted: stats.deleted, shielded };
   },
-  log: log8,
+  log: log9,
   errMsg
 });
 var refreshRisuAssetMap = assetTriggerMutate.refreshRisuAssetMap;
@@ -48275,7 +48462,7 @@ var characterModuleAttach = createCharacterModuleAttach({
   send,
   visibleChatForUser: (uid) => lastActiveChatByUser.get(uid),
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
-  log: log8,
+  log: log9,
   errMsg
 });
 var attachModuleToCharacter = characterModuleAttach.attachModuleToCharacter;
@@ -48297,14 +48484,14 @@ var lorebookImporter = createLorebookImporter({
   },
   createWorldBookEntry: (bookId, input, userId) => spindle.world_books.entries.create(bookId, input, userId),
   send,
-  log: log8,
+  log: log9,
   errMsg,
   parseDirectLorebook,
   mapLoreBook
 });
 var regexImporter = createRegexImporter({
   send,
-  log: log8,
+  log: log9,
   errMsg,
   parseDirectRegex,
   mapRegex,
@@ -48329,7 +48516,7 @@ var migrationsRunner = createMigrationsRunner({
   toastFor,
   charactersAttachedTo: (moduleId, userId) => charactersAttachedTo(moduleId, userId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
-  log: log8,
+  log: log9,
   errMsg
 });
 var runCharacterMigration = migrationsRunner.runCharacterMigration;
@@ -48354,7 +48541,7 @@ var massMigrations = createMassMigrationsRunner({
   runCharacterMigration,
   emitOperationProgress,
   toastFor,
-  log: log8,
+  log: log9,
   errMsg
 });
 subscribeToMissingChanges((missing) => {
@@ -48362,28 +48549,28 @@ subscribeToMissingChanges((missing) => {
     return;
   if (capturedUserIds.size === 0)
     return;
-  log8.info(`permissions.changed: re-running mass migrations for ${capturedUserIds.size} captured user(s)`);
+  log9.info(`permissions.changed: re-running mass migrations for ${capturedUserIds.size} captured user(s)`);
   for (const userId of capturedUserIds) {
     (async () => {
       try {
         await massMigrations.runMassModuleMigrationIfNeeded(userId);
       } catch (err) {
-        log8.warn(`permissions.changed: mass module migration retry failed userId=${userId}: ${errMsg(err)}`);
+        log9.warn(`permissions.changed: mass module migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
         await massMigrations.runMassCharacterMigrationIfNeeded(userId);
       } catch (err) {
-        log8.warn(`permissions.changed: mass character migration retry failed userId=${userId}: ${errMsg(err)}`);
+        log9.warn(`permissions.changed: mass character migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
         await massMigrations.runRetiredMacroMigrationIfNeeded(userId);
       } catch (err) {
-        log8.warn(`permissions.changed: retired macro migration retry failed userId=${userId}: ${errMsg(err)}`);
+        log9.warn(`permissions.changed: retired macro migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
         await massMigrations.runVarScopeMigrationIfNeeded(userId);
       } catch (err) {
-        log8.warn(`permissions.changed: var-scope migration retry failed userId=${userId}: ${errMsg(err)}`);
+        log9.warn(`permissions.changed: var-scope migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
     })();
   }
@@ -48406,7 +48593,7 @@ var repairOrchestrator = createRepairOrchestrator({
       const character = await spindle.characters.get(charId, uid);
       return typeof character?.image_id === "string" && character.image_id.length > 0 ? character.image_id : null;
     },
-    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send, deleteRegexRows: deleteRepairRegexRows, log: log8 }),
+    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send, deleteRegexRows: deleteRepairRegexRows, log: log9 }),
     writeEnvelope: (charId, data, uid) => writeLumirealm(charactersApi(), charId, data, uid).then(() => {
       return;
     }),
@@ -48425,7 +48612,7 @@ var repairOrchestrator = createRepairOrchestrator({
       }, uid);
     },
     invalidateActiveForCharacter: (charId, uid) => invalidateActiveForCharacter(charId, uid),
-    log: log8
+    log: log9
   }),
   readModuleEnvelope: (userId, moduleId) => readEnvelope(moduleStorage(), userId, moduleId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
@@ -48435,7 +48622,7 @@ var repairOrchestrator = createRepairOrchestrator({
   clearDeadJournals,
   send,
   emitOperationProgress,
-  log: log8,
+  log: log9,
   errMsg
 });
 repairOrchestrator.forceRetranslateAll;
@@ -48445,15 +48632,15 @@ var viewerPushDeps = {
   assembleCharacter: (characterId, userId) => viewerAssembly.assembleCharacter(characterId, userId),
   assembleModule: (moduleId, userId) => viewerAssembly.assembleModule(moduleId, userId),
   send,
-  warn: (m) => log8.warn(m),
+  warn: (m) => log9.warn(m),
   errMsg
 };
 var realmHandle = setupRealmBackend({
   send: (msg, userId) => send(msg, userId),
   log: {
-    info: (m) => log8.info(m),
-    warn: (m) => log8.warn(m),
-    error: (m) => log8.error(m)
+    info: (m) => log9.info(m),
+    warn: (m) => log9.warn(m),
+    error: (m) => log9.error(m)
   },
   importCardFromBytes: (bytes, fileName, userId) => importCardFromBytes(bytes, fileName, userId),
   createPreset: (input, uid) => spindle.presets.create(input, uid),
@@ -48469,12 +48656,12 @@ var realmHandle = setupRealmBackend({
   }
 });
 var HIGH_VOLUME_FRONTEND_MSG_TYPES = new Set;
-var screenHandlers = createScreenHandlers({ setScreenDims, log: log8 });
+var screenHandlers = createScreenHandlers({ setScreenDims, log: log9 });
 var consentHandlers = createConsentHandlers({
   pendingConsents,
   resolveAlertDismissal,
   resolvePickResolution,
-  log: log8
+  log: log9
 });
 var connectionsHandlers = createConnectionsHandlers({
   listConnectionsForUser,
@@ -48491,11 +48678,11 @@ var connectionsHandlers = createConnectionsHandlers({
         is_default: c.is_default
       }));
     } catch (err) {
-      log8.warn(`listImageConnectionsForUser failed: ${err}`);
+      log9.warn(`listImageConnectionsForUser failed: ${err}`);
       return [];
     }
   },
-  log: log8
+  log: log9
 });
 var logHandlers = createLogHandlers({
   extensionVersion: EXTENSION_VERSION,
@@ -48524,12 +48711,12 @@ var togglesHandlers = createTogglesHandlers({
   writeToggleValue,
   ensureActiveCardForChat,
   refreshToggleDefinitions,
-  log: log8
+  log: log9
 });
 var dispatchHandlers = createDispatchHandlers({
   dispatchManualTrigger,
   dispatchButtonClick,
-  log: log8
+  log: log9
 });
 var lorebookHandlers = createLorebookHandlers({ lorebookImporter });
 var regexHandlers = createRegexHandlers({ regexImporter });
@@ -48559,7 +48746,7 @@ var assetsHandlers = createAssetsHandlers({
   charactersAttachedTo,
   invalidateActiveForCharacter,
   refreshRisuAssetMap,
-  log: log8,
+  log: log9,
   errMsg
 });
 var viewerHandlers = createViewerHandlers({
@@ -48578,7 +48765,7 @@ var viewerHandlers = createViewerHandlers({
     await writeEnvelope(moduleStorage(), userId, env);
   },
   send,
-  log: log8,
+  log: log9,
   errMsg
 });
 var importHandlers = createImportHandlers({
@@ -48614,7 +48801,7 @@ var importHandlers = createImportHandlers({
   emitOperationProgress,
   notifyHostVersionOutdated: (msg, uid) => spindle.sendToFrontend(msg, uid),
   notifyMissingPermissions: (msg, uid) => spindle.sendToFrontend(msg, uid),
-  log: log8,
+  log: log9,
   errMsg
 });
 var orphanHandlers = createOrphanHandlers({
@@ -48625,7 +48812,7 @@ var orphanHandlers = createOrphanHandlers({
   buildOrphanDetectDeps,
   deleteImageIds,
   emitOperationProgress,
-  log: log8,
+  log: log9,
   errMsg
 });
 var repairHandlers = createRepairHandlers({
@@ -48635,7 +48822,7 @@ var repairHandlers = createRepairHandlers({
   repairInFlightByUser,
   scanRepairTargets,
   applyRepair,
-  log: log8,
+  log: log9,
   errMsg
 });
 var moduleHandlers = createModuleHandlers({
@@ -48654,7 +48841,7 @@ var moduleHandlers = createModuleHandlers({
     for (const moduleId of added) {
       const env = await readEnvelope(moduleStorage(), userId, moduleId);
       if (!env) {
-        log8.warn(`set_global_modules: module ${moduleId} has no envelope, artifacts not installed`);
+        log9.warn(`set_global_modules: module ${moduleId} has no envelope, artifacts not installed`);
         continue;
       }
       const { worldBookId } = await worldBookOps.dispatchGlobalModuleArtifactInstall(env, userId);
@@ -48663,7 +48850,7 @@ var moduleHandlers = createModuleHandlers({
     const chars = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
     for (const c of chars)
       invalidateActiveForCharacter(c.character.id, userId);
-    log8.info(`set_global_modules: user=${userId} count=${applied.length} ` + `added=${added.length} removed=${removed.length} invalidated=${chars.length}`);
+    log9.info(`set_global_modules: user=${userId} count=${applied.length} ` + `added=${added.length} removed=${removed.length} invalidated=${chars.length}`);
   },
   recordGlobalModuleArtifacts: async (moduleId, artifacts, userId) => {
     await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, artifacts);
@@ -48708,7 +48895,7 @@ var moduleHandlers = createModuleHandlers({
   invalidateActiveForCharacter,
   emitOperationProgress,
   blockedByRepair,
-  log: log8,
+  log: log9,
   errMsg
 });
 var exportHandlers = createExportHandlers({
@@ -48764,7 +48951,7 @@ var exportHandlers = createExportHandlers({
     return out;
   },
   extensionVersion: EXTENSION_VERSION,
-  log: log8,
+  log: log9,
   errMsg
 });
 var handlerRegistry = {
@@ -48812,13 +48999,13 @@ spindle.onFrontendMessage(userScoped(async (raw, userId) => {
   markFrontendReady(userId);
   const msg = raw;
   if (!HIGH_VOLUME_FRONTEND_MSG_TYPES.has(msg.type)) {
-    log8.trace(`frontend msg type=${msg.type} userId=${userId ?? "<none>"}`);
+    log9.trace(`frontend msg type=${msg.type} userId=${userId ?? "<none>"}`);
   }
   if (!userId) {
-    log8.warn(`frontend msg type=${msg.type} dropped: no userId`);
+    log9.warn(`frontend msg type=${msg.type} dropped: no userId`);
     return;
   }
-  const ctx = { userId, send, log: log8, errMsg };
+  const ctx = { userId, send, log: log9, errMsg };
   try {
     if (isRealmFrontendMessage(msg)) {
       await realmHandle.handle(msg, userId);
@@ -48828,7 +49015,7 @@ spindle.onFrontendMessage(userScoped(async (raw, userId) => {
     await handler(msg, ctx);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log8.error(`Frontend message handler error (type=${msg.type ?? "?"}): ${message}`);
+    log9.error(`Frontend message handler error (type=${msg.type ?? "?"}): ${message}`);
     send({ type: "error", message }, userId);
   }
 }));

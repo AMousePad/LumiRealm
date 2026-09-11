@@ -126,6 +126,7 @@ import { createOrphanHandlers } from './handlers/orphan.js';
 import { createRepairHandlers } from './handlers/repair.js';
 import { createLifecycleEventHandlers } from './events/lifecycle.js';
 import { createLumiInterceptors } from './interceptors/lumi-hooks.js';
+import { registerSpindleMacros } from './interpreter/spindle-macros.js';
 import { createPromptRegexRunnerClient } from './interceptors/prompt-regex-runner-client.js';
 import { createReadonlyResolver } from './state/readonly-resolver.js';
 import { createMessageVarPass } from './state/message-var-pass.js';
@@ -1111,6 +1112,12 @@ createLumiInterceptors({
   log,
   errMsg,
 }).registerAll();
+
+try {
+  registerSpindleMacros();
+} catch (err) {
+  log.warn(`registerSpindleMacros failed: ${errMsg(err)}`);
+}
 
 // Strip msgs[0] when it's the greeting (non-user) so cached array sits in
 // Risu frame, currentMessageIndex (also Risu-frame) indexes correctly.
