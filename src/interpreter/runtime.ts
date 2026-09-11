@@ -255,6 +255,11 @@ export async function makeRisuTriggerRuntime(
   const submodelSamplers = opts.submodelSamplers ?? dispatchCtx.submodelSamplers ?? auxSamplers;
   const auxDebugCapture: ((event: AuxDebugCaptureEvent) => void) | undefined =
     opts.auxDebugCapture ?? dispatchCtx.auxDebugCapture;
+  const imageConnectionId: string | null =
+    (opts.imageConnectionId ?? dispatchCtx.imageConnectionId ?? null);
+  const imageModelOverride: string | null =
+    (opts.imageModelOverride ?? dispatchCtx.imageModelOverride ?? null);
+  const naiSettings = opts.naiSettings ?? dispatchCtx.naiSettings ?? null;
   // Bind at factory time so cbs() invoked from Lua resolves against the
   // user this runtime was built for, not whoever last set the global.
   const capturedResolveTemplate: ((text: string) => Promise<string>) | undefined =
@@ -1196,19 +1201,47 @@ export async function makeRisuTriggerRuntime(
         try {
           const prompt = toStr(promptVal);
           const negativePrompt = negVal ? toStr(negVal) : undefined;
-          let parameters: Record<string, unknown> | undefined = undefined;
+          let callerParameters: Record<string, unknown> | undefined = undefined;
           if (typeof optionsVal === 'string' && optionsVal.trim().startsWith('{')) {
             try {
-              parameters = JSON.parse(optionsVal);
+              callerParameters = JSON.parse(optionsVal);
             } catch {
               // ignore json parse error
             }
           } else if (typeof optionsVal === 'object' && optionsVal !== null) {
-            parameters = optionsVal as Record<string, unknown>;
+            callerParameters = optionsVal as Record<string, unknown>;
           }
+
+          const baseParameters: Record<string, unknown> = {};
+          if (naiSettings) {
+            if (naiSettings.resolution) baseParameters.resolution = naiSettings.resolution;
+            if (naiSettings.sampler) baseParameters.sampler = naiSettings.sampler;
+            if (typeof naiSettings.steps === 'number') baseParameters.steps = naiSettings.steps;
+            if (typeof naiSettings.guidance === 'number') baseParameters.guidance = naiSettings.guidance;
+            if (typeof naiSettings.smea === 'boolean') baseParameters.smea = naiSettings.smea;
+            if (typeof naiSettings.smeaDyn === 'boolean') baseParameters.smeaDyn = naiSettings.smeaDyn;
+            if (typeof naiSettings.seed === 'number') baseParameters.seed = naiSettings.seed;
+            if (typeof naiSettings.qualityToggle === 'boolean') baseParameters.qualityToggle = naiSettings.qualityToggle;
+            if (typeof naiSettings.ucPreset === 'number') baseParameters.ucPreset = naiSettings.ucPreset;
+            if (naiSettings.negativePrompt && !negativePrompt) {
+              baseParameters.negativePrompt = naiSettings.negativePrompt;
+            }
+          }
+
+          const parameters = {
+            ...baseParameters,
+            ...(callerParameters || {}),
+          };
+
+          const effectiveNegativePrompt = negativePrompt
+            ?? (typeof parameters.negativePrompt === 'string' ? parameters.negativePrompt : undefined)
+            ?? (naiSettings?.negativePrompt || undefined);
+
           const res = await api.imageGen.generate(prompt, {
-            ...(negativePrompt !== undefined ? { negativePrompt } : {}),
-            ...(parameters !== undefined ? { parameters } : {}),
+            ...(effectiveNegativePrompt !== undefined ? { negativePrompt: effectiveNegativePrompt } : {}),
+            ...(imageConnectionId ? { connectionId: imageConnectionId } : {}),
+            ...(imageModelOverride ? { model: imageModelOverride } : (naiSettings?.model ? { model: naiSettings.model } : {})),
+            ...(Object.keys(parameters).length > 0 ? { parameters } : {}),
           });
           let imageId: string | undefined;
           if (typeof res === 'string') {

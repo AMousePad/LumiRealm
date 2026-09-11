@@ -18,6 +18,9 @@ export interface DispatchSeams {
   readonly submodelPrefillCompat: boolean;
   readonly auxDebugCapture?: DispatchAuxDebugCapture;
   readonly resolveTemplate: (text: string) => Promise<string>;
+  readonly imageConnectionId: string | null;
+  readonly imageModelOverride: string | null;
+  readonly naiSettings: RisuCompatSettings['naiSettings'];
 }
 
 export interface BuildDispatchSeamsArgs {
@@ -49,6 +52,9 @@ export function buildDispatchSeams(args: BuildDispatchSeamsArgs): DispatchSeams 
     submodelPrefillCompat: boolean;
     auxDebugCapture?: DispatchAuxDebugCapture;
     resolveTemplate: (text: string) => Promise<string>;
+    imageConnectionId: string | null;
+    imageModelOverride: string | null;
+    naiSettings: RisuCompatSettings['naiSettings'];
   } = {
     chatId: args.chatId,
     binding: args.binding,
@@ -63,6 +69,9 @@ export function buildDispatchSeams(args: BuildDispatchSeamsArgs): DispatchSeams 
     auxPrefillCompat: args.settings.auxPrefillCompat,
     submodelPrefillCompat: args.settings.submodelPrefillCompat,
     resolveTemplate: args.resolveTemplate,
+    imageConnectionId: args.settings.imageConnectionId,
+    imageModelOverride: args.settings.imageModelOverride,
+    naiSettings: args.settings.naiSettings,
   };
   if (args.auxDebugCapture) seams.auxDebugCapture = args.auxDebugCapture;
   return seams;

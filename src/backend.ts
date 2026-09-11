@@ -1663,7 +1663,26 @@ const consentHandlers = createConsentHandlers({
   resolvePickResolution,
   log,
 });
-const connectionsHandlers = createConnectionsHandlers({ listConnectionsForUser, log });
+const connectionsHandlers = createConnectionsHandlers({
+  listConnectionsForUser,
+  listImageConnectionsForUser: async (uid) => {
+    if (!spindle.imageGen?.listConnections) return [];
+    try {
+      const list = await spindle.imageGen.listConnections(uid);
+      return list.map((c) => ({
+        id: c.id,
+        name: c.name,
+        provider: c.provider,
+        model: c.model,
+        is_default: c.is_default,
+      }));
+    } catch (err) {
+      log.warn(`listImageConnectionsForUser failed: ${err}`);
+      return [];
+    }
+  },
+  log,
+});
 const logHandlers = createLogHandlers({
   extensionVersion: EXTENSION_VERSION,
   logStore,

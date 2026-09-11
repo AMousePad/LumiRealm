@@ -243,6 +243,9 @@ export type FrontendToBackend =
         readonly legacyMediaFindings?: boolean;
         readonly translateEnabled?: boolean;
         readonly skipAssetThumbnails?: boolean;
+        readonly imageConnectionId?: string | null;
+        readonly imageModelOverride?: string | null;
+        readonly naiSettings?: Partial<NaiSettingsWire>;
       };
     }
   // Browser-translated cache writeback, one message per scope per language.
@@ -264,6 +267,9 @@ export type FrontendToBackend =
     }
   | {
       type: 'request_connections_list';
+    }
+  | {
+      type: 'request_image_connections_list';
     }
   | { type: 'process_module_from_upload'; uploadId: string; fileName: string }
   | { type: 'request_modules' }
@@ -605,6 +611,9 @@ export type BackendToFrontend =
         readonly legacyMediaFindings: boolean;
         readonly translateEnabled: boolean;
         readonly skipAssetThumbnails: boolean;
+        readonly imageConnectionId: string | null;
+        readonly imageModelOverride: string | null;
+        readonly naiSettings: NaiSettingsWire;
       };
     }
   // Emitted when the user enables request/response capture toggles in Settings → Debug.
@@ -635,6 +644,16 @@ export type BackendToFrontend =
     }
   | {
       type: 'connections_list_pushed';
+      connections: readonly {
+        readonly id: string;
+        readonly name: string;
+        readonly provider: string;
+        readonly model: string;
+        readonly is_default: boolean;
+      }[];
+    }
+  | {
+      type: 'image_connections_list_pushed';
       connections: readonly {
         readonly id: string;
         readonly name: string;
@@ -918,6 +937,20 @@ export type SidebarToggleWire =
       readonly options?: readonly string[];
       readonly moduleId?: string;
     };
+
+export interface NaiSettingsWire {
+  readonly model: string | null;
+  readonly resolution: string;
+  readonly sampler: string;
+  readonly steps: number;
+  readonly guidance: number;
+  readonly negativePrompt: string | null;
+  readonly smea: boolean;
+  readonly smeaDyn: boolean;
+  readonly seed: number | null;
+  readonly qualityToggle: boolean;
+  readonly ucPreset: number;
+}
 
 export interface AuxSamplersWire {
   readonly temperature: number | null;

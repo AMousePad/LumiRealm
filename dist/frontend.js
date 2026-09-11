@@ -24450,6 +24450,19 @@ var SAMPLER_KEYS = [
   "presencePenalty",
   "repetitionPenalty"
 ];
+var DEFAULT_NAI_SETTINGS = {
+  model: null,
+  resolution: "832x1216",
+  sampler: "k_euler_ancestral",
+  steps: 28,
+  guidance: 5,
+  negativePrompt: null,
+  smea: false,
+  smeaDyn: false,
+  seed: null,
+  qualityToggle: true,
+  ucPreset: 0
+};
 
 // src/util/samplers-wire.ts
 var SAMPLER_WIRE_KEYS = {
@@ -24797,6 +24810,9 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const submodelModelOverride = opts.submodelModelOverride ?? dispatchCtx.submodelModelOverride ?? auxModelOverride;
   const submodelSamplers = opts.submodelSamplers ?? dispatchCtx.submodelSamplers ?? auxSamplers;
   const auxDebugCapture = opts.auxDebugCapture ?? dispatchCtx.auxDebugCapture;
+  const imageConnectionId = opts.imageConnectionId ?? dispatchCtx.imageConnectionId ?? null;
+  const imageModelOverride = opts.imageModelOverride ?? dispatchCtx.imageModelOverride ?? null;
+  const naiSettings = opts.naiSettings ?? dispatchCtx.naiSettings ?? null;
   const capturedResolveTemplate = opts.resolveTemplate ?? dispatchCtx.resolveTemplate;
   const auxParamsWire = samplersToWire(auxSamplers);
   const submodelParamsWire = samplersToWire(submodelSamplers);
@@ -25618,17 +25634,48 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         try {
           const prompt2 = toStr(promptVal);
           const negativePrompt = negVal ? toStr(negVal) : undefined;
-          let parameters = undefined;
+          let callerParameters = undefined;
           if (typeof optionsVal === "string" && optionsVal.trim().startsWith("{")) {
             try {
-              parameters = JSON.parse(optionsVal);
+              callerParameters = JSON.parse(optionsVal);
             } catch {}
           } else if (typeof optionsVal === "object" && optionsVal !== null) {
-            parameters = optionsVal;
+            callerParameters = optionsVal;
           }
+          const baseParameters = {};
+          if (naiSettings) {
+            if (naiSettings.resolution)
+              baseParameters.resolution = naiSettings.resolution;
+            if (naiSettings.sampler)
+              baseParameters.sampler = naiSettings.sampler;
+            if (typeof naiSettings.steps === "number")
+              baseParameters.steps = naiSettings.steps;
+            if (typeof naiSettings.guidance === "number")
+              baseParameters.guidance = naiSettings.guidance;
+            if (typeof naiSettings.smea === "boolean")
+              baseParameters.smea = naiSettings.smea;
+            if (typeof naiSettings.smeaDyn === "boolean")
+              baseParameters.smeaDyn = naiSettings.smeaDyn;
+            if (typeof naiSettings.seed === "number")
+              baseParameters.seed = naiSettings.seed;
+            if (typeof naiSettings.qualityToggle === "boolean")
+              baseParameters.qualityToggle = naiSettings.qualityToggle;
+            if (typeof naiSettings.ucPreset === "number")
+              baseParameters.ucPreset = naiSettings.ucPreset;
+            if (naiSettings.negativePrompt && !negativePrompt) {
+              baseParameters.negativePrompt = naiSettings.negativePrompt;
+            }
+          }
+          const parameters = {
+            ...baseParameters,
+            ...callerParameters || {}
+          };
+          const effectiveNegativePrompt = negativePrompt ?? (typeof parameters.negativePrompt === "string" ? parameters.negativePrompt : undefined) ?? (naiSettings?.negativePrompt || undefined);
           const res = await api.imageGen.generate(prompt2, {
-            ...negativePrompt !== undefined ? { negativePrompt } : {},
-            ...parameters !== undefined ? { parameters } : {}
+            ...effectiveNegativePrompt !== undefined ? { negativePrompt: effectiveNegativePrompt } : {},
+            ...imageConnectionId ? { connectionId: imageConnectionId } : {},
+            ...imageModelOverride ? { model: imageModelOverride } : naiSettings?.model ? { model: naiSettings.model } : {},
+            ...Object.keys(parameters).length > 0 ? { parameters } : {}
           });
           let imageId;
           if (typeof res === "string") {
@@ -39030,6 +39077,7 @@ function mountSettingsPanel(opts) {
   root.classList.add("risu-settings-drawer");
   let settings = null;
   let connections = null;
+  let imageConnections = null;
   let lastSavedTs = 0;
   const status = document.createElement("div");
   status.className = "rs-status";
@@ -39037,6 +39085,7 @@ function mountSettingsPanel(opts) {
   const SUB_TABS = [
     { id: "aux", label: "Auxiliary", title: "Aux model, used by Lua's axLLMMain / axLLM calls." },
     { id: "sub", label: "Sub", title: "Submodel, used by V2 runLLM(model='submodel'). Falls back to Aux when empty." },
+    { id: "image", label: "Image", title: "Image generation profile and NovelAI settings." },
     { id: "debug", label: "Debug", title: "Capture toggles, parity toggles, and diagnostic logs." },
     { id: "cleanup", label: "Cleanup", title: "Find and delete orphaned image assets that no live character or module references." }
   ];
@@ -39354,6 +39403,210 @@ function mountSettingsPanel(opts) {
   logsHost.appendChild(logsMount);
   debugBody.appendChild(logsHost);
   const logsHandle = mountLogsPanel({ root: logsMount, sendToBackend, log });
+  const imageBody = document.createElement("section");
+  imageBody.className = "lr-settings-tab-body";
+  const imageIntro = document.createElement("p");
+  imageIntro.className = "lr-settings-intro";
+  imageIntro.textContent = "Configure image generation connection profile and NovelAI generation parameters for Lua generateImage calls.";
+  imageBody.appendChild(imageIntro);
+  const imgConnRow = document.createElement("div");
+  imgConnRow.className = "rs-row";
+  const imgConnLabel = document.createElement("label");
+  imgConnLabel.className = "rs-label";
+  imgConnLabel.textContent = "Image Connection";
+  imgConnLabel.htmlFor = "rs-img-conn";
+  imgConnRow.appendChild(imgConnLabel);
+  const imgConnSelect = createSearchableSelect({
+    id: "rs-img-conn",
+    className: "rs-trigger",
+    placeholder: "Loading image connections…",
+    searchPlaceholder: "Search image connections…",
+    emptyMessage: "No matching image connections",
+    items: [],
+    onChange(value) {
+      log.info(`settings-tab: image connection changed to "${value ?? "<default>"}"`);
+      sendToBackend({
+        type: "update_settings",
+        patch: { imageConnectionId: value }
+      });
+    }
+  });
+  imgConnRow.appendChild(imgConnSelect.root);
+  imageBody.appendChild(imgConnRow);
+  const imgModelRow = document.createElement("div");
+  imgModelRow.className = "rs-row";
+  const imgModelLabel = document.createElement("label");
+  imgModelLabel.className = "rs-label";
+  imgModelLabel.textContent = "Model override";
+  imgModelLabel.htmlFor = "rs-img-model";
+  imgModelRow.appendChild(imgModelLabel);
+  const imgModelInput = document.createElement("input");
+  imgModelInput.id = "rs-img-model";
+  imgModelInput.type = "text";
+  imgModelInput.className = "rs-input";
+  imgModelInput.placeholder = "(use connection default)";
+  imgModelInput.spellcheck = false;
+  imgModelRow.appendChild(imgModelInput);
+  imageBody.appendChild(imgModelRow);
+  const imgBtnRow = document.createElement("div");
+  imgBtnRow.className = "rs-row rs-row-buttons";
+  const imgSaveModelBtn = document.createElement("button");
+  imgSaveModelBtn.type = "button";
+  imgSaveModelBtn.className = "lrm-btn lrm-btn-primary";
+  imgSaveModelBtn.textContent = "Save";
+  imgSaveModelBtn.title = "Save the image model override.";
+  imgBtnRow.appendChild(imgSaveModelBtn);
+  const imgResetBtn = document.createElement("button");
+  imgResetBtn.type = "button";
+  imgResetBtn.className = "lrm-btn";
+  imgResetBtn.textContent = "Reset";
+  imgResetBtn.title = "Clear image connection and model.";
+  imgBtnRow.appendChild(imgResetBtn);
+  const imgRefreshBtn = document.createElement("button");
+  imgRefreshBtn.type = "button";
+  imgRefreshBtn.className = "lrm-btn";
+  imgRefreshBtn.textContent = "Refresh";
+  imgRefreshBtn.title = "Re-fetch image connection list.";
+  imgBtnRow.appendChild(imgRefreshBtn);
+  imageBody.appendChild(imgBtnRow);
+  const naiSection = document.createElement("div");
+  naiSection.className = "rs-subsection";
+  const naiHeader = document.createElement("div");
+  naiHeader.className = "rs-subsection-header";
+  const naiTitle = document.createElement("h3");
+  naiTitle.className = "rs-subsection-title";
+  naiTitle.textContent = "NovelAI Settings";
+  naiHeader.appendChild(naiTitle);
+  const naiDesc = document.createElement("p");
+  naiDesc.className = "rs-subsection-desc";
+  naiDesc.textContent = "Parameters passed when generating images via NovelAI image profile.";
+  naiHeader.appendChild(naiDesc);
+  naiSection.appendChild(naiHeader);
+  const resRow = document.createElement("div");
+  resRow.className = "rs-row";
+  const resLabel = document.createElement("label");
+  resLabel.className = "rs-label";
+  resLabel.textContent = "Resolution";
+  resLabel.htmlFor = "rs-nai-res";
+  resRow.appendChild(resLabel);
+  const resInput = document.createElement("input");
+  resInput.id = "rs-nai-res";
+  resInput.type = "text";
+  resInput.className = "rs-input";
+  resInput.placeholder = "832x1216 (Portrait)";
+  resRow.appendChild(resInput);
+  naiSection.appendChild(resRow);
+  const samplerRow = document.createElement("div");
+  samplerRow.className = "rs-row";
+  const samplerLabel = document.createElement("label");
+  samplerLabel.className = "rs-label";
+  samplerLabel.textContent = "Sampler";
+  samplerLabel.htmlFor = "rs-nai-sampler";
+  samplerRow.appendChild(samplerLabel);
+  const samplerInput = document.createElement("input");
+  samplerInput.id = "rs-nai-sampler";
+  samplerInput.type = "text";
+  samplerInput.className = "rs-input";
+  samplerInput.placeholder = "k_euler_ancestral";
+  samplerRow.appendChild(samplerInput);
+  naiSection.appendChild(samplerRow);
+  const sgRow = document.createElement("div");
+  sgRow.className = "rs-row";
+  const stepsLabel = document.createElement("label");
+  stepsLabel.className = "rs-label";
+  stepsLabel.textContent = "Steps (1-50)";
+  stepsLabel.htmlFor = "rs-nai-steps";
+  sgRow.appendChild(stepsLabel);
+  const stepsInput = document.createElement("input");
+  stepsInput.id = "rs-nai-steps";
+  stepsInput.type = "number";
+  stepsInput.min = "1";
+  stepsInput.max = "50";
+  stepsInput.className = "rs-input";
+  sgRow.appendChild(stepsInput);
+  const guidanceLabel = document.createElement("label");
+  guidanceLabel.className = "rs-label";
+  guidanceLabel.textContent = "Guidance (Scale)";
+  guidanceLabel.htmlFor = "rs-nai-guidance";
+  sgRow.appendChild(guidanceLabel);
+  const guidanceInput = document.createElement("input");
+  guidanceInput.id = "rs-nai-guidance";
+  guidanceInput.type = "number";
+  guidanceInput.step = "0.5";
+  guidanceInput.min = "1";
+  guidanceInput.max = "20";
+  guidanceInput.className = "rs-input";
+  sgRow.appendChild(guidanceInput);
+  naiSection.appendChild(sgRow);
+  const negRow = document.createElement("div");
+  negRow.className = "rs-row";
+  const negLabel = document.createElement("label");
+  negLabel.className = "rs-label";
+  negLabel.textContent = "Negative Prompt";
+  negLabel.htmlFor = "rs-nai-neg";
+  negRow.appendChild(negLabel);
+  const negInput = document.createElement("input");
+  negInput.id = "rs-nai-neg";
+  negInput.type = "text";
+  negInput.className = "rs-input";
+  negInput.placeholder = "Default negative prompt / undesired content";
+  negRow.appendChild(negInput);
+  naiSection.appendChild(negRow);
+  const smeaRow = document.createElement("div");
+  smeaRow.className = "rs-row";
+  const smeaLabel = document.createElement("label");
+  smeaLabel.className = "rs-check";
+  const smeaCheck = document.createElement("input");
+  smeaCheck.type = "checkbox";
+  smeaLabel.appendChild(smeaCheck);
+  const smeaSpan = document.createElement("span");
+  smeaSpan.textContent = "SMEA (Specialized Multiscale Attention)";
+  smeaLabel.appendChild(smeaSpan);
+  smeaRow.appendChild(smeaLabel);
+  const smeaDynLabel = document.createElement("label");
+  smeaDynLabel.className = "rs-check";
+  const smeaDynCheck = document.createElement("input");
+  smeaDynCheck.type = "checkbox";
+  smeaDynLabel.appendChild(smeaDynCheck);
+  const smeaDynSpan = document.createElement("span");
+  smeaDynSpan.textContent = "SMEA DYN (Dynamic)";
+  smeaDynLabel.appendChild(smeaDynSpan);
+  smeaRow.appendChild(smeaDynLabel);
+  naiSection.appendChild(smeaRow);
+  const qcRow = document.createElement("div");
+  qcRow.className = "rs-row";
+  const qcLabel = document.createElement("label");
+  qcLabel.className = "rs-check";
+  const qcCheck = document.createElement("input");
+  qcCheck.type = "checkbox";
+  qcLabel.appendChild(qcCheck);
+  const qcSpan = document.createElement("span");
+  qcSpan.textContent = "Enable Quality Tags";
+  qcLabel.appendChild(qcSpan);
+  qcRow.appendChild(qcLabel);
+  const ucLabel = document.createElement("label");
+  ucLabel.className = "rs-label";
+  ucLabel.textContent = "UC Preset";
+  ucLabel.htmlFor = "rs-nai-uc";
+  qcRow.appendChild(ucLabel);
+  const ucInput = document.createElement("input");
+  ucInput.id = "rs-nai-uc";
+  ucInput.type = "number";
+  ucInput.min = "0";
+  ucInput.max = "3";
+  ucInput.className = "rs-input";
+  qcRow.appendChild(ucInput);
+  naiSection.appendChild(qcRow);
+  const naiBtnRow = document.createElement("div");
+  naiBtnRow.className = "rs-row rs-row-buttons";
+  const saveNaiBtn = document.createElement("button");
+  saveNaiBtn.type = "button";
+  saveNaiBtn.className = "lrm-btn lrm-btn-primary";
+  saveNaiBtn.textContent = "Save NovelAI Settings";
+  saveNaiBtn.title = "Save the NovelAI parameters.";
+  naiBtnRow.appendChild(saveNaiBtn);
+  naiSection.appendChild(naiBtnRow);
+  imageBody.appendChild(naiSection);
   const cleanupBody = document.createElement("section");
   cleanupBody.className = "lr-settings-tab-body";
   const cleanupIntro = document.createElement("p");
@@ -39815,6 +40068,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
   panelsHost.className = "lr-subtab-panels";
   panelsHost.appendChild(auxBody);
   panelsHost.appendChild(subBody);
+  panelsHost.appendChild(imageBody);
   panelsHost.appendChild(debugBody);
   panelsHost.appendChild(cleanupBody);
   root.appendChild(panelsHost);
@@ -39827,6 +40081,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     }
     auxBody.hidden = id !== "aux";
     subBody.hidden = id !== "sub";
+    imageBody.hidden = id !== "image";
     debugBody.hidden = id !== "debug";
     cleanupBody.hidden = id !== "cleanup";
   }
@@ -40073,6 +40328,51 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     legacyMediaCheck.checked = settings?.legacyMediaFindings === true;
     skipThumbsCheck.checked = settings?.skipAssetThumbnails === true;
   }
+  function renderImageConnectionSelect() {
+    const items = (imageConnections ?? []).map((c) => ({
+      value: c.id,
+      label: `${c.name} (${c.provider}${c.model ? ` / ${c.model}` : ""})${c.is_default ? " [default]" : ""}`
+    }));
+    items.unshift({ value: "", label: "Use default image connection" });
+    const current = settings?.imageConnectionId ?? "";
+    if (current && imageConnections && !imageConnections.find((c) => c.id === current)) {
+      items.push({
+        value: current,
+        label: `${current.slice(0, 8)}… (deleted? unknown)`
+      });
+    }
+    imgConnSelect.setItems(items);
+    imgConnSelect.setValue(current);
+  }
+  function renderImageModelInput() {
+    if (document.activeElement !== imgModelInput) {
+      imgModelInput.value = settings?.imageModelOverride ?? "";
+    }
+  }
+  function renderNaiSettings() {
+    const nai = settings?.naiSettings ?? DEFAULT_NAI_SETTINGS;
+    if (document.activeElement !== resInput) {
+      resInput.value = nai.resolution;
+    }
+    if (document.activeElement !== samplerInput) {
+      samplerInput.value = nai.sampler;
+    }
+    if (document.activeElement !== stepsInput) {
+      stepsInput.value = String(nai.steps);
+    }
+    if (document.activeElement !== guidanceInput) {
+      guidanceInput.value = String(nai.guidance);
+    }
+    if (document.activeElement !== negInput) {
+      negInput.value = nai.negativePrompt ?? "";
+    }
+    smeaCheck.checked = nai.smea;
+    smeaDynCheck.checked = nai.smeaDyn;
+    qcCheck.checked = nai.qualityToggle;
+    if (document.activeElement !== ucInput) {
+      ucInput.value = String(nai.ucPreset);
+    }
+  }
   function render() {
     renderConnectionSelect();
     renderModelInput();
@@ -40080,6 +40380,9 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     renderSubmodelConnectionSelect();
     renderSubmodelModelInput();
     renderSubmodelSamplers();
+    renderImageConnectionSelect();
+    renderImageModelInput();
+    renderNaiSettings();
     renderDebugChecks();
     renderParityChecks();
     renderStatus();
@@ -40173,6 +40476,49 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
         submodelSamplers: clearedSamplers
       }
     });
+    imgSaveModelBtn.addEventListener("click", () => {
+      const raw = imgModelInput.value.trim();
+      log.info(`settings-tab: image model override saved as "${raw}"`);
+      sendToBackend({
+        type: "update_settings",
+        patch: { imageModelOverride: raw === "" ? null : raw }
+      });
+    });
+    imgResetBtn.addEventListener("click", () => {
+      log.info("settings-tab: reset image connection + model");
+      sendToBackend({
+        type: "update_settings",
+        patch: { imageConnectionId: null, imageModelOverride: null }
+      });
+    });
+    imgRefreshBtn.addEventListener("click", () => {
+      log.info("settings-tab: re-fetching image connections list");
+      imageConnections = null;
+      renderImageConnectionSelect();
+      sendToBackend({ type: "request_image_connections_list" });
+    });
+    saveNaiBtn.addEventListener("click", () => {
+      const stepsVal = parseInt(stepsInput.value, 10);
+      const guidanceVal = parseFloat(guidanceInput.value);
+      const ucVal = parseInt(ucInput.value, 10);
+      const negVal = negInput.value.trim();
+      const patchNai = {
+        resolution: resInput.value.trim() || DEFAULT_NAI_SETTINGS.resolution,
+        sampler: samplerInput.value.trim() || DEFAULT_NAI_SETTINGS.sampler,
+        steps: Number.isFinite(stepsVal) ? stepsVal : DEFAULT_NAI_SETTINGS.steps,
+        guidance: Number.isFinite(guidanceVal) ? guidanceVal : DEFAULT_NAI_SETTINGS.guidance,
+        negativePrompt: negVal.length > 0 ? negVal : null,
+        smea: smeaCheck.checked,
+        smeaDyn: smeaDynCheck.checked,
+        qualityToggle: qcCheck.checked,
+        ucPreset: Number.isFinite(ucVal) ? ucVal : DEFAULT_NAI_SETTINGS.ucPreset
+      };
+      log.info(`settings-tab: saving NovelAI settings`);
+      sendToBackend({
+        type: "update_settings",
+        patch: { naiSettings: patchNai }
+      });
+    });
   });
   auxPrefillCheck.addEventListener("change", () => {
     log.info(`settings-tab: auxPrefillCompat=${auxPrefillCheck.checked}`);
@@ -40212,6 +40558,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
   });
   sendToBackend({ type: "request_settings" });
   sendToBackend({ type: "request_connections_list" });
+  sendToBackend({ type: "request_image_connections_list" });
   async function deleteRepairRegexRows(msg) {
     let deleted = 0;
     let ok = false;
@@ -40262,7 +40609,10 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
         auxDebugCaptureRequest: msg.settings.auxDebugCaptureRequest,
         auxDebugCaptureResponse: msg.settings.auxDebugCaptureResponse,
         legacyMediaFindings: msg.settings.legacyMediaFindings,
-        skipAssetThumbnails: msg.settings.skipAssetThumbnails
+        skipAssetThumbnails: msg.settings.skipAssetThumbnails,
+        imageConnectionId: msg.settings.imageConnectionId,
+        imageModelOverride: msg.settings.imageModelOverride,
+        naiSettings: msg.settings.naiSettings
       };
       lastSavedTs = Date.now();
       render();
@@ -40271,6 +40621,12 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     if (msg.type === "connections_list_pushed") {
       log.info(`settings-tab: connections_list_pushed count=${msg.connections.length}`);
       connections = msg.connections;
+      render();
+      return;
+    }
+    if (msg.type === "image_connections_list_pushed") {
+      log.info(`settings-tab: image_connections_list_pushed count=${msg.connections.length}`);
+      imageConnections = msg.connections;
       render();
       return;
     }

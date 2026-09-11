@@ -29369,6 +29369,68 @@ var DEFAULT_SAMPLERS = {
   presencePenalty: null,
   repetitionPenalty: null
 };
+var DEFAULT_NAI_SETTINGS = {
+  model: null,
+  resolution: "832x1216",
+  sampler: "k_euler_ancestral",
+  steps: 28,
+  guidance: 5,
+  negativePrompt: null,
+  smea: false,
+  smeaDyn: false,
+  seed: null,
+  qualityToggle: true,
+  ucPreset: 0
+};
+function normalizeNaiSettings(raw) {
+  if (!raw || typeof raw !== "object")
+    return DEFAULT_NAI_SETTINGS;
+  const r = raw;
+  let model = null;
+  if (typeof r.model === "string") {
+    const trimmed = r.model.trim();
+    model = trimmed.length > 0 ? trimmed : null;
+  }
+  const resolution = typeof r.resolution === "string" && r.resolution.trim().length > 0 ? r.resolution.trim() : DEFAULT_NAI_SETTINGS.resolution;
+  const sampler = typeof r.sampler === "string" && r.sampler.trim().length > 0 ? r.sampler.trim() : DEFAULT_NAI_SETTINGS.sampler;
+  let steps = DEFAULT_NAI_SETTINGS.steps;
+  if (typeof r.steps === "number" && Number.isFinite(r.steps)) {
+    steps = Math.max(1, Math.min(50, Math.round(r.steps)));
+  }
+  let guidance = DEFAULT_NAI_SETTINGS.guidance;
+  if (typeof r.guidance === "number" && Number.isFinite(r.guidance)) {
+    guidance = Math.max(1, Math.min(20, r.guidance));
+  }
+  let negativePrompt = null;
+  if (typeof r.negativePrompt === "string") {
+    const trimmed = r.negativePrompt.trim();
+    negativePrompt = trimmed.length > 0 ? trimmed : null;
+  }
+  const smea = r.smea === true;
+  const smeaDyn = r.smeaDyn === true;
+  let seed = null;
+  if (typeof r.seed === "number" && Number.isFinite(r.seed) && r.seed >= 0) {
+    seed = Math.floor(r.seed);
+  }
+  const qualityToggle = r.qualityToggle !== false;
+  let ucPreset = DEFAULT_NAI_SETTINGS.ucPreset;
+  if (typeof r.ucPreset === "number" && Number.isFinite(r.ucPreset)) {
+    ucPreset = Math.max(0, Math.floor(r.ucPreset));
+  }
+  return {
+    model,
+    resolution,
+    sampler,
+    steps,
+    guidance,
+    negativePrompt,
+    smea,
+    smeaDyn,
+    seed,
+    qualityToggle,
+    ucPreset
+  };
+}
 var DEFAULT_SETTINGS = {
   schema_version: 1,
   auxConnectionId: null,
@@ -29383,7 +29445,10 @@ var DEFAULT_SETTINGS = {
   auxDebugCaptureResponse: false,
   legacyMediaFindings: false,
   translateEnabled: true,
-  skipAssetThumbnails: true
+  skipAssetThumbnails: true,
+  imageConnectionId: null,
+  imageModelOverride: null,
+  naiSettings: DEFAULT_NAI_SETTINGS
 };
 var SETTINGS_PATH = "lumirealm/settings.json";
 function isStoredSettings(v) {
@@ -29399,6 +29464,10 @@ function isStoredSettings(v) {
   if (o.submodelConnectionId !== undefined && o.submodelConnectionId !== null && typeof o.submodelConnectionId !== "string")
     return false;
   if (o.submodelModelOverride !== undefined && o.submodelModelOverride !== null && typeof o.submodelModelOverride !== "string")
+    return false;
+  if (o.imageConnectionId !== undefined && o.imageConnectionId !== null && typeof o.imageConnectionId !== "string")
+    return false;
+  if (o.imageModelOverride !== undefined && o.imageModelOverride !== null && typeof o.imageModelOverride !== "string")
     return false;
   return true;
 }
@@ -29492,6 +29561,27 @@ function normalizeSettingsPatch(patch) {
   if ("skipAssetThumbnails" in p) {
     out.skipAssetThumbnails = !!p.skipAssetThumbnails;
   }
+  if ("imageConnectionId" in p) {
+    const v = p.imageConnectionId;
+    if (v === null)
+      out.imageConnectionId = null;
+    else if (typeof v === "string") {
+      const trimmed = v.trim();
+      out.imageConnectionId = trimmed.length === 0 ? null : trimmed;
+    }
+  }
+  if ("imageModelOverride" in p) {
+    const v = p.imageModelOverride;
+    if (v === null)
+      out.imageModelOverride = null;
+    else if (typeof v === "string") {
+      const trimmed = v.trim();
+      out.imageModelOverride = trimmed.length === 0 ? null : trimmed;
+    }
+  }
+  if ("naiSettings" in p) {
+    out.naiSettings = normalizeNaiSettings(p.naiSettings);
+  }
   return out;
 }
 async function loadSettings(storage, userId) {
@@ -29517,7 +29607,10 @@ async function loadSettings(storage, userId) {
       auxDebugCaptureResponse: stored.auxDebugCaptureResponse === true,
       legacyMediaFindings: stored.legacyMediaFindings === true,
       translateEnabled: stored.translateEnabled === undefined ? true : stored.translateEnabled === true,
-      skipAssetThumbnails: stored.skipAssetThumbnails === undefined ? true : stored.skipAssetThumbnails === true
+      skipAssetThumbnails: stored.skipAssetThumbnails === undefined ? true : stored.skipAssetThumbnails === true,
+      imageConnectionId: typeof stored.imageConnectionId === "string" ? stored.imageConnectionId : null,
+      imageModelOverride: typeof stored.imageModelOverride === "string" ? stored.imageModelOverride : null,
+      naiSettings: stored.naiSettings !== undefined ? normalizeNaiSettings(stored.naiSettings) : DEFAULT_NAI_SETTINGS
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -29910,6 +30003,9 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const submodelModelOverride = opts.submodelModelOverride ?? dispatchCtx.submodelModelOverride ?? auxModelOverride;
   const submodelSamplers = opts.submodelSamplers ?? dispatchCtx.submodelSamplers ?? auxSamplers;
   const auxDebugCapture = opts.auxDebugCapture ?? dispatchCtx.auxDebugCapture;
+  const imageConnectionId = opts.imageConnectionId ?? dispatchCtx.imageConnectionId ?? null;
+  const imageModelOverride = opts.imageModelOverride ?? dispatchCtx.imageModelOverride ?? null;
+  const naiSettings = opts.naiSettings ?? dispatchCtx.naiSettings ?? null;
   const capturedResolveTemplate = opts.resolveTemplate ?? dispatchCtx.resolveTemplate;
   const auxParamsWire = samplersToWire(auxSamplers);
   const submodelParamsWire = samplersToWire(submodelSamplers);
@@ -30731,17 +30827,48 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         try {
           const prompt2 = toStr(promptVal);
           const negativePrompt = negVal ? toStr(negVal) : undefined;
-          let parameters = undefined;
+          let callerParameters = undefined;
           if (typeof optionsVal === "string" && optionsVal.trim().startsWith("{")) {
             try {
-              parameters = JSON.parse(optionsVal);
+              callerParameters = JSON.parse(optionsVal);
             } catch {}
           } else if (typeof optionsVal === "object" && optionsVal !== null) {
-            parameters = optionsVal;
+            callerParameters = optionsVal;
           }
+          const baseParameters = {};
+          if (naiSettings) {
+            if (naiSettings.resolution)
+              baseParameters.resolution = naiSettings.resolution;
+            if (naiSettings.sampler)
+              baseParameters.sampler = naiSettings.sampler;
+            if (typeof naiSettings.steps === "number")
+              baseParameters.steps = naiSettings.steps;
+            if (typeof naiSettings.guidance === "number")
+              baseParameters.guidance = naiSettings.guidance;
+            if (typeof naiSettings.smea === "boolean")
+              baseParameters.smea = naiSettings.smea;
+            if (typeof naiSettings.smeaDyn === "boolean")
+              baseParameters.smeaDyn = naiSettings.smeaDyn;
+            if (typeof naiSettings.seed === "number")
+              baseParameters.seed = naiSettings.seed;
+            if (typeof naiSettings.qualityToggle === "boolean")
+              baseParameters.qualityToggle = naiSettings.qualityToggle;
+            if (typeof naiSettings.ucPreset === "number")
+              baseParameters.ucPreset = naiSettings.ucPreset;
+            if (naiSettings.negativePrompt && !negativePrompt) {
+              baseParameters.negativePrompt = naiSettings.negativePrompt;
+            }
+          }
+          const parameters = {
+            ...baseParameters,
+            ...callerParameters || {}
+          };
+          const effectiveNegativePrompt = negativePrompt ?? (typeof parameters.negativePrompt === "string" ? parameters.negativePrompt : undefined) ?? (naiSettings?.negativePrompt || undefined);
           const res = await api.imageGen.generate(prompt2, {
-            ...negativePrompt !== undefined ? { negativePrompt } : {},
-            ...parameters !== undefined ? { parameters } : {}
+            ...effectiveNegativePrompt !== undefined ? { negativePrompt: effectiveNegativePrompt } : {},
+            ...imageConnectionId ? { connectionId: imageConnectionId } : {},
+            ...imageModelOverride ? { model: imageModelOverride } : naiSettings?.model ? { model: naiSettings.model } : {},
+            ...Object.keys(parameters).length > 0 ? { parameters } : {}
           });
           let imageId;
           if (typeof res === "string") {
@@ -35671,6 +35798,11 @@ function createConnectionsHandlers(deps) {
       const connections = await deps.listConnectionsForUser(ctx.userId);
       deps.log.debug(`request_connections_list: returning ${connections.length} connection(s) for user=${ctx.userId}`);
       ctx.send({ type: "connections_list_pushed", connections }, ctx.userId);
+    },
+    request_image_connections_list: async (_msg, ctx) => {
+      const connections = await deps.listImageConnectionsForUser?.(ctx.userId) ?? [];
+      deps.log.debug(`request_image_connections_list: returning ${connections.length} connection(s) for user=${ctx.userId}`);
+      ctx.send({ type: "image_connections_list_pushed", connections }, ctx.userId);
     }
   };
 }
@@ -35741,7 +35873,10 @@ function settingsToWire(s) {
     auxDebugCaptureResponse: s.auxDebugCaptureResponse,
     legacyMediaFindings: s.legacyMediaFindings,
     translateEnabled: s.translateEnabled,
-    skipAssetThumbnails: s.skipAssetThumbnails
+    skipAssetThumbnails: s.skipAssetThumbnails,
+    imageConnectionId: s.imageConnectionId,
+    imageModelOverride: s.imageModelOverride,
+    naiSettings: s.naiSettings
   };
 }
 function createSettingsHandlers(deps) {
@@ -41660,7 +41795,10 @@ function buildDispatchSeams(args) {
     submodelSamplers: args.settings.submodelSamplers,
     auxPrefillCompat: args.settings.auxPrefillCompat,
     submodelPrefillCompat: args.settings.submodelPrefillCompat,
-    resolveTemplate: args.resolveTemplate
+    resolveTemplate: args.resolveTemplate,
+    imageConnectionId: args.settings.imageConnectionId,
+    imageModelOverride: args.settings.imageModelOverride,
+    naiSettings: args.settings.naiSettings
   };
   if (args.auxDebugCapture)
     seams.auxDebugCapture = args.auxDebugCapture;
@@ -48197,7 +48335,27 @@ var consentHandlers = createConsentHandlers({
   resolvePickResolution,
   log: log8
 });
-var connectionsHandlers = createConnectionsHandlers({ listConnectionsForUser, log: log8 });
+var connectionsHandlers = createConnectionsHandlers({
+  listConnectionsForUser,
+  listImageConnectionsForUser: async (uid) => {
+    if (!spindle.imageGen?.listConnections)
+      return [];
+    try {
+      const list = await spindle.imageGen.listConnections(uid);
+      return list.map((c) => ({
+        id: c.id,
+        name: c.name,
+        provider: c.provider,
+        model: c.model,
+        is_default: c.is_default
+      }));
+    } catch (err) {
+      log8.warn(`listImageConnectionsForUser failed: ${err}`);
+      return [];
+    }
+  },
+  log: log8
+});
 var logHandlers = createLogHandlers({
   extensionVersion: EXTENSION_VERSION,
   logStore,

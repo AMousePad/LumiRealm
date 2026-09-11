@@ -24,6 +24,98 @@ export const DEFAULT_SAMPLERS: AuxSamplerOverrides = {
   frequencyPenalty: null, presencePenalty: null, repetitionPenalty: null,
 };
 
+export interface NaiSettings {
+  readonly model: string | null;
+  readonly resolution: string;
+  readonly sampler: string;
+  readonly steps: number;
+  readonly guidance: number;
+  readonly negativePrompt: string | null;
+  readonly smea: boolean;
+  readonly smeaDyn: boolean;
+  readonly seed: number | null;
+  readonly qualityToggle: boolean;
+  readonly ucPreset: number;
+}
+
+export const DEFAULT_NAI_SETTINGS: NaiSettings = {
+  model: null,
+  resolution: '832x1216',
+  sampler: 'k_euler_ancestral',
+  steps: 28,
+  guidance: 5.0,
+  negativePrompt: null,
+  smea: false,
+  smeaDyn: false,
+  seed: null,
+  qualityToggle: true,
+  ucPreset: 0,
+};
+
+export function normalizeNaiSettings(raw: unknown): NaiSettings {
+  if (!raw || typeof raw !== 'object') return DEFAULT_NAI_SETTINGS;
+  const r = raw as Record<string, unknown>;
+
+  let model: string | null = null;
+  if (typeof r.model === 'string') {
+    const trimmed = r.model.trim();
+    model = trimmed.length > 0 ? trimmed : null;
+  }
+
+  const resolution = typeof r.resolution === 'string' && r.resolution.trim().length > 0
+    ? r.resolution.trim()
+    : DEFAULT_NAI_SETTINGS.resolution;
+
+  const sampler = typeof r.sampler === 'string' && r.sampler.trim().length > 0
+    ? r.sampler.trim()
+    : DEFAULT_NAI_SETTINGS.sampler;
+
+  let steps = DEFAULT_NAI_SETTINGS.steps;
+  if (typeof r.steps === 'number' && Number.isFinite(r.steps)) {
+    steps = Math.max(1, Math.min(50, Math.round(r.steps)));
+  }
+
+  let guidance = DEFAULT_NAI_SETTINGS.guidance;
+  if (typeof r.guidance === 'number' && Number.isFinite(r.guidance)) {
+    guidance = Math.max(1, Math.min(20, r.guidance));
+  }
+
+  let negativePrompt: string | null = null;
+  if (typeof r.negativePrompt === 'string') {
+    const trimmed = r.negativePrompt.trim();
+    negativePrompt = trimmed.length > 0 ? trimmed : null;
+  }
+
+  const smea = r.smea === true;
+  const smeaDyn = r.smeaDyn === true;
+
+  let seed: number | null = null;
+  if (typeof r.seed === 'number' && Number.isFinite(r.seed) && r.seed >= 0) {
+    seed = Math.floor(r.seed);
+  }
+
+  const qualityToggle = r.qualityToggle !== false;
+
+  let ucPreset = DEFAULT_NAI_SETTINGS.ucPreset;
+  if (typeof r.ucPreset === 'number' && Number.isFinite(r.ucPreset)) {
+    ucPreset = Math.max(0, Math.floor(r.ucPreset));
+  }
+
+  return {
+    model,
+    resolution,
+    sampler,
+    steps,
+    guidance,
+    negativePrompt,
+    smea,
+    smeaDyn,
+    seed,
+    qualityToggle,
+    ucPreset,
+  };
+}
+
 export interface RisuCompatSettings {
   readonly schema_version: 1;
   readonly auxConnectionId: string | null;
@@ -44,6 +136,12 @@ export interface RisuCompatSettings {
   readonly translateEnabled: boolean;
   /** Upload card/module assets with skip_thumbnail_processing. ON by default, applies at import time only. */
   readonly skipAssetThumbnails: boolean;
+  /** Image generation profile connection ID. `null` = use host default image gen connection. */
+  readonly imageConnectionId: string | null;
+  /** Optional model override for image generation. */
+  readonly imageModelOverride: string | null;
+  /** NovelAI generation parameters passed when using a NovelAI image connection. */
+  readonly naiSettings: NaiSettings;
 }
 
 export const DEFAULT_SETTINGS: RisuCompatSettings = {
@@ -61,6 +159,9 @@ export const DEFAULT_SETTINGS: RisuCompatSettings = {
   legacyMediaFindings: false,
   translateEnabled: true,
   skipAssetThumbnails: true,
+  imageConnectionId: null,
+  imageModelOverride: null,
+  naiSettings: DEFAULT_NAI_SETTINGS,
 };
 
 export const SETTINGS_PATH = "lumirealm/settings.json";
@@ -74,6 +175,8 @@ export function isStoredSettings(v: unknown): v is RisuCompatSettings {
   // submodel* fields are additive; pre-existing files won't have them.
   if (o.submodelConnectionId !== undefined && o.submodelConnectionId !== null && typeof o.submodelConnectionId !== "string") return false;
   if (o.submodelModelOverride !== undefined && o.submodelModelOverride !== null && typeof o.submodelModelOverride !== "string") return false;
+  if (o.imageConnectionId !== undefined && o.imageConnectionId !== null && typeof o.imageConnectionId !== "string") return false;
+  if (o.imageModelOverride !== undefined && o.imageModelOverride !== null && typeof o.imageModelOverride !== "string") return false;
   return true;
 }
 
@@ -158,6 +261,25 @@ export function normalizeSettingsPatch(patch: unknown): Partial<RisuCompatSettin
   if ("skipAssetThumbnails" in p) {
     out.skipAssetThumbnails = !!p.skipAssetThumbnails;
   }
+  if ("imageConnectionId" in p) {
+    const v = p.imageConnectionId;
+    if (v === null) out.imageConnectionId = null;
+    else if (typeof v === "string") {
+      const trimmed = v.trim();
+      out.imageConnectionId = trimmed.length === 0 ? null : trimmed;
+    }
+  }
+  if ("imageModelOverride" in p) {
+    const v = p.imageModelOverride;
+    if (v === null) out.imageModelOverride = null;
+    else if (typeof v === "string") {
+      const trimmed = v.trim();
+      out.imageModelOverride = trimmed.length === 0 ? null : trimmed;
+    }
+  }
+  if ("naiSettings" in p) {
+    out.naiSettings = normalizeNaiSettings(p.naiSettings);
+  }
   return out;
 }
 
@@ -189,6 +311,9 @@ export async function loadSettings(
       legacyMediaFindings?: unknown;
       translateEnabled?: unknown;
       skipAssetThumbnails?: unknown;
+      imageConnectionId?: unknown;
+      imageModelOverride?: unknown;
+      naiSettings?: unknown;
     };
     return {
       schema_version: 1,
@@ -213,6 +338,15 @@ export async function loadSettings(
       legacyMediaFindings: stored.legacyMediaFindings === true,
       translateEnabled: stored.translateEnabled === undefined ? true : stored.translateEnabled === true,
       skipAssetThumbnails: stored.skipAssetThumbnails === undefined ? true : stored.skipAssetThumbnails === true,
+      imageConnectionId: typeof stored.imageConnectionId === "string"
+        ? stored.imageConnectionId
+        : null,
+      imageModelOverride: typeof stored.imageModelOverride === "string"
+        ? stored.imageModelOverride
+        : null,
+      naiSettings: stored.naiSettings !== undefined
+        ? normalizeNaiSettings(stored.naiSettings)
+        : DEFAULT_NAI_SETTINGS,
     };
   } catch {
     return DEFAULT_SETTINGS;

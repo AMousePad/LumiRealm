@@ -22,6 +22,9 @@ function settingsToWire(s: RisuCompatSettings): {
   readonly legacyMediaFindings: RisuCompatSettings['legacyMediaFindings'];
   readonly translateEnabled: RisuCompatSettings['translateEnabled'];
   readonly skipAssetThumbnails: RisuCompatSettings['skipAssetThumbnails'];
+  readonly imageConnectionId: RisuCompatSettings['imageConnectionId'];
+  readonly imageModelOverride: RisuCompatSettings['imageModelOverride'];
+  readonly naiSettings: RisuCompatSettings['naiSettings'];
 } {
   return {
     schema_version: 1,
@@ -38,6 +41,9 @@ function settingsToWire(s: RisuCompatSettings): {
     legacyMediaFindings: s.legacyMediaFindings,
     translateEnabled: s.translateEnabled,
     skipAssetThumbnails: s.skipAssetThumbnails,
+    imageConnectionId: s.imageConnectionId,
+    imageModelOverride: s.imageModelOverride,
+    naiSettings: s.naiSettings,
   };
 }
 

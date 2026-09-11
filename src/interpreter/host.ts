@@ -217,6 +217,9 @@ export interface TriggerRuntimeOpts {
   };
   readonly auxPrefillCompat?: boolean;
   readonly submodelPrefillCompat?: boolean;
+  readonly imageConnectionId?: string | null;
+  readonly imageModelOverride?: string | null;
+  readonly naiSettings?: import('../state/settings-store.js').NaiSettings;
   readonly auxDebugCapture?: (event: import("./runtime.js").AuxDebugCaptureEvent) => void;
   /** Backs Lua `cbs(value)`. Used by listenEdit chains that don't run
    *  inside a dispatch-context window. */
