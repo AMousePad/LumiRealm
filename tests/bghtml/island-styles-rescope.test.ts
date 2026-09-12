@@ -219,3 +219,12 @@ describe('rescopeRisuEnvironment — descendant + pseudo combinators', () => {
     expect(out.css).toContain(':where([class~=not-prose])');
   });
 });
+
+test('bundled environment inherits host typography instead of Risu app defaults', async () => {
+  const bundle = await Bun.file(new URL('../../src/bghtml/risu-environment.css', import.meta.url)).text();
+  const out = rescopeRisuEnvironment(bundle);
+  expect(out.css).not.toContain('--risu-font-family:Arial');
+  expect(out.css).toContain(':host{font-family:inherit;font-size:inherit;line-height:inherit}');
+  expect(out.css).toContain('*{font-family:var(--risu-font-family)}');
+  expect(out.css).toContain('.font-mono{font-family:var(--font-mono)}');
+});

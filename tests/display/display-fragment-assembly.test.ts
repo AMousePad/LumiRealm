@@ -162,10 +162,10 @@ describe('wrapResolvedContentAsIsland', () => {
     expect(normalizeBlockBalance(out)).toBe(out);
   });
 
-  test('island wrapper carries Risu chat metrics scaled by the host font scale', () => {
-    const out = wrapResolvedContentAsIsland(msg);
-    expect(out).toContain('font-size:calc(0.875rem * var(--lumiverse-font-scale, 1))');
-    expect(out).toContain('line-height:calc(1.25rem * var(--lumiverse-font-scale, 1))');
+  test('island wrapper leaves typography to the host and preserves card styles', () => {
+    expect(MESSAGE_ISLAND_OPEN).not.toContain('style=');
+    const card = '<div style="font-family:monospace;font-size:22px;line-height:2">text</div>';
+    expect(wrapResolvedContentAsIsland(card)).toContain(card);
   });
 
   test('character clipper nests inside simpleFrame', () => {

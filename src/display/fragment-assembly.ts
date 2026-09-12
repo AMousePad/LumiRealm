@@ -133,19 +133,10 @@ function hasIslandWorthyContent(text: string): boolean {
   return nextBlockTag(text, 0) !== null || STYLE_TAG_RE.test(text);
 }
 
-// Risu's chat text span carries its font metrics as an inline style
-// (0.875rem size, 1.25rem line-height at default zoom), so they are absent
-// from the shipped CSS bundle and must be re-applied here. Multiplying by
-// the host font-scale variable makes the native Font Scale setting the
-// analog of Risu's zoom.
-const RISU_CHAT_METRICS_STYLE =
-  'font-size:calc(0.875rem * var(--lumiverse-font-scale, 1));'
-  + 'line-height:calc(1.25rem * var(--lumiverse-font-scale, 1))';
-
 // data-message-prose opts into the host's top-level markdown paragraph
 // semantics. Message islands only, the translate-time style wrap must not.
 export const MESSAGE_ISLAND_OPEN =
-  `${STYLE_WRAP_OPEN.slice(0, -1)} data-message-prose style="${RISU_CHAT_METRICS_STYLE}">`;
+  `${STYLE_WRAP_OPEN.slice(0, -1)} data-message-prose>`;
 
 // Pure-markdown and inline-only messages keep the host's prose rendering.
 // Block structure or styles get the Risu-parity single context.

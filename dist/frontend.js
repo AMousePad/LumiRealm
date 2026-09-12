@@ -23410,8 +23410,7 @@ var STYLE_TAG_RE = /<style[\s>]/i;
 function hasIslandWorthyContent(text) {
   return nextBlockTag(text, 0) !== null || STYLE_TAG_RE.test(text);
 }
-var RISU_CHAT_METRICS_STYLE = "font-size:calc(0.875rem * var(--lumiverse-font-scale, 1));" + "line-height:calc(1.25rem * var(--lumiverse-font-scale, 1))";
-var MESSAGE_ISLAND_OPEN = `${STYLE_WRAP_OPEN.slice(0, -1)} data-message-prose style="${RISU_CHAT_METRICS_STYLE}">`;
+var MESSAGE_ISLAND_OPEN = `${STYLE_WRAP_OPEN.slice(0, -1)} data-message-prose>`;
 function wrapResolvedContentAsIsland(content) {
   if (!content || !hasIslandWorthyContent(content))
     return content;
@@ -46634,7 +46633,7 @@ function setupIslandStyles(flog, opts = {}) {
   };
 }
 function rescopeRisuEnvironment(input) {
-  let css = input;
+  let css = input.replace(/--risu-font-family:\s*Arial,\s*sans-serif,\s*serif;?/g, "");
   const proseInvertHits = (css.match(/\.prose-invert\b/g) ?? []).length;
   css = css.replaceAll(/\.prose-invert\b/g, ":host");
   const proseHits = (css.match(/\.prose\b(?!-)/g) ?? []).length;
@@ -46649,6 +46648,7 @@ function rescopeRisuEnvironment(input) {
   css = css.replaceAll(/--FontColorQuote2:\s*(#[0-9a-fA-F]{3,8})/g, "--FontColorQuote2:var(--lumiverse-prose-dialogue,$1)");
   css += `
 :host{overflow:visible !important}
+` + `:host{font-family:inherit;font-size:inherit;line-height:inherit}
 ` + ':host :where(font,span[style*="color"]) mark[risu-mark=quote1],' + `:host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}
 ` + `:host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong,x-em){color:inherit}
 ` + `:host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong) :is(em,strong){color:inherit}
