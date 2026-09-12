@@ -29,4 +29,24 @@ describe('transformPresetTemplate', () => {
     const output = transformPresetTemplate(input);
     expect(output).toBe('{{#if {{risuCalc::{{var::toggle_cueinput}}=1}}}}Name: {{/if}}{{/if}}');
   });
+
+  it('names numbered and anonymous conditional closers for the host', () => {
+    expect(transformPresetTemplate('{{#if 1}}A{{/7}}')).toBe('{{#if 1}}A{{/if}}');
+    expect(transformPresetTemplate('{{#if_pure 0}}A{{/}}')).toBe('{{#if 0}}A{{/if}}');
+  });
+
+  it('pairs arbitrary closers with the innermost block', () => {
+    const input = '{{#if 1}}A{{#if 0}}B{{/2}}C{{/1}}';
+    expect(transformPresetTemplate(input)).toBe('{{#if 1}}A{{#if 0}}B{{/if}}C{{/if}}');
+    expect(transformPresetTemplate('{{#if 1}}{{#each a as x}}B{{/9}}{{/8}}'))
+      .toBe('{{#if 1}}{{#each a as x}}B{{/each}}{{/if}}');
+    expect(transformPresetTemplate('{{#if 1}}A{{/other}}')).toBe('{{#if 1}}A{{/if}}');
+  });
+
+  it('keeps nested condition macros intact and leaves orphan closers unchanged', () => {
+    expect(transformPresetTemplate('{{/7}}{{#if {{? 1}}}}A{{/8}}{{/}}'))
+      .toBe('{{/7}}{{#if {{risuCalc::1}}}}A{{/if}}{{/}}');
+    expect(transformPresetTemplate('{{// note}}{{#if 1}}A{{/if}}'))
+      .toBe('{{// note}}{{#if 1}}A{{/if}}');
+  });
 });

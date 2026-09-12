@@ -96,6 +96,36 @@ export function parseRisuToggleSyntax(template: string | undefined): ParsedToggl
 }
 
 
+// Risu's risuChatParser closes the innermost block regardless of the closing label.
+// The host instead requires a closing macro whose name matches its opener.
+function namePresetBlockClosers(template: string): string {
+  const blocks: string[] = [];
+  const openings: number[] = [];
+  let result = '';
+  let copied = 0;
+  for (const token of template.matchAll(/\{\{|\}\}/g)) {
+    const offset = token.index!;
+    if (token[0] === '{{') {
+      openings.push(offset);
+      continue;
+    }
+    const start = openings.pop();
+    if (start === undefined || openings.length > 0) continue;
+    const inner = template.slice(start + 2, offset);
+    const opener = /^#([a-zA-Z_]+)\b/.exec(inner);
+    if (opener) {
+      blocks.push(opener[1]!);
+    } else if (inner.startsWith('/') && !inner.startsWith('//')) {
+      const name = blocks.pop();
+      if (name !== undefined) {
+        result += template.slice(copied, start) + `{{/${name}}}`;
+        copied = offset + 2;
+      }
+    }
+  }
+  return result + template.slice(copied);
+}
+
 /**
  * Translates embedded Risu CBS expressions in preset blocks into Lumiverse-compatible macros.
  * Recursively maps {{? expr}} -> {{risuCalc::expr}}, variable lookups, and boolean helpers.
@@ -139,6 +169,8 @@ export function transformPresetTemplate(template: string): string {
   // 3. Normalize pure-if conditionals: {{#if_pure ...}} -> {{#if ...}}, {{/if_pure}} -> {{/if}}
   result = result.replace(/\{\{#if_pure\b/g, '{{#if');
   result = result.replace(/\{\{\/if_pure\}\}/g, '{{/if}}');
+
+  result = namePresetBlockClosers(result);
 
   // 4. Map common CBS helpers to namespaced compatibility macros
   result = result.replace(/\{\{contains::/g, '{{risuContains::');

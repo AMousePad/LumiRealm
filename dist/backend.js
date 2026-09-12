@@ -20518,6 +20518,34 @@ function parseRisuToggleSyntax(template) {
   }
   return groups.filter((g) => g.variables.length > 0);
 }
+function namePresetBlockClosers(template) {
+  const blocks = [];
+  const openings = [];
+  let result = "";
+  let copied = 0;
+  for (const token of template.matchAll(/\{\{|\}\}/g)) {
+    const offset = token.index;
+    if (token[0] === "{{") {
+      openings.push(offset);
+      continue;
+    }
+    const start = openings.pop();
+    if (start === undefined || openings.length > 0)
+      continue;
+    const inner = template.slice(start + 2, offset);
+    const opener = /^#([a-zA-Z_]+)\b/.exec(inner);
+    if (opener) {
+      blocks.push(opener[1]);
+    } else if (inner.startsWith("/") && !inner.startsWith("//")) {
+      const name = blocks.pop();
+      if (name !== undefined) {
+        result += template.slice(copied, start) + `{{/${name}}}`;
+        copied = offset + 2;
+      }
+    }
+  }
+  return result + template.slice(copied);
+}
 function transformPresetTemplate(template) {
   if (!template || typeof template !== "string" || !template.includes("{{")) {
     return template;
@@ -20551,6 +20579,7 @@ function transformPresetTemplate(template) {
   result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, "{{var::$1}}");
   result = result.replace(/\{\{#if_pure\b/g, "{{#if");
   result = result.replace(/\{\{\/if_pure\}\}/g, "{{/if}}");
+  result = namePresetBlockClosers(result);
   result = result.replace(/\{\{contains::/g, "{{risuContains::");
   result = result.replace(/\{\{length::/g, "{{risuLength::");
   result = result.replace(/\{\{and::/g, "{{risuAnd::");
