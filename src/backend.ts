@@ -1024,6 +1024,15 @@ const applySvgRasterIndex = createApplySvgRasterIndex({
 const TRANSLATE_TARGET_LANG = 'en';
 
 const variablesTogglesService = createVariablesTogglesService({
+  visibleChatForUser: (userId) => lastActiveChatByUser.get(userId),
+  invalidateUserToggleReaders: (userId) => {
+    for (const [chatId, active] of activeCardByChat) {
+      if (active.ownerUserId !== userId) continue;
+      invalidateRenderMcpForChat(chatId);
+      invalidateMacroInterceptorForChat(chatId);
+      invalidateListenEditPreload(chatId);
+    }
+  },
   translateLang: TRANSLATE_TARGET_LANG,
   variableState,
   toggleState,

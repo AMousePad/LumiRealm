@@ -24586,6 +24586,8 @@ async function loadVars(api, chatId) {
   }
 }
 async function loadGlobalVars(api) {
+  if (api.getGlobalVariables)
+    return api.getGlobalVariables();
   try {
     const raw = await api.chat.getMetadata("macro_variables");
     if (!raw || typeof raw !== "object")
@@ -26071,9 +26073,9 @@ var cache2 = new Map;
 async function preloadForListenEditChain(api, chatId, characterId) {
   if (chatId) {
     const cached = cache2.get(chatId);
-    if (cached && Date.now() - cached.ts < CACHE_TTL_MS && cached.characterId === (characterId ?? null)) {
+    if (cached && Date.now() - cached.ts < CACHE_TTL_MS && cached.characterId === (characterId ?? null) && cached.userId === api.userId) {
       log2.trace(`cache.hit chat=${chatId} age=${Date.now() - cached.ts}ms ` + `entries=${cached.snapshot.lorebook?.entries.length ?? 0} msgs=${cached.snapshot.messagesRaw?.length ?? 0}`);
-      return cached.snapshot;
+      return { ...cached.snapshot, globalVars: await loadGlobalVars(api) };
     }
   }
   const t0 = Date.now();
@@ -26090,6 +26092,8 @@ async function preloadForListenEditChain(api, chatId, characterId) {
   else
     log2.warn(`loadVars failed — ${varsResult.reason?.message ?? varsResult.reason}`);
   let globalVars;
+  if (globalVarsResult.status === "rejected" && api.getGlobalVariables)
+    throw globalVarsResult.reason;
   if (globalVarsResult.status === "fulfilled")
     globalVars = globalVarsResult.value;
   else
@@ -26130,7 +26134,7 @@ async function preloadForListenEditChain(api, chatId, characterId) {
     ...lorebook !== undefined ? { lorebook } : {}
   };
   if (chatId) {
-    cache2.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null });
+    cache2.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null, userId: api.userId });
   }
   log2.trace(`preload.done chat=${chatId ?? "<none>"} parallel_fetch=${tParallel}ms ` + `total=${Date.now() - t0}ms ` + `vars=${varsCache ? Object.keys(varsCache).length : "<failed>"} ` + `globalVars=${globalVars ? Object.keys(globalVars).length : "<failed>"} ` + `msgs=${messagesRaw?.length ?? "<failed>"} ` + `lore_entries=${lorebook?.entries.length ?? "<failed>"} ` + `cached=${chatId ? "yes" : "no"}`);
   return snapshot;
@@ -45332,6 +45336,8 @@ function mountTogglesPanel(opts) {
       return;
     }
     if (msg.type === "set_variables") {
+      if (activeChatId !== null && msg.chatId !== activeChatId)
+        return;
       if (values && values.chatId === msg.chatId && values.seq > msg.seq)
         return;
       values = {

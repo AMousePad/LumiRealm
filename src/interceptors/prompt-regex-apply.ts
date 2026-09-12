@@ -1,5 +1,6 @@
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
+import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import type { RunPipelineInput, PipelinePhase } from '../interpreter/evaluator/pipeline.js';
@@ -153,7 +154,7 @@ export async function buildBackendPipelineInput(
     },
     variables: {
       ...(mv.local ? { local: mv.local } : {}),
-      ...(mv.global ? { global: mv.global } : {}),
+      global: await readEffectiveGlobals(userId, mv.global ?? {}),
       ...(chatVars ? { chat: chatVars } : {}),
     },
     legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,

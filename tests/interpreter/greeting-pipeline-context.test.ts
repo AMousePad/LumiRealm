@@ -28,6 +28,7 @@ const messages = [
 
 function installSpindle(canonicalIndex: number | undefined = 2): void {
   (globalThis as { spindle?: unknown }).spindle = {
+    userStorage: { getJson: async () => null },
     chats: {
       get: async () => ({
         id: 'chat-1',

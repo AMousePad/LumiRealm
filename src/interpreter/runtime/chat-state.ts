@@ -27,6 +27,7 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
 }
 
 export async function loadGlobalVars(api: HostApi): Promise<Record<string, string>> {
+  if (api.getGlobalVariables) return api.getGlobalVariables();
   try {
     const raw = await api.chat.getMetadata('macro_variables');
     if (!raw || typeof raw !== 'object') return {};

@@ -30199,6 +30199,8 @@ async function loadVars(api, chatId) {
   }
 }
 async function loadGlobalVars(api) {
+  if (api.getGlobalVariables)
+    return api.getGlobalVariables();
   try {
     const raw = await api.chat.getMetadata("macro_variables");
     if (!raw || typeof raw !== "object")
@@ -33914,9 +33916,9 @@ function invalidateListenEditPreload(chatId) {
 async function preloadForListenEditChain(api, chatId, characterId) {
   if (chatId) {
     const cached = cache2.get(chatId);
-    if (cached && Date.now() - cached.ts < CACHE_TTL_MS && cached.characterId === (characterId ?? null)) {
+    if (cached && Date.now() - cached.ts < CACHE_TTL_MS && cached.characterId === (characterId ?? null) && cached.userId === api.userId) {
       log.trace(`cache.hit chat=${chatId} age=${Date.now() - cached.ts}ms ` + `entries=${cached.snapshot.lorebook?.entries.length ?? 0} msgs=${cached.snapshot.messagesRaw?.length ?? 0}`);
-      return cached.snapshot;
+      return { ...cached.snapshot, globalVars: await loadGlobalVars(api) };
     }
   }
   const t0 = Date.now();
@@ -33933,6 +33935,8 @@ async function preloadForListenEditChain(api, chatId, characterId) {
   else
     log.warn(`loadVars failed \u2014 ${varsResult.reason?.message ?? varsResult.reason}`);
   let globalVars;
+  if (globalVarsResult.status === "rejected" && api.getGlobalVariables)
+    throw globalVarsResult.reason;
   if (globalVarsResult.status === "fulfilled")
     globalVars = globalVarsResult.value;
   else
@@ -33973,7 +33977,7 @@ async function preloadForListenEditChain(api, chatId, characterId) {
     ...lorebook !== undefined ? { lorebook } : {}
   };
   if (chatId) {
-    cache2.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null });
+    cache2.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null, userId: api.userId });
   }
   log.trace(`preload.done chat=${chatId ?? "<none>"} parallel_fetch=${tParallel}ms ` + `total=${Date.now() - t0}ms ` + `vars=${varsCache ? Object.keys(varsCache).length : "<failed>"} ` + `globalVars=${globalVars ? Object.keys(globalVars).length : "<failed>"} ` + `msgs=${messagesRaw?.length ?? "<failed>"} ` + `lore_entries=${lorebook?.entries.length ?? "<failed>"} ` + `cached=${chatId ? "yes" : "no"}`);
   return snapshot;
@@ -39401,6 +39405,82 @@ function toRisuFirstMessageIndex(value) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value - 1 : -1;
 }
 
+// src/state/toggle-preferences.ts
+var PATH2 = "lumirealm/toggle-preferences.json";
+var chains2 = new Map;
+function exclusive(userId, fn) {
+  if (!userId)
+    throw new TypeError("Toggle preferences require a user ID");
+  const previous = chains2.get(userId) ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  const tail = run.then(() => {
+    return;
+  }, () => {
+    return;
+  });
+  chains2.set(userId, tail);
+  tail.then(() => {
+    if (chains2.get(userId) === tail)
+      chains2.delete(userId);
+  });
+  return run;
+}
+
+class TogglePreferencesError extends TypeError {
+  constructor(cause) {
+    super(`Toggle preferences could not be read: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "TogglePreferencesError";
+  }
+}
+async function read(userId) {
+  try {
+    const raw = await spindle.userStorage.getJson(PATH2, { fallback: null, userId });
+    if (raw === null)
+      return null;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new TypeError("Invalid toggle preferences");
+    }
+    for (const [key, value] of Object.entries(raw)) {
+      if (!key.startsWith("toggle_") || typeof value !== "string") {
+        throw new TypeError("Invalid toggle preference entry");
+      }
+    }
+    return raw;
+  } catch (error) {
+    throw new TogglePreferencesError(error);
+  }
+}
+function toggles(legacy) {
+  return Object.fromEntries(Object.entries(legacy).filter(([key]) => key.startsWith("toggle_")));
+}
+async function initializeTogglePreferences(userId, legacy) {
+  await exclusive(userId, async () => {
+    if (await read(userId) === null) {
+      await spindle.userStorage.setJson(PATH2, toggles(legacy), { userId });
+    }
+  });
+}
+async function readEffectiveGlobals(userId, legacy) {
+  return exclusive(userId, async () => {
+    const preferences = await read(userId);
+    if (preferences === null)
+      return { ...legacy };
+    return { ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith("toggle_"))), ...preferences };
+  });
+}
+async function writeTogglePreference(userId, key, value, legacy) {
+  if (!key.startsWith("toggle_"))
+    throw new TypeError("Invalid toggle preference key");
+  await exclusive(userId, async () => {
+    const preferences = await read(userId) ?? toggles(legacy);
+    if (value === null)
+      delete preferences[key];
+    else
+      preferences[key] = value;
+    await spindle.userStorage.setJson(PATH2, preferences, { userId });
+  });
+}
+
 // src/interpreter/alert-bridge.ts
 var pending2 = new Map;
 function awaitAlertDismissal(requestId, ownerUserId, timeoutMs = 60000) {
@@ -39587,6 +39667,15 @@ function makeSpindleHost(ctx) {
     }
   };
   const host = {
+    ...uid !== undefined ? { userId: uid } : {},
+    getGlobalVariables: async () => {
+      if (!uid)
+        throw new TypeError("Global variables require a user ID");
+      const raw = await getMetadata("macro_variables");
+      const global = raw?.global;
+      const legacy = global && typeof global === "object" ? Object.fromEntries(Object.entries(global).map(([key, value]) => [key, toStr(value)])) : {};
+      return readEffectiveGlobals(uid, legacy);
+    },
     chat: {
       getChatId: () => chatId,
       getMessages,
@@ -40605,7 +40694,7 @@ async function buildBackendPipelineInput(chatId, characterId, userId, deps, pers
     },
     variables: {
       ...mv.local ? { local: mv.local } : {},
-      ...mv.global ? { global: mv.global } : {},
+      global: await readEffectiveGlobals(userId, mv.global ?? {}),
       ...chatVars ? { chat: chatVars } : {}
     },
     legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
@@ -41809,7 +41898,7 @@ function createReadonlyResolver(deps) {
       },
       variables: {
         ...mv.local ? { local: mv.local } : {},
-        ...mv.global ? { global: mv.global } : {},
+        global: await readEffectiveGlobals(userId, mv.global ?? {}),
         ...chatVars ? { chat: chatVars } : {}
       },
       legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
@@ -41847,6 +41936,8 @@ function createReadonlyResolver(deps) {
       log.debug(`resolveReadonlyMany: DONE chat=${chatId} entries=${templates.length} ` + `elapsed=${Date.now() - t0}ms`);
       return resolved;
     } catch (err) {
+      if (err instanceof TogglePreferencesError)
+        throw err;
       log.error(`resolveReadonlyMany: worker-eval threw chat=${chatId}: ${err.message}. ` + `Returning templates verbatim (no Lumi-native fallback).`);
       return [...templates];
     }
@@ -41889,6 +41980,8 @@ function createReadonlyResolver(deps) {
       log.debug(`resolveReadonly: DONE chat=${chatId} elapsed=${Date.now() - t0}ms out_len=${out.length} ` + `out[0..200]=${JSON.stringify(out.slice(0, 200))}`);
       return out;
     } catch (err) {
+      if (err instanceof TogglePreferencesError)
+        throw err;
       log.error(`resolveReadonly: worker-eval threw chat=${chatId}: ${err.message}. Returning template verbatim (no Lumi-native fallback).`);
       return template;
     }
@@ -44548,9 +44641,13 @@ function createVariablesTogglesService(deps) {
       return;
     }
     const meta = chat?.metadata ?? {};
+    const legacyGlobals = sanitizeVarMap(meta.macro_variables?.global);
+    if (deps.visibleChatForUser?.(userId) === chatId) {
+      await initializeTogglePreferences(userId, legacyGlobals);
+    }
     const scopes = {
       local: sanitizeVarMap(meta.chat_variables),
-      global: sanitizeVarMap(meta.macro_variables?.global),
+      global: await readEffectiveGlobals(userId, legacyGlobals),
       chat: sanitizeVarMap(undefined)
     };
     const cardSide = active.card.risuPayload.scriptstate_defaults ?? {};
@@ -44686,29 +44783,19 @@ function createVariablesTogglesService(deps) {
     }
     let chat;
     try {
-      chat = await spindle.chats.get(chatId, userId);
+      chat = await spindle.chats.get(deps.visibleChatForUser?.(userId) ?? chatId, userId);
     } catch (err) {
       return { ok: false, reason: `chats.get failed: ${errMsg(err)}` };
     }
     const meta = chat?.metadata ?? {};
-    const mv = meta["macro_variables"] && typeof meta["macro_variables"] === "object" ? { ...meta["macro_variables"] } : {};
-    const global = mv["global"] && typeof mv["global"] === "object" ? { ...mv["global"] } : {};
+    const legacyGlobals = sanitizeVarMap(meta["macro_variables"]?.global);
     const storeKey = `toggle_${trimmedKey}`;
-    if (value === null) {
-      if (!Object.prototype.hasOwnProperty.call(global, storeKey)) {
-        return { ok: true };
-      }
-      delete global[storeKey];
-    } else {
-      global[storeKey] = String(value);
-    }
-    mv["global"] = global;
     try {
-      expectChatChange(chatId);
-      await spindle.chats.update(chatId, { metadata: { ...meta, macro_variables: mv } }, userId);
+      await writeTogglePreference(userId, storeKey, value, legacyGlobals);
     } catch (err) {
-      return { ok: false, reason: `chats.update failed: ${errMsg(err)}` };
+      return { ok: false, reason: `toggle preferences write failed: ${errMsg(err)}` };
     }
+    deps.invalidateUserToggleReaders?.(userId);
     invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
@@ -48120,6 +48207,16 @@ var applySvgRasterIndex = createApplySvgRasterIndex({
 });
 var TRANSLATE_TARGET_LANG = "en";
 var variablesTogglesService = createVariablesTogglesService({
+  visibleChatForUser: (userId) => lastActiveChatByUser.get(userId),
+  invalidateUserToggleReaders: (userId) => {
+    for (const [chatId, active] of activeCardByChat) {
+      if (active.ownerUserId !== userId)
+        continue;
+      invalidateRenderMcpForChat(chatId);
+      invalidateMacroInterceptorForChat(chatId);
+      invalidateListenEditPreload(chatId);
+    }
+  },
   translateLang: TRANSLATE_TARGET_LANG,
   variableState,
   toggleState,

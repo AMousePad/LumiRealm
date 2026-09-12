@@ -386,6 +386,7 @@ export function mountTogglesPanel(opts: MountTogglesPanelOptions): TogglesTabHan
       return;
     }
     if (msg.type === 'set_variables') {
+      if (activeChatId !== null && msg.chatId !== activeChatId) return;
       if (values && values.chatId === msg.chatId && values.seq > msg.seq) return;
       values = {
         chatId: msg.chatId,

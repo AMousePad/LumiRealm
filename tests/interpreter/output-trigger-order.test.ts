@@ -14,6 +14,7 @@ describe('output lifecycle order', () => {
     const writes: string[] = [];
 
     (globalThis as { spindle?: unknown }).spindle = {
+      userStorage: { getJson: async () => null },
       chat: {
         getMessages: async () => messages.map((message) => ({ ...message })),
         updateMessage: async (_chatId: string, messageId: string, patch: { content?: string }) => {

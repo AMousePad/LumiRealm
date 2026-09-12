@@ -54,6 +54,8 @@ export interface HostDomHandle {
 }
 
 export interface HostApi {
+  readonly userId?: string;
+  readonly getGlobalVariables?: () => Promise<Record<string, string>>;
   readonly chat: {
     getChatId?: () => string | null;
     getMessages(): Promise<readonly HostMessage[]>;

@@ -9670,6 +9670,9 @@ var init_scanner = __esm(() => {
   init_cbs();
 });
 
+// src/state/toggle-preferences.ts
+var chains = new Map;
+
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
 // spindle.json

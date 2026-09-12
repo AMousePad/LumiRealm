@@ -14,6 +14,8 @@ import type {
   HostWorldInfoEntry,
   InjectOpts,
 } from './host.js';
+import { readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { toStr } from '../util/coerce.js';
 import { expectChatChange } from '../state/own-chat-change.js';
 import { expectCharacterEdit } from '../state/own-character-edit.js';
 import { makeSafeLogger } from '../util/safe-log.js';
@@ -162,6 +164,16 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   };
 
   const host: HostApi = {
+    ...(uid !== undefined ? { userId: uid } : {}),
+    getGlobalVariables: async () => {
+      if (!uid) throw new TypeError('Global variables require a user ID');
+      const raw = await getMetadata('macro_variables');
+      const global = (raw as { global?: unknown } | null)?.global;
+      const legacy = global && typeof global === 'object'
+        ? Object.fromEntries(Object.entries(global).map(([key, value]) => [key, toStr(value)]))
+        : {};
+      return readEffectiveGlobals(uid, legacy);
+    },
     chat: {
       getChatId: () => chatId,
       getMessages,
