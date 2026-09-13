@@ -44978,6 +44978,22 @@ async function assembleDisplaySnapshot(deps, active, chatId, userId, vars) {
     fetchHostLorebook(bookIds, userId),
     fetchChatRuntimeState(chatId, userId)
   ]);
+  const moduleLorebooks = Object.values(active.card.risuPayload.extra?.runtime_module_lorebooks ?? {}).flat();
+  for (const raw of moduleLorebooks) {
+    if (!raw || typeof raw !== "object")
+      continue;
+    const row = raw;
+    lorebookHost.push({
+      id: typeof row.id === "string" ? row.id : `module-lore-${lorebookHost.length}`,
+      ...typeof row.worldBookId === "string" ? { worldBookId: row.worldBookId } : {},
+      key: Array.isArray(row.key) ? row.key : typeof row.key === "string" ? row.key : [],
+      content: typeof row.content === "string" ? row.content : "",
+      comment: typeof row.comment === "string" ? row.comment : "",
+      orderValue: typeof row.orderValue === "number" ? row.orderValue : typeof row.insertorder === "number" ? row.insertorder : 100,
+      disabled: typeof row.disabled === "boolean" ? row.disabled : false,
+      constant: typeof row.constant === "boolean" ? row.constant : false
+    });
+  }
   const chatView = buildRisuChatView({ messages: messagesHost });
   const chatState = buildDisplayChatStateFromView(chatView);
   const triggers = active.card.risuPayload.triggers;

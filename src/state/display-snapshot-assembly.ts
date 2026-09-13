@@ -202,6 +202,26 @@ export async function assembleDisplaySnapshot(
     fetchChatRuntimeState(chatId, userId),
   ]);
 
+  // Display runtimes consume preloaded lore, so include the active card's module
+  // rows here rather than relying on the runtime's host-fetch path.
+  const moduleLorebooks = Object.values(
+    (active.card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {},
+  ).flat();
+  for (const raw of moduleLorebooks) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Record<string, unknown>;
+    lorebookHost.push({
+      id: typeof row.id === 'string' ? row.id : `module-lore-${lorebookHost.length}`,
+      ...(typeof row.worldBookId === 'string' ? { worldBookId: row.worldBookId } : {}),
+      key: Array.isArray(row.key) ? row.key : typeof row.key === 'string' ? row.key : [],
+      content: typeof row.content === 'string' ? row.content : '',
+      comment: typeof row.comment === 'string' ? row.comment : '',
+      orderValue: typeof row.orderValue === 'number' ? row.orderValue : typeof row.insertorder === 'number' ? row.insertorder : 100,
+      disabled: typeof row.disabled === 'boolean' ? row.disabled : false,
+      constant: typeof row.constant === 'boolean' ? row.constant : false,
+    });
+  }
+
   const chatView = buildRisuChatView({ messages: messagesHost });
   const chatState = buildDisplayChatStateFromView(chatView);
 
