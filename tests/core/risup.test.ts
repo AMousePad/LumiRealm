@@ -402,6 +402,70 @@ describe('Risu preset translator', () => {
     }
   });
 
+  test('maps the Risu loop and scratch chain onto host macros', () => {
+    const raw = {
+      name: 'Loop Chain Preset',
+      promptTemplate: [
+        {
+          type: 'plain',
+          role: 'user',
+          name: 'Guidelines',
+          text:
+            '{{settempvar::genre_check::0}}' +
+            '{{#each {{array::toggle_genre1::toggle_genre2}} genreVar}}' +
+            '{{#if {{any::{{equal::{{getglobalvar::{{slot::genreVar}}}}::1}}}}}}' +
+            '{{settempvar::genre_check::1}}{{/if}}{{/each}}' +
+            '{{#if {{equal::{{tempvar::genre_check}}::1}}}}HIT{{/if}}' +
+            '{{#if {{and::{{notequal::{{getvar::custom}}::null}}::1}}}}CHECKED{{/if}}',
+        },
+      ],
+    };
+
+    const blocks = translateRisuPreset(raw).preset.prompt_order ?? [];
+    const block = blocks.find((b) => b.name === 'Guidelines')!;
+    // A dynamic name ({{getglobalvar::{{slot::x}}}}) only resolves when the body
+    // is kept intact and the loop read becomes the host local-scope read {{getvar}},
+    // which is what {{each}} binds; {{array::}} becomes the list {{each}} splits.
+    expect(block.content).toBe(
+      '{{setvar::genre_check::0}}' +
+        '{{#each toggle_genre1,toggle_genre2 genreVar}}' +
+        '{{#if {{risuAny::{{eq::{{risuGlobalVar::{{getvar::genreVar}}}}::1}}}}}}' +
+        '{{setvar::genre_check::1}}{{/if}}{{/each}}' +
+        '{{#if {{eq::{{getvar::genre_check}}::1}}}}HIT{{/if}}' +
+        '{{#if {{risuAnd::{{ne::{{getvar::custom}}::null}}::1}}}}CHECKED{{/if}}',
+    );
+    for (const unresolved of [
+      '{{array::',
+      '{{slot::',
+      '{{tempvar::',
+      '{{gettempvar::',
+      '{{settempvar::',
+      '{{getglobalvar::',
+      '{{notequal::',
+    ]) {
+      expect(block.content ?? '').not.toContain(unresolved);
+    }
+  });
+
+  test('keeps a nested Risu macro argument intact in the loop list', () => {
+    const raw = {
+      name: 'Nested List Preset',
+      promptTemplate: [
+        {
+          type: 'plain',
+          role: 'user',
+          name: 'Nested',
+          text: '{{#each {{array::{{getglobalvar::toggle_first}}::toggle_second}} loopVar}}{{slot::loopVar}}{{/each}}',
+        },
+      ],
+    };
+
+    const block = (translateRisuPreset(raw).preset.prompt_order ?? []).find((b) => b.name === 'Nested')!;
+    expect(block.content).toBe(
+      '{{#each {{risuGlobalVar::toggle_first}},toggle_second loopVar}}{{getvar::loopVar}}{{/each}}',
+    );
+  });
+
   test('translates jailbreak item and respects postEverything without breaking chat history', () => {
     const raw = {
       name: 'Jailbreak Preset',

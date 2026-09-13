@@ -7,6 +7,7 @@ declare const spindle: any;
 import { calcString } from '../risu-compat/risu-helpers.js';
 import { collectLegacyGlobals, mergeEffectiveGlobals, readTogglePreferences } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
+import { readChatAuthorsNote } from '../state/authors-note-cache.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
 const log = makeSafeLogger('spindle-macros');
@@ -156,6 +157,29 @@ async function resolveGlobalVarMacro(ctx: unknown): Promise<string> {
   }
 }
 
+// ─── Chat author's note (`{{authornote}}`) ───────────────────────────────────
+
+// The host engine has no author's-note slot, so the translated `{{authornote}}`
+// needs one. The reader and its per-chat memo live in state/authors-note-cache,
+// which LumiRealm's own author's-note writer also invalidates.
+async function resolveAuthornoteMacro(ctx: unknown): Promise<string> {
+  const chatId = readChatId(ctx);
+  if (!chatId) return '';
+  const env = (ctx as { env?: { extra?: Record<string, unknown> } })?.env;
+  const userId = typeof env?.extra?.['userId'] === 'string' ? (env.extra['userId'] as string) : '';
+  try {
+    return await readChatAuthorsNote(chatId, userId);
+  } catch (err) {
+    // A failed metadata read must not break the host engine: an unresolved slot
+    // is worse than a note-less prompt.
+    log.warn(
+      `authornote(${chatId}): chat metadata read failed: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return '';
+  }
+}
+
 export function registerSpindleMacros(): void {
   const MACRO_CATEGORY = 'extension:lumirealm';
 
@@ -237,6 +261,15 @@ export function registerSpindleMacros(): void {
       handler: (ctx: unknown) => {
         return getArgs(ctx).some(isTruthy) ? '1' : '0';
       },
+    },
+    {
+      name: 'authornote',
+      // Risu's own alias for the same macro (cbs.ts authornote/author_note).
+      aliases: ['author_note'],
+      category: MACRO_CATEGORY,
+      description: "Reads the chat's author's note (chat metadata authors_note.content).",
+      returnType: 'string',
+      handler: (ctx: unknown) => resolveAuthornoteMacro(ctx),
     },
   ];
 

@@ -9615,7 +9615,7 @@ var init_dispatch = __esm(() => {
 });
 
 // src/interpreter/evaluator/scanner.ts
-function splitMacroArgs(payload) {
+function splitMacroArgs2(payload) {
   const colon = payload.indexOf(":");
   let parts;
   if (colon !== -1 && payload[colon + 1] === ":") {
@@ -9642,7 +9642,7 @@ function dispatchLeaf(payload, ctx, callStack) {
   const calc = tryCalcShortcut(payload, ctx);
   if (calc !== null)
     return calc;
-  const { name, args } = splitMacroArgs(payload);
+  const { name, args } = splitMacroArgs2(payload);
   const entry = lookup(name);
   if (!entry)
     return null;
@@ -9836,7 +9836,7 @@ function evaluate(template, ctx, opts = {}) {
             break;
           }
         }
-        const leafName = normalizeMacroName(splitMacroArgs(dat).name);
+        const leafName = normalizeMacroName(splitMacroArgs2(dat).name);
         if (!isPureMode() && leafName === "bkspc") {
           nested[0] = rewindLastWord(nested[0] ?? "");
           break;
@@ -20549,6 +20549,57 @@ function namePresetBlockClosers(template) {
   }
   return result + template.slice(copied);
 }
+function rewriteMacroBody(template, name, build) {
+  const open = `{{${name}::`;
+  let result = "";
+  let i = 0;
+  while (i < template.length) {
+    const start = template.indexOf(open, i);
+    if (start === -1)
+      return result + template.slice(i);
+    let depth = 0;
+    let j = start;
+    while (j < template.length) {
+      if (template.slice(j, j + 2) === "{{") {
+        depth++;
+        j += 2;
+      } else if (template.slice(j, j + 2) === "}}") {
+        depth--;
+        j += 2;
+        if (depth === 0)
+          break;
+      } else {
+        j++;
+      }
+    }
+    if (depth !== 0)
+      return result + template.slice(i);
+    result += template.slice(i, start) + build(template.slice(start + open.length, j - 2));
+    i = j;
+  }
+  return result;
+}
+function splitMacroArgs(body) {
+  const args = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0;i < body.length - 1; i++) {
+    const two = body.slice(i, i + 2);
+    if (two === "{{") {
+      depth++;
+      i++;
+    } else if (two === "}}") {
+      depth--;
+      i++;
+    } else if (depth === 0 && two === "::") {
+      args.push(body.slice(start, i));
+      i++;
+      start = i + 1;
+    }
+  }
+  args.push(body.slice(start));
+  return args;
+}
 function transformPresetTemplate(template) {
   if (!template || typeof template !== "string" || !template.includes("{{")) {
     return template;
@@ -20579,10 +20630,17 @@ function transformPresetTemplate(template) {
       i++;
     }
   }
-  result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, "{{risuGlobalVar::$1}}");
+  result = rewriteMacroBody(result, "getglobalvar", (body) => `{{risuGlobalVar::${body}}}`);
+  result = result.replace(/\{\{slot::([a-zA-Z0-9_]+)\}\}/g, "{{getvar::$1}}");
+  result = result.replace(/\{\{(?:get)?tempvar::([a-zA-Z0-9_]+)\}\}/g, "{{getvar::$1}}");
+  result = rewriteMacroBody(result, "settempvar", (body) => {
+    const args = splitMacroArgs(body);
+    return `{{setvar::${args[0] ?? ""}::${args[1] ?? ""}}}`;
+  });
   result = result.replace(/\{\{#if_pure\b/g, "{{#if");
   result = result.replace(/\{\{\/if_pure\}\}/g, "{{/if}}");
   result = namePresetBlockClosers(result);
+  result = rewriteMacroBody(result, "array", (body) => splitMacroArgs(body).join(","));
   result = result.replace(/\{\{contains::/g, "{{risuContains::");
   result = result.replace(/\{\{length::/g, "{{risuLength::");
   result = result.replace(/\{\{and::/g, "{{risuAnd::");
@@ -20590,6 +20648,7 @@ function transformPresetTemplate(template) {
   result = result.replace(/\{\{any::/g, "{{risuAny::");
   result = result.replace(/\{\{not::/g, "{{risuNot::");
   result = result.replace(/\{\{equal::/g, "{{eq::");
+  result = result.replace(/\{\{notequal::/g, "{{ne::");
   result = result.replace(/\{\{not_equal::/g, "{{ne::");
   return result;
 }
@@ -28919,6 +28978,27 @@ function makeChatApi(api, state, notifyStateChanged) {
   };
 }
 
+// src/state/authors-note-cache.ts
+var AUTHORS_NOTE_CACHE_TTL_MS = 2000;
+var notesByChat = new Map;
+function invalidateAuthorsNoteCache(chatId) {
+  if (chatId === undefined)
+    notesByChat.clear();
+  else
+    notesByChat.delete(chatId);
+}
+async function readChatAuthorsNote(chatId, userId) {
+  const hit = notesByChat.get(chatId);
+  if (hit && Date.now() - hit.at < AUTHORS_NOTE_CACHE_TTL_MS)
+    return hit.value;
+  const chat = await spindle.chats.get(chatId, userId || undefined);
+  const note = chat?.metadata?.["authors_note"];
+  const raw = note && typeof note === "object" ? note.content : "";
+  const value = typeof raw === "string" ? raw : "";
+  notesByChat.set(chatId, { at: Date.now(), value });
+  return value;
+}
+
 // src/interpreter/runtime/character-note.ts
 function makeCharacterNoteApi(api, state, vars) {
   return {
@@ -28976,6 +29056,7 @@ function makeCharacterNoteApi(api, state, vars) {
     },
     async setAuthorNote(value) {
       const v = toStr(value);
+      invalidateAuthorsNoteCache();
       vars.setVar("__risu_author_note__", v);
       try {
         const prev = await api.chat.getMetadata("authors_note");
@@ -41872,6 +41953,19 @@ async function resolveGlobalVarMacro(ctx) {
     return legacy[key] ?? "null";
   }
 }
+async function resolveAuthornoteMacro(ctx) {
+  const chatId = readChatId(ctx);
+  if (!chatId)
+    return "";
+  const env = ctx?.env;
+  const userId = typeof env?.extra?.["userId"] === "string" ? env.extra["userId"] : "";
+  try {
+    return await readChatAuthorsNote(chatId, userId);
+  } catch (err) {
+    log8.warn(`authornote(${chatId}): chat metadata read failed: ` + `${err instanceof Error ? err.message : String(err)}`);
+    return "";
+  }
+}
 function registerSpindleMacros() {
   const MACRO_CATEGORY = "extension:lumirealm";
   const macros = [
@@ -41952,6 +42046,14 @@ function registerSpindleMacros() {
       handler: (ctx) => {
         return getArgs(ctx).some(isTruthy2) ? "1" : "0";
       }
+    },
+    {
+      name: "authornote",
+      aliases: ["author_note"],
+      category: MACRO_CATEGORY,
+      description: "Reads the chat's author's note (chat metadata authors_note.content).",
+      returnType: "string",
+      handler: (ctx) => resolveAuthornoteMacro(ctx)
     }
   ];
   for (const m of macros) {

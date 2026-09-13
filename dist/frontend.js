@@ -23812,6 +23812,15 @@ function makeChatApi(api, state, notifyStateChanged) {
   };
 }
 
+// src/state/authors-note-cache.ts
+var notesByChat = new Map;
+function invalidateAuthorsNoteCache(chatId) {
+  if (chatId === undefined)
+    notesByChat.clear();
+  else
+    notesByChat.delete(chatId);
+}
+
 // src/interpreter/runtime/character-note.ts
 function makeCharacterNoteApi(api, state, vars) {
   return {
@@ -23869,6 +23878,7 @@ function makeCharacterNoteApi(api, state, vars) {
     },
     async setAuthorNote(value) {
       const v = toStr(value);
+      invalidateAuthorsNoteCache();
       vars.setVar("__risu_author_note__", v);
       try {
         const prev = await api.chat.getMetadata("authors_note");

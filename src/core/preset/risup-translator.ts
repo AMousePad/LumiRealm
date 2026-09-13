@@ -134,6 +134,64 @@ function namePresetBlockClosers(template: string): string {
 }
 
 /**
+ * Rewrites one Risu macro in place while keeping a dynamic body intact. A plain
+ * regex cannot: Risu allows a macro as another macro's argument
+ * ({{getglobalvar::{{slot::x}}}}), so the macro ends at the matching closing
+ * brace, not at the first `}}`.
+ */
+function rewriteMacroBody(template: string, name: string, build: (body: string) => string): string {
+  const open = `{{${name}::`;
+  let result = '';
+  let i = 0;
+  while (i < template.length) {
+    const start = template.indexOf(open, i);
+    if (start === -1) return result + template.slice(i);
+    let depth = 0;
+    let j = start;
+    while (j < template.length) {
+      if (template.slice(j, j + 2) === '{{') {
+        depth++;
+        j += 2;
+      } else if (template.slice(j, j + 2) === '}}') {
+        depth--;
+        j += 2;
+        if (depth === 0) break;
+      } else {
+        j++;
+      }
+    }
+    // An unterminated macro is left alone rather than guessed at.
+    if (depth !== 0) return result + template.slice(i);
+    result += template.slice(i, start) + build(template.slice(start + open.length, j - 2));
+    i = j;
+  }
+  return result;
+}
+
+/** Splits a macro body on `::`, ignoring separators inside nested macros. */
+function splitMacroArgs(body: string): string[] {
+  const args: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < body.length - 1; i++) {
+    const two = body.slice(i, i + 2);
+    if (two === '{{') {
+      depth++;
+      i++;
+    } else if (two === '}}') {
+      depth--;
+      i++;
+    } else if (depth === 0 && two === '::') {
+      args.push(body.slice(start, i));
+      i++;
+      start = i + 1;
+    }
+  }
+  args.push(body.slice(start));
+  return args;
+}
+
+/**
  * Translates embedded Risu CBS expressions in preset blocks into Lumiverse-compatible macros.
  * Recursively maps {{? expr}} -> {{risuCalc::expr}}, variable lookups, and boolean helpers.
  */
@@ -178,15 +236,32 @@ export function transformPresetTemplate(template: string): string {
   //    only the import-time toggle defaults and never the user's State → Toggles
   //    choice. risuGlobalVar applies the same effective-globals overlay (chat
   //    globals + persisted user toggle preferences) LumiRealm's own engine uses.
-  result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, '{{risuGlobalVar::$1}}');
+  result = rewriteMacroBody(result, 'getglobalvar', (body) => `{{risuGlobalVar::${body}}}`);
 
-  // 3. Normalize pure-if conditionals: {{#if_pure ...}} -> {{#if ...}}, {{/if_pure}} -> {{/if}}
+  // 3. Risu loop and scratch reads -> the host's local scope. Risu's #each
+  //    substitutes {{slot::NAME}} textually; the host's {{each}} binds the loop
+  //    variable in `variables.local`, which {{getvar::}} reads. Risu temp
+  //    variables live for a single parser pass and no host surface carries
+  //    per-pass state, so they share that local scope, which the host resets per
+  //    assembly and which extension macros (unlike host built-ins) cannot write.
+  result = result.replace(/\{\{slot::([a-zA-Z0-9_]+)\}\}/g, '{{getvar::$1}}');
+  result = result.replace(/\{\{(?:get)?tempvar::([a-zA-Z0-9_]+)\}\}/g, '{{getvar::$1}}');
+  result = rewriteMacroBody(result, 'settempvar', (body) => {
+    const args = splitMacroArgs(body);
+    // Risu reads a missing argument as "", so the one-argument form clears it.
+    return `{{setvar::${args[0] ?? ''}::${args[1] ?? ''}}}`;
+  });
+
+  // 4. Normalize pure-if conditionals: {{#if_pure ...}} -> {{#if ...}}, {{/if_pure}} -> {{/if}}
   result = result.replace(/\{\{#if_pure\b/g, '{{#if');
   result = result.replace(/\{\{\/if_pure\}\}/g, '{{/if}}');
 
   result = namePresetBlockClosers(result);
 
-  // 4. Map common CBS helpers to namespaced compatibility macros
+  // 5. Map common CBS helpers to namespaced compatibility macros. Risu's list
+  //    construction ({{array::a::b}}) becomes the comma list the host's {{each}}
+  //    splits on.
+  result = rewriteMacroBody(result, 'array', (body) => splitMacroArgs(body).join(','));
   result = result.replace(/\{\{contains::/g, '{{risuContains::');
   result = result.replace(/\{\{length::/g, '{{risuLength::');
   result = result.replace(/\{\{and::/g, '{{risuAnd::');
@@ -194,6 +269,8 @@ export function transformPresetTemplate(template: string): string {
   result = result.replace(/\{\{any::/g, '{{risuAny::');
   result = result.replace(/\{\{not::/g, '{{risuNot::');
   result = result.replace(/\{\{equal::/g, '{{eq::');
+  // Risu's primary name and its alias both mean the same macro (cbs.ts notequal).
+  result = result.replace(/\{\{notequal::/g, '{{ne::');
   result = result.replace(/\{\{not_equal::/g, '{{ne::');
 
   return result;
