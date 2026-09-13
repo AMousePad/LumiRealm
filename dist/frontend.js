@@ -45312,6 +45312,36 @@ function mountTogglesPanel(opts) {
       value
     });
   }
+  function applyValues() {
+    for (const row of listHost.querySelectorAll(".lr-toggle-row")) {
+      const key = row.dataset["key"] ?? "";
+      const stored = readToggle(key);
+      switch (row.dataset["kind"]) {
+        case "checkbox": {
+          const cb = row.querySelector(".lr-toggle-checkbox");
+          if (cb)
+            cb.checked = stored === "1";
+          break;
+        }
+        case "select": {
+          const sel = row.querySelector(".lr-toggle-select");
+          const index = Number.parseInt(stored, 10);
+          const opt = sel !== null && Number.isInteger(index) ? sel.options[index] : undefined;
+          if (opt && !opt.selected)
+            opt.selected = true;
+          break;
+        }
+        default: {
+          if (textEditBuffers.has(key))
+            break;
+          const field = row.querySelector(".lr-toggle-text, .lr-toggle-textarea");
+          if (field && field.value !== stored)
+            field.value = stored;
+          break;
+        }
+      }
+    }
+  }
   function render() {
     renderStatus();
     renderList();
@@ -45368,7 +45398,7 @@ function mountTogglesPanel(opts) {
         scopes: msg.scopes
       };
       if (defs && defs.chatId === activeChatId) {
-        render();
+        applyValues();
       }
       return;
     }
