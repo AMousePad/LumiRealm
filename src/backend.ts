@@ -1663,7 +1663,7 @@ const realmHandle: RealmBackendHandle = setupRealmBackend({
   importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) =>
     importCardFromBytes(bytes, fileName, userId),
   createPreset: (input, uid) => spindle.presets.create(input, uid),
-  createRegexScript: (input, uid) => spindle.regex_scripts.create(input, uid),
+  regexApi: spindle.regex_scripts,
   notifyImportProgress: (progress, uid) => send(progress as any, uid),
   toast: (msg, kind) => {
     if (kind === 'error') spindle.toast?.error(msg);

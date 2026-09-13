@@ -295,13 +295,19 @@ describe('Preset import via Realm backend', () => {
           updated_at: Date.now(),
         };
       },
-      createRegexScript: async (input) => {
-        createdRegex.push(input);
-        return {
-          id: `script-${createdRegex.length}`,
-          can_mutate: true,
-          ...input,
-        } as any;
+      regexApi: {
+        list: async () => ({ data: [], total: 0 }),
+        create: async (input) => {
+          createdRegex.push(input);
+          return {
+            id: `script-${createdRegex.length}`,
+            can_mutate: true,
+            ...input,
+          } as any;
+        },
+        update: async () => {
+          throw new Error('unexpected regex update');
+        },
       },
       toast: (msg) => {
         toasts.push(msg);
