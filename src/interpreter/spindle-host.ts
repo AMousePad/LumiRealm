@@ -288,6 +288,21 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
           value: { id: conn.id, model: conn.model || undefined, provider: conn.provider || '' },
         };
       }
+      const chat = await spindle.chats.get(chatId, uid);
+      const metadata = chat?.metadata;
+      const boundId = typeof metadata?.connection_profile_id === 'string'
+        ? metadata.connection_profile_id.trim() : '';
+      if (boundId) {
+        const conn = await spindle.connections.get(boundId, uid);
+        if (conn) {
+          const model = typeof metadata?.connection_model === 'string'
+            ? metadata.connection_model.trim() : '';
+          return {
+            ok: true,
+            value: { id: conn.id, model: model || conn.model || undefined, provider: conn.provider || '' },
+          };
+        }
+      }
       const list = await spindle.connections.list(uid);
       if (list.length === 0) {
         return {
