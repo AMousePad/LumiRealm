@@ -98,6 +98,13 @@ export function parseRisuToggleSyntax(template: string | undefined): ParsedToggl
 
 // Risu's risuChatParser closes the innermost block regardless of the closing label.
 // The host instead requires a closing macro whose name matches its opener.
+// A structural marker block is resolved from its marker macro alone, so any
+// conditional inside its content would be silently dropped. Detect the scoped
+// and inline conditional forms the host can evaluate.
+function hasConditional(content: string): boolean {
+  return /\{\{(?:#|if::|unless::)/.test(content);
+}
+
 function namePresetBlockClosers(template: string): string {
   const blocks: string[] = [];
   const openings: number[] = [];
@@ -245,6 +252,7 @@ export function translateRisuPromptBlocks(
 
   // 3. Prompt template items
   let seenChat = false;
+  let seenPersona = false;
   if (Array.isArray(template)) {
     for (const item of template) {
       const type = typeof item['type'] === 'string' ? item['type'] : 'plain';
@@ -312,10 +320,21 @@ export function translateRisuPromptBlocks(
           } as PromptBlockDTO);
         }
       } else if (type === 'persona') {
+        // innerFormat holds the item's own CBS code, so it needs the same macro
+        // translation the plain path applies to `text`.
         const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
         const personaContent = rawInner
-          ? (rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{persona}}') : rawInner)
+          ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{persona}}') : rawInner)
           : (text || '{{persona}}');
+        // The host resolves a persona_description block from {{persona}} alone: it
+        // drops the item's gate and framing text entirely. The marker is only
+        // equivalent while the item is unconditional, so a gated item becomes a
+        // content block and its own placement gate decides whether {{persona}} is
+        // emitted. Only the first persona item may carry the marker.
+        const personaMarker: PromptBlockDTO['marker'] = !seenPersona && !hasConditional(personaContent)
+          ? 'persona_description'
+          : null;
+        seenPersona = true;
         blocks.push({
           id: newUuid(),
           name: name || 'User Persona',
@@ -323,7 +342,7 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          marker: 'persona_description',
+          marker: personaMarker,
           content: personaContent,
           isLocked: false,
           color: null,
@@ -333,7 +352,7 @@ export function translateRisuPromptBlocks(
       } else if (type === 'description') {
         const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
         const descContent = rawInner
-          ? (rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{description}}') : rawInner)
+          ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{description}}') : rawInner)
           : (text || '{{description}}');
         blocks.push({
           id: newUuid(),
@@ -366,9 +385,12 @@ export function translateRisuPromptBlocks(
         } as PromptBlockDTO);
       } else if (type === 'authornote') {
         const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
+        // {{authornote}} is the slot name Risu and LumiRealm's own evaluator use;
+        // neither it nor {{authors_note}} is registered in the host macro
+        // registry, so this slot needs a host macro to resolve.
         const anContent = rawInner
-          ? (rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{authors_note}}') : rawInner)
-          : (text || '{{authors_note}}');
+          ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{authornote}}') : rawInner)
+          : (text || '{{authornote}}');
         blocks.push({
           id: newUuid(),
           name: name || "Author's Note",

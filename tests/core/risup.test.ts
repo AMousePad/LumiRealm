@@ -218,6 +218,190 @@ describe('Risu preset translator', () => {
     expect(regexScripts[0]!.folder).toBe('Hero Preset');
   });
 
+  test('translates CBS inside persona, description, and authornote innerFormat', () => {
+    const raw = {
+      name: 'Inner Format Preset',
+      promptTemplate: [
+        {
+          type: 'persona',
+          name: 'Placement Top',
+          innerFormat: '{{#if_pure {{? {{getglobalvar::toggle_placement}}=2}}}}\n{{slot}}\n{{/if}}',
+        },
+        {
+          type: 'description',
+          name: 'Char Body',
+          innerFormat: '{{#if {{contains::{{getglobalvar::toggle_tags}}::ship}}}}{{slot}}{{/if}}',
+        },
+        {
+          type: 'authornote',
+          name: 'Note Slot',
+          innerFormat: '{{#if {{? {{getglobalvar::toggle_note}}<=2}}}}\n{{slot}}{{/if}}',
+        },
+      ],
+    };
+
+    const { preset } = translateRisuPreset(raw);
+    const blocks = preset.prompt_order || [];
+
+    // innerFormat carries the item's CBS code, so its macros must be translated
+    // exactly like a plain item's text while {{slot}} keeps its slot semantics.
+    const persona = blocks.find((b) => b.name === 'Placement Top')!;
+    // A gated persona item stays content-bearing: the structural marker would
+    // make the host drop its gate when it resolves {{persona}}.
+    expect(persona.marker).toBe(null);
+    expect(persona.content).toBe(
+      '{{#if {{risuCalc::{{risuGlobalVar::toggle_placement}}=2}}}}\n{{persona}}\n{{/if}}',
+    );
+
+    const description = blocks.find((b) => b.name === 'Char Body')!;
+    expect(description.marker).toBe('char_description');
+    expect(description.content).toBe(
+      '{{#if {{risuContains::{{risuGlobalVar::toggle_tags}}::ship}}}}{{description}}{{/if}}',
+    );
+
+    const authornote = blocks.find((b) => b.name === 'Note Slot')!;
+    expect(authornote.content).toBe(
+      '{{#if {{risuCalc::{{risuGlobalVar::toggle_note}}<=2}}}}\n{{authornote}}{{/if}}',
+    );
+
+    for (const block of blocks) {
+      expect(block.content ?? '').not.toContain('{{getglobalvar::');
+      expect(block.content ?? '').not.toContain('#if_pure');
+    }
+  });
+
+  test('keeps the text fallback single-translated for items without innerFormat', () => {
+    const raw = {
+      name: 'Text Fallback Preset',
+      promptTemplate: [
+        {
+          type: 'persona',
+          name: 'Text Persona',
+          text: '{{#if_pure {{? {{getglobalvar::toggle_alpha}}=1}}}}{{persona}}{{/if}}',
+        },
+      ],
+    };
+
+    const { preset } = translateRisuPreset(raw);
+    const block = (preset.prompt_order || []).find((b) => b.name === 'Text Persona')!;
+    expect(block.content).toBe('{{#if {{risuCalc::{{risuGlobalVar::toggle_alpha}}=1}}}}{{persona}}{{/if}}');
+  });
+
+  test('makes gated persona items content blocks so their own gate decides the placement', () => {
+    const raw = {
+      name: 'Persona Placement Preset',
+      customPromptTemplateToggle: '=Placement=group\ntopbotpersona=Persona Placement',
+      promptTemplate: [
+        {
+          type: 'persona',
+          role: 'user',
+          name: '## {{user}}',
+          innerFormat: '{{#if {{? {{getglobalvar::toggle_topbotpersona}}=0}}}}\n---\n<Frame>\n{{slot}}\n{{/if}}',
+        },
+        { type: 'plain', role: 'system', name: 'Rules', text: 'Stay in character.' },
+        { type: 'chat', name: 'Chat Area' },
+        {
+          type: 'persona',
+          role: 'system',
+          name: 'Top Placement',
+          innerFormat: '{{#if_pure {{? {{getglobalvar::toggle_topbotpersona}}=2}}}}\n{{slot}}\n{{/if}}',
+        },
+        {
+          type: 'persona',
+          role: 'system',
+          name: 'Bottom Placement',
+          innerFormat: '{{#if {{? {{getglobalvar::toggle_topbotpersona}}=3}}}}\n{{slot}}\n{{/if}}',
+        },
+        { type: 'description', role: 'user', name: 'Card Body', innerFormat: '{{slot}}' },
+      ],
+    };
+
+    const { preset } = translateRisuPreset(raw);
+    const blocks = preset.prompt_order ?? [];
+
+    // The host resolves a persona_description block from {{persona}} alone and
+    // drops the item's content, so a gated item must not carry the marker: it
+    // would lose its gate and its framing text.
+    expect(blocks.filter((b) => b.marker === 'persona_description').length).toBe(0);
+
+    const carrier = blocks.find((b) => b.name === '## {{user}}')!;
+    expect(carrier.content).toBe(
+      '{{#if {{risuCalc::{{risuGlobalVar::toggle_topbotpersona}}=0}}}}\n---\n<Frame>\n{{persona}}\n{{/if}}',
+    );
+
+    const top = blocks.find((b) => b.name === 'Top Placement')!;
+    const bottom = blocks.find((b) => b.name === 'Bottom Placement')!;
+    expect(top.marker).toBe(null);
+    expect(bottom.marker).toBe(null);
+
+    // Each sibling keeps its own gate, and the gate is what decides whether the
+    // sibling emits the persona at all.
+    expect(top.content).toBe('{{#if {{risuCalc::{{risuGlobalVar::toggle_topbotpersona}}=2}}}}\n{{persona}}\n{{/if}}');
+    expect(bottom.content).toBe('{{#if {{risuCalc::{{risuGlobalVar::toggle_topbotpersona}}=3}}}}\n{{persona}}\n{{/if}}');
+
+    // Ordering, names, roles, enabled state and placement fields are untouched.
+    expect(blocks.map((b) => b.name)).toEqual([
+      'Placement',
+      '🧩 Prompt Assembly',
+      '## {{user}}',
+      'Rules',
+      'Chat Area',
+      'Top Placement',
+      'Bottom Placement',
+      'Card Body',
+    ]);
+    expect(carrier.role).toBe('user');
+    expect(carrier.position).toBe('pre_history');
+    for (const block of [top, bottom]) {
+      expect(block.role).toBe('system');
+      expect(block.position).toBe('post_history');
+      expect(block.depth).toBe(0);
+      expect(block.enabled).toBe(true);
+      expect(block.content).not.toBe('{{persona}}');
+    }
+
+    // The single description item keeps its marker.
+    expect(blocks.find((b) => b.name === 'Card Body')!.marker).toBe('char_description');
+  });
+
+  test('keeps the persona marker for an unconditional persona item', () => {
+    const raw = {
+      name: 'Plain Persona Preset',
+      promptTemplate: [
+        { type: 'persona', role: 'user', name: '## {{user}}', innerFormat: '---\n{{slot}}\n---' },
+        { type: 'plain', role: 'system', name: 'Rules', text: 'Stay in character.' },
+      ],
+    };
+
+    const { preset } = translateRisuPreset(raw);
+    const blocks = preset.prompt_order ?? [];
+
+    // With no conditional inside it the marker is behaviourally equivalent to the
+    // block content, so the host's native persona carrier is kept.
+    const carrier = blocks.find((b) => b.name === '## {{user}}')!;
+    expect(carrier.marker).toBe('persona_description');
+    expect(carrier.content).toBe('---\n{{persona}}\n---');
+    expect(blocks.filter((b) => b.marker === 'persona_description').length).toBe(1);
+  });
+
+  test('emits the Risu authornote slot macro for authornote items', () => {
+    const raw = {
+      name: 'Note Preset',
+      promptTemplate: [
+        { type: 'authornote', role: 'system', name: 'Note Slot', innerFormat: '<Note>\n{{slot}}\n</Note>' },
+        { type: 'authornote', role: 'system', name: 'Bare Note' },
+      ],
+    };
+
+    const blocks = translateRisuPreset(raw).preset.prompt_order ?? [];
+    // {{authornote}} is the slot name Risu and LumiRealm's evaluator define.
+    expect(blocks.find((b) => b.name === 'Note Slot')!.content).toBe('<Note>\n{{authornote}}\n</Note>');
+    expect(blocks.find((b) => b.name === 'Bare Note')!.content).toBe('{{authornote}}');
+    for (const block of blocks) {
+      expect(block.content ?? '').not.toContain('{{authors_note}}');
+    }
+  });
+
   test('translates jailbreak item and respects postEverything without breaking chat history', () => {
     const raw = {
       name: 'Jailbreak Preset',
