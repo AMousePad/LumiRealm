@@ -9673,6 +9673,9 @@ var init_scanner = __esm(() => {
 // src/state/toggle-preferences.ts
 var chains = new Map;
 
+// src/state/preset-toggle-values.ts
+var snapshots = new Map;
+
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
 // spindle.json

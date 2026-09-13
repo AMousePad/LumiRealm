@@ -39457,16 +39457,20 @@ function collectLegacyGlobals(sources) {
   copy(sources.promptVariables, true);
   return out;
 }
-function mergeEffectiveGlobals(legacy, preferences) {
+function mergeEffectiveGlobals(legacy, preferences, presetToggles = {}) {
   if (preferences === null)
-    return { ...legacy };
-  return { ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith("toggle_"))), ...preferences };
+    return { ...presetToggles, ...legacy };
+  return {
+    ...presetToggles,
+    ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith("toggle_"))),
+    ...preferences
+  };
 }
 async function readTogglePreferences(userId) {
   return read(userId);
 }
-async function readEffectiveGlobals(userId, legacy) {
-  return exclusive(userId, async () => mergeEffectiveGlobals(legacy, await read(userId)));
+async function readEffectiveGlobals(userId, legacy, presetToggles = {}) {
+  return exclusive(userId, async () => mergeEffectiveGlobals(legacy, await read(userId), presetToggles));
 }
 async function writeTogglePreference(userId, key, value, legacy) {
   if (!key.startsWith("toggle_"))
@@ -39479,6 +39483,39 @@ async function writeTogglePreference(userId, key, value, legacy) {
       preferences[key] = value;
     await spindle.userStorage.setJson(PATH2, preferences, { userId });
   });
+}
+
+// src/state/preset-toggle-values.ts
+var snapshots = new Map;
+function toggleValues(promptVariables) {
+  if (!promptVariables || typeof promptVariables !== "object" || Array.isArray(promptVariables)) {
+    return null;
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(promptVariables)) {
+    if (!key.startsWith("toggle_"))
+      continue;
+    if (typeof value !== "string" && typeof value !== "number")
+      continue;
+    out[key] = String(value);
+  }
+  return out;
+}
+function recordPresetToggleValues(chatId, userId, presetId, promptVariables) {
+  const id = typeof presetId === "string" && presetId.length > 0 ? presetId : null;
+  const values = toggleValues(promptVariables);
+  const current = snapshots.get(chatId);
+  if (id === null && values === null)
+    return;
+  if (values === null && current?.ownerUserId === userId && current.presetId === id)
+    return;
+  snapshots.set(chatId, { ownerUserId: userId, presetId: id, values: values ?? {} });
+}
+function presetToggleValues(chatId, userId) {
+  const hit = snapshots.get(chatId);
+  if (!hit || !userId || hit.ownerUserId !== userId)
+    return {};
+  return hit.values;
 }
 
 // src/state/recent-writes.ts
@@ -39749,7 +39786,7 @@ function makeSpindleHost(ctx) {
       const raw = await getMetadata("macro_variables");
       const global = raw?.global;
       const legacy = global && typeof global === "object" ? Object.fromEntries(Object.entries(global).map(([key, value]) => [key, toStr(value)])) : {};
-      return readEffectiveGlobals(uid, legacy);
+      return readEffectiveGlobals(uid, legacy, presetToggleValues(chatId, uid));
     },
     chat: {
       getChatId: () => chatId,
@@ -40782,7 +40819,7 @@ async function buildBackendPipelineInput(chatId, characterId, userId, deps, pers
     },
     variables: {
       ...mv.local ? { local: mv.local } : {},
-      global: await readEffectiveGlobals(userId, mv.global ?? {}),
+      global: await readEffectiveGlobals(userId, mv.global ?? {}, presetToggleValues(chatId, userId)),
       ...chatVars ? { chat: chatVars } : {}
     },
     legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
@@ -40916,12 +40953,15 @@ function createLumiInterceptors(deps) {
         log.warn(`macroInterceptor.exit #${callId} path=owner_mismatch chat=${chatId} ` + `cached=${active.ownerUserId} ctx=${ctx.userId} elapsed=${Date.now() - t0}ms`);
         return;
       }
+      const ownerUserId = ctx.userId ?? active.ownerUserId;
+      const envExtra = ctx.env.extra;
+      recordPresetToggleValues(chatId, ownerUserId, envExtra?.presetId, envExtra?.promptVariables);
       const legacyGlobals = collectLegacyGlobals({
         global: ctx.env.variables.global,
         local: ctx.env.variables.local,
-        promptVariables: ctx.env?.extra?.promptVariables
+        promptVariables: envExtra?.promptVariables
       });
-      const effectiveGlobals = await readEffectiveGlobals(ctx.userId ?? active.ownerUserId, legacyGlobals);
+      const effectiveGlobals = await readEffectiveGlobals(ownerUserId, legacyGlobals, presetToggleValues(chatId, ownerUserId));
       const micDynForKey = ctx.env.dynamicMacros;
       const micCtxKey = `${micDynForKey?.chat_index ?? ""}|${micDynForKey?.role ?? ""}|${JSON.stringify(effectiveGlobals)}`;
       const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
@@ -42035,7 +42075,7 @@ function createReadonlyResolver(deps) {
       },
       variables: {
         ...mv.local ? { local: mv.local } : {},
-        global: await readEffectiveGlobals(userId, mv.global ?? {}),
+        global: await readEffectiveGlobals(userId, mv.global ?? {}, presetToggleValues(chatId, userId)),
         ...chatVars ? { chat: chatVars } : {}
       },
       legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
@@ -44785,7 +44825,7 @@ function createVariablesTogglesService(deps) {
     }
     const scopes = {
       local: sanitizeVarMap(meta.chat_variables),
-      global: await readEffectiveGlobals(userId, legacyGlobals),
+      global: await readEffectiveGlobals(userId, legacyGlobals, presetToggleValues(chatId, userId)),
       chat: sanitizeVarMap(undefined)
     };
     const cardSide = active.card.risuPayload.scriptstate_defaults ?? {};

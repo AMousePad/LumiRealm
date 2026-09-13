@@ -17,6 +17,7 @@ import { invalidateMacroInterceptorForChat } from './macro-interceptor-cache.js'
 import type { VariableStateStore } from './variables-state.js';
 import type { ToggleStateStore } from './toggle-state.js';
 import { initializeTogglePreferences, readEffectiveGlobals, writeTogglePreference } from './toggle-preferences.js';
+import { presetToggleValues } from './preset-toggle-values.js';
 
 function sanitizeVarMap(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object') return {};
@@ -225,7 +226,7 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
     }
     const scopes = {
       local: sanitizeVarMap(meta.chat_variables),
-      global: await readEffectiveGlobals(userId, legacyGlobals),
+      global: await readEffectiveGlobals(userId, legacyGlobals, presetToggleValues(chatId, userId)),
       chat: sanitizeVarMap(undefined),
     };
     // FE Default subtab needs both effective and card-side defaults to flag overridden entries and offer "Reset to card default".

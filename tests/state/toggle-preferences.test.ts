@@ -3,11 +3,12 @@ import { createVariablesTogglesService } from '../../src/state/variables-toggles
 import { VariableStateStore } from '../../src/state/variables-state.js';
 import { ToggleStateStore } from '../../src/state/toggle-state.js';
 import { initializeTogglePreferences, readEffectiveGlobals } from '../../src/state/toggle-preferences.js';
+import { recordPresetToggleValues, resetPresetToggleValues } from '../../src/state/preset-toggle-values.js';
 import type { ActiveCard } from '../../src/interpreter/dispatch.js';
 import type { BackendToFrontend } from '../../src/types/messages.js';
 
 const previous = (globalThis as any).spindle;
-afterEach(() => { (globalThis as any).spindle = previous; });
+afterEach(() => { (globalThis as any).spindle = previous; resetPresetToggleValues(); });
 
 function fixture() {
   const disk = new Map<string, unknown>();
@@ -85,4 +86,22 @@ test('preference failures reject instead of silently restoring legacy toggles', 
   await expect(readEffectiveGlobals('user', {})).rejects.toThrow('storage unavailable');
   (globalThis as any).spindle.userStorage.getJson = async () => ({ toggle_check: '0' });
   expect(await readEffectiveGlobals('user', {})).toEqual({ toggle_check: '0' });
+});
+
+test('preset prompt-variable toggles reach the display snapshot below preferences', async () => {
+  const f = fixture();
+  await f.snapshot(f.service(), 'a');
+  recordPresetToggleValues('b', 'user', 'preset-a', { toggle_check: 0, toggle_preset: 1, words: 500 });
+  expect((await f.snapshot(f.service(), 'b')).global).toEqual({
+    ordinary: 'b',
+    toggle_check: '1',
+    toggle_text: 'saved',
+    toggle_preset: '1',
+  });
+  recordPresetToggleValues('b', 'user', 'preset-b', { words: 800 });
+  expect((await f.snapshot(f.service(), 'b')).global).toEqual({
+    ordinary: 'b',
+    toggle_check: '1',
+    toggle_text: 'saved',
+  });
 });

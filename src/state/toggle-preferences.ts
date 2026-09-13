@@ -79,16 +79,23 @@ export function collectLegacyGlobals(sources: {
 }
 
 /**
- * Overlay persisted per-user preferences on the legacy globals.
- * Toggle keys come from the preferences only once they exist, so deleting a
- * preference cannot resurrect an old chat value.
+ * Overlay the toggle stores on the legacy globals, lowest precedence first:
+ * preset variables the host resolved for the chat, then the chat globals, then
+ * the persisted per-user preferences. Preferences are the only source that can
+ * hide a legacy toggle, so deleting one cannot resurrect an old chat value, and
+ * a key no store defines stays missing.
  */
 export function mergeEffectiveGlobals(
   legacy: Record<string, string>,
   preferences: Record<string, string> | null,
+  presetToggles: Readonly<Record<string, string>> = {},
 ): Record<string, string> {
-  if (preferences === null) return { ...legacy };
-  return { ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith('toggle_'))), ...preferences };
+  if (preferences === null) return { ...presetToggles, ...legacy };
+  return {
+    ...presetToggles,
+    ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith('toggle_'))),
+    ...preferences,
+  };
 }
 
 /** Uncached read of the persisted preferences. `null` = never initialized. */
@@ -96,8 +103,12 @@ export async function readTogglePreferences(userId: string): Promise<Record<stri
   return read(userId);
 }
 
-export async function readEffectiveGlobals(userId: string, legacy: Record<string, string>): Promise<Record<string, string>> {
-  return exclusive(userId, async () => mergeEffectiveGlobals(legacy, await read(userId)));
+export async function readEffectiveGlobals(
+  userId: string,
+  legacy: Record<string, string>,
+  presetToggles: Readonly<Record<string, string>> = {},
+): Promise<Record<string, string>> {
+  return exclusive(userId, async () => mergeEffectiveGlobals(legacy, await read(userId), presetToggles));
 }
 
 export async function writeTogglePreference(userId: string, key: string, value: string | null, legacy: Record<string, string>): Promise<void> {

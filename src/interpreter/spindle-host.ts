@@ -15,6 +15,7 @@ import type {
   InjectOpts,
 } from './host.js';
 import { readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { toStr } from '../util/coerce.js';
 import { expectChatChange } from '../state/own-chat-change.js';
 import { expectCharacterEdit } from '../state/own-character-edit.js';
@@ -172,7 +173,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       const legacy = global && typeof global === 'object'
         ? Object.fromEntries(Object.entries(global).map(([key, value]) => [key, toStr(value)]))
         : {};
-      return readEffectiveGlobals(uid, legacy);
+      return readEffectiveGlobals(uid, legacy, presetToggleValues(chatId, uid));
     },
     chat: {
       getChatId: () => chatId,

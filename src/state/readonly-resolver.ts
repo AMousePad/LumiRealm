@@ -1,6 +1,7 @@
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import { readEffectiveGlobals, TogglePreferencesError } from '../state/toggle-preferences.js';
+import { presetToggleValues } from './preset-toggle-values.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import { runPipeline } from '../interpreter/evaluator/pipeline.js';
@@ -191,7 +192,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       },
       variables: {
         ...(mv.local ? { local: mv.local } : {}),
-        global: await readEffectiveGlobals(userId, mv.global ?? {}),
+        global: await readEffectiveGlobals(userId, mv.global ?? {}, presetToggleValues(chatId, userId)),
         ...(chatVars ? { chat: chatVars } : {}),
       },
       legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,

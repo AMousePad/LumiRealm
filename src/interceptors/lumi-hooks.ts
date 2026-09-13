@@ -28,6 +28,7 @@ import {
   macroInterceptorCacheStats,
 } from '../state/macro-interceptor-cache.js';
 import { collectLegacyGlobals, readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { presetToggleValues, recordPresetToggleValues } from '../state/preset-toggle-values.js';
 import { rememberOurWrite } from '../state/recent-writes.js';
 import { expectChatChange } from '../state/own-chat-change.js';
 import { invalidateRecentFlush } from '../state/recent-flush-cache.js';
@@ -228,12 +229,19 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         return;
       }
 
+      const ownerUserId = ctx.userId ?? active.ownerUserId;
+      const envExtra = (ctx.env as { extra?: { presetId?: unknown; promptVariables?: unknown } }).extra;
+      recordPresetToggleValues(chatId, ownerUserId, envExtra?.presetId, envExtra?.promptVariables);
       const legacyGlobals = collectLegacyGlobals({
         global: ctx.env.variables.global,
         local: ctx.env.variables.local,
-        promptVariables: (ctx.env as { extra?: { promptVariables?: Record<string, unknown> } })?.extra?.promptVariables,
+        promptVariables: envExtra?.promptVariables,
       });
-      const effectiveGlobals = await readEffectiveGlobals(ctx.userId ?? active.ownerUserId, legacyGlobals);
+      const effectiveGlobals = await readEffectiveGlobals(
+        ownerUserId,
+        legacyGlobals,
+        presetToggleValues(chatId, ownerUserId),
+      );
 
       const micDynForKey = (ctx.env as { dynamicMacros?: Record<string, string> }).dynamicMacros;
       const micCtxKey = `${micDynForKey?.chat_index ?? ''}|${micDynForKey?.role ?? ''}|${JSON.stringify(effectiveGlobals)}`;
