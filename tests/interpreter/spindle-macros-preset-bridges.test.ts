@@ -52,18 +52,25 @@ function install(chats: Record<string, ChatRecord | null>, failWith?: Error) {
 function call(
   handlers: Map<string, MacroHandler>,
   name: string,
-  env: { chatId?: string; chat?: { id: string }; userId?: string } = {},
+  env: {
+    chatId?: string;
+    chat?: { id: string };
+    userId?: string;
+    args?: string[];
+    messages?: unknown[];
+  } = {},
 ): Promise<string> {
   const handler = handlers.get(name);
   if (!handler) throw new Error(`macro not registered: ${name}`);
   return Promise.resolve(handler({
-    args: [],
+    args: env.args ?? [],
     ...(env.chatId !== undefined ? { chatId: env.chatId } : {}),
     env: {
       ...(env.chat !== undefined ? { chat: env.chat } : {}),
       variables: { global: {}, local: {}, chat: {} },
       extra: {
         ...(env.userId !== undefined ? { userId: env.userId } : {}),
+        ...(env.messages !== undefined ? { messages: env.messages } : {}),
       },
     },
   })) as Promise<string>;
@@ -144,4 +151,77 @@ test('a failed metadata read degrades to the empty string and is not cached', as
   (globalThis as unknown as { spindle: { chats: { get: (chatId: string, userId?: string) => Promise<unknown> } } })
     .spindle.chats.get = async () => chats.chat1;
   expect(await call(handlers, 'authornote', { chatId: 'chat1' })).toBe('later');
+});
+
+// Risu's previouschatlog reads chat.message[Number(index)] (cbs.ts). The host
+// serializes that same list onto env.extra.messages and indexes it with
+// {{lastmessageid}}, so these tests pin the index frame, the missing-message
+// result and the gate the preset chains through the read.
+
+const SYNTH_MESSAGES = [
+  { content: 'SYNTH-M0', name: 'SYNTH-CHAR', is_user: false },
+  { content: 'SYNTH-M1', name: 'SYNTH-USER', is_user: true },
+  { content: 'SYNTH-M2', name: 'SYNTH-CHAR', is_user: false },
+];
+
+const readAt = (handlers: Map<string, MacroHandler>, index: string) =>
+  call(handlers, 'previous_chat_log', { args: [index], messages: SYNTH_MESSAGES });
+
+test('reads the chat history at an absolute 0-based index, whatever the role', async () => {
+  const { handlers } = install({});
+  expect(await readAt(handlers, '0')).toBe('SYNTH-M0');
+  expect(await readAt(handlers, '1')).toBe('SYNTH-M1');
+  expect(await readAt(handlers, '2')).toBe('SYNTH-M2');
+  // Risu's primary spelling for the same macro resolves through the same reader.
+  expect(await call(handlers, 'previouschatlog', { args: ['1'], messages: SYNTH_MESSAGES })).toBe('SYNTH-M1');
+  // Number() coercion matches Risu: padding and a leading sign are numeric.
+  expect(await readAt(handlers, ' 1 ')).toBe('SYNTH-M1');
+  expect(await readAt(handlers, '+1')).toBe('SYNTH-M1');
+});
+
+test('resolves a message that does not exist to the empty string, not the Risu sentinel', async () => {
+  const { handlers } = install({});
+  // Past the end, a negative index (Risu does not wrap from the end), a float
+  // and a non numeric argument all select no message.
+  for (const index of ['3', '-1', '1.5', 'abc']) {
+    const value = await readAt(handlers, index);
+    expect(value).toBe('');
+    expect(value).not.toContain('Out of range');
+  }
+  // A bare macro has no argument at all, which is NaN in Risu's Number(args[0]).
+  expect(await call(handlers, 'previous_chat_log', { messages: SYNTH_MESSAGES })).toBe('');
+});
+
+test('serves the read from the evaluation env and reads no chat', async () => {
+  const { handlers } = install({});
+  // No userId is needed: the host already scoped env.extra.messages, so the
+  // bridge never pays an RPC and has no cache to go stale.
+  expect(await readAt(handlers, '0')).toBe('SYNTH-M0');
+  expect(reads).toBe(0);
+});
+
+test('degrades to the empty string with a log line when the evaluation has no history', async () => {
+  const { handlers } = install({});
+  logStore.setState({ enabled: true, level: 'warn' });
+  expect(await call(handlers, 'previous_chat_log', { chatId: 'chat1', args: ['0'] })).toBe('');
+  expect(await call(handlers, 'previous_chat_log', { userId: 'user', args: ['0'] })).toBe('');
+  expect(await call(handlers, 'previous_chat_log', { args: ['0'], messages: [] })).toBe('');
+  expect(warns.length).toBe(3);
+  expect(warns[0]).toContain('previous_chat_log');
+  expect(warns[0]).toContain('chat1');
+  expect(warns[0]).toContain('no-user');
+  // A missing history is not a reason to touch the host.
+  expect(reads).toBe(0);
+});
+
+test('lets a caller contains gate evaluate instead of leaking the macro', async () => {
+  const { handlers } = install({});
+  const gate = async (index: string, needle: string) =>
+    call(handlers, 'risucontains', {
+      args: [await readAt(handlers, index), needle],
+    });
+  expect(await gate('2', 'SYNTH')).toBe('1');
+  // Out of range reads empty, so a gate whose needle is the macro name is false
+  // rather than true on leaked macro text.
+  expect(await gate('9', 'previous_chat_log')).toBe('0');
 });

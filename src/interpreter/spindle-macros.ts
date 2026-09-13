@@ -180,6 +180,34 @@ async function resolveAuthornoteMacro(ctx: unknown): Promise<string> {
   }
 }
 
+// ─── Chat history reads (`{{previous_chat_log::N}}`) ─────────────────────────
+
+// Risu's previouschatlog reads chat.message[Number(arg)] (cbs.ts), the same
+// array its lastmessageid counts. The host already serializes that array onto
+// env.extra.messages, so the read is served from it: one frame with
+// {{lastmessageid}}, one source of truth, and no RPC per occurrence.
+function resolveChatLogMacro(ctx: unknown): string {
+  const env = (ctx as { env?: { extra?: Record<string, unknown> } })?.env;
+  const messages = env?.extra?.['messages'];
+  if (!Array.isArray(messages) || messages.length === 0) {
+    const userId = typeof env?.extra?.['userId'] === 'string' ? (env.extra['userId'] as string) : '';
+    log.warn(
+      `previous_chat_log(${readChatId(ctx) || 'no-chat'}/${userId || 'no-user'}): ` +
+        'no chat history in this evaluation',
+    );
+    return '';
+  }
+  // Risu indexes with Number(args[0]): a bare macro and a non numeric argument
+  // are NaN, which selects no message, and a negative index is not wrapped to
+  // the end of the list. A message that does not exist yields "" rather than
+  // Risu's "Out of range" sentinel, so a caller's {{contains::}} gate still
+  // evaluates and no sentinel text can reach the prompt.
+  const args = (ctx as { args?: unknown[] })?.args;
+  const index = Array.isArray(args) && args.length > 0 ? Number(args[0]) : Number.NaN;
+  const content = (messages as ReadonlyArray<{ content?: unknown } | null>)[index]?.content;
+  return typeof content === 'string' ? content : '';
+}
+
 export function registerSpindleMacros(): void {
   const MACRO_CATEGORY = 'extension:lumirealm';
 
@@ -261,6 +289,15 @@ export function registerSpindleMacros(): void {
       handler: (ctx: unknown) => {
         return getArgs(ctx).some(isTruthy) ? '1' : '0';
       },
+    },
+    {
+      name: 'previous_chat_log',
+      // Risu's primary spelling for the same macro (cbs.ts previouschatlog).
+      aliases: ['previouschatlog'],
+      category: MACRO_CATEGORY,
+      description: 'Reads one message of the chat history by index, like Risu chat.message[INDEX].',
+      returnType: 'string',
+      handler: (ctx: unknown) => resolveChatLogMacro(ctx),
     },
     {
       name: 'authornote',

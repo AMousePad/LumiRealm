@@ -41966,6 +41966,19 @@ async function resolveAuthornoteMacro(ctx) {
     return "";
   }
 }
+function resolveChatLogMacro(ctx) {
+  const env = ctx?.env;
+  const messages = env?.extra?.["messages"];
+  if (!Array.isArray(messages) || messages.length === 0) {
+    const userId = typeof env?.extra?.["userId"] === "string" ? env.extra["userId"] : "";
+    log8.warn(`previous_chat_log(${readChatId(ctx) || "no-chat"}/${userId || "no-user"}): ` + "no chat history in this evaluation");
+    return "";
+  }
+  const args = ctx?.args;
+  const index = Array.isArray(args) && args.length > 0 ? Number(args[0]) : Number.NaN;
+  const content = messages[index]?.content;
+  return typeof content === "string" ? content : "";
+}
 function registerSpindleMacros() {
   const MACRO_CATEGORY = "extension:lumirealm";
   const macros = [
@@ -42046,6 +42059,14 @@ function registerSpindleMacros() {
       handler: (ctx) => {
         return getArgs(ctx).some(isTruthy2) ? "1" : "0";
       }
+    },
+    {
+      name: "previous_chat_log",
+      aliases: ["previouschatlog"],
+      category: MACRO_CATEGORY,
+      description: "Reads one message of the chat history by index, like Risu chat.message[INDEX].",
+      returnType: "string",
+      handler: (ctx) => resolveChatLogMacro(ctx)
     },
     {
       name: "authornote",
