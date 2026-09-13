@@ -33,6 +33,7 @@ interface SpindleStub {
 
 function setupSpindle(stub: SpindleStub, captured: CapturedHandlers): void {
   (globalThis as unknown as { spindle: unknown }).spindle = {
+    userStorage: { getJson: async () => null },
     registerMacroInterceptor(handler: typeof captured.macroInterceptor, priority?: number) {
       captured.macroInterceptor = handler;
       captured.macroPriority = priority;

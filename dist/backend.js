@@ -39377,81 +39377,6 @@ function macroInterceptorCacheStats() {
   return { size: cache6.size, hits: hitCount2, misses: missCount2 };
 }
 
-// src/state/recent-writes.ts
-var log6 = makeSafeLogger("recent-writes");
-var TTL_MS3 = 60000;
-var MAX_ENTRIES4 = 100;
-var RAPID_CONSUME_MS = 100;
-var cache7 = new Map;
-function key3(chatId, msgId) {
-  return `${chatId}::${msgId}`;
-}
-function rememberOurWrite(chatId, msgId, content) {
-  const now = Date.now();
-  if (cache7.size >= MAX_ENTRIES4) {
-    for (const [k, v] of cache7) {
-      if (now - v.ts > TTL_MS3)
-        cache7.delete(k);
-    }
-    if (cache7.size >= MAX_ENTRIES4) {
-      let oldestKey = null;
-      let oldestTs = Infinity;
-      for (const [k, v] of cache7) {
-        if (v.ts < oldestTs) {
-          oldestTs = v.ts;
-          oldestKey = k;
-        }
-      }
-      if (oldestKey)
-        cache7.delete(oldestKey);
-    }
-  }
-  cache7.set(key3(chatId, msgId), { content, ts: now });
-}
-function consumeIfOurWrite(chatId, msgId, content) {
-  const k = key3(chatId, msgId);
-  const entry = cache7.get(k);
-  if (!entry)
-    return false;
-  const elapsed = Date.now() - entry.ts;
-  if (elapsed > TTL_MS3) {
-    cache7.delete(k);
-    return false;
-  }
-  if (entry.content !== content)
-    return false;
-  cache7.delete(k);
-  if (elapsed >= RAPID_CONSUME_MS) {
-    log6.info(`consumeIfOurWrite: late match chat=${chatId} msg=${msgId} elapsed=${elapsed}ms content_len=${content.length} ` + `\u2014 normal echoes are <${RAPID_CONSUME_MS}ms; if user reports a "my edit reverted" symptom soon after, suspect false-positive`);
-  }
-  return true;
-}
-
-// src/interpreter/decorator-buffers.ts
-var TTL_MS4 = 60000;
-var buffersByChat = new Map;
-function setDecoratorBuffers(chatId, buffers) {
-  buffersByChat.set(chatId, { ...buffers, ts: Date.now() });
-}
-function getDecoratorBuffers(chatId) {
-  const buf = buffersByChat.get(chatId);
-  if (!buf)
-    return null;
-  if (Date.now() - buf.ts > TTL_MS4) {
-    buffersByChat.delete(chatId);
-    return null;
-  }
-  return buf;
-}
-function clearDecoratorBuffers(chatId) {
-  buffersByChat.delete(chatId);
-}
-
-// src/interpreter/greeting-index.ts
-function toRisuFirstMessageIndex(value) {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value - 1 : -1;
-}
-
 // src/state/toggle-preferences.ts
 var PATH2 = "lumirealm/toggle-preferences.json";
 var chains2 = new Map;
@@ -39526,6 +39451,81 @@ async function writeTogglePreference(userId, key, value, legacy) {
       preferences[key] = value;
     await spindle.userStorage.setJson(PATH2, preferences, { userId });
   });
+}
+
+// src/state/recent-writes.ts
+var log6 = makeSafeLogger("recent-writes");
+var TTL_MS3 = 60000;
+var MAX_ENTRIES4 = 100;
+var RAPID_CONSUME_MS = 100;
+var cache7 = new Map;
+function key3(chatId, msgId) {
+  return `${chatId}::${msgId}`;
+}
+function rememberOurWrite(chatId, msgId, content) {
+  const now = Date.now();
+  if (cache7.size >= MAX_ENTRIES4) {
+    for (const [k, v] of cache7) {
+      if (now - v.ts > TTL_MS3)
+        cache7.delete(k);
+    }
+    if (cache7.size >= MAX_ENTRIES4) {
+      let oldestKey = null;
+      let oldestTs = Infinity;
+      for (const [k, v] of cache7) {
+        if (v.ts < oldestTs) {
+          oldestTs = v.ts;
+          oldestKey = k;
+        }
+      }
+      if (oldestKey)
+        cache7.delete(oldestKey);
+    }
+  }
+  cache7.set(key3(chatId, msgId), { content, ts: now });
+}
+function consumeIfOurWrite(chatId, msgId, content) {
+  const k = key3(chatId, msgId);
+  const entry = cache7.get(k);
+  if (!entry)
+    return false;
+  const elapsed = Date.now() - entry.ts;
+  if (elapsed > TTL_MS3) {
+    cache7.delete(k);
+    return false;
+  }
+  if (entry.content !== content)
+    return false;
+  cache7.delete(k);
+  if (elapsed >= RAPID_CONSUME_MS) {
+    log6.info(`consumeIfOurWrite: late match chat=${chatId} msg=${msgId} elapsed=${elapsed}ms content_len=${content.length} ` + `\u2014 normal echoes are <${RAPID_CONSUME_MS}ms; if user reports a "my edit reverted" symptom soon after, suspect false-positive`);
+  }
+  return true;
+}
+
+// src/interpreter/decorator-buffers.ts
+var TTL_MS4 = 60000;
+var buffersByChat = new Map;
+function setDecoratorBuffers(chatId, buffers) {
+  buffersByChat.set(chatId, { ...buffers, ts: Date.now() });
+}
+function getDecoratorBuffers(chatId) {
+  const buf = buffersByChat.get(chatId);
+  if (!buf)
+    return null;
+  if (Date.now() - buf.ts > TTL_MS4) {
+    buffersByChat.delete(chatId);
+    return null;
+  }
+  return buf;
+}
+function clearDecoratorBuffers(chatId) {
+  buffersByChat.delete(chatId);
+}
+
+// src/interpreter/greeting-index.ts
+function toRisuFirstMessageIndex(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value - 1 : -1;
 }
 
 // src/interpreter/alert-bridge.ts
@@ -40871,8 +40871,28 @@ function createLumiInterceptors(deps) {
         log.warn(`macroInterceptor.exit #${callId} path=owner_mismatch chat=${chatId} ` + `cached=${active.ownerUserId} ctx=${ctx.userId} elapsed=${Date.now() - t0}ms`);
         return;
       }
+      const legacyGlobals = (() => {
+        const g = { ...ctx.env.variables.global || {} };
+        if (ctx.env.variables.local) {
+          for (const [k, v] of Object.entries(ctx.env.variables.local)) {
+            if (k.startsWith("toggle_") && !(k in g)) {
+              g[k] = v;
+            }
+          }
+        }
+        const pVars = ctx.env?.extra?.promptVariables;
+        if (pVars && typeof pVars === "object") {
+          for (const [k, v] of Object.entries(pVars)) {
+            if (k.startsWith("toggle_") && !(k in g)) {
+              g[k] = String(v);
+            }
+          }
+        }
+        return g;
+      })();
+      const effectiveGlobals = await readEffectiveGlobals(ctx.userId ?? active.ownerUserId, legacyGlobals);
       const micDynForKey = ctx.env.dynamicMacros;
-      const micCtxKey = `${micDynForKey?.chat_index ?? ""}|${micDynForKey?.role ?? ""}`;
+      const micCtxKey = `${micDynForKey?.chat_index ?? ""}|${micDynForKey?.role ?? ""}|${JSON.stringify(effectiveGlobals)}`;
       const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
       if (hit !== null) {
         maybeEmitMicCacheStats();
@@ -40939,25 +40959,7 @@ function createLumiInterceptors(deps) {
           },
           variables: {
             local: ctx.env.variables.local,
-            global: (() => {
-              const g = { ...ctx.env.variables.global || {} };
-              if (ctx.env.variables.local) {
-                for (const [k, v] of Object.entries(ctx.env.variables.local)) {
-                  if (k.startsWith("toggle_") && !(k in g)) {
-                    g[k] = v;
-                  }
-                }
-              }
-              const pVars = ctx.env?.extra?.promptVariables;
-              if (pVars && typeof pVars === "object") {
-                for (const [k, v] of Object.entries(pVars)) {
-                  if (k.startsWith("toggle_") && !(k in g)) {
-                    g[k] = String(v);
-                  }
-                }
-              }
-              return g;
-            })(),
+            global: effectiveGlobals,
             chat: ctx.env.variables.chat
           },
           system: {

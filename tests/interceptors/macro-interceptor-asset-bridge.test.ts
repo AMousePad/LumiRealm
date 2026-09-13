@@ -76,6 +76,7 @@ describe("MacroInterceptor asset resolution without MacroRegistry registration",
   test("resolves a raw asset macro through the in-worker evaluator", async () => {
     let macroInterceptor: MacroInterceptorHandler | null = null;
     (globalThis as { spindle?: unknown }).spindle = {
+      userStorage: { getJson: async () => null },
       registerMacroInterceptor(handler: MacroInterceptorHandler) {
         macroInterceptor = handler;
       },

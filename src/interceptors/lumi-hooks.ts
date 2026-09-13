@@ -27,6 +27,7 @@ import {
   cacheMacroInterceptor,
   macroInterceptorCacheStats,
 } from '../state/macro-interceptor-cache.js';
+import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { rememberOurWrite } from '../state/recent-writes.js';
 import { expectChatChange } from '../state/own-chat-change.js';
 import { invalidateRecentFlush } from '../state/recent-flush-cache.js';
@@ -218,8 +219,29 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         return;
       }
 
+      const legacyGlobals = (() => {
+        const g: Record<string, string> = { ...(ctx.env.variables.global || {}) };
+        if (ctx.env.variables.local) {
+          for (const [k, v] of Object.entries(ctx.env.variables.local)) {
+            if (k.startsWith('toggle_') && !(k in g)) {
+              g[k] = v;
+            }
+          }
+        }
+        const pVars = (ctx.env as { extra?: { promptVariables?: Record<string, unknown> } })?.extra?.promptVariables;
+        if (pVars && typeof pVars === 'object') {
+          for (const [k, v] of Object.entries(pVars)) {
+            if (k.startsWith('toggle_') && !(k in g)) {
+              g[k] = String(v);
+            }
+          }
+        }
+        return g;
+      })();
+      const effectiveGlobals = await readEffectiveGlobals(ctx.userId ?? active.ownerUserId, legacyGlobals);
+
       const micDynForKey = (ctx.env as { dynamicMacros?: Record<string, string> }).dynamicMacros;
-      const micCtxKey = `${micDynForKey?.chat_index ?? ''}|${micDynForKey?.role ?? ''}`;
+      const micCtxKey = `${micDynForKey?.chat_index ?? ''}|${micDynForKey?.role ?? ''}|${JSON.stringify(effectiveGlobals)}`;
       const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
       if (hit !== null) {
         maybeEmitMicCacheStats();
@@ -321,25 +343,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           },
           variables: {
             local: ctx.env.variables.local,
-            global: (() => {
-              const g: Record<string, string> = { ...(ctx.env.variables.global || {}) };
-              if (ctx.env.variables.local) {
-                for (const [k, v] of Object.entries(ctx.env.variables.local)) {
-                  if (k.startsWith('toggle_') && !(k in g)) {
-                    g[k] = v;
-                  }
-                }
-              }
-              const pVars = (ctx.env as { extra?: { promptVariables?: Record<string, unknown> } })?.extra?.promptVariables;
-              if (pVars && typeof pVars === 'object') {
-                for (const [k, v] of Object.entries(pVars)) {
-                  if (k.startsWith('toggle_') && !(k in g)) {
-                    g[k] = String(v);
-                  }
-                }
-              }
-              return g;
-            })(),
+            global: effectiveGlobals,
             chat: ctx.env.variables.chat,
           },
           system: {
