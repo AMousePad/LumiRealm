@@ -28558,6 +28558,23 @@ Promise.reject = function(err)
   return { await = function(self) error(err) end, ['finally'] = __risuFinally }
 end
 
+-- Wasmoon's injected Promise.all accepts promises and plain values in input order.
+-- Awaiting uses the existing Fengari driver; async workers retain its sequential scheduling.
+Promise.all = function(values)
+  if type(values) ~= 'table' then error('argument must be an array of promises') end
+  return { await = function(self)
+    local results = {}
+    for i, value in ipairs(values) do
+      if type(value) == 'table' and type(value.await) == 'function' then
+        results[i] = value:await()
+      else
+        results[i] = value
+      end
+    end
+    return results
+  end, ['finally'] = __risuFinally }
+end
+
 function getChat(id, index)
   return json.decode(getChatMain(id, index))
 end
