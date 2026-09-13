@@ -126,7 +126,7 @@ import { createOrphanHandlers } from './handlers/orphan.js';
 import { createRepairHandlers } from './handlers/repair.js';
 import { createLifecycleEventHandlers } from './events/lifecycle.js';
 import { createLumiInterceptors } from './interceptors/lumi-hooks.js';
-import { registerSpindleMacros } from './interpreter/spindle-macros.js';
+import { invalidateToggleMacroCache, registerSpindleMacros } from './interpreter/spindle-macros.js';
 import { createPromptRegexRunnerClient } from './interceptors/prompt-regex-runner-client.js';
 import { createReadonlyResolver } from './state/readonly-resolver.js';
 import { createMessageVarPass } from './state/message-var-pass.js';
@@ -1026,6 +1026,7 @@ const TRANSLATE_TARGET_LANG = 'en';
 const variablesTogglesService = createVariablesTogglesService({
   visibleChatForUser: (userId) => lastActiveChatByUser.get(userId),
   invalidateUserToggleReaders: (userId) => {
+    invalidateToggleMacroCache(userId);
     for (const [chatId, active] of activeCardByChat) {
       if (active.ownerUserId !== userId) continue;
       invalidateRenderMcpForChat(chatId);

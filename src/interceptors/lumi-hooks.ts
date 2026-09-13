@@ -27,7 +27,7 @@ import {
   cacheMacroInterceptor,
   macroInterceptorCacheStats,
 } from '../state/macro-interceptor-cache.js';
-import { readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { collectLegacyGlobals, readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { rememberOurWrite } from '../state/recent-writes.js';
 import { expectChatChange } from '../state/own-chat-change.js';
 import { invalidateRecentFlush } from '../state/recent-flush-cache.js';
@@ -116,6 +116,15 @@ export interface CreateLumiInterceptorsDeps {
 
 export interface LumiInterceptors {
   readonly registerAll: () => void;
+}
+
+// Module lore rows live on the card payload rather than in the host lorebook,
+// so listenEdit chains have to pass them to the runtime explicitly.
+function collectRuntimeModuleLorebooks(active: ActiveCard): readonly unknown[] {
+  const extra = active.card.risuPayload.extra as
+    | { runtime_module_lorebooks?: Record<string, readonly unknown[]> }
+    | undefined;
+  return Object.values(extra?.runtime_module_lorebooks ?? {}).flat();
 }
 
 function cardDisablesRecursiveWorldInfo(active: ActiveCard): boolean {
@@ -219,25 +228,11 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         return;
       }
 
-      const legacyGlobals = (() => {
-        const g: Record<string, string> = { ...(ctx.env.variables.global || {}) };
-        if (ctx.env.variables.local) {
-          for (const [k, v] of Object.entries(ctx.env.variables.local)) {
-            if (k.startsWith('toggle_') && !(k in g)) {
-              g[k] = v;
-            }
-          }
-        }
-        const pVars = (ctx.env as { extra?: { promptVariables?: Record<string, unknown> } })?.extra?.promptVariables;
-        if (pVars && typeof pVars === 'object') {
-          for (const [k, v] of Object.entries(pVars)) {
-            if (k.startsWith('toggle_') && !(k in g)) {
-              g[k] = String(v);
-            }
-          }
-        }
-        return g;
-      })();
+      const legacyGlobals = collectLegacyGlobals({
+        global: ctx.env.variables.global,
+        local: ctx.env.variables.local,
+        promptVariables: (ctx.env as { extra?: { promptVariables?: Record<string, unknown> } })?.extra?.promptVariables,
+      });
       const effectiveGlobals = await readEffectiveGlobals(ctx.userId ?? active.ownerUserId, legacyGlobals);
 
       const micDynForKey = (ctx.env as { dynamicMacros?: Record<string, string> }).dynamicMacros;
@@ -498,6 +493,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             source: t,
             luaCode: luaScripts[i] ?? '',
           }));
+          const moduleLorebooks = collectRuntimeModuleLorebooks(active);
           try {
             const editApi = makeSpindleHost({
               chatId: ctx.chatId,
@@ -547,6 +543,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
                 {
                   chatId: ctx.chatId,
                   characterId: active.card.character_id,
+                  moduleLorebooks,
                   resolveTemplate: (text: string) => deps.resolveReadonly(text, ctx.chatId, active.card.character_id, ctx.userId, { cbsContext: true }),
                 },
               );
@@ -835,6 +832,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           source: t,
           luaCode: luaScripts[i] ?? '',
         }));
+        const moduleLorebooks = collectRuntimeModuleLorebooks(active);
 
         // editInput fires on actual user typing only, not regenerate or swipe or continue.
         if (hasLuaTrigger && ctx.generationType === 'normal') {
@@ -857,6 +855,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
                 {
                   chatId,
                   characterId: active.card.character_id,
+                  moduleLorebooks,
                   resolveTemplate: (text: string) => deps.resolveReadonly(text, chatId, active.card.character_id, userId, { cbsContext: true }),
                 },
               );
@@ -890,6 +889,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
               {
                 chatId,
                 characterId: active.card.character_id,
+                moduleLorebooks,
                 resolveTemplate: (text: string) => deps.resolveReadonly(text, chatId, active.card.character_id, userId, { cbsContext: true }),
               },
             );

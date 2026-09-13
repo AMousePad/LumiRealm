@@ -163,8 +163,15 @@ export function transformPresetTemplate(template: string): string {
     }
   }
 
-  // 2. Map variable getters: {{getglobalvar::toggle_*}} -> {{var::toggle_*}}
-  result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, '{{var::$1}}');
+  // 2. Map global-variable getters: {{getglobalvar::x}} -> {{risuGlobalVar::x}}.
+  //    Preset blocks are evaluated by the HOST macro engine (prompt-assembly
+  //    passes sourceOwner:"host", which skips macro interceptor chains), so the
+  //    value must come from a LumiRealm-registered host macro. `{{var::}}` is the
+  //    wrong reader: it resolves the preset prompt-variable store, which holds
+  //    only the import-time toggle defaults and never the user's State → Toggles
+  //    choice. risuGlobalVar applies the same effective-globals overlay (chat
+  //    globals + persisted user toggle preferences) LumiRealm's own engine uses.
+  result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, '{{risuGlobalVar::$1}}');
 
   // 3. Normalize pure-if conditionals: {{#if_pure ...}} -> {{#if ...}}, {{/if_pure}} -> {{/if}}
   result = result.replace(/\{\{#if_pure\b/g, '{{#if');

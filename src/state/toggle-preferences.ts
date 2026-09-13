@@ -50,13 +50,54 @@ export async function initializeTogglePreferences(userId: string, legacy: Record
   });
 }
 
+/**
+ * Collect the chat-scoped ("legacy") globals the effective-global overlay starts
+ * from: every host global (chat metadata `macro_variables.global`) plus any
+ * `toggle_*` value that only exists in the host local map or in the host
+ * preset prompt-variable snapshot. Shared by the macro interceptor and by the
+ * Spindle compatibility macros so both read one definition of "legacy".
+ */
+export function collectLegacyGlobals(sources: {
+  readonly global?: unknown;
+  readonly local?: unknown;
+  readonly promptVariables?: unknown;
+}): Record<string, string> {
+  const out: Record<string, string> = {};
+  const copy = (raw: unknown, toggleOnly: boolean): void => {
+    if (!raw || typeof raw !== 'object') return;
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (value === undefined || value === null) continue;
+      if (toggleOnly && !key.startsWith('toggle_')) continue;
+      if (toggleOnly && Object.hasOwn(out, key)) continue;
+      out[key] = typeof value === 'string' ? value : String(value);
+    }
+  };
+  copy(sources.global, false);
+  copy(sources.local, true);
+  copy(sources.promptVariables, true);
+  return out;
+}
+
+/**
+ * Overlay persisted per-user preferences on the legacy globals.
+ * Toggle keys come from the preferences only once they exist, so deleting a
+ * preference cannot resurrect an old chat value.
+ */
+export function mergeEffectiveGlobals(
+  legacy: Record<string, string>,
+  preferences: Record<string, string> | null,
+): Record<string, string> {
+  if (preferences === null) return { ...legacy };
+  return { ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith('toggle_'))), ...preferences };
+}
+
+/** Uncached read of the persisted preferences. `null` = never initialized. */
+export async function readTogglePreferences(userId: string): Promise<Record<string, string> | null> {
+  return read(userId);
+}
+
 export async function readEffectiveGlobals(userId: string, legacy: Record<string, string>): Promise<Record<string, string>> {
-  return exclusive(userId, async () => {
-    const preferences = await read(userId);
-    if (preferences === null) return { ...legacy };
-    // Remove legacy toggles before overlaying so deletion cannot resurrect an old chat value.
-    return { ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith('toggle_'))), ...preferences };
-  });
+  return exclusive(userId, async () => mergeEffectiveGlobals(legacy, await read(userId)));
 }
 
 export async function writeTogglePreference(userId: string, key: string, value: string | null, legacy: Record<string, string>): Promise<void> {

@@ -5,6 +5,7 @@ declare const spindle: any;
 // calculations, boolean operators, and string utilities.
 
 import { calcString } from '../risu-compat/risu-helpers.js';
+import { collectLegacyGlobals, mergeEffectiveGlobals, readTogglePreferences } from '../state/toggle-preferences.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
 const log = makeSafeLogger('spindle-macros');
@@ -60,10 +61,84 @@ function evalRisuCalc(ctx: unknown): string {
   }
 }
 
+// ─── Effective global variables (`{{getglobalvar::}}` parity) ────────────────
+
+// One preset block can contain hundreds of toggle lookups and every occurrence
+// is an extension-macro round trip, so the preference file is memoized per user
+// instead of re-read each time. The toggle-write path invalidates the entry, so
+// a single window is always exact; the short TTL only bounds staleness when
+// another browser session of the same user changes the file.
+const PREFERENCE_CACHE_TTL_MS = 2000;
+const preferenceCache = new Map<string, { at: number; value: Record<string, string> | null }>();
+
+/** Drop the memoized toggle preferences for one user, or for every user. */
+export function invalidateToggleMacroCache(userId?: string): void {
+  if (userId === undefined) preferenceCache.clear();
+  else preferenceCache.delete(userId);
+}
+
+async function readPreferencesCached(userId: string): Promise<Record<string, string> | null> {
+  const now = Date.now();
+  const hit = preferenceCache.get(userId);
+  if (hit && now - hit.at < PREFERENCE_CACHE_TTL_MS) return hit.value;
+  const value = await readTogglePreferences(userId);
+  preferenceCache.set(userId, { at: now, value });
+  return value;
+}
+
+// The worker host serializes `env.variables.*` as plain objects; in-process
+// callers (tests, dry runs) pass Maps. Accept both shapes.
+function varRecord(raw: unknown): Record<string, unknown> | null {
+  if (raw instanceof Map) return Object.fromEntries(raw as Map<string, unknown>);
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  return null;
+}
+
+/**
+ * Read one global variable with the same effective-globals overlay LumiRealm's
+ * own engine applies to `{{getglobalvar::…}}`: the chat globals
+ * (`macro_variables.global`) overlaid with the user's persisted
+ * State → Toggles preferences.
+ *
+ * Preset blocks are evaluated by the HOST macro engine (sourceOwner: "host"),
+ * which cannot see the extension's preference store, so translated global
+ * lookups must be resolved here. Unset names resolve to the literal `null`
+ * (Risu chatVar parity, matching `interpreter/evaluator/context.ts`).
+ */
+async function resolveGlobalVarMacro(ctx: unknown): Promise<string> {
+  const key = getArg(ctx, 0).trim();
+  if (!key) return '';
+  const env = (ctx as { env?: { variables?: Record<string, unknown>; extra?: Record<string, unknown> } })?.env;
+  const legacy = collectLegacyGlobals({
+    global: varRecord(env?.variables?.['global']),
+    local: varRecord(env?.variables?.['local']),
+    promptVariables: varRecord(env?.extra?.['promptVariables']),
+  });
+  const userId = typeof env?.extra?.['userId'] === 'string' ? (env.extra['userId'] as string) : '';
+  if (!userId) return legacy[key] ?? 'null';
+  try {
+    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId))[key] ?? 'null';
+  } catch (err) {
+    log.warn(
+      `risuGlobalVar(${key}): toggle preference read failed, using chat globals: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return legacy[key] ?? 'null';
+  }
+}
+
 export function registerSpindleMacros(): void {
   const MACRO_CATEGORY = 'extension:lumirealm';
 
   const macros = [
+    {
+      name: 'risuGlobalVar',
+      aliases: ['lumirealmGlobalVar'],
+      category: MACRO_CATEGORY,
+      description: "Reads a Risu global variable, overlaying the user's persisted State → Toggles preferences on the chat globals.",
+      returnType: 'string',
+      handler: (ctx: unknown) => resolveGlobalVarMacro(ctx),
+    },
     {
       name: 'risuCalc',
       aliases: ['cbsCalc', 'littleDevilCalc'],
