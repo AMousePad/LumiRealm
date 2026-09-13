@@ -24927,24 +24927,27 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         }
       }
     } catch {}
-    const rawExtra = opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
-    const extraLorebooks = Array.isArray(rawExtra) ? rawExtra : rawExtra && typeof rawExtra === "object" ? Object.values(rawExtra).flat() : [];
-    if (extraLorebooks.length > 0) {
-      for (const raw of extraLorebooks) {
-        if (!raw || typeof raw !== "object")
-          continue;
-        const r = raw;
-        lorebook.entries.push({
-          id: typeof r.id === "string" ? r.id : `module-lore-${lorebook.entries.length}`,
-          ...typeof r.worldBookId === "string" ? { worldBookId: r.worldBookId } : {},
-          key: Array.isArray(r.key) ? r.key : typeof r.key === "string" ? r.key : [],
-          content: typeof r.content === "string" ? r.content : "",
-          comment: typeof r.comment === "string" ? r.comment : "",
-          orderValue: typeof r.orderValue === "number" ? r.orderValue : typeof r.insertorder === "number" ? r.insertorder : 100,
-          disabled: typeof r.disabled === "boolean" ? r.disabled : false,
-          constant: typeof r.constant === "boolean" ? r.constant : false
-        });
-      }
+  }
+  const rawExtra = preloaded?.lorebook ? opts.moduleLorebooks ?? [] : opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+  const extraLorebooks = Array.isArray(rawExtra) ? rawExtra : rawExtra && typeof rawExtra === "object" ? Object.values(rawExtra).flat() : [];
+  if (extraLorebooks.length > 0) {
+    if (preloaded?.lorebook && lorebook.entries === preloaded.lorebook.entries) {
+      lorebook.entries = [...lorebook.entries];
+    }
+    for (const raw of extraLorebooks) {
+      if (!raw || typeof raw !== "object")
+        continue;
+      const r = raw;
+      lorebook.entries.push({
+        id: typeof r.id === "string" ? r.id : `module-lore-${lorebook.entries.length}`,
+        ...typeof r.worldBookId === "string" ? { worldBookId: r.worldBookId } : {},
+        key: Array.isArray(r.key) ? r.key : typeof r.key === "string" ? r.key : [],
+        content: typeof r.content === "string" ? r.content : "",
+        comment: typeof r.comment === "string" ? r.comment : "",
+        orderValue: typeof r.orderValue === "number" ? r.orderValue : typeof r.insertorder === "number" ? r.insertorder : 100,
+        disabled: typeof r.disabled === "boolean" ? r.disabled : false,
+        constant: typeof r.constant === "boolean" ? r.constant : false
+      });
     }
   }
   const _factoryTotal = Date.now() - _factoryStart;
@@ -26177,6 +26180,7 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
         ...opts.characterId !== undefined ? { characterId: opts.characterId } : {},
         ...opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {},
         ...opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {},
+        ...opts.moduleLorebooks !== undefined ? { moduleLorebooks: opts.moduleLorebooks } : {},
         preloaded
       });
       const factoryMs = Date.now() - tFactoryStart;

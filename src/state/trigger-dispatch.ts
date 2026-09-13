@@ -195,6 +195,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
                   {
                     chatId,
                     characterId,
+                    moduleLorebooks,
                     resolveTemplate: (text: string) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
                   },
                 );

@@ -25,6 +25,8 @@ export interface ListenEditOpts {
   readonly characterId?: string;
   readonly resolveTemplate?: (text: string) => Promise<string>;
   readonly preloaded?: TriggerRuntimePreloaded;
+  /** Module lore rows for the active card; the preloaded snapshot has only the character's own books. */
+  readonly moduleLorebooks?: readonly unknown[];
   readonly wasmoonKey?: string;
   readonly onVarRead?: (name: string, scope: 'chat' | 'global') => void;
 }
@@ -108,6 +110,7 @@ export async function runListenEditChain<T>(
           ...(opts.characterId !== undefined ? { characterId: opts.characterId } : {}),
           ...(opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {}),
           ...(opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {}),
+          ...(opts.moduleLorebooks !== undefined ? { moduleLorebooks: opts.moduleLorebooks } : {}),
           // Hand the per-chain snapshot to the runtime so it skips its own
           // repeated state fetches (local/global vars, messages, character/lorebook).
           preloaded,

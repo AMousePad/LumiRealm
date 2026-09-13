@@ -20576,7 +20576,7 @@ function transformPresetTemplate(template) {
       i++;
     }
   }
-  result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, "{{var::$1}}");
+  result = result.replace(/\{\{getglobalvar::([a-zA-Z0-9_]+)\}\}/g, "{{risuGlobalVar::$1}}");
   result = result.replace(/\{\{#if_pure\b/g, "{{#if");
   result = result.replace(/\{\{\/if_pure\}\}/g, "{{/if}}");
   result = namePresetBlockClosers(result);
@@ -30566,24 +30566,27 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         }
       }
     } catch {}
-    const rawExtra = opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
-    const extraLorebooks = Array.isArray(rawExtra) ? rawExtra : rawExtra && typeof rawExtra === "object" ? Object.values(rawExtra).flat() : [];
-    if (extraLorebooks.length > 0) {
-      for (const raw of extraLorebooks) {
-        if (!raw || typeof raw !== "object")
-          continue;
-        const r = raw;
-        lorebook.entries.push({
-          id: typeof r.id === "string" ? r.id : `module-lore-${lorebook.entries.length}`,
-          ...typeof r.worldBookId === "string" ? { worldBookId: r.worldBookId } : {},
-          key: Array.isArray(r.key) ? r.key : typeof r.key === "string" ? r.key : [],
-          content: typeof r.content === "string" ? r.content : "",
-          comment: typeof r.comment === "string" ? r.comment : "",
-          orderValue: typeof r.orderValue === "number" ? r.orderValue : typeof r.insertorder === "number" ? r.insertorder : 100,
-          disabled: typeof r.disabled === "boolean" ? r.disabled : false,
-          constant: typeof r.constant === "boolean" ? r.constant : false
-        });
-      }
+  }
+  const rawExtra = preloaded?.lorebook ? opts.moduleLorebooks ?? [] : opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+  const extraLorebooks = Array.isArray(rawExtra) ? rawExtra : rawExtra && typeof rawExtra === "object" ? Object.values(rawExtra).flat() : [];
+  if (extraLorebooks.length > 0) {
+    if (preloaded?.lorebook && lorebook.entries === preloaded.lorebook.entries) {
+      lorebook.entries = [...lorebook.entries];
+    }
+    for (const raw of extraLorebooks) {
+      if (!raw || typeof raw !== "object")
+        continue;
+      const r = raw;
+      lorebook.entries.push({
+        id: typeof r.id === "string" ? r.id : `module-lore-${lorebook.entries.length}`,
+        ...typeof r.worldBookId === "string" ? { worldBookId: r.worldBookId } : {},
+        key: Array.isArray(r.key) ? r.key : typeof r.key === "string" ? r.key : [],
+        content: typeof r.content === "string" ? r.content : "",
+        comment: typeof r.comment === "string" ? r.comment : "",
+        orderValue: typeof r.orderValue === "number" ? r.orderValue : typeof r.insertorder === "number" ? r.insertorder : 100,
+        disabled: typeof r.disabled === "boolean" ? r.disabled : false,
+        constant: typeof r.constant === "boolean" ? r.constant : false
+      });
     }
   }
   const _factoryTotal = Date.now() - _factoryStart;
@@ -38738,6 +38741,7 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
         ...opts.characterId !== undefined ? { characterId: opts.characterId } : {},
         ...opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {},
         ...opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {},
+        ...opts.moduleLorebooks !== undefined ? { moduleLorebooks: opts.moduleLorebooks } : {},
         preloaded
       });
       const factoryMs = Date.now() - tFactoryStart;
@@ -39433,13 +39437,36 @@ async function initializeTogglePreferences(userId, legacy) {
     }
   });
 }
+function collectLegacyGlobals(sources) {
+  const out = {};
+  const copy = (raw, toggleOnly) => {
+    if (!raw || typeof raw !== "object")
+      return;
+    for (const [key, value] of Object.entries(raw)) {
+      if (value === undefined || value === null)
+        continue;
+      if (toggleOnly && !key.startsWith("toggle_"))
+        continue;
+      if (toggleOnly && Object.hasOwn(out, key))
+        continue;
+      out[key] = typeof value === "string" ? value : String(value);
+    }
+  };
+  copy(sources.global, false);
+  copy(sources.local, true);
+  copy(sources.promptVariables, true);
+  return out;
+}
+function mergeEffectiveGlobals(legacy, preferences) {
+  if (preferences === null)
+    return { ...legacy };
+  return { ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith("toggle_"))), ...preferences };
+}
+async function readTogglePreferences(userId) {
+  return read(userId);
+}
 async function readEffectiveGlobals(userId, legacy) {
-  return exclusive(userId, async () => {
-    const preferences = await read(userId);
-    if (preferences === null)
-      return { ...legacy };
-    return { ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith("toggle_"))), ...preferences };
-  });
+  return exclusive(userId, async () => mergeEffectiveGlobals(legacy, await read(userId)));
 }
 async function writeTogglePreference(userId, key, value, legacy) {
   if (!key.startsWith("toggle_"))
@@ -40809,6 +40836,10 @@ async function listLivePromptRegexScripts(characterId, chatId, userId) {
 }
 
 // src/interceptors/lumi-hooks.ts
+function collectRuntimeModuleLorebooks(active) {
+  const extra = active.card.risuPayload.extra;
+  return Object.values(extra?.runtime_module_lorebooks ?? {}).flat();
+}
 function cardDisablesRecursiveWorldInfo(active) {
   const source = active.lumirealm.source?.card;
   if (!source || typeof source !== "object" || Array.isArray(source))
@@ -40885,25 +40916,11 @@ function createLumiInterceptors(deps) {
         log.warn(`macroInterceptor.exit #${callId} path=owner_mismatch chat=${chatId} ` + `cached=${active.ownerUserId} ctx=${ctx.userId} elapsed=${Date.now() - t0}ms`);
         return;
       }
-      const legacyGlobals = (() => {
-        const g = { ...ctx.env.variables.global || {} };
-        if (ctx.env.variables.local) {
-          for (const [k, v] of Object.entries(ctx.env.variables.local)) {
-            if (k.startsWith("toggle_") && !(k in g)) {
-              g[k] = v;
-            }
-          }
-        }
-        const pVars = ctx.env?.extra?.promptVariables;
-        if (pVars && typeof pVars === "object") {
-          for (const [k, v] of Object.entries(pVars)) {
-            if (k.startsWith("toggle_") && !(k in g)) {
-              g[k] = String(v);
-            }
-          }
-        }
-        return g;
-      })();
+      const legacyGlobals = collectLegacyGlobals({
+        global: ctx.env.variables.global,
+        local: ctx.env.variables.local,
+        promptVariables: ctx.env?.extra?.promptVariables
+      });
       const effectiveGlobals = await readEffectiveGlobals(ctx.userId ?? active.ownerUserId, legacyGlobals);
       const micDynForKey = ctx.env.dynamicMacros;
       const micCtxKey = `${micDynForKey?.chat_index ?? ""}|${micDynForKey?.role ?? ""}|${JSON.stringify(effectiveGlobals)}`;
@@ -41080,6 +41097,7 @@ function createLumiInterceptors(deps) {
             source: t,
             luaCode: luaScripts[i] ?? ""
           }));
+          const moduleLorebooks = collectRuntimeModuleLorebooks(active);
           try {
             const editApi = makeSpindleHost({
               chatId: ctx.chatId,
@@ -41113,6 +41131,7 @@ function createLumiInterceptors(deps) {
               transformed = await runListenEditChain(editChain, "editDisplay", transformed, { index: risuChatIdx }, editApi, { characterId: active.card.character_id, content: ctx.content }, editScriptNS, {
                 chatId: ctx.chatId,
                 characterId: active.card.character_id,
+                moduleLorebooks,
                 resolveTemplate: (text) => deps.resolveReadonly(text, ctx.chatId, active.card.character_id, ctx.userId, { cbsContext: true })
               });
               chainMs = Date.now() - tChain;
@@ -41330,6 +41349,7 @@ function createLumiInterceptors(deps) {
           source: t,
           luaCode: luaScripts[i] ?? ""
         }));
+        const moduleLorebooks = collectRuntimeModuleLorebooks(active);
         if (hasLuaTrigger && ctx.generationType === "normal") {
           let userIdx = -1;
           for (let i = out.length - 1;i >= 0; i--) {
@@ -41345,6 +41365,7 @@ function createLumiInterceptors(deps) {
               const mutated = await runListenEditChain(editChain, "editInput", orig, { index: userIdx - 1 }, editApi, { characterId: active.card.character_id, content: orig }, editScriptNS, {
                 chatId,
                 characterId: active.card.character_id,
+                moduleLorebooks,
                 resolveTemplate: (text) => deps.resolveReadonly(text, chatId, active.card.character_id, userId, { cbsContext: true })
               });
               if (mutated !== orig) {
@@ -41365,6 +41386,7 @@ function createLumiInterceptors(deps) {
             const mutated = await runListenEditChain(editChain, "editRequest", out, { generationType: ctx.generationType }, editApi, { characterId: active.card.character_id, content: "" }, editScriptNS, {
               chatId,
               characterId: active.card.character_id,
+              moduleLorebooks,
               resolveTemplate: (text) => deps.resolveReadonly(text, chatId, active.card.character_id, userId, { cbsContext: true })
             });
             if (Array.isArray(mutated)) {
@@ -41631,9 +41653,61 @@ function evalRisuCalc(ctx) {
     return "0";
   }
 }
+var PREFERENCE_CACHE_TTL_MS = 2000;
+var preferenceCache = new Map;
+function invalidateToggleMacroCache(userId) {
+  if (userId === undefined)
+    preferenceCache.clear();
+  else
+    preferenceCache.delete(userId);
+}
+async function readPreferencesCached(userId) {
+  const now = Date.now();
+  const hit = preferenceCache.get(userId);
+  if (hit && now - hit.at < PREFERENCE_CACHE_TTL_MS)
+    return hit.value;
+  const value = await readTogglePreferences(userId);
+  preferenceCache.set(userId, { at: now, value });
+  return value;
+}
+function varRecord(raw) {
+  if (raw instanceof Map)
+    return Object.fromEntries(raw);
+  if (raw && typeof raw === "object" && !Array.isArray(raw))
+    return raw;
+  return null;
+}
+async function resolveGlobalVarMacro(ctx) {
+  const key = getArg(ctx, 0).trim();
+  if (!key)
+    return "";
+  const env = ctx?.env;
+  const legacy = collectLegacyGlobals({
+    global: varRecord(env?.variables?.["global"]),
+    local: varRecord(env?.variables?.["local"]),
+    promptVariables: varRecord(env?.extra?.["promptVariables"])
+  });
+  const userId = typeof env?.extra?.["userId"] === "string" ? env.extra["userId"] : "";
+  if (!userId)
+    return legacy[key] ?? "null";
+  try {
+    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId))[key] ?? "null";
+  } catch (err) {
+    log8.warn(`risuGlobalVar(${key}): toggle preference read failed, using chat globals: ` + `${err instanceof Error ? err.message : String(err)}`);
+    return legacy[key] ?? "null";
+  }
+}
 function registerSpindleMacros() {
   const MACRO_CATEGORY = "extension:lumirealm";
   const macros = [
+    {
+      name: "risuGlobalVar",
+      aliases: ["lumirealmGlobalVar"],
+      category: MACRO_CATEGORY,
+      description: "Reads a Risu global variable, overlaying the user's persisted State \u2192 Toggles preferences on the chat globals.",
+      returnType: "string",
+      handler: (ctx) => resolveGlobalVarMacro(ctx)
+    },
     {
       name: "risuCalc",
       aliases: ["cbsCalc", "littleDevilCalc"],
@@ -42363,6 +42437,7 @@ function createTriggerDispatcher(deps) {
                 mutated = await runListenEditChain(editChain, "editOutput", mutated, { index: risuChatIdx }, api, { characterId, content: mutated }, scriptNS, {
                   chatId,
                   characterId,
+                  moduleLorebooks,
                   resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true })
                 });
               } catch (err) {
@@ -48303,6 +48378,7 @@ var TRANSLATE_TARGET_LANG = "en";
 var variablesTogglesService = createVariablesTogglesService({
   visibleChatForUser: (userId) => lastActiveChatByUser.get(userId),
   invalidateUserToggleReaders: (userId) => {
+    invalidateToggleMacroCache(userId);
     for (const [chatId, active] of activeCardByChat) {
       if (active.ownerUserId !== userId)
         continue;
