@@ -20518,6 +20518,9 @@ function parseRisuToggleSyntax(template) {
   }
   return groups.filter((g) => g.variables.length > 0);
 }
+function hasConditional(content) {
+  return /\{\{(?:#|if::|unless::)/.test(content);
+}
 function namePresetBlockClosers(template) {
   const blocks = [];
   const openings = [];
@@ -20633,6 +20636,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
     });
   }
   let seenChat = false;
+  let seenPersona = false;
   if (Array.isArray(template)) {
     for (const item of template) {
       const type = typeof item["type"] === "string" ? item["type"] : "plain";
@@ -20693,7 +20697,9 @@ function translateRisuPromptBlocks(template, toggleGroups) {
         }
       } else if (type === "persona") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
-        const personaContent = rawInner ? rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{persona}}") : rawInner : text || "{{persona}}";
+        const personaContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{persona}}") : rawInner) : text || "{{persona}}";
+        const personaMarker = !seenPersona && !hasConditional(personaContent) ? "persona_description" : null;
+        seenPersona = true;
         blocks.push({
           id: newUuid(),
           name: name || "User Persona",
@@ -20701,7 +20707,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           enabled,
           position: seenChat ? "post_history" : "pre_history",
           depth: 0,
-          marker: "persona_description",
+          marker: personaMarker,
           content: personaContent,
           isLocked: false,
           color: null,
@@ -20710,7 +20716,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
         });
       } else if (type === "description") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
-        const descContent = rawInner ? rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{description}}") : rawInner : text || "{{description}}";
+        const descContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{description}}") : rawInner) : text || "{{description}}";
         blocks.push({
           id: newUuid(),
           name: name || "Character Description",
@@ -20742,7 +20748,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
         });
       } else if (type === "authornote") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
-        const anContent = rawInner ? rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{authors_note}}") : rawInner : text || "{{authors_note}}";
+        const anContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{authornote}}") : rawInner) : text || "{{authornote}}";
         blocks.push({
           id: newUuid(),
           name: name || "Author's Note",
@@ -41830,21 +41836,37 @@ function varRecord(raw) {
     return raw;
   return null;
 }
+function presetToggleLayer(ctx, promptVariables, userId) {
+  if (promptVariables)
+    return collectLegacyGlobals({ promptVariables });
+  const chatId = readChatId(ctx);
+  return chatId ? presetToggleValues(chatId, userId) : {};
+}
+function readChatId(ctx) {
+  const c = ctx;
+  for (const candidate of [c?.env?.chat?.id, c?.chatId]) {
+    if (typeof candidate === "string" && candidate)
+      return candidate;
+  }
+  return "";
+}
 async function resolveGlobalVarMacro(ctx) {
   const key = getArg(ctx, 0).trim();
   if (!key)
     return "";
   const env = ctx?.env;
+  const promptVariables = varRecord(env?.extra?.["promptVariables"]);
   const legacy = collectLegacyGlobals({
     global: varRecord(env?.variables?.["global"]),
     local: varRecord(env?.variables?.["local"]),
-    promptVariables: varRecord(env?.extra?.["promptVariables"])
+    promptVariables
   });
   const userId = typeof env?.extra?.["userId"] === "string" ? env.extra["userId"] : "";
   if (!userId)
     return legacy[key] ?? "null";
   try {
-    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId))[key] ?? "null";
+    const presetToggles = presetToggleLayer(ctx, promptVariables, userId);
+    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId), presetToggles)[key] ?? "null";
   } catch (err) {
     log8.warn(`risuGlobalVar(${key}): toggle preference read failed, using chat globals: ` + `${err instanceof Error ? err.message : String(err)}`);
     return legacy[key] ?? "null";

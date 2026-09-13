@@ -6,6 +6,7 @@ declare const spindle: any;
 
 import { calcString } from '../risu-compat/risu-helpers.js';
 import { collectLegacyGlobals, mergeEffectiveGlobals, readTogglePreferences } from '../state/toggle-preferences.js';
+import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
 const log = makeSafeLogger('spindle-macros');
@@ -94,11 +95,37 @@ function varRecord(raw: unknown): Record<string, unknown> | null {
   return null;
 }
 
+// Preset layer of the effective-globals overlay. Host preset blocks are
+// evaluated with sourceOwner "host", which skips the macro interceptor that
+// records the per-chat snapshot, so prefer the snapshot the host resolved for
+// this evaluation and use the recorded one only when this evaluation carries
+// no snapshot.
+function presetToggleLayer(
+  ctx: unknown,
+  promptVariables: Record<string, unknown> | null,
+  userId: string,
+): Record<string, string> {
+  if (promptVariables) return collectLegacyGlobals({ promptVariables });
+  const chatId = readChatId(ctx);
+  return chatId ? presetToggleValues(chatId, userId) : {};
+}
+
+// `env.chat.id` is the chat this evaluation belongs to; the worker host also
+// mirrors it onto the invocation context it posts to the extension.
+function readChatId(ctx: unknown): string {
+  const c = ctx as { chatId?: unknown; env?: { chat?: { id?: unknown } } };
+  for (const candidate of [c?.env?.chat?.id, c?.chatId]) {
+    if (typeof candidate === 'string' && candidate) return candidate;
+  }
+  return '';
+}
+
 /**
  * Read one global variable with the same effective-globals overlay LumiRealm's
- * own engine applies to `{{getglobalvar::…}}`: the chat globals
- * (`macro_variables.global`) overlaid with the user's persisted
- * State → Toggles preferences.
+ * own engine applies to `{{getglobalvar::…}}`: the preset values the host
+ * resolved for this evaluation, then the chat globals
+ * (`macro_variables.global`), then the user's persisted State → Toggles
+ * preferences.
  *
  * Preset blocks are evaluated by the HOST macro engine (sourceOwner: "host"),
  * which cannot see the extension's preference store, so translated global
@@ -109,15 +136,17 @@ async function resolveGlobalVarMacro(ctx: unknown): Promise<string> {
   const key = getArg(ctx, 0).trim();
   if (!key) return '';
   const env = (ctx as { env?: { variables?: Record<string, unknown>; extra?: Record<string, unknown> } })?.env;
+  const promptVariables = varRecord(env?.extra?.['promptVariables']);
   const legacy = collectLegacyGlobals({
     global: varRecord(env?.variables?.['global']),
     local: varRecord(env?.variables?.['local']),
-    promptVariables: varRecord(env?.extra?.['promptVariables']),
+    promptVariables,
   });
   const userId = typeof env?.extra?.['userId'] === 'string' ? (env.extra['userId'] as string) : '';
   if (!userId) return legacy[key] ?? 'null';
   try {
-    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId))[key] ?? 'null';
+    const presetToggles = presetToggleLayer(ctx, promptVariables, userId);
+    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId), presetToggles)[key] ?? 'null';
   } catch (err) {
     log.warn(
       `risuGlobalVar(${key}): toggle preference read failed, using chat globals: ` +
