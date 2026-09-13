@@ -186,6 +186,7 @@ export function summarizeEnvelope(env: ModuleEnvelope): ModuleIndexEntry {
 export function upsertIndex(index: ModuleIndex, entry: ModuleIndexEntry): ModuleIndex {
   const filtered = index.entries.filter((e) => e.id !== entry.id);
   return {
+    ...index,
     schema_version: MODULE_SCHEMA_VERSION,
     entries: [...filtered, entry].sort((a, b) => b.uploaded_at - a.uploaded_at),
   };

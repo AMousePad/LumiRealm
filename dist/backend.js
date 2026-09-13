@@ -35165,6 +35165,7 @@ function summarizeEnvelope(env) {
 function upsertIndex(index, entry) {
   const filtered = index.entries.filter((e) => e.id !== entry.id);
   return {
+    ...index,
     schema_version: MODULE_SCHEMA_VERSION,
     entries: [...filtered, entry].sort((a, b) => b.uploaded_at - a.uploaded_at)
   };
@@ -39828,6 +39829,19 @@ function makeSpindleHost(ctx) {
           ok: true,
           value: { id: conn.id, model: conn.model || undefined, provider: conn.provider || "" }
         };
+      }
+      const chat = await spindle.chats.get(chatId, uid);
+      const metadata = chat?.metadata;
+      const boundId = typeof metadata?.connection_profile_id === "string" ? metadata.connection_profile_id.trim() : "";
+      if (boundId) {
+        const conn = await spindle.connections.get(boundId, uid);
+        if (conn) {
+          const model = typeof metadata?.connection_model === "string" ? metadata.connection_model.trim() : "";
+          return {
+            ok: true,
+            value: { id: conn.id, model: model || conn.model || undefined, provider: conn.provider || "" }
+          };
+        }
       }
       const list = await spindle.connections.list(uid);
       if (list.length === 0) {

@@ -17,12 +17,14 @@ import {
   listModules,
   pairModuleAssetsForUpload,
   readEnvelope,
+  readGlobalModuleIds,
   readIndex,
   rebuildIndex,
   removeFromIndex,
   summarizeEnvelope,
   upsertIndex,
   writeEnvelope,
+  writeGlobalModuleIds,
   writeIndex,
 } from '../../src/state/modules-store.js';
 import type { RisuModule } from '../../src/core/schemas/module.js';
@@ -629,4 +631,50 @@ describe('pairModuleAssetsForUpload', () => {
     expect(out[0]!.path).toBe('asset_0.png');
     expect(out[1484]!.path).toBe('asset_1484.png');
   });
+});
+
+
+describe('module writes preserve global selection', () => {
+  for (const id of ['new-module', 'enabled-a']) {
+    test(`writing ${id} preserves persisted enabled order and artifact ownership`, async () => {
+      const storage = createFakeStorage();
+      const makeEnvelope = (moduleId: string): ModuleEnvelope => ({
+        schema_version: MODULE_SCHEMA_VERSION,
+        id: moduleId,
+        filename: 'neutral.risum',
+        uploaded_at: 10,
+        module: { id: moduleId, name: 'Neutral module', description: '' } as RisuModule,
+        asset_index: {},
+      });
+      for (const moduleId of ['enabled-a', 'enabled-b']) {
+        await writeEnvelope(storage, 'owner', makeEnvelope(moduleId));
+      }
+      const selected: ModuleIndex = {
+        ...await readIndex(storage, 'owner'),
+        global_module_ids: ['enabled-b', 'enabled-a'],
+        global_module_regex_script_ids: { 'enabled-a': ['regex-a'] },
+        global_module_world_books: { 'enabled-b': 'book-b' },
+      };
+      await writeIndex(storage, 'owner', selected);
+      await writeIndex(storage, 'other', selected);
+      await writeEnvelope(storage, 'owner', {
+        ...makeEnvelope(id), uploaded_at: 20,
+        module: { ...makeEnvelope(id).module, namespace: 'enabled-a' },
+      });
+      const persisted = await storage.getJson<ModuleIndex>('lumirealm/modules/index.json', { userId: 'owner' });
+      expect(persisted.global_module_ids).toEqual(['enabled-b', 'enabled-a']);
+      expect(await readGlobalModuleIds(storage, 'owner')).toEqual(['enabled-b', 'enabled-a']);
+      expect(persisted.global_module_regex_script_ids).toEqual(selected.global_module_regex_script_ids);
+      expect(persisted.global_module_world_books).toEqual(selected.global_module_world_books);
+      expect(persisted.entries.map((entry) => entry.id)).toEqual(
+        id === 'new-module' ? ['new-module', 'enabled-a', 'enabled-b'] : ['enabled-a', 'enabled-b'],
+      );
+      expect(await readIndex(storage, 'other')).toEqual(selected);
+      expect((await readIndex(storage, undefined)).entries).toEqual([]);
+      const replacement = await writeGlobalModuleIds(storage, 'owner', ['enabled-a']);
+      expect(replacement.applied).toEqual(['enabled-a']);
+      expect(replacement.removed).toEqual(['enabled-b']);
+      expect(await readGlobalModuleIds(storage, 'owner')).toEqual(['enabled-a']);
+    });
+  }
 });
