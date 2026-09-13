@@ -36,6 +36,7 @@ describe('attached module runtime identity', () => {
     let directReads = 0;
 
     const pushes = createModulePushes({
+      listWorldBookEntries: async () => ({ data: [] }),
       translateLang: 'en',
       readLumirealm: async () => null,
       writeLumirealm: async () => {},
@@ -98,6 +99,7 @@ describe('attached module runtime identity', () => {
     let libraryCalls = 0;
 
     const pushes = createModulePushes({
+      listWorldBookEntries: async () => ({ data: [] }),
       translateLang: 'en',
       readLumirealm: async () => null,
       writeLumirealm: async () => {},
@@ -169,6 +171,7 @@ describe('attached module runtime identity', () => {
     } as unknown as ModuleEnvelope;
 
     const pushes = createModulePushes({
+      listWorldBookEntries: async () => ({ data: [] }),
       translateLang: 'en',
       readLumirealm: async () => null,
       writeLumirealm: async () => {},

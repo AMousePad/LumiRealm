@@ -12,11 +12,17 @@ import type {
 import type { ModuleEnvelope, ModuleIndexEntry } from './modules-store.js';
 import type { AttachedModuleForRuntime } from './lumirealm-character.js';
 import { coerceAtActionsFromScripts } from '../interpreter/at-actions-runtime.js';
+import { reconcileLoreEntries, type LiveLoreEntry } from '../core/export/lore-back-projection.js';
+import type { LoreBook } from '../core/schemas/lorebook.js';
 import { mergeLangBlock } from './translation-merge.js';
 import { expectCharacterEdit } from './own-character-edit.js';
 import { setGlobalModuleIdsCache } from './global-modules-cache.js';
 
 export interface ModulePushesDeps {
+  readonly listWorldBookEntries: (
+    bookId: string,
+    opts: { limit: number; offset: number; userId: string },
+  ) => Promise<{ readonly data: readonly LiveLoreEntry[] }>;
   readonly translateLang: string;
   readonly readLumirealm: (
     characterId: string,
@@ -333,7 +339,7 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
       return (resolvedOrder.get(a.id) ?? 0) - (resolvedOrder.get(b.id) ?? 0);
     });
 
-    return orderedEnvelopes.map((env) => {
+    return Promise.all(orderedEnvelopes.map(async (env) => {
       const m = env.module as {
         trigger?: readonly unknown[];
         regex?: readonly unknown[];
@@ -344,6 +350,19 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
         backgroundEmbedding?: unknown;
         namespace?: unknown;
       };
+      let lorebook: readonly unknown[] = Array.isArray(m.lorebook) ? m.lorebook : [];
+      if (env.installed_world_book_id) {
+        const live: LiveLoreEntry[] = [];
+        for (;;) {
+          const page = await deps.listWorldBookEntries(env.installed_world_book_id, {
+            limit: 200, offset: live.length, userId,
+          });
+          live.push(...page.data);
+          if (page.data.length < 200) break;
+        }
+        // Installed rows are editable; the import envelope is only the source for back-projection.
+        lorebook = reconcileLoreEntries(lorebook as readonly LoreBook[], live, () => '').entries;
+      }
       const namespace =
         typeof m.namespace === 'string' && m.namespace.length > 0
           ? m.namespace
@@ -385,7 +404,7 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
         triggers,
         lua_scripts,
         at_actions: atActions,
-        lorebook: Array.isArray(m.lorebook) ? m.lorebook : [],
+        lorebook,
         asset_index: runtimeAssetIndex,
         low_level_access: m.lowLevelAccess === true,
         ...(typeof m.customModuleToggle === 'string' && m.customModuleToggle.length > 0
@@ -401,7 +420,7 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
           ? { namespace }
           : {}),
       };
-    });
+    }));
   }
 
   return {

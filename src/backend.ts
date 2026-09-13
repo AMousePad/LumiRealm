@@ -1350,6 +1350,7 @@ async function processRisumUpload(
 
 
 const modulePushes = createModulePushes({
+  listWorldBookEntries: (bookId, opts) => spindle.world_books.entries.list(bookId, opts),
   translateLang: TRANSLATE_TARGET_LANG,
   readGlobalModuleIds: (userId) => readGlobalModuleIds(moduleStorage(), userId),
   readLumirealm: (charId, userId) => readLumirealm(charactersApi(), charId, userId),

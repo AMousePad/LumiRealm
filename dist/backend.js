@@ -46205,8 +46205,23 @@ function createModulePushes(deps) {
         return 1;
       return (resolvedOrder.get(a.id) ?? 0) - (resolvedOrder.get(b.id) ?? 0);
     });
-    return orderedEnvelopes.map((env) => {
+    return Promise.all(orderedEnvelopes.map(async (env) => {
       const m = env.module;
+      let lorebook = Array.isArray(m.lorebook) ? m.lorebook : [];
+      if (env.installed_world_book_id) {
+        const live = [];
+        for (;; ) {
+          const page = await deps.listWorldBookEntries(env.installed_world_book_id, {
+            limit: 200,
+            offset: live.length,
+            userId
+          });
+          live.push(...page.data);
+          if (page.data.length < 200)
+            break;
+        }
+        lorebook = reconcileLoreEntries(lorebook, live, () => "").entries;
+      }
       const namespace = typeof m.namespace === "string" && m.namespace.length > 0 ? m.namespace : null;
       const attachmentHandles = attachedIds.filter((handle) => handle === env.id || handle === namespace);
       const triggers = Array.isArray(m.trigger) ? m.trigger : [];
@@ -46236,7 +46251,7 @@ function createModulePushes(deps) {
         triggers,
         lua_scripts,
         at_actions: atActions,
-        lorebook: Array.isArray(m.lorebook) ? m.lorebook : [],
+        lorebook,
         asset_index: runtimeAssetIndex,
         low_level_access: m.lowLevelAccess === true,
         ...typeof m.customModuleToggle === "string" && m.customModuleToggle.length > 0 ? { custom_module_toggle: m.customModuleToggle } : {},
@@ -46244,7 +46259,7 @@ function createModulePushes(deps) {
         ...typeof m.backgroundEmbedding === "string" && m.backgroundEmbedding.length > 0 ? { background_embedding: m.backgroundEmbedding } : {},
         ...namespace !== null ? { namespace } : {}
       };
-    });
+    }));
   }
   return {
     pushModules,
@@ -48515,6 +48530,7 @@ async function processRisumUpload(uploadId, fileName, userId) {
   }
 }
 var modulePushes = createModulePushes({
+  listWorldBookEntries: (bookId, opts) => spindle.world_books.entries.list(bookId, opts),
   translateLang: TRANSLATE_TARGET_LANG,
   readGlobalModuleIds: (userId) => readGlobalModuleIds(moduleStorage(), userId),
   readLumirealm: (charId, userId) => readLumirealm(charactersApi(), charId, userId),
