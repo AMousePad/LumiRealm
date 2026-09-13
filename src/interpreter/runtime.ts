@@ -1353,6 +1353,8 @@ export async function makeRisuTriggerRuntime(
           }
           return {
             ...e,
+            // Risu loadLoreBooksMain exposes prompt text as data, not content.
+            data: content,
             name: toStr(e.comment || e.id),
             comment: toStr(e.comment),
             content,

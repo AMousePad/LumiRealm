@@ -109,4 +109,36 @@ describe('Runtime Module Lorebooks and getLoreBooks', () => {
 
     expect(runtime.getVar('result')).toBe('2|Card.Core.axLLM|CORE_CONTENT');
   });
+
+  test('loaded lore data reaches the auxiliary model through awaited prompt assembly', async () => {
+    const requests: unknown[] = [];
+    const api: HostApi = {
+      ...makeMockHostApi(),
+      llm: { generate: async (request) => {
+        requests.push(request);
+        return { content: 'Synthetic result' };
+      } },
+    };
+    const runtime = await makeRisuTriggerRuntime(api, { characterId: 'char-1' }, scriptNs(), {
+      characterId: 'char-1', lowLevelAccess: true,
+      moduleLorebooks: [{ id: 'lore-1', content: 'Oak {{user}}' }],
+    });
+    await runtime.runLua(`
+      function onRun(id)
+        local worker = async(function()
+          local books = loadLoreBooks(id, 100)
+          local prompt = {}
+          for _, book in ipairs(books) do
+            table.insert(prompt, {role = 'user', content = book.data:gsub('Oak', 'Pine')})
+          end
+          local response = axLLM(id, prompt)
+          assert(response.success)
+          setChatVar(id, 'result', response.result)
+        end)
+        Promise.all({worker()}):await()
+      end
+    `);
+    expect(requests).toEqual([{ messages: [{ role: 'user', content: 'Pine User' }] }]);
+    expect(runtime.getVar('result')).toBe('Synthetic result');
+  });
 });

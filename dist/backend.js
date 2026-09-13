@@ -31436,6 +31436,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           }
           return {
             ...e,
+            data: content,
             name: toStr(e.comment || e.id),
             comment: toStr(e.comment),
             content,
