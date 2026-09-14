@@ -5,6 +5,7 @@ import type { SpindleAPI, UserPresetCreateDTO, UserPresetDTO } from 'lumiverse-s
 import { isRisuPresetBytes, decodeRisuPreset } from '../core/preset/risup-decoder.js';
 import { translateRisuPreset } from '../core/preset/risup-translator.js';
 import { reconcilePresetRegexScripts } from './preset-regex-reconcile.js';
+import { translatePresetLabels } from '../core/preset/preset-labels.js';
 
 export interface RealmBackendLog {
   info(msg: string): void;
@@ -17,15 +18,25 @@ export interface RealmBackendDeps {
   readonly log: RealmBackendLog;
   readonly importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) => Promise<void>;
   readonly createPreset?: (input: UserPresetCreateDTO, userId?: string) => Promise<UserPresetDTO>;
+  /** Rewrites imported preset display labels; absent when the host cannot generate. */
+  readonly translatePresetLabels?: (
+    preset: UserPresetCreateDTO,
+    opts: { readonly connectionId: string; readonly userId: string },
+  ) => Promise<UserPresetCreateDTO>;
   /** Global regex surface used to reconcile this preset's imported rows. */
   readonly regexApi: Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'>;
   readonly notifyImportProgress?: (progress: { type: 'import_progress'; phase: string; message: string; fraction: number | null; error?: string | null }, userId?: string) => void;
   readonly toast?: (msg: string, kind?: 'info' | 'error' | 'warning' | 'success') => void;
 }
 
+export interface PresetImportOptions {
+  /** Set when the user opted into label translation for this import. */
+  readonly labelTranslation?: { readonly connectionId: string };
+}
+
 export interface RealmBackendHandle {
   handle(msg: RealmFrontendToBackend, userId: string | undefined): Promise<void>;
-  importAnyFormat(bytes: Uint8Array, fileName: string, userId: string): Promise<void>;
+  importAnyFormat(bytes: Uint8Array, fileName: string, userId: string, opts?: PresetImportOptions): Promise<void>;
 }
 
 export function isRealmFrontendMessage(msg: { type: string }): msg is RealmFrontendToBackend {
@@ -140,12 +151,20 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     }
   }
 
-    async function importPresetFromBytes(bytes: Uint8Array, fileName: string, userId: string): Promise<void> {
+    async function importPresetFromBytes(
+      bytes: Uint8Array,
+      fileName: string,
+      userId: string,
+      opts?: PresetImportOptions,
+    ): Promise<void> {
     log.info(`importPresetFromBytes: decoding preset from ${fileName} (${bytes.byteLength} bytes)`);
     deps.notifyImportProgress?.({ type: 'import_progress', phase: 'decoding', message: `Decoding preset ${fileName}`, fraction: 0.2, error: null }, userId);
     const raw = await decodeRisuPreset(bytes, fileName);
     deps.notifyImportProgress?.({ type: 'import_progress', phase: 'translating', message: `Translating preset ${raw.name || fileName}`, fraction: 0.5, error: null }, userId);
-    const { preset: presetInput, regexScripts } = translateRisuPreset(raw, fileName);
+    const { preset: translatedPreset, regexScripts } = translateRisuPreset(raw, fileName);
+    const presetInput = opts?.labelTranslation === undefined
+      ? translatedPreset
+      : await translateImportedPresetLabels(translatedPreset, opts.labelTranslation.connectionId, userId);
 
     if (!deps.createPreset) {
       throw new Error('Host preset creation is unavailable');
@@ -180,9 +199,30 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     deps.notifyImportProgress?.({ type: 'import_progress', phase: 'done', message: `Preset "${created.name}" imported successfully`, fraction: 1.0, error: null }, userId);
   }
 
-  async function importAnyFormat(bytes: Uint8Array, fileName: string, userId: string): Promise<void> {
+  async function translateImportedPresetLabels(
+    preset: UserPresetCreateDTO,
+    connectionId: string,
+    userId: string,
+  ): Promise<UserPresetCreateDTO> {
+    const translate = deps.translatePresetLabels;
+    if (!translate) throw new Error('Preset label translation is unavailable on this host');
+    deps.notifyImportProgress?.(
+      { type: 'import_progress', phase: 'translating', message: 'Translating preset labels', fraction: 0.65, error: null },
+      userId,
+    );
+    const translated = await translate(preset, { connectionId, userId });
+    log.info(`importPresetFromBytes: translated preset labels via connection=${connectionId.slice(0, 8)}...`);
+    return translated;
+  }
+
+  async function importAnyFormat(
+    bytes: Uint8Array,
+    fileName: string,
+    userId: string,
+    opts?: PresetImportOptions,
+  ): Promise<void> {
     if (isRisuPresetBytes(bytes, fileName)) {
-      await importPresetFromBytes(bytes, fileName, userId);
+      await importPresetFromBytes(bytes, fileName, userId, opts);
       return;
     }
     let conv: ImportFormatConversion;

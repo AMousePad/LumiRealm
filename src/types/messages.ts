@@ -150,7 +150,13 @@ export type FrontendToBackend =
   | { type: 'display_authority'; chatId: string; authoritative: boolean }
   // Card bytes are streamed to the host tus endpoint (resumable, no WS frame
   // cap), then the worker reads them by id via spindle.uploads.
-  | { type: 'import_card_from_upload'; uploadId: string; fileName: string }
+  | {
+      type: 'import_card_from_upload';
+      uploadId: string;
+      fileName: string;
+      /** Set by the Presets panel when the user opted into label translation. */
+      presetLabelTranslation?: { readonly connectionId: string };
+    }
   // Large lorebook / regex JSON imports upload via the tus endpoint (a single
   // SPINDLE_BACKEND_MSG frame is capped at 4MB and silently dropped past that).
   | {

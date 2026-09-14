@@ -1,6 +1,7 @@
 import type { BackendToFrontend, CardSummary } from '../types/messages.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { HostVersionCheckResult } from '../util/version-check.js';
+import type { PresetImportOptions } from '../realm/backend.js';
 import type { Handler } from './types.js';
 
 export interface PendingImportCompletion {
@@ -41,7 +42,12 @@ export interface ImportHandlerDeps {
     userId: string,
     opts?: { force?: boolean },
   ) => Promise<void>;
-  readonly importAnyFormat: (bytes: Uint8Array, fileName: string, userId: string) => Promise<void>;
+  readonly importAnyFormat: (
+    bytes: Uint8Array,
+    fileName: string,
+    userId: string,
+    opts?: PresetImportOptions,
+  ) => Promise<void>;
   readonly getUpload: (
     uploadId: string,
     userId: string,
@@ -168,7 +174,14 @@ export function createImportHandlers(deps: ImportHandlerDeps): {
       }
       deps.log.info(`import_card_from_upload: got ${upload.data.byteLength} bytes, running importCard`);
       try {
-        await deps.importAnyFormat(upload.data, msg.fileName || upload.fileName, ctx.userId);
+        await deps.importAnyFormat(
+          upload.data,
+          msg.fileName || upload.fileName,
+          ctx.userId,
+          msg.presetLabelTranslation === undefined
+            ? undefined
+            : { labelTranslation: msg.presetLabelTranslation },
+        );
       } finally {
         void deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
       }

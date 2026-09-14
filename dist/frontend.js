@@ -32543,6 +32543,25 @@ var styles_default = `.risu-compat-drawer {\r
   align-items: center;\r
   flex-wrap: wrap;\r
 }\r
+/* Preset label translation: opt-in checkbox + the connection it runs on. */\r
+.lr-modules-drawer .lrm-preset-labels {\r
+  display: flex;\r
+  align-items: center;\r
+  gap: 6px;\r
+  font-size: 12px;\r
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));\r
+}\r
+.lr-modules-drawer .lrm-preset-translate-check {\r
+  margin: 0;\r
+  accent-color: var(--lumiverse-primary, #6c9cff);\r
+}\r
+.lr-modules-drawer .lrm-preset-translate-text {\r
+  cursor: pointer;\r
+}\r
+.lr-modules-drawer .lrm-preset-connection {\r
+  width: 100%;\r
+  max-width: none;\r
+}\r
 .lr-modules-drawer .lrm-list-filter {\r
   display: flex;\r
   gap: 8px;\r
@@ -42014,6 +42033,34 @@ function mountModulesPanel(opts) {
   presetUploadBtn.title = "Pick a RisuAI preset (.risup, .risupreset, or .json) file to import into Lumiverse Loom presets.";
   presetToolbar.appendChild(presetUploadBtn);
   presetsBody.appendChild(presetToolbar);
+  let presetConnections = null;
+  let presetConnectionId = null;
+  const presetLabelRow = document.createElement("div");
+  presetLabelRow.className = "lrm-preset-labels";
+  const presetTranslateCheck = document.createElement("input");
+  presetTranslateCheck.type = "checkbox";
+  presetTranslateCheck.className = "lrm-preset-translate-check";
+  presetTranslateCheck.id = "lr-preset-translate-labels";
+  const presetTranslateText = document.createElement("label");
+  presetTranslateText.className = "lrm-preset-translate-text";
+  presetTranslateText.htmlFor = presetTranslateCheck.id;
+  presetTranslateText.textContent = "Translate?";
+  presetTranslateText.title = "Translate this preset toggle group, variable and option labels into English. Variables, option values and prompt content are kept as imported.";
+  presetLabelRow.appendChild(presetTranslateCheck);
+  presetLabelRow.appendChild(presetTranslateText);
+  presetsBody.appendChild(presetLabelRow);
+  const presetConnectionSelect = createSearchableSelect({
+    className: "lrm-preset-connection",
+    placeholder: "Loading connections…",
+    searchPlaceholder: "Search connections…",
+    emptyMessage: "No connections. Set one up in Lumi.",
+    items: [],
+    value: null,
+    onChange: (value) => {
+      presetConnectionId = value;
+    }
+  });
+  presetsBody.appendChild(presetConnectionSelect.root);
   const presetStatus = document.createElement("div");
   presetStatus.className = "lrm-lorebook-status";
   presetsBody.appendChild(presetStatus);
@@ -42037,6 +42084,9 @@ function mountModulesPanel(opts) {
     presetsBody.hidden = id !== "presets";
     lorebooksBody.hidden = id !== "lorebooks";
     regexBody.hidden = id !== "regex";
+    if (id === "presets" && presetConnections === null) {
+      sendToBackend({ type: "request_connections_list" });
+    }
   }
   activateSubTab(activeSubTab);
   function setStatus(_msg, _isError = false) {}
@@ -42481,6 +42531,27 @@ filename: ${m.filename}`;
   presetUploadBtn.addEventListener("click", () => {
     onPresetUploadClicked();
   });
+  presetTranslateCheck.addEventListener("change", () => {
+    renderPresetLabelControls();
+  });
+  function renderPresetLabelControls() {
+    const list = presetConnections ?? [];
+    presetConnectionSelect.setItems(list.map((c) => ({
+      value: c.id,
+      label: c.name,
+      ...c.model ? { secondary: c.model } : {}
+    })));
+    if (presetConnectionId === null || !list.some((c) => c.id === presetConnectionId)) {
+      presetConnectionId = (list.find((c) => c.is_default) ?? list[0])?.id ?? null;
+    }
+    presetConnectionSelect.setValue(presetConnectionId);
+    const ready = list.length > 0;
+    if (!ready)
+      presetTranslateCheck.checked = false;
+    presetTranslateCheck.disabled = !ready;
+    presetConnectionSelect.setDisabled(!ready || !presetTranslateCheck.checked);
+  }
+  renderPresetLabelControls();
   async function onPresetUploadClicked() {
     if (presetImportInFlight)
       return;
@@ -42540,8 +42611,14 @@ filename: ${m.filename}`;
           setPresetStatus("Could not read upload ID from endpoint", true);
           return;
         }
-        setPresetStatus(`Processing "${fileName}" on server…`, false);
-        sendToBackend({ type: "import_card_from_upload", uploadId, fileName });
+        const labelTranslation = presetTranslateCheck.checked && presetConnectionId !== null ? { connectionId: presetConnectionId } : null;
+        setPresetStatus(labelTranslation === null ? `Processing "${fileName}" on server…` : `Processing "${fileName}" on server (translating labels)…`, false);
+        sendToBackend({
+          type: "import_card_from_upload",
+          uploadId,
+          fileName,
+          ...labelTranslation !== null ? { presetLabelTranslation: labelTranslation } : {}
+        });
       }
     });
     activeTus = upload;
@@ -42784,6 +42861,10 @@ filename: ${m.filename}`;
         render();
         break;
       }
+      case "connections_list_pushed":
+        presetConnections = msg.connections;
+        renderPresetLabelControls();
+        break;
       case "modules_pushed":
         modules = msg.modules;
         globalModuleIds = msg.global_module_ids ?? [];

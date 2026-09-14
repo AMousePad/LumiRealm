@@ -17,6 +17,8 @@ import { sendImportText } from './import-text-upload.js';
 import * as tus from 'tus-js-client';
 import { pickNativeFile } from './native-file-picker.js';
 
+type ConnectionWire = Extract<BackendToFrontend, { type: 'connections_list_pushed' }>['connections'][number];
+
 // Mounts into a host element provided by ui/sidebar.ts.
 
 const UPLOAD_ENDPOINT = '/api/v1/spindle-uploads';
@@ -296,6 +298,39 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   presetToolbar.appendChild(presetUploadBtn);
   presetsBody.appendChild(presetToolbar);
 
+  // Opt-in label translation. Risu presets are usually authored in the card's
+  // own language, so the labels a Loom category renders are translated at
+  // import through a connection profile the user picks here. Keys, stored
+  // option values and block content are never touched.
+  let presetConnections: readonly ConnectionWire[] | null = null;
+  let presetConnectionId: string | null = null;
+  const presetLabelRow = document.createElement('div');
+  presetLabelRow.className = 'lrm-preset-labels';
+  const presetTranslateCheck = document.createElement('input');
+  presetTranslateCheck.type = 'checkbox';
+  presetTranslateCheck.className = 'lrm-preset-translate-check';
+  presetTranslateCheck.id = 'lr-preset-translate-labels';
+  const presetTranslateText = document.createElement('label');
+  presetTranslateText.className = 'lrm-preset-translate-text';
+  presetTranslateText.htmlFor = presetTranslateCheck.id;
+  presetTranslateText.textContent = 'Translate?';
+  presetTranslateText.title =
+    'Translate this preset toggle group, variable and option labels into English. Variables, option values and prompt content are kept as imported.';
+  presetLabelRow.appendChild(presetTranslateCheck);
+  presetLabelRow.appendChild(presetTranslateText);
+  presetsBody.appendChild(presetLabelRow);
+
+  const presetConnectionSelect = createSearchableSelect({
+    className: 'lrm-preset-connection',
+    placeholder: 'Loading connections…',
+    searchPlaceholder: 'Search connections…',
+    emptyMessage: 'No connections. Set one up in Lumi.',
+    items: [],
+    value: null,
+    onChange: (value) => { presetConnectionId = value; },
+  });
+  presetsBody.appendChild(presetConnectionSelect.root);
+
   const presetStatus = document.createElement('div');
   presetStatus.className = 'lrm-lorebook-status';
   presetsBody.appendChild(presetStatus);
@@ -322,6 +357,11 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     presetsBody.hidden = id !== 'presets';
     lorebooksBody.hidden = id !== 'lorebooks';
     regexBody.hidden = id !== 'regex';
+    // The Presets panel owns its own copy of the profile list; asking only when
+    // the tab is opened keeps the import panel from polling the host on mount.
+    if (id === 'presets' && presetConnections === null) {
+      sendToBackend({ type: 'request_connections_list' });
+    }
   }
   activateSubTab(activeSubTab);
 
@@ -796,6 +836,27 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   // Standalone preset import (.risup / .risupreset / .json)
   let presetImportInFlight = false;
   presetUploadBtn.addEventListener('click', () => { void onPresetUploadClicked(); });
+  presetTranslateCheck.addEventListener('change', () => { renderPresetLabelControls(); });
+
+  // The first connection is the host default, so an untouched select still
+  // names a profile instead of silently sending the import without a target.
+  function renderPresetLabelControls(): void {
+    const list = presetConnections ?? [];
+    presetConnectionSelect.setItems(list.map((c) => ({
+      value: c.id,
+      label: c.name,
+      ...(c.model ? { secondary: c.model } : {}),
+    })));
+    if (presetConnectionId === null || !list.some((c) => c.id === presetConnectionId)) {
+      presetConnectionId = (list.find((c) => c.is_default) ?? list[0])?.id ?? null;
+    }
+    presetConnectionSelect.setValue(presetConnectionId);
+    const ready = list.length > 0;
+    if (!ready) presetTranslateCheck.checked = false;
+    presetTranslateCheck.disabled = !ready;
+    presetConnectionSelect.setDisabled(!ready || !presetTranslateCheck.checked);
+  }
+  renderPresetLabelControls();
 
   async function onPresetUploadClicked(): Promise<void> {
     if (presetImportInFlight) return;
@@ -852,8 +913,21 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
           setPresetStatus('Could not read upload ID from endpoint', true);
           return;
         }
-        setPresetStatus(`Processing "${fileName}" on server…`, false);
-        sendToBackend({ type: 'import_card_from_upload', uploadId, fileName });
+        const labelTranslation = presetTranslateCheck.checked && presetConnectionId !== null
+          ? { connectionId: presetConnectionId }
+          : null;
+        setPresetStatus(
+          labelTranslation === null
+            ? `Processing "${fileName}" on server…`
+            : `Processing "${fileName}" on server (translating labels)…`,
+          false,
+        );
+        sendToBackend({
+          type: 'import_card_from_upload',
+          uploadId,
+          fileName,
+          ...(labelTranslation !== null ? { presetLabelTranslation: labelTranslation } : {}),
+        });
       },
     });
 
@@ -1110,6 +1184,10 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         render();
         break;
       }
+      case 'connections_list_pushed':
+        presetConnections = msg.connections;
+        renderPresetLabelControls();
+        break;
       case 'modules_pushed':
         modules = msg.modules;
         globalModuleIds = msg.global_module_ids ?? [];

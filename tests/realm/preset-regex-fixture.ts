@@ -3,8 +3,9 @@ import type {
   RegexScriptDTO,
   RegexScriptListOptionsDTO,
   SpindleAPI,
+  UserPresetCreateDTO,
 } from 'lumiverse-spindle-types';
-import type { RealmBackendHandle } from '../../src/realm/backend.js';
+import type { RealmBackendDeps, RealmBackendHandle } from '../../src/realm/backend.js';
 import { setupRealmBackend } from '../../src/realm/backend.js';
 
 export const PRESET_NAME = 'Synthetic Preset';
@@ -205,11 +206,17 @@ export interface PresetBackendHarness {
   readonly backend: RealmBackendHandle;
   readonly logs: readonly string[];
   readonly warns: readonly string[];
+  /** Every preset-create input, in call order. */
+  readonly creates: UserPresetCreateDTO[];
 }
 
-export function makePresetBackend(store: RegexStore): PresetBackendHarness {
+export function makePresetBackend(
+  store: RegexStore,
+  extra: { readonly translatePresetLabels?: RealmBackendDeps['translatePresetLabels'] } = {},
+): PresetBackendHarness {
   const logs: string[] = [];
   const warns: string[] = [];
+  const creates: UserPresetCreateDTO[] = [];
   const backend = setupRealmBackend({
     send: () => {},
     log: {
@@ -218,21 +225,27 @@ export function makePresetBackend(store: RegexStore): PresetBackendHarness {
       error: () => {},
     },
     importCardFromBytes: async () => {},
-    createPreset: async (input) => ({
-      id: `preset-${logs.length}`,
-      name: input.name,
-      provider: input.provider,
-      engine: input.engine ?? 'classic',
-      parameters: input.parameters ?? {},
-      prompt_order: input.prompt_order ?? [],
-      prompts: {},
-      metadata: input.metadata ?? {},
-      cache_revision: 0,
-      created_at: 1,
-      updated_at: 1,
-    }),
+    ...(extra.translatePresetLabels !== undefined
+      ? { translatePresetLabels: extra.translatePresetLabels }
+      : {}),
+    createPreset: async (input) => {
+      creates.push(input);
+      return {
+        id: `preset-${logs.length}`,
+        name: input.name,
+        provider: input.provider,
+        engine: input.engine ?? 'classic',
+        parameters: input.parameters ?? {},
+        prompt_order: input.prompt_order ?? [],
+        prompts: {},
+        metadata: input.metadata ?? {},
+        cache_revision: 0,
+        created_at: 1,
+        updated_at: 1,
+      };
+    },
     regexApi: store.api,
     toast: () => {},
   });
-  return { backend, logs, warns };
+  return { backend, logs, warns, creates };
 }
