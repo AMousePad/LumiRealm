@@ -20600,10 +20600,7 @@ function splitMacroArgs(body) {
   args.push(body.slice(start));
   return args;
 }
-function transformPresetTemplate(template) {
-  if (!template || typeof template !== "string" || !template.includes("{{")) {
-    return template;
-  }
+function rewriteCalculations(template) {
   let result = "";
   let i = 0;
   const n = template.length;
@@ -20622,7 +20619,9 @@ function transformPresetTemplate(template) {
           j++;
         }
       }
-      const expr = template.slice(i + 3, j - 2).trim();
+      if (depth !== 0)
+        return result + template.slice(i);
+      const expr = rewriteCalculations(template.slice(i + 3, j - 2).trim());
       result += `{{risuCalc::${expr}}}`;
       i = j;
     } else {
@@ -20630,6 +20629,13 @@ function transformPresetTemplate(template) {
       i++;
     }
   }
+  return result;
+}
+function transformPresetTemplate(template) {
+  if (!template || typeof template !== "string" || !template.includes("{{")) {
+    return template;
+  }
+  let result = rewriteCalculations(template);
   result = rewriteMacroBody(result, "getglobalvar", (body) => `{{risuGlobalVar::${body}}}`);
   result = result.replace(/\{\{slot::([a-zA-Z0-9_]+)\}\}/g, "{{getvar::$1}}");
   result = result.replace(/\{\{(?:get)?tempvar::([a-zA-Z0-9_]+)\}\}/g, "{{getvar::$1}}");

@@ -191,16 +191,7 @@ function splitMacroArgs(body: string): string[] {
   return args;
 }
 
-/**
- * Translates embedded Risu CBS expressions in preset blocks into Lumiverse-compatible macros.
- * Recursively maps {{? expr}} -> {{risuCalc::expr}}, variable lookups, and boolean helpers.
- */
-export function transformPresetTemplate(template: string): string {
-  if (!template || typeof template !== 'string' || !template.includes('{{')) {
-    return template;
-  }
-
-  // 1. Balanced brace parser for {{? ...}} -> {{risuCalc::...}}
+function rewriteCalculations(template: string): string {
   let result = '';
   let i = 0;
   const n = template.length;
@@ -219,7 +210,8 @@ export function transformPresetTemplate(template: string): string {
           j++;
         }
       }
-      const expr = template.slice(i + 3, j - 2).trim();
+      if (depth !== 0) return result + template.slice(i);
+      const expr = rewriteCalculations(template.slice(i + 3, j - 2).trim());
       result += `{{risuCalc::${expr}}}`;
       i = j;
     } else {
@@ -227,6 +219,20 @@ export function transformPresetTemplate(template: string): string {
       i++;
     }
   }
+
+  return result;
+}
+
+/**
+ * Translates embedded Risu CBS expressions in preset blocks into Lumiverse-compatible macros.
+ * Recursively maps {{? expr}} -> {{risuCalc::expr}}, variable lookups, and boolean helpers.
+ */
+export function transformPresetTemplate(template: string): string {
+  if (!template || typeof template !== 'string' || !template.includes('{{')) {
+    return template;
+  }
+
+  let result = rewriteCalculations(template);
 
   // 2. Map global-variable getters: {{getglobalvar::x}} -> {{risuGlobalVar::x}}.
   //    Preset blocks are evaluated by the HOST macro engine (prompt-assembly
