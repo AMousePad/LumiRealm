@@ -54,6 +54,8 @@ export interface HostDomHandle {
 }
 
 export interface HostApi {
+  readonly userId?: string;
+  readonly getGlobalVariables?: () => Promise<Record<string, string>>;
   readonly chat: {
     getChatId?: () => string | null;
     getMessages(): Promise<readonly HostMessage[]>;
@@ -114,6 +116,19 @@ export interface HostApi {
       readonly is_default: boolean;
     }[]>;
   };
+  readonly imageGen?: {
+    generate(prompt: string, opts?: {
+      negativePrompt?: string;
+      connectionId?: string;
+      model?: string;
+      parameters?: Record<string, unknown>;
+      includeDataUrl?: boolean;
+    }): Promise<{ imageId?: string; imageUrl?: string; imageDataUrl?: string } | string>;
+  };
+  readonly images?: {
+    uploadFromDataUrl(dataUrl: string, name?: string): Promise<string | { id: string }>;
+    getUrl?(id: string): string;
+  };
   readonly tokens?: {
     count(text: string): Promise<number>;
   };
@@ -173,6 +188,7 @@ export interface TriggerRuntimeOpts {
   readonly chatId?: string;
   /** Pre-fetched chat-state snapshot — see `TriggerRuntimePreloaded`. */
   readonly preloaded?: TriggerRuntimePreloaded;
+  readonly moduleLorebooks?: readonly unknown[];
   // Backend uses this to filter MESSAGE_EDITED self-echoes from Lua setChat.
   readonly rememberOurWrite?: (chatId: string, msgId: string, content: string) => void;
   readonly stateChanged?: () => void;
@@ -204,6 +220,9 @@ export interface TriggerRuntimeOpts {
   };
   readonly auxPrefillCompat?: boolean;
   readonly submodelPrefillCompat?: boolean;
+  readonly imageConnectionId?: string | null;
+  readonly imageModelOverride?: string | null;
+  readonly naiSettings?: import('../state/settings-store.js').NaiSettings;
   readonly auxDebugCapture?: (event: import("./runtime.js").AuxDebugCaptureEvent) => void;
   /** Backs Lua `cbs(value)`. Used by listenEdit chains that don't run
    *  inside a dispatch-context window. */

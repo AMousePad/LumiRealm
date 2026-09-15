@@ -340,6 +340,38 @@ export function mountTogglesPanel(opts: MountTogglesPanelOptions): TogglesTabHan
     });
   }
 
+  // Values-only refresh: rebuilding the list resets every group to open, drops
+  // focus, and clamps the drawer scroll offset. Patch the rendered rows instead.
+  function applyValues(): void {
+    for (const row of listHost.querySelectorAll<HTMLElement>('.lr-toggle-row')) {
+      const key = row.dataset['key'] ?? '';
+      const stored = readToggle(key);
+      switch (row.dataset['kind']) {
+        case 'checkbox': {
+          const cb = row.querySelector<HTMLInputElement>('.lr-toggle-checkbox');
+          if (cb) cb.checked = stored === '1';
+          break;
+        }
+        case 'select': {
+          const sel = row.querySelector<HTMLSelectElement>('.lr-toggle-select');
+          const index = Number.parseInt(stored, 10);
+          const opt = sel !== null && Number.isInteger(index) ? sel.options[index] : undefined;
+          if (opt && !opt.selected) opt.selected = true;
+          break;
+        }
+        default: {
+          // An in-progress text edit wins until it commits.
+          if (textEditBuffers.has(key)) break;
+          const field = row.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+            '.lr-toggle-text, .lr-toggle-textarea',
+          );
+          if (field && field.value !== stored) field.value = stored;
+          break;
+        }
+      }
+    }
+  }
+
   function render(): void {
     renderStatus();
     renderList();
@@ -386,6 +418,7 @@ export function mountTogglesPanel(opts: MountTogglesPanelOptions): TogglesTabHan
       return;
     }
     if (msg.type === 'set_variables') {
+      if (activeChatId !== null && msg.chatId !== activeChatId) return;
       if (values && values.chatId === msg.chatId && values.seq > msg.seq) return;
       values = {
         chatId: msg.chatId,
@@ -393,7 +426,7 @@ export function mountTogglesPanel(opts: MountTogglesPanelOptions): TogglesTabHan
         scopes: msg.scopes,
       };
       if (defs && defs.chatId === activeChatId) {
-        render();
+        applyValues();
       }
       return;
     }

@@ -37,6 +37,7 @@ function harness(options: {
     raw: [] as unknown[][],
   };
   (globalThis as { spindle?: unknown }).spindle = {
+    chats: { async get() { return { metadata: {} }; } },
     connections: {
       async get(...args: unknown[]) {
         calls.get.push(args);

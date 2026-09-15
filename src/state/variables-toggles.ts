@@ -3,7 +3,8 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { AttributionWire, BackendToFrontend, SidebarToggleWire } from '../types/messages.js';
 import type { LumirealmCharacterData } from '../payload/types.js';
-import type { ModuleEnvelope } from './modules-store.js';
+import { resolveEffectiveModuleIds, type ModuleEnvelope } from './modules-store.js';
+import { getGlobalModuleIds } from './global-modules-cache.js';
 import {
   extractToggleKeys,
   parseToggleSyntax,
@@ -15,6 +16,8 @@ import { invalidateRenderMcpForChat } from './render-mcp-cache.js';
 import { invalidateMacroInterceptorForChat } from './macro-interceptor-cache.js';
 import type { VariableStateStore } from './variables-state.js';
 import type { ToggleStateStore } from './toggle-state.js';
+import { initializeTogglePreferences, readEffectiveGlobals, writeTogglePreference } from './toggle-preferences.js';
+import { presetToggleValues } from './preset-toggle-values.js';
 
 function sanitizeVarMap(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object') return {};
@@ -116,6 +119,8 @@ function toggleToWire(
 }
 
 export interface VariablesTogglesDeps {
+  readonly visibleChatForUser?: (userId: string) => string | undefined;
+  readonly invalidateUserToggleReaders?: (userId: string) => void;
   readonly translateLang: string;
   readonly variableState: VariableStateStore;
   readonly toggleState: ToggleStateStore;
@@ -215,9 +220,13 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
       macro_variables?: { global?: unknown };
       chat_variables?: unknown;
     };
+    const legacyGlobals = sanitizeVarMap(meta.macro_variables?.global);
+    if (deps.visibleChatForUser?.(userId) === chatId) {
+      await initializeTogglePreferences(userId, legacyGlobals);
+    }
     const scopes = {
       local: sanitizeVarMap(meta.chat_variables),
-      global: sanitizeVarMap(meta.macro_variables?.global),
+      global: await readEffectiveGlobals(userId, legacyGlobals, presetToggleValues(chatId, userId)),
       chat: sanitizeVarMap(undefined),
     };
     // FE Default subtab needs both effective and card-side defaults to flag overridden entries and offer "Reset to card default".
@@ -322,7 +331,10 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
   }> {
     const fetched = await readLumirealm(characterId, userId);
     if (!fetched || !fetched.data) return { wireRows: [], attribution: {}, keyCount: 0 };
-    const attachedIds = fetched.data.user_overrides.attached_module_ids ?? [];
+    const attachedIds = resolveEffectiveModuleIds(
+      getGlobalModuleIds(userId),
+      fetched.data.user_overrides.attached_module_ids,
+    );
     const envelopes = attachedIds.length > 0
       ? await readAttachedModuleEnvelopes(userId, attachedIds)
       : [];
@@ -432,40 +444,20 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
 
     let chat: { metadata?: unknown } | null;
     try {
-      chat = (await spindle.chats.get(chatId, userId)) as { metadata?: unknown } | null;
+      chat = (await spindle.chats.get(deps.visibleChatForUser?.(userId) ?? chatId, userId)) as { metadata?: unknown } | null;
     } catch (err) {
       return { ok: false, reason: `chats.get failed: ${errMsg(err)}` };
     }
     const meta = (chat?.metadata ?? {}) as Record<string, unknown>;
-    const mv = (meta['macro_variables'] && typeof meta['macro_variables'] === 'object'
-      ? { ...(meta['macro_variables'] as Record<string, unknown>) }
-      : {}) as Record<string, unknown>;
-    const global = (mv['global'] && typeof mv['global'] === 'object'
-      ? { ...(mv['global'] as Record<string, unknown>) }
-      : {}) as Record<string, unknown>;
-
+    const legacyGlobals = sanitizeVarMap((meta['macro_variables'] as { global?: unknown } | undefined)?.global);
     const storeKey = `toggle_${trimmedKey}`;
-    if (value === null) {
-      if (!Object.prototype.hasOwnProperty.call(global, storeKey)) {
-        return { ok: true };
-      }
-      delete global[storeKey];
-    } else {
-      global[storeKey] = String(value);
-    }
-    mv['global'] = global;
-
     try {
-      expectChatChange(chatId);
-      await spindle.chats.update(
-        chatId,
-        { metadata: { ...meta, macro_variables: mv } as never },
-        userId,
-      );
+      await writeTogglePreference(userId, storeKey, value, legacyGlobals);
     } catch (err) {
-      return { ok: false, reason: `chats.update failed: ${errMsg(err)}` };
+      return { ok: false, reason: `toggle preferences write failed: ${errMsg(err)}` };
     }
 
+    deps.invalidateUserToggleReaders?.(userId);
     invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);

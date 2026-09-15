@@ -133,7 +133,7 @@ export async function dispatchBinding(
         ctx.api,
         ctx.data,
         ctx.scriptNS,
-        { binding, displayMode: binding === 'display' },
+        { binding, displayMode: binding === 'display', moduleLorebooks: ctx.opts?.moduleLorebooks },
         flags,
       );
       dlog(`← trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms stopSending=${flags.stopSending}`);
@@ -170,6 +170,7 @@ function makeMirroredConsole(name: string): InterpConsole {
 interface TriggerInvocation {
   readonly binding: RisuBinding;
   readonly displayMode: boolean;
+  readonly moduleLorebooks?: readonly unknown[] | undefined;
 }
 
 async function runInterpretedTrigger(
@@ -188,6 +189,7 @@ async function runInterpretedTrigger(
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
       binding: invocation.binding,
       characterId: entry.rtOpts.characterId,
+      ...(invocation.moduleLorebooks ? { moduleLorebooks: invocation.moduleLorebooks } : {}),
     });
     try {
       await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {

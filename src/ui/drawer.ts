@@ -12,7 +12,7 @@ import { pickNativeFile } from './native-file-picker.js';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
-const ACCEPT_EXTENSIONS = ['.charx', '.png', '.json', '.jpg', '.jpeg'];
+const ACCEPT_EXTENSIONS = ['.charx', '.png', '.json', '.jpg', '.jpeg', '.risup', '.risupreset', '.risum'];
 
 const UPLOAD_ENDPOINT = '/api/v1/spindle-uploads';
 const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
@@ -64,8 +64,8 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   const importBtn = document.createElement('button');
   importBtn.type = 'button';
   importBtn.className = 'lrm-btn lrm-btn-primary';
-  importBtn.textContent = 'Upload card';
-  importBtn.title = 'Pick a .charx, .png, .json, or .jpg/.jpeg character file.';
+  importBtn.textContent = 'Upload file…';
+  importBtn.title = 'Pick a character card (.charx, .png, .json) or preset (.risup, .risupreset) file.';
   actionRow.appendChild(importBtn);
   root.appendChild(actionRow);
 

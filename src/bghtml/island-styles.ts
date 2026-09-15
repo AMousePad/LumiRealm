@@ -322,8 +322,7 @@ export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {
 // Risu CSS assumes a chat-shell ancestor (.chattext/.prose/.prose-invert/.chat-width).
 // Those ancestors don't exist inside the extractHtmlIslands shadow, so rewrite
 // them to :host. Rewrite order matters: .prose-invert before .prose. Also rewrites
-// :root to :root,:host (CSS vars absent inside shadow). Appends a :host baseline
-// mirroring chat-shell default font/line-height.
+// :root to :root,:host (CSS vars absent inside shadow).
 
 interface RescopeResult {
   readonly css: string;
@@ -336,7 +335,9 @@ interface RescopeResult {
 }
 
 export function rescopeRisuEnvironment(input: string): RescopeResult {
-  let css = input;
+  // Deliberate host adaptation of Risu's styles.css app font default:
+  // leave the variable unset so the universal font rule inherits unless a card sets it.
+  let css = input.replace(/--risu-font-family:\s*Arial,\s*sans-serif,\s*serif;?/g, '');
   // .prose-invert must run before .prose rewrite
   const proseInvertHits = (css.match(/\.prose-invert\b/g) ?? []).length;
   css = css.replaceAll(/\.prose-invert\b/g, ':host');
@@ -356,10 +357,11 @@ export function rescopeRisuEnvironment(input: string): RescopeResult {
   );
   // overflow:visible !important defeats Lumi's `_htmlIsland_*` host
   // `overflow: hidden` (set from outside the shadow at equal specificity, so
-  // :host loses without !important). Font-size / line-height are intentionally
-  // not set here, so Lumi's --lumiverse-font-scale inheritance reaches card content.
+  // :host loses without !important).
   css +=
     '\n:host{overflow:visible !important}\n' +
+    // Host reader settings replace Risu's Chat.svelte app metrics, not card typography.
+    ':host{font-family:inherit;font-size:inherit;line-height:inherit}\n' +
     ':host :where(font,span[style*="color"]) mark[risu-mark=quote1],' +
     ':host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}\n' +
     // Emphasis inside author-coloured containers or quote marks inherits the

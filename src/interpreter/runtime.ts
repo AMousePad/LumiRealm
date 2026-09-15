@@ -16,8 +16,11 @@ import { makeCharacterNoteApi } from './runtime/character-note.js';
 import {
   makeLorebookApi,
   sortLorebookEntriesBySourceOrder,
+  keyToArray,
   type LorebookCache,
 } from './runtime/lorebook.js';
+import { evaluate } from './evaluator/index.js';
+import { buildEvaluatorContext } from './evaluator/context.js';
 import { makeDisplayStateApi } from './runtime/display-state.js';
 import { runLLM as _runLLM, parseLuaPromptArg } from './runtime/llm.js';
 import {
@@ -46,6 +49,7 @@ const _logAxLLMMain       = makeSafeLogger('runtime.axLLMMain');
 const _logFlush           = makeSafeLogger('runtime.flush');
 const _logLuaPrint        = makeSafeLogger('runtime.lua');
 const _logCbs             = makeSafeLogger('runtime.cbs');
+const _logImageGen        = makeSafeLogger('runtime.imageGen');
 
 type WasmoonExec = (
   code: string,
@@ -255,6 +259,11 @@ export async function makeRisuTriggerRuntime(
   const submodelSamplers = opts.submodelSamplers ?? dispatchCtx.submodelSamplers ?? auxSamplers;
   const auxDebugCapture: ((event: AuxDebugCaptureEvent) => void) | undefined =
     opts.auxDebugCapture ?? dispatchCtx.auxDebugCapture;
+  const imageConnectionId: string | null =
+    (opts.imageConnectionId ?? dispatchCtx.imageConnectionId ?? null);
+  const imageModelOverride: string | null =
+    (opts.imageModelOverride ?? dispatchCtx.imageModelOverride ?? null);
+  const naiSettings = opts.naiSettings ?? dispatchCtx.naiSettings ?? null;
   // Bind at factory time so cbs() invoked from Lua resolves against the
   // user this runtime was built for, not whoever last set the global.
   const capturedResolveTemplate: ((text: string) => Promise<string>) | undefined =
@@ -402,6 +411,38 @@ export async function makeRisuTriggerRuntime(
         }
       }
     } catch { /* world_books permission not granted */ }
+  }
+  // A preloaded snapshot carries only the character's own books, so listenEdit
+  // chains pass their module lore rows through opts. The fetched path can also
+  // read them from the dispatch context.
+  const rawExtra = preloaded?.lorebook
+    ? opts.moduleLorebooks ?? []
+    : opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+  const extraLorebooks = Array.isArray(rawExtra)
+    ? rawExtra
+    : (rawExtra && typeof rawExtra === 'object')
+    ? Object.values(rawExtra as unknown as Record<string, unknown>).flat()
+    : [];
+  if (extraLorebooks.length > 0) {
+    // The preloaded entries array is shared by every trigger in the chain, so
+    // copy it before appending.
+    if (preloaded?.lorebook && lorebook.entries === preloaded.lorebook.entries) {
+      lorebook.entries = [...lorebook.entries];
+    }
+    for (const raw of extraLorebooks) {
+      if (!raw || typeof raw !== 'object') continue;
+      const r = raw as Record<string, unknown>;
+      lorebook.entries.push({
+        id: typeof r.id === 'string' ? r.id : `module-lore-${lorebook.entries.length}`,
+        ...(typeof r.worldBookId === 'string' ? { worldBookId: r.worldBookId } : {}),
+        key: Array.isArray(r.key) ? r.key : typeof r.key === 'string' ? r.key : [],
+        content: typeof r.content === 'string' ? r.content : '',
+        comment: typeof r.comment === 'string' ? r.comment : '',
+        orderValue: typeof r.orderValue === 'number' ? r.orderValue : typeof r.insertorder === 'number' ? r.insertorder : 100,
+        disabled: typeof r.disabled === 'boolean' ? r.disabled : false,
+        constant: typeof r.constant === 'boolean' ? r.constant : false,
+      });
+    }
   }
 
   const _factoryTotal = Date.now() - _factoryStart;
@@ -941,6 +982,22 @@ export async function makeRisuTriggerRuntime(
       },
       getChatLength: (_id: unknown) => messagesCache.length,
       getFullChatMain: (_id: unknown) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
+      // Risu scriptings.ts declareAPI('getRecentChatsMain'): the last `count`
+      // messages as {role, data, time}, oldest first. A missing, non-numeric, or
+      // negative count clamps to zero, which is an empty array rather than the
+      // whole chat. Reads the same messagesCache frame as getFullChatMain, so
+      // the greeting stays excluded the way `chat.message` excludes it.
+      getRecentChatsMain: (_id: unknown, count: unknown) => {
+        const safeCount = Math.max(0, Math.floor(Number(count) || 0));
+        const start = Math.max(0, messagesCache.length - safeCount);
+        return JSON.stringify(
+          messagesCache.slice(start).map((m) => ({
+            role: lumiRoleToRisu(m.role),
+            data: toStr(m.content),
+            time: typeof m.createdAt === 'number' ? m.createdAt : 0,
+          })),
+        );
+      },
       setFullChatMain: (_id: unknown, value: unknown) => { reconcileFullChat(value); },
       sleep: (_id: unknown, ms: unknown) => new Promise<void>((r) => setTimeout(r, Math.max(0, Number(ms) || 0))),
       // Risu parity: user-facing `cbs` is sync. The lua-bridge prelude wraps `cbsMain():await()` so cards calling `cbs("...")` get a string.
@@ -973,6 +1030,9 @@ export async function makeRisuTriggerRuntime(
       // reloadDisplay forces refresh from async/callback paths.
       reloadDisplay: (_id: unknown) => {
         notifyStateChanged('reloadDisplay');
+      },
+      updateDisplay: (_id: unknown) => {
+        notifyStateChanged('updateDisplay');
       },
       reloadChat: (_id: unknown, _index: unknown) => {
         notifyStateChanged('reloadChat');
@@ -1178,7 +1238,98 @@ export async function makeRisuTriggerRuntime(
       },
       similarity: luaReject('similarity', 'requires vector-store bridge'),
       request: luaReject('request', 'arbitrary-URL fetch from user Lua is out of scope'),
-      generateImage: luaReject('generateImage', 'requires image-gen pipeline'),
+      generateImage: async (
+        _id: unknown,
+        promptVal: unknown,
+        negVal: unknown,
+        optionsVal: unknown,
+      ): Promise<string> => {
+        if (!lowLevelAccess) {
+          return 'Error: lowLevelAccess required';
+        }
+        if (!api.imageGen?.generate) {
+          return 'Error: image generation not available on this host';
+        }
+        try {
+          const prompt = toStr(promptVal);
+          const negativePrompt = negVal ? toStr(negVal) : undefined;
+          let callerParameters: Record<string, unknown> | undefined = undefined;
+          if (typeof optionsVal === 'string' && optionsVal.trim().startsWith('{')) {
+            try {
+              callerParameters = JSON.parse(optionsVal);
+            } catch {
+              // ignore json parse error
+            }
+          } else if (typeof optionsVal === 'object' && optionsVal !== null) {
+            callerParameters = optionsVal as Record<string, unknown>;
+          }
+
+          const baseParameters: Record<string, unknown> = {};
+          if (naiSettings) {
+            if (naiSettings.resolution) baseParameters.resolution = naiSettings.resolution;
+            if (naiSettings.sampler) baseParameters.sampler = naiSettings.sampler;
+            if (typeof naiSettings.steps === 'number') baseParameters.steps = naiSettings.steps;
+            if (typeof naiSettings.guidance === 'number') baseParameters.guidance = naiSettings.guidance;
+            if (typeof naiSettings.smea === 'boolean') baseParameters.smea = naiSettings.smea;
+            if (typeof naiSettings.smeaDyn === 'boolean') baseParameters.smeaDyn = naiSettings.smeaDyn;
+            if (typeof naiSettings.seed === 'number') baseParameters.seed = naiSettings.seed;
+            if (typeof naiSettings.qualityToggle === 'boolean') baseParameters.qualityToggle = naiSettings.qualityToggle;
+            if (typeof naiSettings.ucPreset === 'number') baseParameters.ucPreset = naiSettings.ucPreset;
+            if (naiSettings.negativePrompt && !negativePrompt) {
+              baseParameters.negativePrompt = naiSettings.negativePrompt;
+            }
+          }
+
+          const parameters = {
+            ...baseParameters,
+            ...(callerParameters || {}),
+          };
+          if (typeof parameters.seed === 'number' && parameters.seed < 0) {
+            delete parameters.seed;
+          }
+
+          const effectiveNegativePrompt = negativePrompt
+            ?? (typeof parameters.negativePrompt === 'string' ? parameters.negativePrompt : undefined)
+            ?? (naiSettings?.negativePrompt || undefined);
+
+          _logImageGen.info(`generateImage: dispatching prompt="${prompt.slice(0, 100)}" conn=${imageConnectionId ?? '<default>'}`);
+          const res = await api.imageGen.generate(prompt, {
+            ...(effectiveNegativePrompt !== undefined ? { negativePrompt: effectiveNegativePrompt } : {}),
+            ...(imageConnectionId ? { connectionId: imageConnectionId } : {}),
+            ...(imageModelOverride ? { model: imageModelOverride } : (naiSettings?.model ? { model: naiSettings.model } : {})),
+            ...(Object.keys(parameters).length > 0 ? { parameters } : {}),
+          });
+          let imageId: string | undefined;
+          if (typeof res === 'string') {
+            if (res.startsWith('data:')) {
+              if (api.images?.uploadFromDataUrl) {
+                const up = await api.images.uploadFromDataUrl(res);
+                imageId = typeof up === 'string' ? up : up?.id;
+              }
+            } else {
+              imageId = res;
+            }
+          } else if (typeof res === 'object' && res !== null) {
+            const r = res as { imageId?: string; imageUrl?: string; imageDataUrl?: string };
+            if (r.imageId) {
+              imageId = r.imageId;
+            } else if (r.imageDataUrl && api.images?.uploadFromDataUrl) {
+              const up = await api.images.uploadFromDataUrl(r.imageDataUrl);
+              imageId = typeof up === 'string' ? up : up?.id;
+            }
+          }
+          if (imageId) {
+            _logImageGen.info(`generateImage: success imageId=${imageId}`);
+            return `{{inlay::${imageId}}}`;
+          }
+          _logImageGen.warn(`generateImage: failed — no image returned`);
+          return 'Error: image generation returned no image';
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          _logImageGen.warn(`generateImage: threw — ${msg}`);
+          return `Error: image generation failed: ${msg}`;
+        }
+      },
       // Emits resolved HTML directly. Sentinel wouldn't survive DB write without a re-parse pass.
       getCharacterImageMain: async (_id: unknown) => {
         try {
@@ -1201,9 +1352,94 @@ export async function makeRisuTriggerRuntime(
       },
       loadLoreBooksMain: (_id: unknown, _reserve: unknown) => {
         void _reserve;
-        return Promise.resolve(JSON.stringify(lorebook.entries.map((e) => toStr(e.content))));
+        const evalCtx = buildEvaluatorContext({
+          chatId: portalChatId ?? '',
+          commit: false,
+          suppressVarPersist: true,
+          userName: 'User',
+          charName: 'Char',
+          character: { description: '' },
+          chat: {
+            messages: messagesCache.map((m) => ({
+              role: m.role === 'user' ? ('user' as const) : m.role === 'system' ? ('system' as const) : ('assistant' as const),
+              content: m.content,
+              createdAt: m.createdAt ?? Date.now(),
+            })),
+          },
+          variables: {
+            global: { ...globalVarsCache },
+            local: { ...varsCache },
+            chat: { ...varsCache },
+          },
+        });
+        const out = lorebook.entries.map((e) => {
+          let content = toStr(e.content);
+          if (content.includes('{{')) {
+            try { content = evaluate(content, evalCtx); } catch { /* skip */ }
+          }
+          return {
+            ...e,
+            // Risu loadLoreBooksMain exposes prompt text as data, not content.
+            data: content,
+            name: toStr(e.comment || e.id),
+            comment: toStr(e.comment),
+            content,
+            key: Array.isArray(e.key) ? e.key.join(', ') : toStr(e.key),
+            order: e.orderValue ?? 100,
+            alwaysActive: !e.disabled,
+          };
+        });
+        return Promise.resolve(JSON.stringify(out));
       },
-      getLoreBooksMain: (_id: unknown, _search: unknown) => JSON.stringify(getAllLorebooks()),
+      getLoreBooksMain: (_id: unknown, search: unknown) => {
+        const searchStr = typeof search === 'string' ? search.trim() : '';
+        const matches = searchStr
+          ? lorebook.entries.filter((e) => {
+              if (toStr(e.comment) === searchStr) return true;
+              if (toStr(e.id) === searchStr) return true;
+              const keys = keyToArray(e.key);
+              return keys.some((k) => k === searchStr);
+            })
+          : lorebook.entries;
+
+        const evalCtx = buildEvaluatorContext({
+          chatId: portalChatId ?? '',
+          commit: false,
+          suppressVarPersist: true,
+          userName: 'User',
+          charName: 'Char',
+          character: { description: '' },
+          chat: {
+            messages: messagesCache.map((m) => ({
+              role: m.role === 'user' ? ('user' as const) : m.role === 'system' ? ('system' as const) : ('assistant' as const),
+              content: m.content,
+              createdAt: m.createdAt ?? Date.now(),
+            })),
+          },
+          variables: {
+            global: { ...globalVarsCache },
+            local: { ...varsCache },
+            chat: { ...varsCache },
+          },
+        });
+
+        const out = matches.map((e) => {
+          let content = toStr(e.content);
+          if (content.includes('{{')) {
+            try { content = evaluate(content, evalCtx); } catch { /* skip */ }
+          }
+          return {
+            ...e,
+            id: e.id,
+            comment: toStr(e.comment),
+            content,
+            key: Array.isArray(e.key) ? e.key.join(', ') : toStr(e.key),
+            order: e.orderValue ?? 100,
+            alwaysActive: !e.disabled,
+          };
+        });
+        return JSON.stringify(out);
+      },
       upsertLocalLoreBook: (_id: unknown, name: unknown, content: unknown, opts?: Record<string, unknown>) => {
         const o = opts || {};
         createLorebook(name, o['key'] || name, content, o['order'] || 0);

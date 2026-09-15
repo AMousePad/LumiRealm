@@ -2046,6 +2046,25 @@
   align-items: center;
   flex-wrap: wrap;
 }
+/* Preset label translation: opt-in checkbox + the connection it runs on. */
+.lr-modules-drawer .lrm-preset-labels {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));
+}
+.lr-modules-drawer .lrm-preset-translate-check {
+  margin: 0;
+  accent-color: var(--lumiverse-primary, #6c9cff);
+}
+.lr-modules-drawer .lrm-preset-translate-text {
+  cursor: pointer;
+}
+.lr-modules-drawer .lrm-preset-connection {
+  width: 100%;
+  max-width: none;
+}
 .lr-modules-drawer .lrm-list-filter {
   display: flex;
   gap: 8px;

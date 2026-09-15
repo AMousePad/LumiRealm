@@ -150,7 +150,13 @@ export type FrontendToBackend =
   | { type: 'display_authority'; chatId: string; authoritative: boolean }
   // Card bytes are streamed to the host tus endpoint (resumable, no WS frame
   // cap), then the worker reads them by id via spindle.uploads.
-  | { type: 'import_card_from_upload'; uploadId: string; fileName: string }
+  | {
+      type: 'import_card_from_upload';
+      uploadId: string;
+      fileName: string;
+      /** Set by the Presets panel when the user opted into label translation. */
+      presetLabelTranslation?: { readonly connectionId: string };
+    }
   // Large lorebook / regex JSON imports upload via the tus endpoint (a single
   // SPINDLE_BACKEND_MSG frame is capped at 4MB and silently dropped past that).
   | {
@@ -243,6 +249,9 @@ export type FrontendToBackend =
         readonly legacyMediaFindings?: boolean;
         readonly translateEnabled?: boolean;
         readonly skipAssetThumbnails?: boolean;
+        readonly imageConnectionId?: string | null;
+        readonly imageModelOverride?: string | null;
+        readonly naiSettings?: Partial<NaiSettingsWire>;
       };
     }
   // Browser-translated cache writeback, one message per scope per language.
@@ -264,6 +273,9 @@ export type FrontendToBackend =
     }
   | {
       type: 'request_connections_list';
+    }
+  | {
+      type: 'request_image_connections_list';
     }
   | { type: 'process_module_from_upload'; uploadId: string; fileName: string }
   | { type: 'request_modules' }
@@ -605,6 +617,9 @@ export type BackendToFrontend =
         readonly legacyMediaFindings: boolean;
         readonly translateEnabled: boolean;
         readonly skipAssetThumbnails: boolean;
+        readonly imageConnectionId: string | null;
+        readonly imageModelOverride: string | null;
+        readonly naiSettings: NaiSettingsWire;
       };
     }
   // Emitted when the user enables request/response capture toggles in Settings → Debug.
@@ -635,6 +650,16 @@ export type BackendToFrontend =
     }
   | {
       type: 'connections_list_pushed';
+      connections: readonly {
+        readonly id: string;
+        readonly name: string;
+        readonly provider: string;
+        readonly model: string;
+        readonly is_default: boolean;
+      }[];
+    }
+  | {
+      type: 'image_connections_list_pushed';
       connections: readonly {
         readonly id: string;
         readonly name: string;
@@ -918,6 +943,20 @@ export type SidebarToggleWire =
       readonly options?: readonly string[];
       readonly moduleId?: string;
     };
+
+export interface NaiSettingsWire {
+  readonly model: string | null;
+  readonly resolution: string;
+  readonly sampler: string;
+  readonly steps: number;
+  readonly guidance: number;
+  readonly negativePrompt: string | null;
+  readonly smea: boolean;
+  readonly smeaDyn: boolean;
+  readonly seed: number | null;
+  readonly qualityToggle: boolean;
+  readonly ucPreset: number;
+}
 
 export interface AuxSamplersWire {
   readonly temperature: number | null;

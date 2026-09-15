@@ -14,6 +14,9 @@ import type {
   HostWorldInfoEntry,
   InjectOpts,
 } from './host.js';
+import { readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { presetToggleValues } from '../state/preset-toggle-values.js';
+import { toStr } from '../util/coerce.js';
 import { expectChatChange } from '../state/own-chat-change.js';
 import { expectCharacterEdit } from '../state/own-character-edit.js';
 import { makeSafeLogger } from '../util/safe-log.js';
@@ -162,6 +165,16 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   };
 
   const host: HostApi = {
+    ...(uid !== undefined ? { userId: uid } : {}),
+    getGlobalVariables: async () => {
+      if (!uid) throw new TypeError('Global variables require a user ID');
+      const raw = await getMetadata('macro_variables');
+      const global = (raw as { global?: unknown } | null)?.global;
+      const legacy = global && typeof global === 'object'
+        ? Object.fromEntries(Object.entries(global).map(([key, value]) => [key, toStr(value)]))
+        : {};
+      return readEffectiveGlobals(uid, legacy, presetToggleValues(chatId, uid));
+    },
     chat: {
       getChatId: () => chatId,
       getMessages,
@@ -276,6 +289,21 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
           value: { id: conn.id, model: conn.model || undefined, provider: conn.provider || '' },
         };
       }
+      const chat = await spindle.chats.get(chatId, uid);
+      const metadata = chat?.metadata;
+      const boundId = typeof metadata?.connection_profile_id === 'string'
+        ? metadata.connection_profile_id.trim() : '';
+      if (boundId) {
+        const conn = await spindle.connections.get(boundId, uid);
+        if (conn) {
+          const model = typeof metadata?.connection_model === 'string'
+            ? metadata.connection_model.trim() : '';
+          return {
+            ok: true,
+            value: { id: conn.id, model: model || conn.model || undefined, provider: conn.provider || '' },
+          };
+        }
+      }
       const list = await spindle.connections.list(uid);
       if (list.length === 0) {
         return {
@@ -385,6 +413,36 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       }
     },
   };
+
+  if (typeof spindle !== 'undefined' && spindle.imageGen) {
+    (host as { imageGen?: HostApi['imageGen'] }).imageGen = {
+      async generate(prompt: string, opts) {
+        const input: Record<string, unknown> = {
+          prompt,
+          negativePrompt: opts?.negativePrompt,
+          ...(opts?.connectionId ? { connection_id: opts.connectionId } : {}),
+          ...(opts?.model ? { model: opts.model } : {}),
+          ...(opts?.parameters ? { parameters: opts.parameters } : {}),
+          ...(uid !== undefined ? { userId: uid } : {}),
+          ...(opts?.includeDataUrl !== undefined ? { includeDataUrl: opts.includeDataUrl } : {}),
+        };
+        const res = await spindle.imageGen.generate(input as any);
+        return res as { imageId?: string; imageUrl?: string; imageDataUrl?: string } | string;
+      },
+    };
+  }
+
+  if (typeof spindle !== 'undefined' && spindle.images) {
+    (host as { images?: HostApi['images'] }).images = {
+      async uploadFromDataUrl(dataUrl: string, name?: string): Promise<string | { id: string }> {
+        const res = await spindle.images.uploadFromDataUrl(dataUrl, name, uid);
+        return typeof res === 'string' ? res : res.id;
+      },
+      getUrl(id: string): string {
+        return `/api/v1/images/${id}`;
+      },
+    };
+  }
 
   void characterId; // surfaced via ctx for future expansion
   return host;
