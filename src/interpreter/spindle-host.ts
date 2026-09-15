@@ -13,6 +13,8 @@ import type {
   HostPersona,
   HostWorldInfoEntry,
   InjectOpts,
+  HostCorsFetch,
+  HostCorsResponse,
 } from './host.js';
 import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
@@ -166,6 +168,18 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
 
   const host: HostApi = {
     ...(uid !== undefined ? { userId: uid } : {}),
+    // Permission-gated CORS proxy (`spindle.cors`; `cors_proxy` is declared in
+    // spindle.json and the host enforces the grant). Backs Lua `request`, and is
+    // left out on hosts that predate the API — the runtime then reports a
+    // transport failure instead of rejecting the Lua call.
+    ...(typeof spindle.cors === 'function'
+      ? {
+          // Upstream Risu: fetchNative(url, { method: 'GET' }) — GET only, no
+          // headers, no body.
+          corsFetch: async (url: string, init?: { readonly method?: string }) =>
+            (await spindle.cors(url, { method: init?.method ?? 'GET' })) as HostCorsResponse,
+        }
+      : {}),
     getGlobalVariables: async () => {
       if (!uid) throw new TypeError('Global variables require a user ID');
       const raw = await getMetadata('macro_variables');

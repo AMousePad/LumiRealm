@@ -22,6 +22,7 @@ import {
 import { evaluate } from './evaluator/index.js';
 import { buildEvaluatorContext } from './evaluator/context.js';
 import { makeDisplayStateApi } from './runtime/display-state.js';
+import { makeLuaRequest } from './runtime/request.js';
 import { runLLM as _runLLM, parseLuaPromptArg } from './runtime/llm.js';
 import {
   extractRegex,
@@ -1237,7 +1238,13 @@ export async function makeRisuTriggerRuntime(
         }
       },
       similarity: luaReject('similarity', 'requires vector-store bridge'),
-      request: luaReject('request', 'arbitrary-URL fetch from user Lua is out of scope'),
+      // Risu parity: scriptings.ts declareAPI('request', ...). Mirrors upstream
+      // exactly: no lowLevelAccess -> nil (upstream `return`), every other path
+      // resolves JSON and never rejects, so one bad URL cannot kill the trigger.
+      request: async (_id: unknown, urlVal: unknown): Promise<string | undefined> => {
+        if (!lowLevelAccess) return undefined;
+        return _luaRequest(urlVal);
+      },
       generateImage: async (
         _id: unknown,
         promptVal: unknown,
@@ -1474,6 +1481,10 @@ export async function makeRisuTriggerRuntime(
     modifyLorebook, modifyLorebookByIndex, createLorebook,
     deleteLorebookByIndex, setLorebookActivation, setLorebookAlwaysActive,
   } = _lore;
+
+  // Risu parity: scriptings.ts declareAPI('request', ...). Rate-limit state is
+  // module-scoped inside makeLuaRequest, so every runtime shares one window.
+  const _luaRequest = makeLuaRequest({ corsFetch: api.corsFetch });
 
   const _displayState = makeDisplayStateApi(opts.displayData, opts.requestData);
   const {

@@ -24111,6 +24111,68 @@ function makeDisplayStateApi(initialDisplayState = "", initialRequestState = [])
   };
 }
 
+// src/interpreter/runtime/request.ts
+var _logRequest = makeSafeLogger("runtime.lua.request");
+var REQUEST_URL_MAX_LENGTH = 120;
+var REQUEST_RATE_LIMIT = 5;
+var REQUEST_RATE_WINDOW_MS = 60000;
+var REQUEST_BANNED_PREFIXES = [
+  "https://realm.risuai.net",
+  "https://risuai.net",
+  "https://risuai.xyz"
+];
+var _requestsInWindow = 0;
+var _windowStartMs = 0;
+var _clock = Date.now;
+function payload(status, data) {
+  return JSON.stringify({ status, data });
+}
+function makeLuaRequest(deps) {
+  let warnedNoTransport = false;
+  return async function luaRequest(urlVal) {
+    const nowMs = _clock();
+    if (_windowStartMs + REQUEST_RATE_WINDOW_MS < nowMs) {
+      _requestsInWindow = 0;
+      _windowStartMs = nowMs;
+    }
+    if (_requestsInWindow >= REQUEST_RATE_LIMIT) {
+      return payload(429, "Too many requests. you can request 5 times per minute");
+    }
+    _requestsInWindow += 1;
+    const url = toStr(urlVal);
+    if (url.length > REQUEST_URL_MAX_LENGTH) {
+      return payload(413, "URL to large. max is 120 characters");
+    }
+    if (!url.startsWith("https://")) {
+      return payload(400, "Only https requests are allowed");
+    }
+    for (const banned of REQUEST_BANNED_PREFIXES) {
+      if (url.startsWith(banned)) {
+        return payload(400, "request to " + url + " is not allowed");
+      }
+    }
+    const corsFetch = deps.corsFetch;
+    if (!corsFetch) {
+      if (!warnedNoTransport) {
+        warnedNoTransport = true;
+        _logRequest.warn('corsFetch missing on HostApi — lua.request resolves {"status":400,"data":"internal error"}');
+      }
+      return payload(400, "internal error");
+    }
+    try {
+      const res = await corsFetch(url, { method: "GET" });
+      const status = typeof res?.status === "number" ? res.status : 200;
+      const text = res && typeof res.text === "function" ? await res.text() : typeof res?.body === "string" ? res.body : toStr(res?.body);
+      _logRequest.info(`GET ${url.slice(0, 120)} -> ${status} len=${text.length}`);
+      return payload(status, text);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      _logRequest.warn(`GET ${url.slice(0, 120)} failed: ${msg}`);
+      return payload(400, "internal error");
+    }
+  };
+}
+
 // src/interpreter/runtime/llm.ts
 var _log2 = makeSafeLogger("runtime.runLLM");
 async function runLLM(api, routing, value, model, _streaming) {
@@ -25671,7 +25733,11 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         }
       },
       similarity: luaReject("similarity", "requires vector-store bridge"),
-      request: luaReject("request", "arbitrary-URL fetch from user Lua is out of scope"),
+      request: async (_id, urlVal) => {
+        if (!lowLevelAccess)
+          return;
+        return _luaRequest(urlVal);
+      },
       generateImage: async (_id, promptVal, negVal, optionsVal) => {
         if (!lowLevelAccess) {
           return "Error: lowLevelAccess required";
@@ -25938,6 +26004,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     setLorebookActivation,
     setLorebookAlwaysActive
   } = _lore;
+  const _luaRequest = makeLuaRequest({ corsFetch: api.corsFetch });
   const _displayState = makeDisplayStateApi(opts.displayData, opts.requestData);
   const {
     getDisplayState,

@@ -53,6 +53,25 @@ export interface HostDomHandle {
   remove(): void;
 }
 
+/** Raw result of the host's permission-gated CORS proxy (`spindle.cors`).
+ *  The host returns the plain `{status, statusText, headers, body}` shape with
+ *  the response text in `body` (text is the default `responseType`). */
+export interface HostCorsResponse {
+  readonly status?: number;
+  readonly statusText?: string;
+  /** Response body as text. */
+  readonly body?: string;
+  /** Present only if a host returns a Response-like object instead of the
+   *  plain shape; `body` is preferred when both exist. */
+  readonly text?: () => Promise<string>;
+}
+
+/** Permission-gated host CORS proxy (`spindle.cors`). Backs Lua `request`. */
+export type HostCorsFetch = (
+  url: string,
+  init?: { readonly method?: string },
+) => Promise<HostCorsResponse>;
+
 export interface HostApi {
   readonly userId?: string;
   readonly getGlobalVariables?: () => Promise<Record<string, string>>;
@@ -129,6 +148,9 @@ export interface HostApi {
     uploadFromDataUrl(dataUrl: string, name?: string): Promise<string | { id: string }>;
     getUrl?(id: string): string;
   };
+  /** Host CORS proxy (`spindle.cors`). Absent on hosts without the API; Lua
+   *  `request` then resolves its "internal error" payload instead of rejecting. */
+  readonly corsFetch?: HostCorsFetch;
   readonly tokens?: {
     count(text: string): Promise<number>;
   };
