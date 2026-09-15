@@ -143,6 +143,35 @@ function cardDisablesRecursiveWorldInfo(active: ActiveCard): boolean {
   return (characterBook as Record<string, unknown>)['recursive_scanning'] === false;
 }
 
+// The host aborts a whole interceptor once its wall-clock budget passes
+// (interceptor-pipeline.ts: DEFAULT_INTERCEPTOR_TIMEOUT_MS, 10s unless the
+// manifest or the user's Spindle setting says otherwise) and keeps the
+// pre-interceptor messages, so an overrun silently ships an un-mutated prompt.
+// Stage marks make that overrun self-explaining at the default log level
+// instead of leaving a bare timeout in the host console.
+const SLOW_INTERCEPTOR_WARN_MS = 8_000;
+
+interface StageTimer {
+  mark(name: string): void;
+  elapsed(): number;
+  summary(): string;
+}
+
+function createStageTimer(): StageTimer {
+  const t0 = Date.now();
+  let prev = t0;
+  const marks: string[] = [];
+  return {
+    mark(name: string): void {
+      const now = Date.now();
+      marks.push(`${name}=${now - prev}ms`);
+      prev = now;
+    },
+    elapsed: () => Date.now() - t0,
+    summary: () => marks.join(' '),
+  };
+}
+
 export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiInterceptors {
   const { log, errMsg, activeCardByChat } = deps;
 
@@ -707,12 +736,14 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
 
       return userIdAls.run(userId, async () => {
         let out: LlmMessage[] = messages;
+        const stage = createStageTimer();
 
         try {
           await deps.runMessageVarPass(chatId, active.card.character_id, userId);
         } catch (err) {
           log.warn(`interceptor.runMessageVarPass threw chat=${chatId}: ${errMsg(err)}`);
         }
+        stage.mark('messageVarPass');
         out = out.map((m) => {
           if (typeof m.content === 'string') {
             if (!hasSetvarFamily(m.content)) return m;
@@ -726,6 +757,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           });
           return changed ? { ...m, content } : m;
         });
+        stage.mark('stripSetvar');
 
         if (deps.isPromptRegexAuthoritative(chatId)) {
           try {
@@ -760,6 +792,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             );
           }
         }
+        stage.mark('promptRegex');
 
         // Tier 3 inject_at: apply staged plans to system messages by content match. Mirrors Risu's positionParser append/prepend/replace operations on the slot's text.
         const buffers = readDecoratorBuffers(chatId);
@@ -825,6 +858,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             clearDecoratorBuffer(chatId);
           }
         }
+        stage.mark('injectAt');
 
         const triggers = active.card.risuPayload.triggers as readonly TriggerScript[];
         const luaScripts = active.card.risuPayload.lua_scripts;
@@ -883,6 +917,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             }
           }
         }
+        stage.mark('editInput');
 
         if (hasLuaTrigger) {
           try {
@@ -914,6 +949,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             log.warn(`interceptor.editRequest threw: ${errMsg(err)}. Continuing with prior array.`);
           }
         }
+        stage.mark('editRequest');
 
         try {
           out = await runRequestTriggerChain(out, {
@@ -926,6 +962,15 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           // Risu also treats malformed request-trigger output as non-fatal and
           // sends the last valid prompt array.
           log.warn(`interceptor.requestTrigger threw: ${errMsg(err)}. Continuing with prior array.`);
+        }
+        stage.mark('requestTrigger');
+
+        const interceptorMs = stage.elapsed();
+        if (interceptorMs >= SLOW_INTERCEPTOR_WARN_MS) {
+          log.warn(
+            `interceptor slow chat=${chatId} total=${interceptorMs}ms ` +
+              `host_budget_default=10000ms stages=[${stage.summary()}]`,
+          );
         }
 
         return out;

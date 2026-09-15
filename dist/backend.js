@@ -38923,6 +38923,78 @@ function stripSetvarSpans(text, execSpan) {
 
 // src/interpreter/listen-edit.ts
 var log2 = makeSafeLogger("listenEdit.runChain");
+var SLOW_TRIGGER_WARN_MS = 2500;
+var SLOW_CHAIN_WARN_MS = 6000;
+function isPlainRecord(v) {
+  if (typeof v !== "object" || v === null || Array.isArray(v))
+    return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+function createChainProbe() {
+  const api = new Map;
+  const template = { calls: 0, ms: 0 };
+  function bump(name, ms) {
+    const stat = api.get(name) ?? { calls: 0, ms: 0 };
+    stat.calls += 1;
+    stat.ms += ms;
+    api.set(name, stat);
+  }
+  function wrapFns(source, prefix) {
+    const out = {};
+    for (const key of Object.keys(source)) {
+      const value = source[key];
+      const name = prefix ? `${prefix}.${key}` : key;
+      if (typeof value === "function") {
+        const fn = value;
+        out[key] = async (...args) => {
+          const t0 = Date.now();
+          try {
+            return await fn.apply(source, args);
+          } finally {
+            bump(name, Date.now() - t0);
+          }
+        };
+      } else if (isPlainRecord(value)) {
+        out[key] = wrapFns(value, name);
+      } else {
+        out[key] = value;
+      }
+    }
+    return out;
+  }
+  return {
+    api,
+    template,
+    wrapApi: (source) => wrapFns(source, ""),
+    wrapTemplate: (fn) => {
+      if (fn === undefined)
+        return;
+      return async (text) => {
+        const t0 = Date.now();
+        try {
+          return await fn(text);
+        } finally {
+          template.calls += 1;
+          template.ms += Date.now() - t0;
+        }
+      };
+    },
+    apiMs: () => {
+      let sum = 0;
+      for (const stat of api.values())
+        sum += stat.ms;
+      return sum;
+    },
+    apiCalls: () => {
+      let sum = 0;
+      for (const stat of api.values())
+        sum += stat.calls;
+      return sum;
+    },
+    topApi: (n) => [...api.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, n).map(([name, stat]) => `${name}=${stat.calls}calls/${stat.ms}ms`).join(", ")
+  };
+}
 async function runListenEditChain(triggers, mode, value, meta, api, data, scriptNS, opts = {}) {
   const eligible = triggers.filter((t) => {
     const luaTrigger = t.source.effect?.[0]?.type === "triggerlua";
@@ -38945,17 +39017,26 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
   let totalFactoryMs = 0;
   let totalRunLuaMs = 0;
   let totalSerdeMs = 0;
+  let totalApiMs = 0;
+  let totalApiCalls = 0;
+  let totalCbsCalls = 0;
+  let totalCbsMs = 0;
   for (let i = 0;i < eligible.length; i++) {
     const t = eligible[i];
     const tStart = Date.now();
     try {
       const tFactoryStart = Date.now();
-      const runtime = await makeRisuTriggerRuntime(effApi, data, scriptNS, {
+      const probe = createChainProbe();
+      const apiMsBefore = probe.apiMs();
+      const apiCallsBefore = probe.apiCalls();
+      const cbsCallsBefore = probe.template.calls;
+      const cbsMsBefore = probe.template.ms;
+      const runtime = await makeRisuTriggerRuntime(probe.wrapApi(effApi), data, scriptNS, {
         binding: "manual",
         lowLevelAccess: false,
         ...opts.chatId !== undefined ? { chatId: opts.chatId } : {},
         ...opts.characterId !== undefined ? { characterId: opts.characterId } : {},
-        ...opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {},
+        ...opts.resolveTemplate !== undefined ? { resolveTemplate: probe.wrapTemplate(opts.resolveTemplate) } : {},
         ...opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {},
         ...opts.moduleLorebooks !== undefined ? { moduleLorebooks: opts.moduleLorebooks } : {},
         preloaded
@@ -38992,13 +39073,28 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
       }
       const triggerTotal = Date.now() - tStart;
       const otherMs = triggerTotal - factoryMs - serdeMs - runLuaMs;
-      log2.trace(`trigger[${i}] mode=${mode} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `other=${otherMs}ms (lua_len=${t.luaCode.length})`);
+      const apiMs = probe.apiMs() - apiMsBefore;
+      const apiCalls = probe.apiCalls() - apiCallsBefore;
+      const cbsCalls = probe.template.calls - cbsCallsBefore;
+      const cbsMs = probe.template.ms - cbsMsBefore;
+      totalApiMs += apiMs;
+      totalApiCalls += apiCalls;
+      totalCbsCalls += cbsCalls;
+      totalCbsMs += cbsMs;
+      log2.trace(`trigger[${i}] mode=${mode} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `api=${apiMs}ms/${apiCalls} cbs=${cbsMs}ms/${cbsCalls} ` + `other=${otherMs}ms (lua_len=${t.luaCode.length})`);
+      if (triggerTotal >= (opts.slowTriggerWarnMs ?? SLOW_TRIGGER_WARN_MS)) {
+        log2.warn(`slow trigger[${i}] mode=${mode} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `api=${apiMs}ms/${apiCalls}calls lua_only=${runLuaMs - apiMs}ms ` + `cbs=${cbsMs}ms/${cbsCalls}calls other=${otherMs}ms ` + `lua_len=${t.luaCode.length} top=[${probe.topApi(3)}] ` + `chatId=${opts.chatId ?? "<none>"}`);
+      }
     } catch (err) {
       log2.warn(`trigger[${i}] mode=${mode} elapsed=${Date.now() - tStart}ms THREW \u2014 ${errMsg(err)}; keeping prior value`);
     }
   }
   const chainTotal = Date.now() - chainStart;
-  log2.trace(`chain.done mode=${mode} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms ` + `factory_sum=${totalFactoryMs}ms runLua_sum=${totalRunLuaMs}ms ` + `serde_sum=${totalSerdeMs}ms ` + `other=${chainTotal - preloadMs - totalFactoryMs - totalRunLuaMs - totalSerdeMs}ms ` + `chatId=${opts.chatId ?? "<none>"}`);
+  const chainOtherMs = chainTotal - preloadMs - totalFactoryMs - totalRunLuaMs - totalSerdeMs;
+  log2.trace(`chain.done mode=${mode} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms ` + `factory_sum=${totalFactoryMs}ms runLua_sum=${totalRunLuaMs}ms ` + `api_sum=${totalApiMs}ms/${totalApiCalls} cbs_sum=${totalCbsMs}ms/${totalCbsCalls} ` + `serde_sum=${totalSerdeMs}ms ` + `other=${chainOtherMs}ms ` + `chatId=${opts.chatId ?? "<none>"}`);
+  if (chainTotal >= (opts.slowChainWarnMs ?? SLOW_CHAIN_WARN_MS)) {
+    log2.warn(`slow chain mode=${mode} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms factory_sum=${totalFactoryMs}ms ` + `runLua_sum=${totalRunLuaMs}ms api_sum=${totalApiMs}ms/${totalApiCalls}calls ` + `cbs_sum=${totalCbsMs}ms/${totalCbsCalls}calls serde_sum=${totalSerdeMs}ms ` + `other=${chainOtherMs}ms chatId=${opts.chatId ?? "<none>"}`);
+  }
   return current;
 }
 
@@ -41105,6 +41201,21 @@ function cardDisablesRecursiveWorldInfo(active) {
   }
   return characterBook["recursive_scanning"] === false;
 }
+var SLOW_INTERCEPTOR_WARN_MS = 8000;
+function createStageTimer() {
+  const t0 = Date.now();
+  let prev = t0;
+  const marks = [];
+  return {
+    mark(name) {
+      const now = Date.now();
+      marks.push(`${name}=${now - prev}ms`);
+      prev = now;
+    },
+    elapsed: () => Date.now() - t0,
+    summary: () => marks.join(" ")
+  };
+}
 function createLumiInterceptors(deps) {
   const { log, errMsg, activeCardByChat } = deps;
   let diagInterceptorCall = 0;
@@ -41504,11 +41615,13 @@ function createLumiInterceptors(deps) {
       }
       return userIdAls.run(userId, async () => {
         let out = messages;
+        const stage = createStageTimer();
         try {
           await deps.runMessageVarPass(chatId, active.card.character_id, userId);
         } catch (err) {
           log.warn(`interceptor.runMessageVarPass threw chat=${chatId}: ${errMsg(err)}`);
         }
+        stage.mark("messageVarPass");
         out = out.map((m) => {
           if (typeof m.content === "string") {
             if (!hasSetvarFamily(m.content))
@@ -41524,6 +41637,7 @@ function createLumiInterceptors(deps) {
           });
           return changed ? { ...m, content } : m;
         });
+        stage.mark("stripSetvar");
         if (deps.isPromptRegexAuthoritative(chatId)) {
           try {
             const scripts = await listLivePromptRegexScripts(active.card.character_id, chatId, userId);
@@ -41546,6 +41660,7 @@ function createLumiInterceptors(deps) {
             log.error(`interceptor.promptRegex threw for prompt-regex-owned chat=${chatId} (host skipped its pass): ` + `${errMsg(err)}. Shipping an UN-REGEX'd prompt.`);
           }
         }
+        stage.mark("promptRegex");
         const buffers = getDecoratorBuffers(chatId);
         if (buffers && buffers.injectAt.length > 0) {
           const character = await spindle.characters.get(active.card.character_id, userId).catch(() => null);
@@ -41592,6 +41707,7 @@ function createLumiInterceptors(deps) {
             clearDecoratorBuffers(chatId);
           }
         }
+        stage.mark("injectAt");
         const triggers = active.card.risuPayload.triggers;
         const luaScripts = active.card.risuPayload.lua_scripts;
         const hasLuaTrigger = triggers.some((t) => t.effect?.[0]?.type === "triggerlua");
@@ -41637,6 +41753,7 @@ function createLumiInterceptors(deps) {
             }
           }
         }
+        stage.mark("editInput");
         if (hasLuaTrigger) {
           try {
             const mutated = await runListenEditChain(editChain, "editRequest", out, { generationType: ctx.generationType }, editApi, { characterId: active.card.character_id, content: "" }, editScriptNS, {
@@ -41655,6 +41772,7 @@ function createLumiInterceptors(deps) {
             log.warn(`interceptor.editRequest threw: ${errMsg(err)}. Continuing with prior array.`);
           }
         }
+        stage.mark("editRequest");
         try {
           out = await runRequestTriggerChain(out, {
             api: editApi,
@@ -41664,6 +41782,11 @@ function createLumiInterceptors(deps) {
           });
         } catch (err) {
           log.warn(`interceptor.requestTrigger threw: ${errMsg(err)}. Continuing with prior array.`);
+        }
+        stage.mark("requestTrigger");
+        const interceptorMs = stage.elapsed();
+        if (interceptorMs >= SLOW_INTERCEPTOR_WARN_MS) {
+          log.warn(`interceptor slow chat=${chatId} total=${interceptorMs}ms host_budget_default=10000ms stages=[${stage.summary()}]`);
         }
         return out;
       });
