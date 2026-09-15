@@ -29298,6 +29298,7 @@ var spindle_default = {
   requested_capabilities: [
     "base64_decode"
   ],
+  interceptorTimeoutMs: 60000,
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
   minimum_lumiverse_version: "1.1.6",
