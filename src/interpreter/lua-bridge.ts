@@ -289,6 +289,11 @@ function getFullChat(id)
   return json.decode(getFullChatMain(id))
 end
 
+-- Risu scriptings.ts.
+function getRecentChats(id, count)
+  return json.decode(getRecentChatsMain(id, count))
+end
+
 function setFullChat(id, value)
   setFullChatMain(id, json.encode(value))
 end

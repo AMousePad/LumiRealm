@@ -982,6 +982,22 @@ export async function makeRisuTriggerRuntime(
       },
       getChatLength: (_id: unknown) => messagesCache.length,
       getFullChatMain: (_id: unknown) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
+      // Risu scriptings.ts declareAPI('getRecentChatsMain'): the last `count`
+      // messages as {role, data, time}, oldest first. A missing, non-numeric, or
+      // negative count clamps to zero, which is an empty array rather than the
+      // whole chat. Reads the same messagesCache frame as getFullChatMain, so
+      // the greeting stays excluded the way `chat.message` excludes it.
+      getRecentChatsMain: (_id: unknown, count: unknown) => {
+        const safeCount = Math.max(0, Math.floor(Number(count) || 0));
+        const start = Math.max(0, messagesCache.length - safeCount);
+        return JSON.stringify(
+          messagesCache.slice(start).map((m) => ({
+            role: lumiRoleToRisu(m.role),
+            data: toStr(m.content),
+            time: typeof m.createdAt === 'number' ? m.createdAt : 0,
+          })),
+        );
+      },
       setFullChatMain: (_id: unknown, value: unknown) => { reconcileFullChat(value); },
       sleep: (_id: unknown, ms: unknown) => new Promise<void>((r) => setTimeout(r, Math.max(0, Number(ms) || 0))),
       // Risu parity: user-facing `cbs` is sync. The lua-bridge prelude wraps `cbsMain():await()` so cards calling `cbs("...")` get a string.

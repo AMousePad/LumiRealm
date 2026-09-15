@@ -31281,6 +31281,15 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       },
       getChatLength: (_id) => messagesCache.length,
       getFullChatMain: (_id) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
+      getRecentChatsMain: (_id, count) => {
+        const safeCount = Math.max(0, Math.floor(Number(count) || 0));
+        const start = Math.max(0, messagesCache.length - safeCount);
+        return JSON.stringify(messagesCache.slice(start).map((m) => ({
+          role: lumiRoleToRisu(m.role),
+          data: toStr(m.content),
+          time: typeof m.createdAt === "number" ? m.createdAt : 0
+        })));
+      },
       setFullChatMain: (_id, value) => {
         reconcileFullChat(value);
       },
@@ -32705,6 +32714,11 @@ end
 
 function getFullChat(id)
   return json.decode(getFullChatMain(id))
+end
+
+-- Risu scriptings.ts.
+function getRecentChats(id, count)
+  return json.decode(getRecentChatsMain(id, count))
 end
 
 function setFullChat(id, value)
