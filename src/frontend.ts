@@ -29,6 +29,7 @@ import { setupHostVersionModal } from './ui/host-version-modal.js';
 import { setupPermissionsModal } from './ui/permissions-modal.js';
 import { setupBridgeStatusBanner } from './ui/bridge-status-banner.js';
 import { logStore, isLogThreshold, DEFAULT_LOG_LEVEL, type LogThreshold } from './log/store.js';
+import { isLogTransportNoise } from './log/transport.js';
 import {
   installConsoleCapture,
   removeConsoleCapture,
@@ -317,7 +318,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   flog.info('frontend setup: styles injected');
 
   const sendToBackend = (msg: FrontendToBackend): void => {
-    flog.trace(`frontend send: ${msg.type}`, msg);
+    if (!isLogTransportNoise(msg.type)) flog.trace(`frontend send: ${msg.type}`, msg);
     ctx.sendToBackend(msg);
   };
 
@@ -536,7 +537,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const unsub = ctx.onBackendMessage((raw) => {
     const msg = raw as BackendToFrontend;
-    flog.trace(`frontend recv: ${msg.type}`, msg);
+    if (!isLogTransportNoise(msg.type)) flog.trace(`frontend recv: ${msg.type}`, msg);
     if (msg.type === 'log_state_pushed') {
       const level: LogThreshold = isLogThreshold(msg.level) ? msg.level : DEFAULT_LOG_LEVEL;
       logStore.setState({ enabled: msg.enabled, includeChatData: msg.includeChatData, level });

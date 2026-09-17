@@ -128,6 +128,7 @@ import { createLifecycleEventHandlers } from './events/lifecycle.js';
 import { createLumiInterceptors } from './interceptors/lumi-hooks.js';
 import { createPromptRegexRunnerClient } from './interceptors/prompt-regex-runner-client.js';
 import { createReadonlyResolver } from './state/readonly-resolver.js';
+import { isLogTransportNoise } from './log/transport.js';
 import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
 import { createTriggerDispatcher } from './state/trigger-dispatch.js';
@@ -1610,8 +1611,6 @@ const realmHandle: RealmBackendHandle = setupRealmBackend({
     importCardFromBytes(bytes, fileName, userId),
 });
 
-const HIGH_VOLUME_FRONTEND_MSG_TYPES: ReadonlySet<string> = new Set<string>();
-
 const screenHandlers = createScreenHandlers({ setScreenDims, log });
 const consentHandlers = createConsentHandlers({
   pendingConsents,
@@ -1942,7 +1941,7 @@ spindle.onFrontendMessage(userScoped(async (raw, userId) => {
   captureUserId(userId, 'frontend-message');
   markFrontendReady(userId);
   const msg = raw as FrontendToBackend;
-  if (!HIGH_VOLUME_FRONTEND_MSG_TYPES.has(msg.type)) {
+  if (!isLogTransportNoise(msg.type)) {
     log.trace(`frontend msg type=${msg.type} userId=${userId ?? '<none>'}`);
   }
   // Operator-scoped extension contract: every FE WS arrives with a real userId

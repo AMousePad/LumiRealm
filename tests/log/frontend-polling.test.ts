@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
-import { setup } from './frontend.js';
+import { setup } from '../../src/frontend.js';
+import { logStore } from '../../src/log/store.js';
+import { removeConsoleCapture } from '../../src/log/frontend-capture.js';
 
 const originalGlobals = new Map<string, PropertyDescriptor | undefined>();
 let browser: Window | null = null;
@@ -38,6 +40,7 @@ function makeContext(win: Window, withDisplay = true): {
     setExpression(): void {},
   };
   const ctx = {
+    events: { on() { return () => {}; } },
     deferReady(): void { events.push('defer'); },
     ready(): void { events.push('ready'); },
     ...(withDisplay ? { display } : {}),
@@ -71,6 +74,8 @@ function makeContext(win: Window, withDisplay = true): {
 }
 
 afterEach(() => {
+  removeConsoleCapture();
+  logStore.setState({ enabled: false });
   teardown?.();
   teardown = null;
   browser?.close();
@@ -80,6 +85,20 @@ afterEach(() => {
     else delete (globalThis as Record<string, unknown>)[name];
   }
   originalGlobals.clear();
+});
+
+test('frontend status replies do not increase the diagnostic event count', () => {
+  const harness = makeContext(installBrowser());
+  let receive: (message: unknown) => void = () => {};
+  harness.ctx.onBackendMessage = (listener) => { receive = listener; return () => {}; };
+  teardown = setup(harness.ctx);
+  const state = { type: 'log_state_pushed', enabled: true, includeChatData: true, level: 'trace', eventCount: 0, bufferBytes: 0 };
+  receive(state);
+  const before = logStore.snapshot().events.length;
+  for (let i = 0; i < 100; i++) receive(state);
+  expect(logStore.snapshot().events.length).toBe(before);
+  removeConsoleCapture();
+  logStore.setState({ enabled: false });
 });
 
 describe('frontend runtime setup', () => {

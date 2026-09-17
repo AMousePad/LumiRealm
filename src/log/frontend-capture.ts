@@ -3,6 +3,7 @@
 
 import { logStore, redact } from './store.js';
 import type { LogEventWire } from '../types/messages.js';
+import { isLogTransportNoise } from './transport.js';
 
 const CONSOLE_METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const;
 type ConsoleMethod = (typeof CONSOLE_METHODS)[number];
@@ -26,6 +27,10 @@ export function installConsoleCapture(): void {
     (console as unknown as Record<string, (...args: unknown[]) => void>)[m] = (...args: unknown[]) => {
       try { originalConsole[m]?.(...args); } catch { /* */ }
       try {
+        if (args[0] === '[WS] ←' && args[1] === 'SPINDLE_FRONTEND_MSG') {
+          const payload = args[2] as { identifier?: string; data?: { type?: string } } | undefined;
+          if (payload?.identifier === 'lumirealm' && isLogTransportNoise(payload.data?.type ?? '')) return;
+        }
         const text = args.map(formatArg).join(' ');
         if (text.startsWith('[lumirealm] ')) return;
         logStore.push(methodToLevel(m), 'console', text);
