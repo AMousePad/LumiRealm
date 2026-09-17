@@ -77,7 +77,7 @@ function emitV2CutChat(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `await __risu.cutChat(Number(${resolveCall(e.start, e.startType)}), Number(${resolveCall(e.end, e.endType)}));`,
+      `await __risu.cutChat(Number(${resolveCall(e.start, e.startType === 'value' ? 'value' : 'var')}), Number(${resolveCall(e.end, e.endType === 'value' ? 'value' : 'var')}), true);`,
     ),
     needsAwait: true,
   };

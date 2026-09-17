@@ -15,7 +15,7 @@ import { hasTriggerTemplate } from '../core/triggers/templates.js';
 import { advanceTriggerControl, type TriggerControlState } from '../core/triggers/control-flow.js';
 import type { TriggerEffect } from '../core/schemas/triggerscript.js';
 import { runCollectionEffect } from './runtime/arrays-dicts.js';
-import { makeChatApi } from './runtime/chat.js';
+import { makeChatApi, retainedChatMessages, recoverFailedChatCut } from './runtime/chat.js';
 import { makeCharacterNoteApi } from './runtime/character-note.js';
 import {
   makeLorebookApi,
@@ -131,7 +131,7 @@ export interface RisuTriggerRuntime {
   impersonate(role: 'user' | 'char' | string, value: unknown): Promise<void>;
   systemPrompt(location: 'start' | 'historyend' | 'promptend' | string, value: unknown): Promise<void>;
   command(value: unknown): Promise<never>;
-  cutChat(start: unknown, end: unknown): Promise<void>;
+  cutChat(start: unknown, end: unknown, defaultInvalidEnd?: boolean): Promise<void>;
   modifyChat(index: unknown, value: unknown): Promise<void>;
   updateGUI(): Promise<void>;
   updateChatAt(i: unknown): Promise<void>;
@@ -403,6 +403,7 @@ export async function makeRisuTriggerRuntime(
   // and track IDs assigned to new rows so later edits/deletes cannot race them.
   const pendingSendIds = new WeakMap<HostMessage, Promise<string>>();
   let chatMutationTail: Promise<void> = Promise.resolve();
+  let cutChatFailure: { cause: unknown; previous: HostMessage[] } | undefined;
 
   function enqueueChatMutation(label: string, operation: () => Promise<void>): Promise<void> {
     const next = chatMutationTail.then(operation);
@@ -412,6 +413,15 @@ export async function makeRisuTriggerRuntime(
       );
     });
     return chatMutationTail;
+  }
+
+  async function drainChatMutations(): Promise<void> {
+    await chatMutationTail;
+    if (cutChatFailure) {
+      const { cause, previous } = cutChatFailure;
+      cutChatFailure = undefined;
+      await recoverFailedChatCut(api, messagesCache, previous, cause);
+    }
   }
 
   function trackPendingSend(entry: HostMessage, completion: Promise<void>): void {
@@ -585,9 +595,14 @@ export async function makeRisuTriggerRuntime(
   const {
     getMessagesTail, getMessageCount, getLastMessage, getMessageAtIndex,
     getLastUserMessage, getLastCharMessage, getFirstMessage,
-    impersonate, systemPrompt, command, cutChat, modifyChat,
+    impersonate, systemPrompt, command, cutChat: cutChatMessages, modifyChat,
     updateGUI, updateChatAt, tokenize, quickSearchChat,
   } = _chat;
+
+  async function cutChat(start: unknown, end: unknown, defaultInvalidEnd = false): Promise<void> {
+    await drainChatMutations();
+    await cutChatMessages(start, end, defaultInvalidEnd);
+  }
 
   function compare(a: unknown, b: unknown, op: string): boolean {
     return compareValues(a, b, op);
@@ -887,7 +902,26 @@ export async function makeRisuTriggerRuntime(
         };
         reconcileFullChat(JSON.stringify(desired));
       },
-      cutChat: (_id: unknown, start: unknown, end: unknown) => { cutChat(start, end); },
+      cutChat: (_id: unknown, start: unknown, end: unknown) => {
+        const previous = [...messagesCache];
+        const kept = retainedChatMessages(previous, start, end);
+        const keep = new Set(kept);
+        const removed = messagesCache.filter(message => !keep.has(message)).reverse();
+        messagesCache.splice(0, messagesCache.length, ...kept);
+        enqueueChatMutation('cutChat', async () => {
+          if (cutChatFailure) {
+            cutChatFailure.previous.push(...removed);
+            return;
+          }
+          try {
+            for (const message of removed) {
+              const id = await resolveHostMessageId(message);
+              if (!id) throw new Error('Cut message has no persisted ID');
+              await api.chat.deleteMessage(id);
+            }
+          } catch (cause) { cutChatFailure = { cause, previous }; }
+        });
+      },
       removeChat: (_id: unknown, index: unknown) => {
         const n = Number(index);
         if (!Number.isFinite(n)) return;
@@ -1241,7 +1275,7 @@ export async function makeRisuTriggerRuntime(
       flog(`saveVars OK`);
     }
     dirty.value = false;
-    await chatMutationTail;
+    await drainChatMutations();
     flog(`DONE`);
     return wasDirty;
   }

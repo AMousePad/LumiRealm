@@ -217,14 +217,13 @@ describe('chat.systemPrompt', () => {
 });
 
 describe('chat.cutChat', () => {
-  test('deletes range + splices cache', async () => {
+  test('retains the requested range and deletes only rows outside it', async () => {
     const h = newChat();
     await h.chat.cutChat(1, 3);
-    // Should delete m2 + m3 (indices 1, 2 — range is hi exclusive)
-    expect(h.fake.deletes.sort()).toEqual(['m2', 'm3']);
+    expect(h.fake.deletes.sort()).toEqual(['m1', 'm4']);
     expect(h.state.messagesCache.length).toBe(2);
-    expect(h.state.messagesCache[0]?.id).toBe('m1');
-    expect(h.state.messagesCache[1]?.id).toBe('m4');
+    expect(h.state.messagesCache[0]?.id).toBe('m2');
+    expect(h.state.messagesCache[1]?.id).toBe('m3');
   });
 
   test('end-clamps to length', async () => {
@@ -237,7 +236,7 @@ describe('chat.cutChat', () => {
     const h = newChat();
     await h.chat.cutChat(-5, 2);
     expect(h.state.messagesCache.length).toBe(2);
-    expect(h.state.messagesCache[0]?.id).toBe('m3');
+    expect(h.state.messagesCache[0]?.id).toBe('m1');
   });
 });
 

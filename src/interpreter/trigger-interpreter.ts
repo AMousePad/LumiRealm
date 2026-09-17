@@ -148,7 +148,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2CutChat: async (op, { rt }) => {
     const e = op as Any;
-    await rt.cutChat(Number(rt.resolve(e.start, e.startType)), Number(rt.resolve(e.end, e.endType)));
+    await rt.cutChat(Number(rt.resolve(e.start, e.startType === 'value' ? 'value' : 'var')), Number(rt.resolve(e.end, e.endType === 'value' ? 'value' : 'var')), true);
   },
   v2ModifyChat: async (op, { rt }) => {
     const e = op as Any;

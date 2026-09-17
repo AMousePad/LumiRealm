@@ -6,6 +6,31 @@ import { risuRoleToLumi } from '../../util/role-coerce.js';
 import { unsupported } from './unsupported.js';
 import type { HostApi, HostMessage } from '../host.js';
 
+export class ChatMutationError extends Error {
+  constructor(cause: unknown) {
+    super(`Could not cut chat: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'ChatMutationError';
+  }
+}
+
+export function retainedChatMessages(messages: readonly HostMessage[], start: unknown, end: unknown, defaultInvalidEnd = false): HostMessage[] {
+  const endNumber = end === undefined ? undefined : Number(end);
+  return messages.slice(Number(start), defaultInvalidEnd && Number.isNaN(endNumber) ? undefined : endNumber);
+}
+
+export async function recoverFailedChatCut(api: HostApi, messages: HostMessage[], previous: readonly HostMessage[], cause: unknown): Promise<never> {
+  // Host rows commit individually; a rejected response can follow a successful deletion.
+  // Keep the original frame identities so a surviving assistant cannot become a new greeting.
+  try {
+    const current = await api.chat.getMessages();
+    const knownIds = new Set([...previous, ...messages].map(message => message.id));
+    messages.splice(0, messages.length, ...current.filter(message => knownIds.has(message.id)));
+  } catch (refreshCause) {
+    throw new ChatMutationError(new AggregateError([cause, refreshCause], 'Deletion and chat refresh failed'));
+  }
+  throw new ChatMutationError(cause);
+}
+
 export interface ChatState {
   readonly messagesCache: HostMessage[];
   readonly loopCounter: { value: number };
@@ -27,7 +52,7 @@ export interface ChatApi {
   impersonate(role: unknown, value: unknown): Promise<void>;
   systemPrompt(location: unknown, value: unknown): Promise<void>;
   command(value: unknown): Promise<never>;
-  cutChat(start: unknown, end: unknown): Promise<void>;
+  cutChat(start: unknown, end: unknown, defaultInvalidEnd?: boolean): Promise<void>;
   modifyChat(index: unknown, value: unknown): Promise<void>;
   updateGUI(): Promise<void>;
   updateChatAt(i: unknown): Promise<void>;
@@ -105,15 +130,19 @@ export function makeChatApi(
     return unsupported('command', 'no host equivalent of Risu processMultiCommand; corpus usage = 2 effects');
   }
 
-  async function cutChat(start: unknown, end: unknown): Promise<void> {
+  async function cutChat(start: unknown, end: unknown, defaultInvalidEnd = false): Promise<void> {
+    const previous = [...state.messagesCache];
+    const kept = new Set(retainedChatMessages(previous, start, end, defaultInvalidEnd));
     try {
-      const lo = Math.max(0, Number(start) || 0);
-      const hi = Math.min(state.messagesCache.length, Number(end) || state.messagesCache.length);
-      for (let i = hi - 1; i >= lo; i--) {
-        if (state.messagesCache[i]) await api.chat.deleteMessage(state.messagesCache[i]!.id);
+      for (let i = state.messagesCache.length - 1; i >= 0; i--) {
+        const message = state.messagesCache[i]!;
+        if (kept.has(message)) continue;
+        await api.chat.deleteMessage(message.id);
+        state.messagesCache.splice(i, 1);
       }
-      state.messagesCache.splice(lo, Math.max(0, hi - lo));
-    } catch { /* */ }
+    } catch (cause) {
+      await recoverFailedChatCut(api, state.messagesCache, previous, cause);
+    }
   }
 
   async function modifyChat(index: unknown, value: unknown): Promise<void> {
