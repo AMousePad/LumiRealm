@@ -64,6 +64,8 @@ export function makeVarsApi(state: VarsState): VarsApi {
       state.tempVars[n] = v;
       return;
     }
+    // Risu runTrigger only marks stored state as changed when the value differs.
+    if (state.varsCache['$' + n] === v) return;
     state.varsCache['$' + n] = v;
     state.dirty.value = true;
     _log.info(`$${n}=${JSON.stringify(v.slice(0, 80))}`);
@@ -82,39 +84,28 @@ export function makeVarsApi(state: VarsState): VarsApi {
   }
 
   function setvarV1(name: string, op: string, rawValue: unknown): void {
-    const rendered = toStr(resolve(rawValue, 'value'));
-    if (op === '=' || !op) { setVar(name, rendered); return; }
-    const pN = Number(getVar(name));
-    const pBase = Number.isFinite(pN) ? pN : 0;
-    const nN = Number(rendered);
-    const nBase = Number.isFinite(nN) ? nN : 0;
-    let result: number | string;
-    switch (op) {
-      case '+=': result = pBase + nBase; break;
-      case '-=': result = pBase - nBase; break;
-      case '*=': result = pBase * nBase; break;
-      case '/=': result = nBase === 0 ? 0 : pBase / nBase; break;
-      default: result = rendered; break;
-    }
-    setVar(name, String(result));
+    assign(name, op, resolve(rawValue, 'value'), false);
   }
 
   function setvarV2(name: string, op: string, value: unknown): void {
-    const prev = getVar(name);
+    assign(name, op, value, true);
+  }
+
+  function assign(name: string, op: string, value: unknown, allowRemainder: boolean): void {
+    const previous = Number(getVar(name));
+    const base = Number.isNaN(previous) ? 0 : previous;
     const valueStr = toStr(value);
-    let result: string;
-    if (op === '=') result = valueStr;
-    else if (op === '+=') {
-      const nP = Number(prev), nV = Number(valueStr);
-      if (Number.isFinite(nP) && Number.isFinite(nV)) result = String(nP + nV);
-      else result = toStr(prev) + valueStr;
+    const number = Number(valueStr);
+    let result: string | number = '';
+    switch (op) {
+      case '=': result = valueStr; break;
+      case '+=': result = base + number; break;
+      case '-=': result = base - number; break;
+      case '*=': result = base * number; break;
+      case '/=': result = base / number; break;
+      case '%=': if (allowRemainder) result = base % number; break;
     }
-    else if (op === '-=') result = String(Number(prev) - Number(valueStr));
-    else if (op === '*=') result = String(Number(prev) * Number(valueStr));
-    else if (op === '/=') result = Number(valueStr) === 0 ? '0' : String(Number(prev) / Number(valueStr));
-    else if (op === '%=') result = Number(valueStr) === 0 ? '0' : String(Number(prev) % Number(valueStr));
-    else result = valueStr;
-    setVar(name, result);
+    setVar(name, String(result));
   }
 
   return {

@@ -202,11 +202,11 @@ describe('vars.setvarV1', () => {
     api = makeVarsApi(state);
   });
 
-  test("'=' or empty op assigns", () => {
+  test("'=' assigns and an empty operator writes an empty result", () => {
     api.setvarV1('x', '=', '5');
     expect(api.getVar('x')).toBe('5');
     api.setvarV1('y', '', '10');
-    expect(api.getVar('y')).toBe('10');
+    expect(api.getVar('y')).toBe('');
   });
 
   test('+= adds numerically', () => {
@@ -227,10 +227,10 @@ describe('vars.setvarV1', () => {
     expect(api.getVar('m')).toBe('42');
   });
 
-  test('/= zero divisor → 0 (Risu parity)', () => {
+  test('/= zero divisor preserves Infinity from Risu arithmetic', () => {
     api.setVar('q', '10');
     api.setvarV1('q', '/=', '0');
-    expect(api.getVar('q')).toBe('0');
+    expect(api.getVar('q')).toBe('Infinity');
   });
 
   test('non-numeric prev → treated as 0 base', () => {
@@ -239,10 +239,10 @@ describe('vars.setvarV1', () => {
     expect(api.getVar('x')).toBe('5');
   });
 
-  test('unknown op → assign rendered value', () => {
+  test('unknown operator writes an empty result', () => {
     api.setVar('x', 'old');
     api.setvarV1('x', 'wat', 'new');
-    expect(api.getVar('x')).toBe('new');
+    expect(api.getVar('x')).toBe('');
   });
 });
 
@@ -265,22 +265,22 @@ describe('vars.setvarV2', () => {
     expect(api.getVar('n')).toBe('12');
   });
 
-  test('+= non-numeric → string concat', () => {
+  test('+= nonnumeric operand produces NaN', () => {
     api.setVar('s', 'hello ');
     api.setvarV2('s', '+=', 'world');
-    expect(api.getVar('s')).toBe('hello world');
+    expect(api.getVar('s')).toBe('NaN');
   });
 
-  test('+= one-side numeric → still string concat (both must be numeric)', () => {
+  test('+= numeric state does not turn addition into concatenation', () => {
     api.setVar('s', '5');
     api.setvarV2('s', '+=', 'abc');
-    expect(api.getVar('s')).toBe('5abc');
+    expect(api.getVar('s')).toBe('NaN');
   });
 
-  test('%= zero divisor → 0', () => {
+  test('%= zero divisor produces NaN', () => {
     api.setVar('m', '10');
     api.setvarV2('m', '%=', '0');
-    expect(api.getVar('m')).toBe('0');
+    expect(api.getVar('m')).toBe('NaN');
   });
 
   test('%= non-zero', () => {

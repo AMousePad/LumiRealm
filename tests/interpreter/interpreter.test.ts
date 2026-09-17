@@ -176,7 +176,7 @@ describe('interpreter — V2 control flow', () => {
     const t = mkTrigger({
       effect: [
         { type: 'v2If', indent: 0, source: 'mood', condition: '=', target: 'happy', targetType: 'value' },
-        { type: 'v2SetVar', indent: 1, var: 'triggered', value: '1', valueType: 'value' },
+        { type: 'v2SetVar', indent: 1, var: 'triggered', operator: '=', value: '1', valueType: 'value' },
         { type: 'v2EndIndent', indent: 0 },
       ] as never,
     });
@@ -190,7 +190,7 @@ describe('interpreter — V2 control flow', () => {
     const t = mkTrigger({
       effect: [
         { type: 'v2If', indent: 0, source: 'mood', condition: '=', target: 'happy', targetType: 'value' },
-        { type: 'v2SetVar', indent: 1, var: 'triggered', value: '1', valueType: 'value' },
+        { type: 'v2SetVar', indent: 1, var: 'triggered', operator: '=', value: '1', valueType: 'value' },
         { type: 'v2EndIndent', indent: 0 },
       ] as never,
     });
