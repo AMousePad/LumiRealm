@@ -6,6 +6,22 @@ import {
   type DisplaySnapshot,
 } from '../../src/display/snapshot.js';
 import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
+import type { FeRegexScript } from '../../src/display/regex-apply.js';
+
+function displayRule(overrides: Partial<FeRegexScript> = {}): FeRegexScript {
+  return {
+    id: 'rule', find_regex: 'TOKEN', replace_string: '{{char}}', flags: 'g',
+    placement: ['ai_output'], substitute_macros: 'none', trim_strings: [],
+    min_depth: null, max_depth: null, ...overrides,
+  };
+}
+
+async function applyRules(scripts: readonly FeRegexScript[], content = 'TOKEN') {
+  return createDisplayResolver().applyScripts({
+    content, scripts: [...scripts],
+    context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+  });
+}
 
 function snapshot(luaCode = ''): DisplaySnapshot {
   return {
@@ -100,6 +116,90 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
+  test('native local variables start empty instead of reading persisted Risu state', async () => {
+    const base = snapshot();
+    setDisplaySnapshot({ ...base, vars: { local: { route: 'CHAT' }, global: { route: 'GLOBAL' }, chat: {} }, scriptstateDefaults: { fallback: 'DEFAULT' } });
+    for (const mode of ['raw', 'after', 'escaped'] as const) {
+      const result = await applyRules([displayRule({ substitute_macros: mode,
+        replace_string: '{{getvar::route}}|{{getchatvar::route}}|{{getgvar::route}}|{{getvar::fallback}}',
+      })]);
+      expect(result?.content).toBe('|CHAT|GLOBAL|');
+      expect(result?.touchedVars).toContain('local:route');
+      expect(result?.touchedVars).toContain('global:route');
+    }
+  });
+
+  test('native scratch writes survive rules and matches without leaking into Risu or later renders', async () => {
+    const base = snapshot();
+    setDisplaySnapshot({ ...base, vars: { local: { n: '40' }, global: {}, chat: {} } });
+    const rules = [
+      displayRule({ find_regex: '^', replace_string: '{{setvar::n::1}}', substitute_macros: 'raw' }),
+      displayRule({ find_regex: 'x', replace_string: '{{incvar::n}}', substitute_macros: 'raw' }),
+      displayRule({ find_regex: '$', replace_string: '|{{getvar::n}}', substitute_macros: 'raw', metadata: { _risu: {} } }),
+    ];
+    expect((await applyRules(rules, 'xx'))?.content).toBe('23|40');
+    expect((await applyRules(rules, 'xx'))?.content).toBe('23|40');
+  });
+
+  test('native find macros and captured replacements share their own variable state', async () => {
+    setDisplaySnapshot(snapshot());
+    const result = await applyRules([
+      displayRule({ find_regex: '^', replace_string: '{{setvar::pattern::(TOKEN)}}', substitute_macros: 'raw' }),
+      displayRule({ find_regex: '{{getvar::pattern}}', replace_string: '{{setvar::value::$1}}{{getvar::value}}!', substitute_macros: 'raw' }),
+    ]);
+    expect(result?.content).toBe('TOKEN!');
+  });
+
+  test('native persisted-variable reads track refreshes without persisting display writes', async () => {
+    const base = snapshot();
+    const rules = [displayRule({ substitute_macros: 'after', replace_string:
+      '{{getchatvar::route}}|{{setchatvar::route::DISPLAY}}{{getchatvar::route}}',
+    })];
+    for (const route of ['before', 'after']) {
+      setDisplaySnapshot({ ...base, vars: { local: { route }, global: {}, chat: {} } });
+      const result = await applyRules(rules);
+      expect(result?.content).toBe(`${route}|DISPLAY`);
+      expect(result?.touchedVars).toContain('local:route');
+      expect(result?.touchedVars).toContain('chat:route');
+      expect((await applyRules([displayRule({ substitute_macros: 'raw', replace_string: '{{getchatvar::route}}' })]))?.content).toBe(route);
+    }
+  });
+
+  for (const mode of ['none', 'find', 'escaped'] as const) {
+    test(`native ${mode} rules do not add a Risu parse of the resulting body`, async () => {
+      setDisplaySnapshot(snapshot());
+      const result = await applyRules([displayRule({ substitute_macros: mode })], 'TOKEN|{{user}}');
+      expect(result?.content).toBe(mode === 'escaped' ? 'Character|{{user}}' : '{{char}}|{{user}}');
+    });
+  }
+
+  for (const origin of ['character', 'module']) {
+    test(`Risu ${origin} rules retain processScriptFull post-replacement parsing`, async () => {
+      setDisplaySnapshot(snapshot());
+      expect((await applyRules([displayRule({ metadata: { _risu: { origin } } })]))?.content).toBe('Character');
+    });
+  }
+
+  test('interleaved native and Risu rows retain their order and shared text', async () => {
+    setDisplaySnapshot(snapshot());
+    expect((await applyRules([
+      displayRule(),
+      displayRule({ find_regex: '\\{\\{char\\}\\}', replace_string: '{{user}}', metadata: { _risu: {} } }),
+      displayRule({ find_regex: 'User', replace_string: '{{char}}' }),
+    ]))?.content).toBe('{{char}}');
+    expect((await applyRules([
+      displayRule(),
+      displayRule({ find_regex: '$', replace_string: '!', metadata: { _risu: {} } }),
+    ]))?.content).toBe('Character!');
+  });
+
+  test('malformed provenance does not enable Risu parsing', async () => {
+    setDisplaySnapshot(snapshot());
+    for (const value of [null, false, 'module', []]) {
+      expect((await applyRules([displayRule({ metadata: { _risu: value } })]))?.content).toBe('{{char}}');
+    }
+  });
+
   test('attaches native action payloads to each display match without resolving action macros', async () => {
     setDisplaySnapshot(snapshot());
     const result = await createDisplayResolver().applyScripts({

@@ -27,6 +27,7 @@ import {
 import { type FeRegexScript, type FeRegexMatch } from './regex-apply.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
 import { decorateNativeRegexActions } from './regex-actions.js';
+import { createNativeVariableMacros } from './native-variable-macros.js';
 import { wrapResolvedContentAsIsland } from './fragment-assembly.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
@@ -201,9 +202,11 @@ function scriptApplies(
   return true;
 }
 
-function toCoreScript(script: FeRegexScript): RegexCoreScript {
+function toCoreScript(script: FeRegexScript, nativeEval: (text: string) => string): RegexCoreScript {
   const matchActions = readRegexMatchActions(script.metadata);
   const actions = script.actions;
+  const risu = script.metadata?.['_risu'];
+  const isRisu = risu !== null && typeof risu === 'object' && !Array.isArray(risu);
   return {
     find_regex: script.find_regex,
     replace_string: script.replace_string,
@@ -214,6 +217,9 @@ function toCoreScript(script: FeRegexScript): RegexCoreScript {
     min_depth: script.min_depth,
     max_depth: script.max_depth,
     trim_strings: script.trim_strings,
+    // Only Risu's processScriptFull adds a CBS pass after ordinary replacement.
+    reResolveAfterRule: isRisu,
+    ...(!isRisu ? { evalTemplate: nativeEval } : {}),
     ...(actions && actions.length > 0 ? {
       decorateReplacement: (replacement: string, match: FeRegexMatch, input: string) =>
         decorateNativeRegexActions(replacement, script.id, actions, match, input),
@@ -291,6 +297,11 @@ async function runApply(
     : {};
   if (hasRepeatBack) recorder.touched.add(MSG_DEP_KEY);
   let content = args.content;
+  let nativeVariables: ReturnType<typeof createNativeVariableMacros> | undefined;
+  const nativeEval = (text: string): string => {
+    nativeVariables ??= createNativeVariableMacros(snap.vars, recorder.touched);
+    return runPipeline(buildInput(snap, text, ctx), { recorder, resolveLeaf: nativeVariables });
+  };
 
   for (let index = 0; index < plan.length; index++) {
     const step = plan[index]!;
@@ -316,10 +327,10 @@ async function runApply(
       );
       continue;
     }
-    const coreScripts = [toCoreScript(step.script)];
+    const coreScripts = [toCoreScript(step.script, nativeEval)];
     while (plan[index + 1]?.kind === 'script') {
       const next = plan[++index]!;
-      if (next.kind === 'script') coreScripts.push(toCoreScript(next.script));
+      if (next.kind === 'script') coreScripts.push(toCoreScript(next.script, nativeEval));
     }
     content = applyRegexScriptsCore(content, coreScripts, {
       placement,

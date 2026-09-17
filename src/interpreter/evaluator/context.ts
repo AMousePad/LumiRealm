@@ -102,6 +102,7 @@ export const MSG_DEP_KEY = "__msg__";
 // Input shape for a single evaluator run, including direct identity and
 // message slices pulled out of the extension's live ActiveCard state.
 export interface BuildEvaluatorCtxInput {
+  readonly resolveLeaf?: EvaluatorCtx['resolveLeaf'];
   readonly chatId: string;
   readonly userId?: string;
   readonly characterId?: string;
@@ -385,6 +386,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     : { now: () => Date.now() };
 
   const out: EvaluatorCtx = {
+    ...(input.resolveLeaf ? { resolveLeaf: input.resolveLeaf } : {}),
     chatId,
     vars,
     identity,

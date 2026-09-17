@@ -48,6 +48,11 @@ function dispatchLeaf(
   if (calc !== null) return calc;
 
   const { name, args } = splitMacroArgs(payload);
+  const resolved = ctx.resolveLeaf?.(name, args);
+  if (resolved) {
+    return !resolved.terminal && resolved.text.includes('{{') && resolved.text !== `{{${payload}}}`
+      ? evaluate(resolved.text, ctx, { callStack }) : resolved.text;
+  }
   const entry = lookup(name);
   if (!entry) return null;
 

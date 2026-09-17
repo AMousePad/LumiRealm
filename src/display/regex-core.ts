@@ -18,6 +18,8 @@ export interface RegexCoreScript {
   readonly disabled?: boolean;
   readonly preResolvedFind?: string;
   readonly preResolvedReplace?: string;
+  readonly reResolveAfterRule?: boolean;
+  readonly evalTemplate?: (text: string) => string;
   readonly matchActions?: readonly (
     | 'move_top'
     | 'move_bottom'
@@ -54,7 +56,7 @@ export function applyRegexScriptsCore(
   const {
     placement,
     depth,
-    evalTemplate,
+    evalTemplate: defaultEvalTemplate,
     reResolveAfterRule,
     previousContent,
   } = opts;
@@ -69,6 +71,7 @@ export function applyRegexScriptsCore(
     }
 
     const before = result;
+    const evalTemplate = script.evalTemplate ?? defaultEvalTemplate;
     let findRegex = script.find_regex;
     if (script.preResolvedFind !== undefined) {
       findRegex = script.preResolvedFind;
@@ -123,7 +126,7 @@ export function applyRegexScriptsCore(
       result = applyTrimStrings(result, script.trim_strings);
 
       if (
-        reResolveAfterRule
+        (script.reResolveAfterRule ?? reResolveAfterRule)
         && script.substitute_macros !== 'after'
         && script.substitute_macros !== 'raw'
         && result !== before

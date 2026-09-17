@@ -8,6 +8,7 @@ import type {
 export type { MacroHandler, RisuRuntimeContext };
 
 export interface EvaluatorCtx extends RisuRuntimeContext {
+  readonly resolveLeaf?: (name: string, args: readonly string[]) => { text: string; terminal: boolean } | undefined;
   // For {{call::name::...}} recursive re-entry; cap matches Risu's 20.
   readonly callStack?: number;
 }

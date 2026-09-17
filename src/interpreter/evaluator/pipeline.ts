@@ -17,12 +17,14 @@ export interface RunPipelineInput extends Omit<BuildEvaluatorCtxInput, "commit">
 
 export interface RunPipelineOptions {
   readonly recorder?: VarReadRecorder;
+  readonly resolveLeaf?: BuildEvaluatorCtxInput['resolveLeaf'];
 }
 
 export function runPipeline(input: RunPipelineInput, opts?: RunPipelineOptions): string {
   const commit = input.phase === "commit";
 
   const ctx = buildEvaluatorContext({
+    ...(opts?.resolveLeaf ? { resolveLeaf: opts.resolveLeaf } : {}),
     chatId: input.chatId,
     ...(opts?.recorder ? { recorder: opts.recorder } : {}),
     ...(input.userId !== undefined ? { userId: input.userId } : {}),
