@@ -67,9 +67,7 @@ export interface DisplaySnapshot {
   readonly legacyMediaFindings: boolean;
   readonly modulesByNamespace: Readonly<Record<string, readonly string[]>>;
   readonly lorebook: readonly LorebookEntry[];
-  /** Card uses editDisplay Lua hooks; FE defers body-resolve to the backend until P4. */
   readonly hasEditDisplayLua: boolean;
-  /** Card uses @@emo/@@repeat_back editdisplay actions; FE defers until P4/P5. */
   readonly hasEditAtActions: boolean;
   readonly luaTriggers: readonly DisplayLuaTrigger[];
   readonly messagesHost: readonly HostMessage[];

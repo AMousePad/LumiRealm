@@ -37,6 +37,7 @@ import {
   type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import { buildModuleDisplayPlan } from './module-action-plan.js';
+import { parseDisplayCaller } from './caller-parser.js';
 const log = makeSafeLogger('display-resolver');
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
@@ -370,7 +371,7 @@ export function createDisplayResolver(
         const liveSnap = (snap.luaTriggers.length > 0 || rowlessAtActions.length > 0)
           ? withCurrentDisplayMessage(snap, args.context, args.content)
           : snap;
-        let body = args.content;
+        let body = parseDisplayCaller(buildInput(liveSnap, args.content, args.context), recorder);
         if (liveSnap.luaTriggers.length > 0) {
           body = await runEditDisplayChain(
             liveSnap,

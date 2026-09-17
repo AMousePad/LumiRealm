@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createDisplayResolver } from '../../src/display/resolver.js';
 import {
   clearDisplaySnapshot,
@@ -285,14 +285,14 @@ describe('frontend display resolver message context', () => {
     expect(result?.content).toContain('data-align="good"');
   });
 
-  test('passes raw display content to Lua before the CBS parser pass', async () => {
+  test('expands the message before Lua and expands macros emitted by the hook afterward', async () => {
     setWasmoonEnabled(false);
     setDisplaySnapshot(snapshot(`
       listenEdit("editDisplay", function(triggerId, data)
         if data == "{{user}}" then
           return data .. "|raw"
         end
-        return data .. "|parsed"
+        return data .. "|parsed|{{char}}"
       end)
     `));
 
@@ -309,7 +309,129 @@ describe('frontend display resolver message context', () => {
       },
     });
 
-    expect(result?.content).toBe('User|raw');
+    expect(result?.content).toBe('User|parsed|Character');
+  });
+
+  test.each([-1, 15, 31])('uses the full snapshot index before hooks while preserving raw message %s', async (index) => {
+    setWasmoonEnabled(false);
+    const content = '{{chatindex}}|{{getvar::panel}}';
+    const base = paginatedSnapshot(`
+      listenEdit("editDisplay", function(id, data, meta)
+        local row = getChat(id, meta.index)
+        local raw = meta.index == -1 or row.data == "${content}"
+        return (data == "${index}|open" and "parsed" or "raw") .. ":" .. meta.index .. ":" .. tostring(raw)
+      end)
+    `);
+    const messageId = index === -1 ? 'greeting' : `message-${index + 1}`;
+    const snap = { ...base, vars: { ...base.vars, local: { panel: 'open' } } };
+    setDisplaySnapshot(snap);
+    const stored = structuredClone(snap.messagesHost);
+    const result = await createDisplayResolver().resolveBody({ content, context: {
+      chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 31 - index,
+      messageId, messageIndex: 0, role: 'assistant',
+    } });
+    expect(result?.content).toBe(`parsed:${index}:true`);
+    expect(result?.touchedVars).toContain('local:panel');
+    expect(snap.messagesHost).toEqual(stored);
+  });
+
+  test('records initial reads even when Lua consumes their text, without fetching or persisting', async () => {
+    setWasmoonEnabled(false);
+    const network = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected network request'));
+    try {
+      const base = snapshot(`listenEdit("editDisplay", function(id, data)
+        return data == "open" and "visible" or "hidden"
+      end)`);
+      const writes: unknown[] = [];
+      const resolver = createDisplayResolver((_chatId, vars) => { writes.push(vars); });
+      const args = { content: '{{setvar::panel::wrong}}{{getvar::panel}}', context: {
+        chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0,
+      } };
+      for (const [value, expected] of [['open', 'visible'], ['closed', 'hidden']] as const) {
+        const snap = { ...base, vars: { ...base.vars, local: { panel: value } } };
+        setDisplaySnapshot(snap);
+        const result = await resolver.resolveBody(args);
+        expect(result?.content).toBe(expected);
+        expect(result?.touchedVars).toContain('local:panel');
+        expect(result?.cacheable).toBe(true);
+        expect(snap.vars.local.panel).toBe(value);
+      }
+      expect(writes).toEqual([]);
+      expect(network).not.toHaveBeenCalled();
+    } finally { network.mockRestore(); }
+  });
+
+  test('runs caller parsing, Lua, structured display triggers, then native regex in order', async () => {
+    setWasmoonEnabled(false);
+    const base = snapshot(`listenEdit("editDisplay", function(id, data)
+      return data == "User" and "from Lua" or "unexpanded"
+    end)`);
+    setDisplaySnapshot({ ...base, luaTriggers: [...base.luaTriggers, { luaCode: '', source: {
+      type: 'display', comment: '', conditions: [], effect: [
+        { type: 'v2GetDisplayState', outputVar: 'body' },
+        { type: 'v2RegexTest', value: 'body', valueType: 'var', regex: '^from Lua$', regexType: 'value', flags: '', flagsType: 'value', outputVar: 'matched' },
+        { type: 'v2SetDisplayState', value: 'matched', valueType: 'var' },
+      ],
+    } }] });
+    const resolver = createDisplayResolver();
+    const context = { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 };
+    const body = await resolver.resolveBody({ content: '{{user}}', context });
+    expect(body?.content).toBe('1');
+    const result = await resolver.applyScripts({ content: body!.content, context, scripts: [
+      displayRule({ find_regex: '^1$', replace_string: '{{user}}', substitute_macros: 'none' }),
+    ] });
+    expect(result?.content).toBe('{{user}}');
+  });
+
+  test.each([
+    ['{{getvar::indirect}}', '{{user}}'],
+    ['{{getvar::{{getvar::key}}}}', '{{user}}'],
+    ['{{#pure}}{{user}}{{/pure}}', '{{user}}'],
+  ])('preserves one caller parse before hooks for %s', async (content, expected) => {
+    setWasmoonEnabled(false);
+    const base = snapshot(`listenEdit("editDisplay", function(id, data)
+      return data == "${expected}" and "one pass" or "wrong input"
+    end)`);
+    setDisplaySnapshot({ ...base, vars: { ...base.vars, local: { key: 'indirect', indirect: '{{user}}' } } });
+    const result = await createDisplayResolver().resolveBody({ content, context: {
+      chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0,
+    } });
+    expect(result?.content).toBe('one pass');
+  });
+
+  test.each([
+    ['{{img::portrait}}', true],
+    ['{{getvar::asset}}', true],
+    ['{{#pure}}{{img::portrait}}{{/pure}}', true],
+    ['{{img:portrait}}', false],
+    ['{{inlay::portrait}}', false],
+  ])('resolves the caller asset stage before hooks for %s', async (content, imageExpected) => {
+    setWasmoonEnabled(false);
+    const base = snapshot(`listenEdit("editDisplay", function(id, data)
+      return string.find(data, '<img src="/api/v1/images/portrait"', 1, true) and "image" or "literal"
+    end)`);
+    setDisplaySnapshot({ ...base,
+      character: { ...base.character, additionalAssets: { portrait: { imageIds: ['portrait'] } } },
+      vars: { ...base.vars, local: { asset: '{{img::portrait}}' } },
+    });
+    const result = await createDisplayResolver().resolveBody({ content, context: {
+      chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0,
+    } });
+    expect(result?.content).toBe(imageExpected ? 'image' : 'literal');
+  });
+
+  test('retains initial message dependencies and randomness when a hook replaces the body', async () => {
+    setWasmoonEnabled(false);
+    setDisplaySnapshot(snapshot('listenEdit("editDisplay", function() return "fixed" end)'));
+    const resolver = createDisplayResolver();
+    const context = { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 };
+    const message = await resolver.resolveBody({ content: '{{lastmessage}}', context });
+    expect(message?.content).toBe('fixed');
+    expect(message?.touchedVars).toContain('__msg__');
+    expect(message?.cacheable).toBe(true);
+    const random = await resolver.resolveBody({ content: '{{random::a::b}}', context });
+    expect(random?.content).toBe('fixed');
+    expect(random?.cacheable).toBe(false);
   });
 
   test('preloads frontend Lua global variables from the global scope', async () => {

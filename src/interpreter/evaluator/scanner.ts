@@ -48,7 +48,7 @@ function dispatchLeaf(
   if (calc !== null) return calc;
 
   const { name, args } = splitMacroArgs(payload);
-  const resolved = ctx.resolveLeaf?.(name, args);
+  const resolved = ctx.resolveLeaf?.(name, args, payload);
   if (resolved) {
     return !resolved.terminal && resolved.text.includes('{{') && resolved.text !== `{{${payload}}}`
       ? evaluate(resolved.text, ctx, { callStack }) : resolved.text;
@@ -58,7 +58,7 @@ function dispatchLeaf(
 
   try {
     const result = entry.handler(ctx, args, payload);
-    if (typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
+    if (ctx.reparseMacroResults !== false && typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
       return evaluate(result, ctx, { callStack });
     }
     return result;

@@ -103,6 +103,7 @@ export const MSG_DEP_KEY = "__msg__";
 // message slices pulled out of the extension's live ActiveCard state.
 export interface BuildEvaluatorCtxInput {
   readonly resolveLeaf?: EvaluatorCtx['resolveLeaf'];
+  readonly reparseMacroResults?: boolean;
   readonly chatId: string;
   readonly userId?: string;
   readonly characterId?: string;
@@ -375,6 +376,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
 
   return freshParserContext({
     ...(input.resolveLeaf ? { resolveLeaf: input.resolveLeaf } : {}),
+    ...(input.reparseMacroResults === false ? { reparseMacroResults: false } : {}),
     chatId,
     vars,
     identity,
