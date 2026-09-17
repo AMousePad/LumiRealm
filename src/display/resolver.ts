@@ -24,8 +24,9 @@ import {
   waitForSnapshot,
   type DisplaySnapshot,
 } from './snapshot.js';
-import { type FeRegexScript } from './regex-apply.js';
+import { type FeRegexScript, type FeRegexMatch } from './regex-apply.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
+import { decorateNativeRegexActions } from './regex-actions.js';
 import { wrapResolvedContentAsIsland } from './fragment-assembly.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
@@ -202,6 +203,7 @@ function scriptApplies(
 
 function toCoreScript(script: FeRegexScript): RegexCoreScript {
   const matchActions = readRegexMatchActions(script.metadata);
+  const actions = script.actions;
   return {
     find_regex: script.find_regex,
     replace_string: script.replace_string,
@@ -212,6 +214,10 @@ function toCoreScript(script: FeRegexScript): RegexCoreScript {
     min_depth: script.min_depth,
     max_depth: script.max_depth,
     trim_strings: script.trim_strings,
+    ...(actions && actions.length > 0 ? {
+      decorateReplacement: (replacement: string, match: FeRegexMatch, input: string) =>
+        decorateNativeRegexActions(replacement, script.id, actions, match, input),
+    } : {}),
     ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
     ...(matchActions.length > 0 ? { matchActions } : {}),
     ...(typeof script.metadata?.['repeat_position'] === 'string'

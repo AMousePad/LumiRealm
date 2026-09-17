@@ -100,6 +100,40 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
+  test('attaches native action payloads to each display match without resolving action macros', async () => {
+    setDisplaySnapshot(snapshot());
+    const result = await createDisplayResolver().applyScripts({
+      content: '<choice>Left</choice> <choice align="good">Right</choice>',
+      context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+      scripts: [{
+        id: 'choices', find_regex: '<choice(?: align="(?<align>[^"]+)")?>(?<label>[^<]+)</choice>',
+        replace_string: '<button data-align="$<align>" data-regex-action="pick">$<label></button>',
+        flags: 'g', placement: ['ai_output'], substitute_macros: 'after',
+        trim_strings: [], min_depth: null, max_depth: null,
+        actions: [{
+          id: 'pick', type: 'send', multi_select: false, cost: '1', limit: '3',
+          title: 'Choose $<label>', subtitle: '', content: 'My choice: $<label>. {{char}}',
+        }],
+      }],
+    });
+    const payloads = [...(result?.content ?? '').matchAll(/data-lumiverse-regex-action="([^"]+)"/g)]
+      .map((match) => JSON.parse(decodeURIComponent(match[1]!)));
+    expect(payloads).toEqual([
+      {
+        id: 'pick', type: 'send', multi_select: false, cost: 1, limit: 0,
+        title: 'Choose Left', subtitle: '', content: 'My choice: Left. {{char}}',
+        scriptId: 'choices', instanceId: 'choices:0:21',
+      },
+      {
+        id: 'pick', type: 'send', multi_select: false, cost: 1, limit: 0,
+        title: 'Choose Right', subtitle: '', content: 'My choice: Right. {{char}}',
+        scriptId: 'choices', instanceId: 'choices:22:57',
+      },
+    ]);
+    expect(result?.content).toContain('data-align=""');
+    expect(result?.content).toContain('data-align="good"');
+  });
+
   test('passes raw display content to Lua before the CBS parser pass', async () => {
     setWasmoonEnabled(false);
     setDisplaySnapshot(snapshot(`

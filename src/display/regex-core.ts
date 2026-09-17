@@ -1,9 +1,8 @@
 import {
   compileRegex,
-  collectMatches,
   substituteRegexCaptures,
-  rebuildFromMatches,
   applyTrimStrings,
+  type FeRegexMatch,
 } from './regex-apply.js';
 
 export interface RegexCoreScript {
@@ -26,6 +25,7 @@ export interface RegexCoreScript {
   )[];
   readonly repeatPosition?: string;
   readonly repeatRawMatch?: boolean;
+  readonly decorateReplacement?: (replacement: string, match: FeRegexMatch, input: string) => string;
 }
 
 export interface ApplyRegexCoreOptions {
@@ -98,18 +98,9 @@ export function applyRegexScriptsCore(
       }
 
       if (script.substitute_macros === 'raw') {
-        const matches = collectMatches(result, regex);
-        if (matches.length > 0) {
-          const replacements = matches.map((m) => {
-            const withCaptures = substituteRegexCaptures(
-              script.replace_string, m.fullMatch, m.groups, m.index, result, m.namedGroups,
-            );
-            return evalTemplate(withCaptures);
-          });
-          result = rebuildFromMatches(result, matches, replacements);
-        }
+        result = replaceWithDecoration(result, regex, script.replace_string, script.decorateReplacement, evalTemplate);
       } else if (script.substitute_macros === 'after') {
-        const substituted = result.replace(regex, script.replace_string);
+        const substituted = replaceWithDecoration(result, regex, script.replace_string, script.decorateReplacement);
         result = evalTemplate(substituted);
       } else {
         let replaceString = script.replace_string;
@@ -126,7 +117,7 @@ export function applyRegexScriptsCore(
             ? resolved.replace(/\$/g, '$$$$')
             : resolved;
         }
-        result = result.replace(regex, replaceString);
+        result = replaceWithDecoration(result, regex, replaceString, script.decorateReplacement);
       }
 
       result = applyTrimStrings(result, script.trim_strings);
@@ -146,6 +137,35 @@ export function applyRegexScriptsCore(
   }
 
   return result;
+}
+
+function replaceWithDecoration(
+  input: string,
+  regex: RegExp,
+  replacement: string,
+  decorate: RegexCoreScript['decorateReplacement'],
+  evalReplacement?: (text: string) => string,
+): string {
+  if (!decorate && !evalReplacement) return input.replace(regex, replacement);
+  // Native replace owns match iteration, including sticky and Unicode empty
+  // matches, so adding actions cannot change which occurrences are replaced.
+  return input.replace(regex, (fullMatch: string, ...args: unknown[]) => {
+    const tail = args[args.length - 1];
+    const namedGroups = typeof tail === 'object' && tail !== null
+      ? tail as Record<string, string | undefined> : undefined;
+    const offsetIndex = args.length - (namedGroups ? 3 : 2);
+    const match: FeRegexMatch = {
+      fullMatch,
+      index: args[offsetIndex] as number,
+      groups: args.slice(0, offsetIndex) as (string | undefined)[],
+      ...(namedGroups ? { namedGroups } : {}),
+    };
+    const substituted = substituteRegexCaptures(
+      replacement, fullMatch, match.groups, match.index, input, namedGroups,
+    );
+    const resolved = evalReplacement ? evalReplacement(substituted) : substituted;
+    return decorate ? decorate(resolved, match, input) : resolved;
+  });
 }
 
 function applyMatchActions(
@@ -213,6 +233,12 @@ function applyMatchActions(
           previousContent,
           priorMatch.groups,
         );
+      }
+      if (script.decorateReplacement) {
+        piece = script.decorateReplacement(piece, {
+          fullMatch: priorMatch[0], index: priorMatch.index, groups,
+          ...(priorMatch.groups ? { namedGroups: priorMatch.groups } : {}),
+        }, previousContent);
       }
     }
     if (!position) return { handled: true, content: content + piece };
