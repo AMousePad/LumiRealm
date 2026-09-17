@@ -1,7 +1,9 @@
 import type { TriggerEffect, TriggerScript } from "../schemas/triggerscript.js";
 import type { EmitContext, EmitIssue } from "./types.js";
-import { indent, resolveCall } from "./types.js";
+import { indent } from "./types.js";
 import { EMITTERS } from "./opcodes/index.js";
+import { CONTROL_OPS } from "./control-flow.js";
+import { triggerNeedsTemplates } from './templates.js';
 
 
 export interface CompileTriggerOptions {
@@ -33,6 +35,9 @@ export function compileTrigger(
   };
 
   const out: string[] = [];
+  if (triggerNeedsTemplates(trigger)) {
+    out.push(line(ctx, 'await __risu.prepareTemplates();'));
+  }
 
   const hasConditions = Array.isArray(trigger.conditions) && trigger.conditions.length > 0;
   if (hasConditions) {
@@ -40,8 +45,33 @@ export function compileTrigger(
   }
 
   const effects = (trigger.effect ?? []) as readonly TriggerEffect[];
-  const compiled = compileBlock(effects, 0, 0, ctx);
-  out.push(compiled.code);
+  if (effects.length > 0) {
+    const controlEffects = effects.map(effect => CONTROL_OPS.has(effect.type) ? effect
+      : { type: effect.type, ...('indent' in effect ? { indent: effect.indent } : {}) });
+    out.push(line(ctx, `const __effects = ${JSON.stringify(controlEffects)};`));
+    out.push(line(ctx, `const __control = { loops: {}, ticks: 0 };`));
+    out.push(line(ctx, `for (let __index = 0; __index < __effects.length; __index++) {`));
+    const inner = { ...ctx, indent: ctx.indent + 1 };
+    out.push(line(inner, `const __next = await __risu.advanceControl(__effects, __index, __control);`));
+    out.push(line(inner, `if (__next !== undefined) { __index = __next; continue; }`));
+    out.push(line(inner, `switch (__index) {`));
+    const leafCtx = { ...inner, indent: inner.indent + 2 };
+    for (const [index, op] of effects.entries()) {
+      if (CONTROL_OPS.has(op.type)) continue;
+      const emitter = EMITTERS[op.type];
+      if (!emitter) {
+        issues.push({ opcode: op.type, message: "unknown opcode: likely a newer RisuAI version. Card may not work properly. Contact `amousepad` on Discord if you see this message.", severity: "warn" });
+        out.push(line(inner, "/* unknown opcode skipped */"));
+        continue;
+      }
+      out.push(line(inner, `case ${index}: {`));
+      out.push(emitter(op, leafCtx).code);
+      out.push(line(leafCtx, `break;`));
+      out.push(line(inner, `}`));
+    }
+    out.push(line(inner, `}`));
+    out.push(line(ctx, `}`));
+  }
 
   const unimplementedCounts: Record<string, number> = {};
   for (const issue of issues) {
@@ -57,158 +87,6 @@ export function compileTrigger(
   };
 }
 
-function compileBlock(
-  effects: readonly TriggerEffect[],
-  start: number,
-  minIndent: number,
-  ctx: EmitContext,
-): { nextIndex: number; code: string } {
-  const out: string[] = [];
-  let i = start;
-  while (i < effects.length) {
-    const op = effects[i]!;
-    const opIndent = readIndent(op);
-
-    if (opIndent < minIndent) break;
-    if (
-      (op.type === "v2EndIndent" || op.type === "v2Else") &&
-      opIndent === minIndent &&
-      minIndent > 0
-    ) {
-      break;
-    }
-
-    switch (op.type) {
-      case "v2If":
-      case "v2IfVar":
-      case "v2IfAdvanced": {
-        out.push(line(ctx, `if (${emitCondition(op)}) {`));
-        const innerCtx = { ...ctx, indent: ctx.indent + 1 };
-        const body = compileBlock(effects, i + 1, opIndent + 1, innerCtx);
-        out.push(body.code);
-        i = body.nextIndex;
-        const endOp = effects[i];
-        if (endOp && endOp.type === "v2EndIndent" && readIndent(endOp) === opIndent + 1) {
-          i++; // consume v2EndIndent
-          const elseOp = effects[i];
-          if (elseOp && elseOp.type === "v2Else" && readIndent(elseOp) === opIndent) {
-            out.push(line(ctx, `} else {`));
-            const elseBody = compileBlock(effects, i + 1, opIndent + 1, innerCtx);
-            out.push(elseBody.code);
-            i = elseBody.nextIndex;
-            const elseEnd = effects[i];
-            if (elseEnd && elseEnd.type === "v2EndIndent" && readIndent(elseEnd) === opIndent + 1) {
-              i++;
-            }
-          }
-          out.push(line(ctx, `}`));
-        } else {
-          out.push(line(ctx, `}`));
-          ctx.issues.push({
-            opcode: op.type,
-            message: "missing v2EndIndent for v2If",
-            severity: "warn",
-          });
-        }
-        break;
-      }
-      case "v2Loop": {
-        out.push(line(ctx, `while (true) {`));
-        const innerCtx = { ...ctx, indent: ctx.indent + 1, loopDepth: ctx.loopDepth + 1 };
-        out.push(line(innerCtx, `if ((__risu.loopTick() & 0xff) === 0) { await __risu.sleep(1); }`));
-        const body = compileBlock(effects, i + 1, opIndent + 1, innerCtx);
-        out.push(body.code);
-        i = body.nextIndex;
-        const endOp = effects[i];
-        if (endOp && endOp.type === "v2EndIndent" && readIndent(endOp) === opIndent + 1) {
-          i++;
-        }
-        out.push(line(ctx, `}`));
-        break;
-      }
-      case "v2LoopNTimes": {
-        const e = op as unknown as {
-          value: string;
-          valueType: "var" | "value";
-          indent: number;
-        };
-        const counter = `__risu_n_${i}`;
-        const limit = `__risu_lim_${i}`;
-        out.push(
-          line(
-            ctx,
-            `{ const ${limit} = Math.max(0, Number(${resolveCall(e.value, e.valueType)}) || 0);`,
-          ),
-        );
-        out.push(line(ctx, `  for (let ${counter} = 0; ${counter} < ${limit}; ${counter}++) {`));
-        const innerCtx = { ...ctx, indent: ctx.indent + 2, loopDepth: ctx.loopDepth + 1 };
-        const body = compileBlock(effects, i + 1, opIndent + 1, innerCtx);
-        out.push(body.code);
-        i = body.nextIndex;
-        const endOp = effects[i];
-        if (endOp && endOp.type === "v2EndIndent" && readIndent(endOp) === opIndent + 1) {
-          i++;
-        }
-        out.push(line(ctx, `  }`));
-        out.push(line(ctx, `}`));
-        break;
-      }
-      case "v2BreakLoop": {
-        // Risu triggers.ts: outside a loop, breakLoop exits the trigger.
-        out.push(line(ctx, ctx.loopDepth > 0 ? `break;` : `return;`));
-        i++;
-        break;
-      }
-      case "v2Else":
-      case "v2EndIndent":
-        ctx.issues.push({
-          opcode: op.type,
-          message: "orphan structural opcode — no matching opener",
-          severity: "warn",
-        });
-        i++;
-        break;
-      default: {
-        const emitter = EMITTERS[op.type];
-        if (!emitter) {
-          ctx.issues.push({
-            opcode: op.type,
-            message: "unknown opcode: likely a newer RisuAI version. Card may not work properly. Contact `amousepad` on Discord if you see this message.",
-            severity: "warn",
-          });
-          out.push(line(ctx, `/* unknown opcode (skipped): ${op.type} */`));
-        } else {
-          const result = emitter(op, ctx);
-          if (result.code.length > 0) out.push(result.code);
-        }
-        i++;
-        break;
-      }
-    }
-  }
-  return { nextIndex: i, code: out.join("\n") };
-}
-
 function line(ctx: EmitContext, body: string): string {
   return indent(ctx) + body;
-}
-
-function readIndent(op: TriggerEffect): number {
-  const raw = (op as { indent?: unknown }).indent;
-  if (typeof raw === "number" && raw >= 0) return raw;
-  return 0;
-}
-
-function emitCondition(op: TriggerEffect): string {
-  const e = op as unknown as {
-    type: "v2If" | "v2IfAdvanced";
-    condition: string;
-    target: string;
-    targetType: "var" | "value";
-    source: string;
-    sourceType?: "var" | "value";
-  };
-  // Risu triggers.ts: v2If source is always a var; v2IfAdvanced has a type field.
-  const sourceKind = e.type === "v2If" ? "var" : e.sourceType ?? "var";
-  return `__risu.compare(${resolveCall(e.source, sourceKind)}, ${resolveCall(e.target, e.targetType)}, ${JSON.stringify(e.condition)})`;
 }

@@ -63,6 +63,7 @@ import {
 import type { RunnerDispatchResult } from './prompt-regex-runner-client.js';
 
 export interface CreateLumiInterceptorsDeps {
+  readonly prepareTriggerContext: import('../state/readonly-resolver.js').ReadonlyResolver['prepareTriggerContext'];
   readonly activeCardByChat: Map<string, ActiveCard>;
   readonly captureUserId: (userId: string | undefined, where: string) => void;
   readonly isFeDisplayAuthoritative: (chatId: string) => boolean;
@@ -887,6 +888,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
 
         try {
           out = await runRequestTriggerChain(out, {
+            templateContext: () => deps.prepareTriggerContext(chatId, active.card.character_id, userId),
             api: editApi,
             chatId,
             characterId: active.card.character_id,

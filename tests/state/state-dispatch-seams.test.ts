@@ -1,3 +1,4 @@
+import { basicTriggerContext } from '../helpers/trigger-runtime.js';
 import { describe, test, expect } from 'bun:test';
 import {
   buildDispatchSeams,
@@ -18,11 +19,24 @@ function baseArgs(overrides?: Partial<BuildDispatchSeamsArgs>): BuildDispatchSea
     stateChanged: NOOP_STATE_CHANGED,
     auxDebugCapture: undefined,
     resolveTemplate: NOOP_RESOLVE,
+    templateContext: basicTriggerContext,
     ...overrides,
   };
 }
 
 describe('buildDispatchSeams', () => {
+  test('prepares one context per dispatch and keeps separate dispatches isolated', async () => {
+    let reads = 0;
+    const args = baseArgs({ templateContext: async () => { reads++; return basicTriggerContext(); } });
+    const first = buildDispatchSeams(args);
+    expect(reads).toBe(0);
+    const [a, b] = await Promise.all([first.templateContext(), first.templateContext()]);
+    expect(a).toBe(b);
+    expect(reads).toBe(1);
+    expect(await buildDispatchSeams(args).templateContext()).not.toBe(a);
+    expect(reads).toBe(2);
+  });
+
   test('default settings: every settings field copied verbatim', () => {
     const seams = buildDispatchSeams(baseArgs());
     expect(seams.auxConnectionId).toBe(DEFAULT_SETTINGS.auxConnectionId);
@@ -43,6 +57,7 @@ describe('buildDispatchSeams', () => {
       rememberOurWrite: remember,
       stateChanged,
       resolveTemplate,
+      templateContext: basicTriggerContext,
     }));
     expect(seams.chatId).toBe('chat-7');
     expect(seams.binding).toBe('output');
@@ -171,6 +186,7 @@ describe('buildDispatchSeams', () => {
       auxPrefillCompat: settings.auxPrefillCompat,
       submodelPrefillCompat: settings.submodelPrefillCompat,
       resolveTemplate,
+      templateContext: basicTriggerContext,
     };
 
     const helper = buildDispatchSeams({
@@ -181,9 +197,10 @@ describe('buildDispatchSeams', () => {
       stateChanged,
       auxDebugCapture: undefined,
       resolveTemplate,
+      templateContext: basicTriggerContext,
     });
 
-    expect(helper).toEqual(inline);
+    expect({ ...helper, templateContext: basicTriggerContext }).toEqual(inline);
   });
 
   test('parity: produces same shape as inline construction (Pattern B with auxDebugCapture)', () => {
@@ -212,6 +229,7 @@ describe('buildDispatchSeams', () => {
       submodelPrefillCompat: settings.submodelPrefillCompat,
       auxDebugCapture: cb,
       resolveTemplate,
+      templateContext: basicTriggerContext,
     };
 
     const helper = buildDispatchSeams({
@@ -222,9 +240,10 @@ describe('buildDispatchSeams', () => {
       stateChanged,
       auxDebugCapture: cb as never,
       resolveTemplate,
+      templateContext: basicTriggerContext,
     });
 
-    expect(helper).toEqual(inline as never);
+    expect({ ...helper, templateContext: basicTriggerContext }).toEqual(inline as never);
   });
 
   test('returned seams object is fresh (does not alias settings.auxSamplers reference)', () => {

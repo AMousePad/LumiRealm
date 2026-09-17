@@ -9,7 +9,11 @@ import {
   RisuCompatUnsupportedError,
 } from './host.js';
 import { buildRisuChatView } from './risu-chat-view.js';
-import { makeVarsApi } from './runtime/vars.js';
+import { makeVarsApi, createTriggerLocalState } from './runtime/vars.js';
+import { createTriggerTemplateParser } from './runtime/template.js';
+import { hasTriggerTemplate } from '../core/triggers/templates.js';
+import { advanceTriggerControl, type TriggerControlState } from '../core/triggers/control-flow.js';
+import type { TriggerEffect } from '../core/schemas/triggerscript.js';
 import { makeArraysDictsApi } from './runtime/arrays-dicts.js';
 import { makeChatApi } from './runtime/chat.js';
 import { makeCharacterNoteApi } from './runtime/character-note.js';
@@ -111,6 +115,7 @@ export interface RisuTriggerRuntime {
   stopSending: boolean;
   sendAIprompt: boolean;
   // resolution
+  prepareTemplates(): Promise<void>;
   resolve(value: unknown, kind: 'var' | 'value' | 'regex' | string): string;
   setVar(name: string, value: unknown): void;
   getVar(name: string): string;
@@ -119,6 +124,7 @@ export interface RisuTriggerRuntime {
   setvarV2(name: string, op: string, value: unknown): void;
   compare(a: unknown, b: unknown, op: string): boolean;
   checkConditions(conditions: readonly unknown[]): boolean;
+  advanceControl(effects: readonly TriggerEffect[], index: number, state: TriggerControlState): Promise<number | undefined>;
   // control flow
   loopTick(): number;
   sleep(ms: number): Promise<void>;
@@ -559,14 +565,32 @@ export async function makeRisuTriggerRuntime(
 
   // `dirty` boxed so flush() observes setVar writes across the closure boundary.
   const dirty: { value: boolean } = { value: false };
-  const localScopes = new Map<number, Map<string, string>>();
+  const localState = opts.localState ?? createTriggerLocalState();
   const tempVars = displayMode ? {} : undefined;
   const onVarRead = opts.onVarRead;
+  let parseTemplate: ((text: string) => string) | undefined;
+  async function prepareTemplates(): Promise<void> {
+    if (parseTemplate) return;
+    const prepare = opts.templateContext ?? dispatchCtx.templateContext;
+    if (!prepare) return;
+    parseTemplate = createTriggerTemplateParser(await prepare(), (scope, name) => {
+      if (scope === 'global') {
+        onVarRead?.(name, 'global');
+        return globalVarsCache[name] ?? 'null';
+      }
+      return _vars.getStoredVar(name);
+    });
+  }
   const _vars = makeVarsApi({
     varsCache,
-    localScopes,
+    ...localState,
     dirty,
     characterId,
+    parseTemplate: text => {
+      if (!hasTriggerTemplate(text)) return text;
+      if (!parseTemplate) throw new RisuCompatUnsupportedError('trigger templates', 'no evaluation context was prepared');
+      return parseTemplate(text);
+    },
     ...(onVarRead ? { onVarRead: (n: string) => onVarRead(n, 'chat') } : {}),
     ...(preloaded?.scriptstateDefaults !== undefined
       ? { scriptstateDefaults: preloaded.scriptstateDefaults }
@@ -1258,14 +1282,16 @@ export async function makeRisuTriggerRuntime(
     return wasDirty;
   }
 
+  const controlRuntime = { ..._vars, compare, sleep };
   const publicApi: RisuTriggerRuntime = {
+    advanceControl: (effects, index, state) => advanceTriggerControl(effects, index, state, controlRuntime),
     get stopSending() { return stopSending; },
     set stopSending(v) { stopSending = !!v; },
     get sendAIprompt() { return sendAIprompt; },
     set sendAIprompt(v) { sendAIprompt = !!v; },
     displayMode, lowLevelAccess, characterId,
     resolve, setVar, getVar, declareLocalVar,
-    setvarV1, setvarV2, compare, checkConditions,
+    setvarV1, setvarV2, compare, checkConditions, prepareTemplates,
     loopTick, sleep,
     impersonate, systemPrompt, command, cutChat, modifyChat,
     updateGUI, updateChatAt, tokenize, quickSearchChat,

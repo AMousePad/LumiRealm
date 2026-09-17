@@ -62,6 +62,9 @@ export async function runDisplayTriggerChain(
         displayMode: true,
         displayData: content,
         preloaded: buildPreloaded(snap),
+        templateContext: async () => ({
+          ...snap, character: snap.character, chat: snap.chat, variables: snap.vars, commit: false,
+        }),
       },
     );
 

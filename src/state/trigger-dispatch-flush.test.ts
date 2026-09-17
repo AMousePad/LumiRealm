@@ -1,3 +1,4 @@
+import { basicTriggerContext } from '../../tests/helpers/trigger-runtime.js';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { RisuPayload } from '../core/payload/index.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
@@ -53,7 +54,8 @@ describe('trigger dispatcher flush', () => {
       getCachedSettingsSync: () => ({ enabled: true, legacyMediaFindings: false }) as never,
       makeStateChangedCallback: () => () => {},
       makeAuxDebugCapture: () => undefined,
-      resolveReadonly: async (text) => text,
+      prepareTriggerContext: basicTriggerContext,
+    resolveReadonly: async (text) => text,
       ensureActiveCardForChat: async () => active,
       refreshBgHtml: async () => {},
       refreshVariables: async () => {},

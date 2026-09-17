@@ -165,17 +165,20 @@ describe('vars.declareLocalVar + getLocal precedence', () => {
   test('declared local shadows chat-scope', () => {
     const state = makeState({ varsCache: { '$x': 'chat-value' } });
     const api = makeVarsApi(state);
+    api.setIndent(1);
     api.declareLocalVar('x', 'local-value', 1);
     expect(api.getVar('x')).toBe('local-value');
   });
 
-  test('deeper local indent wins (reverse iteration)', () => {
+  test('a deeper declaration updates the existing outer binding', () => {
     const state = makeState();
     const api = makeVarsApi(state);
+    api.setIndent(3);
     api.declareLocalVar('x', 'shallow', 1);
     api.declareLocalVar('x', 'deep', 3);
     expect(api.getLocal('x')).toBe('deep');
     expect(api.getVar('x')).toBe('deep');
+    expect(state.localScopes.has('3')).toBe(false);
   });
 
   test('local miss falls through to chat scope', () => {
@@ -185,12 +188,12 @@ describe('vars.declareLocalVar + getLocal precedence', () => {
     expect(api.getVar('y')).toBe('chat-y');
   });
 
-  test('non-numeric indent → 0', () => {
+  test('a nonnumeric indent does not create a visible depth-zero local', () => {
     const state = makeState();
     const api = makeVarsApi(state);
     api.declareLocalVar('x', 'v', 'not-a-number');
-    expect(state.localScopes.has(0)).toBe(true);
-    expect(api.getLocal('x')).toBe('v');
+    expect(state.localScopes.has('not-a-number')).toBe(true);
+    expect(api.getLocal('x')).toBeUndefined();
   });
 });
 

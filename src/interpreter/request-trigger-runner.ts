@@ -18,6 +18,7 @@ const quietConsole: InterpConsole = {
 };
 
 export interface RequestTriggerChainOptions {
+  readonly templateContext?: import('./runtime/template.js').TriggerTemplateContext;
   readonly api: HostApi;
   readonly chatId: string;
   readonly characterId: string;
@@ -46,6 +47,7 @@ export async function runRequestTriggerChain(
       characterId: opts.characterId,
       binding: 'request',
       displayMode: true,
+      ...(opts.templateContext ? { templateContext: opts.templateContext } : {}),
       requestData: messages.map(({ role, content }) => ({
         role,
         content: projectLlmText(content),

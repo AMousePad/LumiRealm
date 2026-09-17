@@ -1,3 +1,4 @@
+import { basicTriggerContext } from '../helpers/trigger-runtime.js';
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   createLumiInterceptors,
@@ -223,6 +224,7 @@ function makeMockDeps(overrides?: Partial<CreateLumiInterceptorsDeps>): {
     },
     getCachedSettingsSync: () => DEFAULT_SETTINGS,
     modulesByNamespaceFromCard: () => null,
+    prepareTriggerContext: basicTriggerContext,
     resolveReadonly: async (template, chatId, _characterId, _userId, opts) => {
       state.resolveCalls.push({ template, chatId, ...(opts ? { opts } : {}) });
       return template;

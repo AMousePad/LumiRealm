@@ -1043,6 +1043,7 @@ const refreshToggleDefinitions = variablesTogglesService.refreshToggleDefinition
 const writeToggleValue = variablesTogglesService.writeToggleValue;
 
 const triggerDispatcher = createTriggerDispatcher({
+  prepareTriggerContext: readonlyResolver.prepareTriggerContext,
   compiledByCharacter,
   getCachedSettingsSync,
   makeStateChangedCallback,
@@ -1062,6 +1063,7 @@ const dispatchButtonClick = triggerDispatcher.dispatchButtonClick;
 const feDisplayShadowOptOut = new Set<string>();
 
 createLumiInterceptors({
+  prepareTriggerContext: readonlyResolver.prepareTriggerContext,
   activeCardByChat,
   captureUserId,
   isFeDisplayAuthoritative: (chatId) => FE_DISPLAY_ENABLED && !feDisplayShadowOptOut.has(chatId),

@@ -13,31 +13,57 @@ export interface VarsState {
   readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   readonly tempVars?: Record<string, string>;
   // indent -> name -> value; deepest indent wins over varsCache.
-  readonly localScopes: Map<number, Map<string, string>>;
+  readonly localScopes: Map<string, Map<string, string>>;
+  readonly currentIndent?: { value: number };
   // Boxed so reference is shared across module boundaries.
   readonly dirty: { value: boolean };
   readonly characterId: string | null;
   // FE display dep recording: Lua var reads are invisible to the CBS recorder.
   readonly onVarRead?: (name: string) => void;
+  readonly parseTemplate?: (text: string) => string;
 }
 
 export interface VarsApi {
   getVar(name: string): string;
+  getStoredVar(name: string): string;
   setVar(name: string, value: unknown): void;
   resolve(value: unknown, kind: string): string;
   declareLocalVar(name: string, value: unknown, indent: unknown): void;
   setvarV1(name: string, op: string, rawValue: unknown): void;
   setvarV2(name: string, op: string, value: unknown): void;
   getLocal(name: string): string | undefined;
+  setIndent(indent: unknown): void;
+  clearLocalVars(indent: number): void;
+}
+
+export type TriggerLocalState = Required<Pick<VarsState, 'localScopes' | 'currentIndent'>>;
+
+export function createTriggerLocalState(): TriggerLocalState {
+  return { localScopes: new Map(), currentIndent: { value: 0 } };
 }
 
 export function makeVarsApi(state: VarsState): VarsApi {
-  function getLocal(name: string): string | undefined {
-    const scopes = [...state.localScopes.values()].reverse();
-    for (const scope of scopes) {
-      if (scope.has(name)) return scope.get(name);
+  const currentIndent = state.currentIndent ?? { value: 0 };
+  function setIndent(indent: unknown): void {
+    if (typeof indent === 'number' && indent >= 0) currentIndent.value = indent;
+  }
+
+  function localScope(name: string, indent: unknown): Map<string, string> | undefined {
+    for (let i = indent as number; i >= 0; i--) {
+      const scope = state.localScopes.get(String(i));
+      if (scope?.has(name)) return scope;
     }
     return undefined;
+  }
+
+  function getLocal(name: string): string | undefined {
+    return localScope(name, currentIndent.value)?.get(name);
+  }
+
+  function clearLocalVars(indent: number): void {
+    for (const depth of state.localScopes.keys()) {
+      if (Number(depth) >= indent) state.localScopes.delete(depth);
+    }
   }
 
   function getVar(name: string): string {
@@ -45,6 +71,10 @@ export function makeVarsApi(state: VarsState): VarsApi {
     state.onVarRead?.(n);
     const local = getLocal(n);
     if (local !== undefined) return toStr(local);
+    return storedVar(n) ?? state.tempVars?.[n] ?? 'null';
+  }
+
+  function storedVar(n: string): string | undefined {
     const fromCache = state.varsCache['$' + n];
     if (fromCache !== undefined) return toStr(fromCache);
     // Risu chatVar.svelte.ts: consult defaultVariables before returning 'null'.
@@ -52,9 +82,12 @@ export function makeVarsApi(state: VarsState): VarsApi {
       ?? getScriptstateDefaultsByCharacter(state.characterId);
     const fromDefaults = defaults?.[n];
     if (fromDefaults !== undefined) return toStr(fromDefaults);
-    const fromTemp = state.tempVars?.[n];
-    if (fromTemp !== undefined) return toStr(fromTemp);
-    return 'null';
+    return undefined;
+  }
+
+  function getStoredVar(name: string): string {
+    state.onVarRead?.(name);
+    return storedVar(name) ?? 'null';
   }
 
   function setVar(name: string, value: unknown): void {
@@ -64,6 +97,8 @@ export function makeVarsApi(state: VarsState): VarsApi {
       state.tempVars[n] = v;
       return;
     }
+    const local = localScope(n, currentIndent.value);
+    if (local) { local.set(n, v); return; }
     // Risu runTrigger only marks stored state as changed when the value differs.
     if (state.varsCache['$' + n] === v) return;
     state.varsCache['$' + n] = v;
@@ -72,19 +107,21 @@ export function makeVarsApi(state: VarsState): VarsApi {
   }
 
   function resolve(value: unknown, kind: string): string {
-    if (kind === 'value' || kind === 'regex') return toStr(value);
-    if (kind === 'var') return getVar(toStr(value));
-    return toStr(value);
+    const text = toStr(value);
+    const parsed = state.parseTemplate ? state.parseTemplate(text) : text;
+    return kind === 'var' ? getVar(parsed) : parsed;
   }
 
   function declareLocalVar(name: string, value: unknown, indent: unknown): void {
-    const n = Number(indent) || 0;
-    if (!state.localScopes.has(n)) state.localScopes.set(n, new Map());
-    state.localScopes.get(n)!.set(toStr(name), toStr(value));
+    const n = String(indent);
+    let scope = localScope(toStr(name), indent) ?? state.localScopes.get(n);
+    if (!scope) { scope = new Map(); state.localScopes.set(n, scope); }
+    scope.set(toStr(name), value == null ? 'null' : toStr(value));
   }
 
   function setvarV1(name: string, op: string, rawValue: unknown): void {
-    assign(name, op, resolve(rawValue, 'value'), false);
+    const value = resolve(rawValue, 'value');
+    assign(resolve(name, 'value'), op, value, false);
   }
 
   function setvarV2(name: string, op: string, value: unknown): void {
@@ -109,6 +146,6 @@ export function makeVarsApi(state: VarsState): VarsApi {
   }
 
   return {
-    getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal,
+    getVar, getStoredVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal, setIndent, clearLocalVars,
   };
 }

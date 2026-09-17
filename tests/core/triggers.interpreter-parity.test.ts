@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { compileTrigger } from '../../src/core/triggers/compile.js';
 import { interpretTrigger, type InterpConsole } from '../../src/interpreter/trigger-interpreter.js';
 import { compareValues } from '../../src/interpreter/runtime/compare.js';
+import { advanceTriggerControl, type TriggerControlState, type TriggerControlRuntime } from '../../src/core/triggers/control-flow.js';
 import {
   KNOWN_V1_EFFECTS,
   KNOWN_V2_OPCODES,
@@ -34,6 +35,7 @@ function makeRecordingRuntime(opts: { asyncHostGetters?: boolean } = {}): { rt: 
     stopSending: false,
     sendAIprompt: false,
 
+    prepareTemplates: async () => {},
     resolve: (value: unknown, kind: string) => (kind === 'var' ? '0' : String(value)),
     setVar: (_n: string, _v: unknown) => {},
     getVar: (_n: string) => '0',
@@ -139,12 +141,17 @@ function makeRecordingRuntime(opts: { asyncHostGetters?: boolean } = {}): { rt: 
     warnDroppedTriggerCode: () => {},
   };
 
+  target.advanceControl = (effects: readonly TriggerEffect[], index: number, state: TriggerControlState) =>
+    advanceTriggerControl(effects, index, state, {
+      ...target, setIndent: () => {}, clearLocalVars: () => {},
+    } as unknown as TriggerControlRuntime);
+
   const rt = new Proxy(target, {
     get(t, prop) {
       const v = t[prop as string];
       if (typeof v === 'function') {
         return (...args: unknown[]) => {
-          rec(String(prop), args);
+          if (prop !== 'advanceControl' && prop !== 'prepareTemplates') rec(String(prop), args);
           return (v as (...a: unknown[]) => unknown).apply(t, args);
         };
       }

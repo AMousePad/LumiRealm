@@ -3,12 +3,14 @@ import type { TriggerEffect, TriggerScript } from '../../src/core/schemas/trigge
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
 import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
 import { interpretTrigger } from '../../src/interpreter/trigger-interpreter.js';
+import { compileTrigger } from '../../src/core/triggers/compile.js';
 
 export async function runTriggerEffects(
   effects: readonly TriggerEffect[],
   initial: Record<string, string> = {},
   opts: TriggerRuntimeOpts = {},
   conditions: TriggerScript['conditions'] = [],
+  execution: 'interpreted' | 'compiled' = 'interpreted',
 ) {
   const metadata: Record<string, unknown> = { chat_variables: { ...initial } };
   const unexpected = async (): Promise<never> => { throw new Error('Unexpected host mutation'); };
@@ -25,10 +27,27 @@ export async function runTriggerEffects(
     },
     characters: { get: async () => ({ id: 'test-character' }), update: unexpected },
   };
-  const runtime = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(), opts);
-  await interpretTrigger({ type: 'manual', comment: '', conditions, effect: [...effects] }, runtime, console, {
-    displayMode: opts.displayMode ?? false, lowLevelAccess: opts.lowLevelAccess ?? false, stepBudget: 1000,
+  const runtime = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(), {
+    templateContext: basicTriggerContext,
+    ...opts,
   });
+  const trigger: TriggerScript = { type: 'manual', comment: '', conditions, effect: [...effects] };
+  const gates = {
+    displayMode: opts.displayMode ?? false, lowLevelAccess: opts.lowLevelAccess ?? false, stepBudget: 1000,
+  };
+  if (execution === 'compiled') {
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await new AsyncFunction('__risu', 'console', '"use strict";\n' + compileTrigger(trigger, gates).body)(runtime, console);
+  } else {
+    await interpretTrigger(trigger, runtime, console, gates);
+  }
   await runtime.flush();
   return { runtime, saved: metadata.chat_variables as Record<string, string> };
+}
+
+export async function basicTriggerContext() {
+  return {
+    chatId: 'test-chat', userName: 'User', charName: 'Character',
+    character: {}, chat: {}, variables: {}, commit: false,
+  };
 }

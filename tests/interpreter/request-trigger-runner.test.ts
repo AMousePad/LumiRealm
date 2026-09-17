@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { TriggerScript } from '../../src/core/schemas/triggerscript.js';
 import type { HostApi } from '../../src/interpreter/host.js';
 import { runRequestTriggerChain } from '../../src/interpreter/request-trigger-runner.js';
+import { basicTriggerContext } from '../helpers/trigger-runtime.js';
 
 function host(writeCount: { value: number }): HostApi {
   return {
@@ -26,6 +27,20 @@ function requestTrigger(effect: TriggerScript['effect']): TriggerScript {
 }
 
 describe('structured request triggers', () => {
+  test('resolves macro operands without persisting request variables', async () => {
+    const writes = { value: 0 };
+    const result = await runRequestTriggerChain([{ role: 'user', content: 'before' }], {
+      api: host(writes), chatId: 'chat', characterId: 'character',
+      templateContext: basicTriggerContext,
+      triggers: [requestTrigger([
+        { type: 'v2SetVar', var: 'for{{user}}', value: '{{char}}', valueType: 'value', operator: '=' },
+        { type: 'v2SetRequestState', index: '0', indexType: 'value', value: 'for{{user}}', valueType: 'var' },
+      ])],
+    });
+    expect(result).toEqual([{ role: 'user', content: 'Character' }]);
+    expect(writes.value).toBe(0);
+  });
+
   test('mutates final request state with Risu bounds and role semantics', async () => {
     const writes = { value: 0 };
     const messages = [

@@ -12,7 +12,8 @@ function emitV2SetVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   };
   const code = line(
     ctx,
-    `await __risu.setvarV2(${resolveCall(e.var, "value")}, ${JSON.stringify(e.operator)}, ${resolveCall(e.value, e.valueType)});`,
+    `const __value = ${resolveCall(e.value, e.valueType === "value" ? "value" : "var")};\n` +
+    line(ctx, `await __risu.setvarV2(${resolveCall(e.var, "value")}, ${JSON.stringify(e.operator)}, __value);`),
   );
   return { code, needsAwait: true };
 }
@@ -21,7 +22,8 @@ function emitV2DeclareLocalVar(op: TriggerEffect, ctx: EmitContext): EmitResult 
   const e = op as unknown as { var: string; value: string; valueType: "var" | "value"; indent: number };
   const code = line(
     ctx,
-    `__risu.declareLocalVar(${resolveCall(e.var, "value")}, ${resolveCall(e.value, e.valueType)}, ${e.indent});`,
+    `const __value = ${resolveCall(e.value, e.valueType === "value" ? "value" : "var")};\n` +
+    line(ctx, `__risu.declareLocalVar(${resolveCall(e.var, "value")}, __value, ${JSON.stringify(e.indent)});`),
   );
   return { code, needsAwait: false };
 }

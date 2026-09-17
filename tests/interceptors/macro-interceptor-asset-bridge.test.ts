@@ -1,3 +1,4 @@
+import { basicTriggerContext } from '../helpers/trigger-runtime.js';
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   createLumiInterceptors,
@@ -52,6 +53,7 @@ function deps(active: ActiveCard): CreateLumiInterceptorsDeps {
     ensureActiveCardForChat: async () => active,
     getCachedSettingsSync: () => DEFAULT_SETTINGS,
     modulesByNamespaceFromCard: () => null,
+    prepareTriggerContext: basicTriggerContext,
     resolveReadonly: async (template) => template,
     resolveReadonlyMany: async (templates) => templates,
     runMessageVarPass: async () => undefined,

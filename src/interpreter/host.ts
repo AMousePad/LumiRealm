@@ -173,6 +173,7 @@ export interface TriggerRuntimeOpts {
   readonly chatId?: string;
   /** Pre-fetched chat-state snapshot — see `TriggerRuntimePreloaded`. */
   readonly preloaded?: TriggerRuntimePreloaded;
+  readonly localState?: import('./runtime/vars.js').TriggerLocalState;
   // Backend uses this to filter MESSAGE_EDITED self-echoes from Lua setChat.
   readonly rememberOurWrite?: (chatId: string, msgId: string, content: string) => void;
   readonly stateChanged?: () => void;
@@ -208,6 +209,7 @@ export interface TriggerRuntimeOpts {
   /** Backs Lua `cbs(value)`. Used by listenEdit chains that don't run
    *  inside a dispatch-context window. */
   readonly resolveTemplate?: (text: string) => Promise<string>;
+  readonly templateContext?: import('./runtime/template.js').TriggerTemplateContext;
   /** FE display dep recording: reports Lua-side var reads (getChatVar/getState/
    *  getGlobalVar) that the CBS recorder cannot see. */
   readonly onVarRead?: (name: string, scope: 'chat' | 'global') => void;

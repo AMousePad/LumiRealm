@@ -1,5 +1,6 @@
 import type { TriggerScript, TriggerEffect } from '../core/schemas/triggerscript.js';
 import type { RisuTriggerRuntime } from './runtime.js';
+import { triggerNeedsTemplates } from '../core/triggers/templates.js';
 
 export interface InterpConsole {
   log(...a: unknown[]): void;
@@ -27,13 +28,6 @@ type Flow = 'normal' | 'return' | 'break';
 
 type Any = Record<string, any>;
 
-type Node =
-  | { kind: 'leaf'; op: TriggerEffect }
-  | { kind: 'if'; op: TriggerEffect; then: Node[]; else: Node[] | null }
-  | { kind: 'loop'; body: Node[] }
-  | { kind: 'loopN'; op: TriggerEffect; body: Node[] }
-  | { kind: 'break' };
-
 interface InterpCtx {
   readonly rt: RisuTriggerRuntime;
   readonly console: InterpConsole;
@@ -41,109 +35,6 @@ interface InterpCtx {
   readonly lowLevelAccess: boolean;
   readonly budget: number;
   steps: number;
-}
-
-function readIndent(op: TriggerEffect): number {
-  const raw = (op as { indent?: unknown }).indent;
-  if (typeof raw === 'number' && raw >= 0) return raw;
-  return 0;
-}
-
-function parseBlock(
-  effects: readonly TriggerEffect[],
-  start: number,
-  minIndent: number,
-): { nodes: Node[]; next: number } {
-  const nodes: Node[] = [];
-  let i = start;
-  while (i < effects.length) {
-    const op = effects[i]!;
-    const opIndent = readIndent(op);
-
-    if (opIndent < minIndent) break;
-    if (
-      (op.type === 'v2EndIndent' || op.type === 'v2Else') &&
-      opIndent === minIndent &&
-      minIndent > 0
-    ) {
-      break;
-    }
-
-    switch (op.type) {
-      case 'v2If':
-      case 'v2IfVar':
-      case 'v2IfAdvanced': {
-        const thenRes = parseBlock(effects, i + 1, opIndent + 1);
-        i = thenRes.next;
-        const node: Node = { kind: 'if', op, then: thenRes.nodes, else: null };
-        const endOp = effects[i];
-        if (endOp && endOp.type === 'v2EndIndent' && readIndent(endOp) === opIndent + 1) {
-          i++;
-          const elseOp = effects[i];
-          if (elseOp && elseOp.type === 'v2Else' && readIndent(elseOp) === opIndent) {
-            const elseRes = parseBlock(effects, i + 1, opIndent + 1);
-            node.else = elseRes.nodes;
-            i = elseRes.next;
-            const elseEnd = effects[i];
-            if (elseEnd && elseEnd.type === 'v2EndIndent' && readIndent(elseEnd) === opIndent + 1) {
-              i++;
-            }
-          }
-        }
-        nodes.push(node);
-        break;
-      }
-      case 'v2Loop': {
-        const bodyRes = parseBlock(effects, i + 1, opIndent + 1);
-        i = bodyRes.next;
-        const endOp = effects[i];
-        if (endOp && endOp.type === 'v2EndIndent' && readIndent(endOp) === opIndent + 1) {
-          i++;
-        }
-        nodes.push({ kind: 'loop', body: bodyRes.nodes });
-        break;
-      }
-      case 'v2LoopNTimes': {
-        const bodyRes = parseBlock(effects, i + 1, opIndent + 1);
-        i = bodyRes.next;
-        const endOp = effects[i];
-        if (endOp && endOp.type === 'v2EndIndent' && readIndent(endOp) === opIndent + 1) {
-          i++;
-        }
-        nodes.push({ kind: 'loopN', op, body: bodyRes.nodes });
-        break;
-      }
-      case 'v2BreakLoop': {
-        nodes.push({ kind: 'break' });
-        i++;
-        break;
-      }
-      case 'v2Else':
-      case 'v2EndIndent': {
-        i++;
-        break;
-      }
-      default: {
-        nodes.push({ kind: 'leaf', op });
-        i++;
-        break;
-      }
-    }
-  }
-  return { nodes, next: i };
-}
-
-function evalCondition(op: TriggerEffect, rt: RisuTriggerRuntime): boolean {
-  const e = op as unknown as {
-    type: string;
-    condition: string;
-    target: string;
-    targetType: 'var' | 'value';
-    source: string;
-    sourceType?: 'var' | 'value';
-  };
-  const sourceKind = e.type === 'v2If' ? 'var' : e.sourceType ?? 'var';
-  return rt.compare(rt.resolve(e.source, sourceKind), rt.resolve(e.target, e.targetType), e.condition);
 }
 
 type LeafHandler = (op: TriggerEffect, ctx: InterpCtx) => void | Flow | Promise<void | Flow>;
@@ -247,11 +138,13 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2SetVar: async (op, { rt }) => {
     const e = op as Any;
-    await rt.setvarV2(rt.resolve(e.var, 'value'), e.operator, rt.resolve(e.value, e.valueType));
+    const value = rt.resolve(e.value, e.valueType === 'value' ? 'value' : 'var');
+    await rt.setvarV2(rt.resolve(e.var, 'value'), e.operator, value);
   },
   v2DeclareLocalVar: (op, { rt }) => {
     const e = op as Any;
-    rt.declareLocalVar(rt.resolve(e.var, 'value'), rt.resolve(e.value, e.valueType), e.indent);
+    const value = rt.resolve(e.value, e.valueType === 'value' ? 'value' : 'var');
+    rt.declareLocalVar(rt.resolve(e.var, 'value'), value, e.indent);
   },
   v2CutChat: async (op, { rt }) => {
     const e = op as Any;
@@ -679,64 +572,10 @@ function bumpBudget(ctx: InterpCtx): void {
 }
 
 async function execLeaf(op: TriggerEffect, ctx: InterpCtx): Promise<Flow> {
-  bumpBudget(ctx);
   const handler = LEAVES[op.type];
   if (!handler) return 'normal';
   const r = await handler(op, ctx);
   return r === 'return' || r === 'break' ? r : 'normal';
-}
-
-async function execNodes(nodes: readonly Node[], loopDepth: number, ctx: InterpCtx): Promise<Flow> {
-  for (const node of nodes) {
-    switch (node.kind) {
-      case 'leaf': {
-        const f = await execLeaf(node.op, ctx);
-        if (f !== 'normal') return f;
-        break;
-      }
-      case 'if': {
-        const cond = evalCondition(node.op, ctx.rt);
-        const branch = cond ? node.then : node.else;
-        if (branch) {
-          const f = await execNodes(branch, loopDepth, ctx);
-          if (f !== 'normal') return f;
-        }
-        break;
-      }
-      case 'loop': {
-        for (;;) {
-          const tick = ctx.rt.loopTick();
-          if ((tick & 0xff) === 0) await ctx.rt.sleep(1);
-          bumpBudget(ctx);
-          const f = await execNodes(node.body, loopDepth + 1, ctx);
-          if (f === 'break') break;
-          if (f === 'return') return 'return';
-        }
-        break;
-      }
-      case 'loopN': {
-        const e = node.op as Any;
-        const lim = Math.max(0, Number(ctx.rt.resolve(e.value, e.valueType)) || 0);
-        let broke = false;
-        for (let n = 0; n < lim; n++) {
-          bumpBudget(ctx);
-          const f = await execNodes(node.body, loopDepth + 1, ctx);
-          if (f === 'break') {
-            broke = true;
-            break;
-          }
-          if (f === 'return') return 'return';
-        }
-        void broke;
-        break;
-      }
-      case 'break': {
-        bumpBudget(ctx);
-        return loopDepth > 0 ? 'break' : 'return';
-      }
-    }
-  }
-  return 'normal';
 }
 
 export async function interpretTrigger(
@@ -745,11 +584,11 @@ export async function interpretTrigger(
   console: InterpConsole,
   opts: InterpretOpts,
 ): Promise<void> {
+  if (triggerNeedsTemplates(trigger)) await rt.prepareTemplates();
   const conditions = (trigger.conditions ?? []) as readonly unknown[];
   if (conditions.length > 0 && !rt.checkConditions(conditions)) return;
 
   const effects = (trigger.effect ?? []) as readonly TriggerEffect[];
-  const { nodes } = parseBlock(effects, 0, 0);
   const ctx: InterpCtx = {
     rt,
     console,
@@ -758,7 +597,13 @@ export async function interpretTrigger(
     budget: opts.stepBudget ?? DEFAULT_STEP_BUDGET,
     steps: 0,
   };
-  await execNodes(nodes, 0, ctx);
+  const control = { loops: {}, ticks: 0 };
+  for (let index = 0; index < effects.length; index++) {
+    bumpBudget(ctx);
+    const next = await rt.advanceControl(effects, index, control);
+    if (next !== undefined) { index = next; continue; }
+    if (await execLeaf(effects[index]!, ctx) === 'return') return;
+  }
 }
 
-export const __test = { parseBlock, evalCondition, LEAVES };
+export const __test = { LEAVES };

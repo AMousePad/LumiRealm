@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { runDisplayTriggerChain } from '../../src/display/trigger-runner.js';
 import type { DisplaySnapshot } from '../../src/display/snapshot.js';
 import type { TriggerScript } from '../../src/core/schemas/triggerscript.js';
@@ -61,6 +61,17 @@ function snapshot(trigger: TriggerScript): DisplaySnapshot {
 }
 
 describe('frontend structured display triggers', () => {
+  test('evaluates trigger macros from the snapshot without host requests', async () => {
+    const network = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected network request'));
+    try {
+      const snap = snapshot({ type: 'display', comment: '', conditions: [], effect: [
+        { type: 'v2SetDisplayState', value: '{{char}}: {{getvar::persisted}} / {{getvar::defaulted}}', valueType: 'value' },
+      ] } as TriggerScript);
+      expect(await runDisplayTriggerChain(snap, 'input')).toEqual({ content: 'Character: original / card default', ran: true });
+      expect(network).not.toHaveBeenCalled();
+    } finally { network.mockRestore(); }
+  });
+
   test('runs in Risu order against the current display text', async () => {
     const result = await runDisplayTriggerChain(snapshot({
       type: 'display',

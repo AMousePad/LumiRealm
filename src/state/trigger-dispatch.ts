@@ -23,6 +23,7 @@ import { invalidateMacroInterceptorForChat } from './macro-interceptor-cache.js'
 import type { RisuCompatSettings } from './settings-store.js';
 
 export interface TriggerDispatcherDeps {
+  readonly prepareTriggerContext: import('./readonly-resolver.js').ReadonlyResolver['prepareTriggerContext'];
   readonly compiledByCharacter: Map<string, readonly CompiledTriggerEntry[]>;
   readonly getCachedSettingsSync: (userId: string | undefined) => RisuCompatSettings;
   readonly makeStateChangedCallback: (chatId: string, userId: string | undefined) => () => void;
@@ -147,6 +148,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
       stateChanged: makeStateChangedCallback(chatId, userId),
       auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
       resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+      templateContext: () => deps.prepareTriggerContext(chatId, characterId, userId),
     });
     // Risu finalizes editOutput/list actions and stores the edited assistant
     // message before firing the structured output trigger. The trigger must
@@ -306,6 +308,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           stateChanged: makeStateChangedCallback(chatId, userId),
           auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
           resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+          templateContext: () => deps.prepareTriggerContext(chatId, characterId, userId),
         });
         const runtime = await makeRisuTriggerRuntime(api, { characterId }, scriptNS, {
           ...seams,
@@ -338,6 +341,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           stateChanged: makeStateChangedCallback(chatId, userId),
           auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
           resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+          templateContext: () => deps.prepareTriggerContext(chatId, characterId, userId),
         });
         await withDispatchContext(seams, async () => {
           const outFlags = { stopSending: false, varsFlushed: false };
@@ -417,6 +421,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps): TriggerDis
           stateChanged: makeStateChangedCallback(chatId, userId),
           auxDebugCapture: makeAuxDebugCapture(chatId, settings, userId),
           resolveTemplate: (text) => resolveReadonly(text, chatId, characterId, userId, { cbsContext: true }),
+          templateContext: () => deps.prepareTriggerContext(chatId, characterId, userId),
         });
         const runtime = await makeRisuTriggerRuntime(api, { characterId }, scriptNS, {
           ...seams,

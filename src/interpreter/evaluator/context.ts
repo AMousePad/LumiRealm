@@ -206,10 +206,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
       : chatId
         ? getOverlay(chatId)
         : null;
-  // Temp vars are per-pass scratchpad (Risu cbs.ts). Not persisted;
-  // not gated on commit so display-mode settempvar chains work correctly.
-  const tempOverlay = new Map<string, string>();
-
   const envLocal = variables.local ?? {};
   const envGlobal = variables.global ?? {};
   const envChat = variables.chat ?? {};
@@ -231,7 +227,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
   const vars = {
     get(scope: VarScope, name: string): string {
       if (recordRead) recordRead(scope, name);
-      if (scope === "temp") return tempOverlay.get(name) ?? "";
       if (overlay) {
         if (scope === "local" && overlay.local.has(name)) return overlay.local.get(name)!;
         if (scope === "global" && overlay.global.has(name)) return overlay.global.get(name)!;
@@ -249,7 +244,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
       return "null";
     },
     set(scope: VarScope, name: string, value: string): void {
-      if (scope === "temp") { tempOverlay.set(name, value); return; }
       if (!commit || !overlay) return;
       if (scope === "global") {
         overlay.global.set(name, value);
@@ -272,7 +266,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     },
     has(scope: VarScope, name: string): boolean {
       if (recordRead) recordRead(scope, name);
-      if (scope === "temp") return tempOverlay.has(name);
       if (overlay) {
         if (scope === "local" && (overlay.local.has(name) || overlay.chat.has(name))) return true;
         if (scope === "global" && overlay.global.has(name)) return true;
@@ -284,7 +277,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
         || Object.prototype.hasOwnProperty.call(defaults, name);
     },
     delete(scope: VarScope, name: string): void {
-      if (scope === "temp") { tempOverlay.delete(name); return; }
       if (!commit) return;
       if (overlay) {
         if (scope === "global") overlay.global.delete(name);
@@ -374,10 +366,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
 
   const lorebook: readonly LorebookEntry[] = input.lorebook ?? [];
 
-  // Risu creates this table inside each risuChatParser call. Recursive calls
-  // share it through parser arguments, but independent templates never do.
-  const functions = makeFunctionRegistry();
-
   const rng = recorder
     ? { random: () => { recorder.volatile = true; return Math.random(); } }
     : { random: () => Math.random() };
@@ -385,7 +373,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     ? { now: () => { recorder.volatile = true; return Date.now(); } }
     : { now: () => Date.now() };
 
-  const out: EvaluatorCtx = {
+  return freshParserContext({
     ...(input.resolveLeaf ? { resolveLeaf: input.resolveLeaf } : {}),
     chatId,
     vars,
@@ -398,7 +386,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     role: input.currentMessageRoleOverride
       ? normalizeRoleToLumi(input.currentMessageRoleOverride)
       : null,
-    functions,
     aiModel: input.system?.model ?? "",
     axModel: "",
     isFirstMessage: Number(chat.messageCount ?? 0) <= 1,
@@ -426,12 +413,35 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     // The prompt-regex pass (suppressVarPersist) leaves the setvar family literal,
     // mirroring Risu's editprocess (no runVar). See RisuRuntimeContext.promptRegexLiteralVars.
     ...(input.suppressVarPersist ? { promptRegexLiteralVars: true } : {}),
+  });
+}
+
+// Independent risuChatParser calls reset functions and temporary variables,
+// while retaining the character, assets and live saved-variable reader.
+export function freshParserContext(base: Omit<EvaluatorCtx, 'functions'>): EvaluatorCtx {
+  const temp = new Map<string, string>();
+  const vars: EvaluatorCtx['vars'] = {
+    get: (scope, name) => scope === 'temp' ? temp.get(name) ?? '' : base.vars.get(scope, name),
+    set: (scope, name, value) => {
+      if (scope === 'temp') temp.set(name, value);
+      else base.vars.set(scope, name, value);
+    },
+    add(scope, name, delta) {
+      if (scope === 'temp') this.set(scope, name, String(Number(this.get(scope, name)) + delta));
+      else base.vars.add(scope, name, delta);
+    },
+    has: (scope, name) => scope === 'temp' ? temp.has(name) : base.vars.has(scope, name),
+    delete: (scope, name) => {
+      if (scope === 'temp') temp.delete(name);
+      else base.vars.delete(scope, name);
+    },
   };
+  const out: EvaluatorCtx = { ...base, vars, functions: makeFunctionRegistry() };
   // Late-bound: handlers re-parse field content with the same context.
   // Lazy require dodges the circular dep through dispatch->handlers.
   (out as { evaluate?: (text: string) => string }).evaluate = (text: string) => {
     if (typeof text !== "string" || text.length === 0) return "";
-    if (text.indexOf("{{") < 0 && text.indexOf("<") < 0) return text;
+    if (text.indexOf("{{") < 0 && text.indexOf("{#") < 0 && text.indexOf("<") < 0) return text;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { evaluate } = require("./scanner.js") as typeof import("./scanner.js");
     return evaluate(text, out, out.callStack !== undefined ? { callStack: out.callStack } : {});

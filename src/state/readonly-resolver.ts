@@ -40,6 +40,9 @@ export interface ReadonlyResolverDeps {
 }
 
 export interface ReadonlyResolver {
+  readonly prepareTriggerContext: (
+    chatId: string, characterId: string, userId: string | undefined,
+  ) => Promise<BuildEvaluatorCtxInput>;
   readonly resolve: (
     template: string,
     chatId: string,
@@ -329,5 +332,11 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
     }
   }
 
-  return { resolve, resolveMany, resolveInWorker, fetchMessages, stripMessageSetvars };
+  async function prepareTriggerContext(chatId: string, characterId: string, userId: string | undefined): Promise<BuildEvaluatorCtxInput> {
+    if (!userId) throw new Error('Trigger evaluation requires a user context');
+    const messages = await fetchMessages(chatId);
+    return { ...await buildCtxInput(chatId, characterId, userId, messages, false), commit: false };
+  }
+
+  return { resolve, resolveMany, resolveInWorker, fetchMessages, stripMessageSetvars, prepareTriggerContext };
 }

@@ -43,6 +43,7 @@ export interface DispatchContext {
   auxDebugCapture?: (event: AuxDebugCaptureEvent) => void;
   /** Backs Lua `cbs(value)`. Routes through resolveReadonly. */
   resolveTemplate?: (text: string) => Promise<string>;
+  templateContext?: import('./template.js').TriggerTemplateContext;
 }
 
 export interface AuxDebugCaptureEvent {

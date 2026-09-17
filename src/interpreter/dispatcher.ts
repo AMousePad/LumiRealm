@@ -12,6 +12,7 @@ import type { RisuBinding } from './runtime.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import { interpretTrigger, type InterpConsole } from './trigger-interpreter.js';
 import { withTriggerDepth } from './runtime/als.js';
+import { createTriggerLocalState, type TriggerLocalState } from './runtime/vars.js';
 
 export interface DispatcherScriptNS extends ScriptNS {
   /** Manual triggers registered by name — v2RunTrigger resolves through here. */
@@ -119,6 +120,7 @@ export async function dispatchBinding(
   const matches = ctx.compiledTriggers.filter((t) => triggerMatchesBinding(t, binding));
   dlog(`dispatchBinding: binding=${binding} matches=${matches.length}/${ctx.compiledTriggers.length} data=${JSON.stringify(ctx.data).slice(0, 200)}`);
   let stopSending = false;
+  const localState = createTriggerLocalState();
   for (const entry of matches) {
     const tStart = Date.now();
     dlog(`→ trigger START name=${entry.name} binding=${entry.binding} triggers=${JSON.stringify(entry.triggers)} effects=${entry.source?.effect?.length ?? 0}`);
@@ -130,7 +132,7 @@ export async function dispatchBinding(
         ctx.api,
         ctx.data,
         ctx.scriptNS,
-        { binding, displayMode: binding === 'display' },
+        { binding, displayMode: binding === 'display', localState },
         flags,
       );
       dlog(`← trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms stopSending=${flags.stopSending}`);
@@ -167,6 +169,7 @@ function makeMirroredConsole(name: string): InterpConsole {
 interface TriggerInvocation {
   readonly binding: RisuBinding;
   readonly displayMode: boolean;
+  readonly localState: TriggerLocalState;
 }
 
 async function runInterpretedTrigger(
@@ -185,6 +188,7 @@ async function runInterpretedTrigger(
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
       binding: invocation.binding,
       characterId: entry.rtOpts.characterId,
+      localState: invocation.localState,
     });
     try {
       await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {
@@ -218,6 +222,7 @@ export async function dispatchByManualName(
   });
   dlog(`dispatchByManualName: name="${manualName}" matches=${matches.length}/${ctx.compiledTriggers.length}`);
   let fired = 0;
+  const localState = createTriggerLocalState();
   for (const entry of matches) {
     try {
       await runInterpretedTrigger(
@@ -225,7 +230,7 @@ export async function dispatchByManualName(
         ctx.api,
         ctx.data,
         ctx.scriptNS,
-        { binding: 'manual', displayMode: false },
+        { binding: 'manual', displayMode: false, localState },
         outFlags,
       );
       fired++;

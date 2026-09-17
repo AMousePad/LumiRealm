@@ -1,3 +1,4 @@
+import { basicTriggerContext } from '../helpers/trigger-runtime.js';
 import { describe, expect, test } from 'bun:test';
 import { prepareTriggers } from '../../src/interpreter/dispatcher.js';
 import { createTriggerDispatcher } from '../../src/state/trigger-dispatch.js';
@@ -75,7 +76,8 @@ describe('output lifecycle order', () => {
       }) as never,
       makeStateChangedCallback: () => () => {},
       makeAuxDebugCapture: () => undefined,
-      resolveReadonly: async (text) => text,
+      prepareTriggerContext: basicTriggerContext,
+    resolveReadonly: async (text) => text,
       ensureActiveCardForChat: async () => active,
       refreshBgHtml: async () => {},
       refreshVariables: async () => {},
