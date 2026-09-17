@@ -308,13 +308,13 @@ export async function makeRisuTriggerRuntime(
   const globalVarsPromise = preloaded?.globalVars
     ? Promise.resolve({ ...preloaded.globalVars })
     : loadGlobalVars(api);
-  let varsCache: Record<string, string>;
+  let varsPromise: Promise<Record<string, string>>;
   let isInheritedVarsCache = false;
   let _tVars = 0;
   let _varsSrc: 'inherited' | 'preloaded' | 'fetched' = 'fetched';
   const inheritedFrame = inheritedVarsAls.getStore();
   if (inheritedFrame) {
-    varsCache = inheritedFrame;
+    varsPromise = Promise.resolve(inheritedFrame);
     isInheritedVarsCache = true;
     _varsSrc = 'inherited';
   } else if (preloaded?.varsCache) {
@@ -322,14 +322,13 @@ export async function makeRisuTriggerRuntime(
     // Risu's listenEdit chain runs each trigger in fresh Lua state , varsCache
     // mutations from one trigger should not leak into the next via the
     // shared preload (they'd leak via flush() at chain end if needed).
-    varsCache = { ...preloaded.varsCache };
+    varsPromise = Promise.resolve({ ...preloaded.varsCache });
     _varsSrc = 'preloaded';
   } else {
     const _t0 = Date.now();
-    varsCache = await loadVars(api);
-    _tVars = Date.now() - _t0;
+    varsPromise = loadVars(api).then(vars => { _tVars = Date.now() - _t0; return vars; });
   }
-  const globalVarsCache = await globalVarsPromise;
+  const [varsCache, globalVarsCache] = await Promise.all([varsPromise, globalVarsPromise]);
   let messagesCache: HostMessage[] = [];
   // Risu's `char.firstMessage` (greeting), excluded from messagesCache to
   // match `chat.message[]`. getFirstMessage / getCharacterLastMessage use it.
@@ -1250,12 +1249,8 @@ export async function makeRisuTriggerRuntime(
     }
     const wasDirty = dirty.value;
     if (dirty.value) {
-      try {
-        await saveVars(api, varsCache, portalChatId);
-        flog(`saveVars OK`);
-      } catch (err) {
-        _logFlush.error(`saveVars FAILED: ${(err as Error).message}`);
-      }
+      await saveVars(api, varsCache, portalChatId);
+      flog(`saveVars OK`);
     }
     dirty.value = false;
     await chatMutationTail;

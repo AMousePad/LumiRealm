@@ -8,6 +8,13 @@ import type { HostApi } from '../host.js';
 
 export const VAR_STORE_KEY = 'chat_variables';
 
+export class VariablePersistenceError extends Error {
+  constructor(operation: 'read' | 'write', key: string, cause: unknown) {
+    super(`Could not ${operation} ${key}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'VariablePersistenceError';
+  }
+}
+
 export async function loadVars(api: HostApi, chatId?: string): Promise<Record<string, string>> {
   if (chatId) {
     const cached = getRecentFlush(chatId);
@@ -21,8 +28,8 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
       out['$' + k] = toStr(v);
     }
     return out;
-  } catch {
-    return {};
+  } catch (cause) {
+    throw new VariablePersistenceError('read', VAR_STORE_KEY, cause);
   }
 }
 
@@ -37,8 +44,8 @@ export async function loadGlobalVars(api: HostApi): Promise<Record<string, strin
       out[key] = toStr(value);
     }
     return out;
-  } catch {
-    return {};
+  } catch (cause) {
+    throw new VariablePersistenceError('read', 'macro_variables', cause);
   }
 }
 
@@ -54,5 +61,7 @@ export async function saveVars(api: HostApi, vars: Record<string, string>, chatI
   try {
     if (chatId) await runChatMetadataExclusive(chatId, write);
     else await write();
-  } catch { /* ignore, chat-metadata write may not be permitted */ }
+  } catch (cause) {
+    throw new VariablePersistenceError('write', VAR_STORE_KEY, cause);
+  }
 }
