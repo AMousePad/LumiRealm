@@ -41,10 +41,9 @@ export function replaceString(
 }
 
 export function random(min: unknown, max: unknown): number {
-  const a = Number(min) || 0;
-  const b = Number(max) || 0;
-  if (a === b) return a;
-  return Math.floor(a + Math.random() * (b - a + 1));
+  const a = Number(min);
+  const b = Number(max);
+  return Math.floor(Math.random() * (b - a + 1) + a);
 }
 
 export function setCharAt(source: unknown, index: unknown, value: unknown): string {

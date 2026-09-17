@@ -78,8 +78,8 @@ describe('random', () => {
     }
   });
 
-  test('non-numeric inputs → 0', () => {
-    expect(random('x', 'y')).toBe(0);
+  test('non-numeric inputs produce NaN', () => {
+    expect(random('x', 'y')).toBeNaN();
   });
 });
 
