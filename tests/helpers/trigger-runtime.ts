@@ -27,7 +27,7 @@ export async function runTriggerEffects(
   };
   const runtime = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(), opts);
   await interpretTrigger({ type: 'manual', comment: '', conditions, effect: [...effects] }, runtime, console, {
-    displayMode: opts.displayMode ?? false, lowLevelAccess: false, stepBudget: 1000,
+    displayMode: opts.displayMode ?? false, lowLevelAccess: opts.lowLevelAccess ?? false, stepBudget: 1000,
   });
   await runtime.flush();
   return { runtime, saved: metadata.chat_variables as Record<string, string> };

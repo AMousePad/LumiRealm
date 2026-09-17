@@ -153,7 +153,7 @@ function emitExtractRegex(op: TriggerEffect, ctx: EmitContext): EmitResult {
     ctx,
     `${setVarCall(
       effect.inputVar,
-      `__risu.extractRegex(${resolveCall(effect.value, "value")}, ${JSON.stringify(effect.regex)}, ${JSON.stringify(effect.flags)}, ${JSON.stringify(effect.result)})`,
+      `__risu.extractRegex(${resolveCall(effect.value, "value")}, ${JSON.stringify(effect.regex)}, ${JSON.stringify(effect.flags)}, ${JSON.stringify(effect.result)}, true)`,
     )};`,
   );
   return { code, needsAwait: false };

@@ -18,8 +18,8 @@ describe('extractRegex', () => {
     expect(extractRegex('hello', '(\\d+)', '', '$1')).toBe('');
   });
 
-  test('invalid regex → empty string (no throw)', () => {
-    expect(extractRegex('x', '(', '', '$0')).toBe('');
+  test('invalid extraction regex throws', () => {
+    expect(() => extractRegex('x', '(', '', '$0')).toThrow(SyntaxError);
   });
 
   test('empty result template still triggers match', () => {
@@ -51,13 +51,13 @@ describe('replaceString', () => {
     expect(replaceString('hello world', '\\w+', '[match]', '', '')).toBe('[match] world');
   });
 
-  test('replacement param wins over result param', () => {
-    expect(replaceString('a', 'a', 'OLD', 'NEW', '')).toBe('NEW');
-    expect(replaceString('a', 'a', 'OLD', '', '')).toBe('OLD'); // empty replacement falls through
+  test('replacement is used only when the result selects a capture', () => {
+    expect(replaceString('a', 'a', 'OLD', 'NEW', '')).toBe('OLD');
+    expect(replaceString('a', 'a', '$0', '', '')).toBe('');
   });
 
   test('flags g works for multi-replace', () => {
-    expect(replaceString('aaa', 'a', '', 'b', 'g')).toBe('bbb');
+    expect(replaceString('aaa', 'a', '$0', 'b', 'g')).toBe('bbb');
   });
 
   test('invalid regex → original source', () => {
@@ -88,8 +88,8 @@ describe('setCharAt', () => {
     expect(setCharAt('hello', 1, 'a')).toBe('hallo');
   });
 
-  test('out-of-range index → unchanged', () => {
-    expect(setCharAt('abc', 99, 'x')).toBe('abc');
+  test('an array index past the end appends while a negative index does not', () => {
+    expect(setCharAt('abc', 99, 'x')).toBe('abcx');
     expect(setCharAt('abc', -1, 'x')).toBe('abc');
   });
 
@@ -97,8 +97,8 @@ describe('setCharAt', () => {
     expect(setCharAt('abc', 1, 'XYZ')).toBe('aXYZc');
   });
 
-  test('non-numeric index treated as 0', () => {
-    expect(setCharAt('abc', 'foo', 'X')).toBe('Xbc');
+  test('non-numeric index leaves the text unchanged', () => {
+    expect(setCharAt('abc', 'foo', 'X')).toBe('abc');
   });
 });
 

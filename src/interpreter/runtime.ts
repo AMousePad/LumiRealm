@@ -149,7 +149,7 @@ export interface RisuTriggerRuntime {
   runCode(code: unknown): Promise<void>;
   runLua(code: unknown, luaOpts?: Record<string, unknown>): Promise<unknown>;
   // string / regex / random
-  extractRegex(value: unknown, regex: unknown, flags: unknown, result: unknown): string;
+  extractRegex(value: unknown, regex: unknown, flags: unknown, result: unknown, v1?: boolean): string;
   regexTest(value: unknown, regex: unknown, flags: unknown): boolean;
   replaceString(source: unknown, regex: unknown, result: unknown, replacement: unknown, flags: unknown): string;
   random(min: unknown, max: unknown): number;

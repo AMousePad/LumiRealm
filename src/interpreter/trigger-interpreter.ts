@@ -224,7 +224,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   extractRegex: (op, ctx) => {
     if (!ctx.lowLevelAccess) return;
     const e = op as Any;
-    ctx.rt.setVar(e.inputVar, ctx.rt.extractRegex(ctx.rt.resolve(e.value, 'value'), e.regex, e.flags, e.result));
+    ctx.rt.setVar(e.inputVar, ctx.rt.extractRegex(ctx.rt.resolve(e.value, 'value'), e.regex, e.flags, e.result, true));
   },
   runImgGen: async (op, ctx) => {
     if (!ctx.lowLevelAccess) return;
