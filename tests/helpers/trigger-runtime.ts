@@ -7,7 +7,7 @@ import { compileTrigger } from '../../src/core/triggers/compile.js';
 
 export async function runTriggerEffects(
   effects: readonly TriggerEffect[],
-  initial: Record<string, string> = {},
+  initial: Record<string, string | null> = {},
   opts: TriggerRuntimeOpts = {},
   conditions: TriggerScript['conditions'] = [],
   execution: 'interpreted' | 'compiled' = 'interpreted',
@@ -42,7 +42,7 @@ export async function runTriggerEffects(
     await interpretTrigger(trigger, runtime, console, gates);
   }
   await runtime.flush();
-  return { runtime, saved: metadata.chat_variables as Record<string, string> };
+  return { runtime, saved: metadata.chat_variables as Record<string, string | null> };
 }
 
 export async function basicTriggerContext() {

@@ -1,6 +1,18 @@
 import { expect, test } from 'bun:test';
 import { createNativeVariableMacros } from '../../src/display/native-variable-macros.js';
 
+test('native null entries still exist and stringify like the host', () => {
+  const resolve = createNativeVariableMacros({ local: { missing: null, empty: '', literal: 'null' }, global: { missing: null }, chat: {} }, new Set());
+  expect(resolve('getchatvar', ['missing'])?.text).toBe('null');
+  expect(resolve('getgvar', ['missing'])?.text).toBe('null');
+  expect(resolve('haschatvar', ['missing'])?.text).toBe('true');
+  expect(resolve('hasgvar', ['missing'])?.text).toBe('true');
+  expect(resolve('getchatvar', ['empty'])?.text).toBe('');
+  expect(resolve('getchatvar', ['literal'])?.text).toBe('null');
+  expect(resolve('getchatvar', ['absent'])?.text).toBe('');
+  expect(resolve('haschatvar', ['absent'])?.text).toBe('false');
+});
+
 test('native variables keep local, global, and persisted chat namespaces separate', () => {
   const touched = new Set<string>();
   const resolve = createNativeVariableMacros({ local: { route: 'CHAT' }, global: { route: 'GLOBAL' }, chat: {} }, touched);

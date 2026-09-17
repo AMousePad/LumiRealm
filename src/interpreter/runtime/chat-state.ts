@@ -15,7 +15,7 @@ export class VariablePersistenceError extends Error {
   }
 }
 
-export async function loadVars(api: HostApi, chatId?: string): Promise<Record<string, string>> {
+export async function loadVars(api: HostApi, chatId?: string): Promise<Record<string, string | null>> {
   if (chatId) {
     const cached = getRecentFlush(chatId);
     if (cached) return { ...cached };
@@ -23,9 +23,9 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
   try {
     const raw = await api.chat.getMetadata(VAR_STORE_KEY);
     if (!raw || typeof raw !== 'object') return {};
-    const out: Record<string, string> = {};
+    const out: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-      out['$' + k] = toStr(v);
+      if (v !== undefined) out['$' + k] = v === null ? null : toStr(v);
     }
     return out;
   } catch (cause) {
@@ -33,15 +33,15 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
   }
 }
 
-export async function loadGlobalVars(api: HostApi): Promise<Record<string, string>> {
+export async function loadGlobalVars(api: HostApi): Promise<Record<string, string | null>> {
   try {
     const raw = await api.chat.getMetadata('macro_variables');
     if (!raw || typeof raw !== 'object') return {};
     const global = (raw as { global?: unknown }).global;
     if (!global || typeof global !== 'object') return {};
-    const out: Record<string, string> = {};
+    const out: Record<string, string | null> = {};
     for (const [key, value] of Object.entries(global as Record<string, unknown>)) {
-      out[key] = toStr(value);
+      if (value !== undefined) out[key] = value === null ? null : toStr(value);
     }
     return out;
   } catch (cause) {
@@ -49,9 +49,9 @@ export async function loadGlobalVars(api: HostApi): Promise<Record<string, strin
   }
 }
 
-export async function saveVars(api: HostApi, vars: Record<string, string>, chatId?: string): Promise<void> {
+export async function saveVars(api: HostApi, vars: Record<string, string | null>, chatId?: string): Promise<void> {
   const write = async (): Promise<void> => {
-    const bare: Record<string, string> = {};
+    const bare: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(vars)) {
       bare[k.startsWith('$') ? k.slice(1) : k] = v;
     }

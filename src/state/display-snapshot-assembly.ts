@@ -185,7 +185,7 @@ export async function assembleDisplaySnapshot(
   active: ActiveCard,
   chatId: string,
   userId: string,
-  vars: { local: Record<string, string>; global: Record<string, string>; chat: Record<string, string> },
+  vars: DisplaySnapshot['vars'],
 ): Promise<DisplaySnapshot> {
   const characterId = active.card.character_id;
   const [charRaw, personaRaw] = await Promise.all([

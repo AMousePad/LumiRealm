@@ -149,9 +149,9 @@ export interface HostApi {
  */
 export interface TriggerRuntimePreloaded {
   /** Output of `loadVars(api)` — `$`-prefixed internal key shape. */
-  readonly varsCache?: Record<string, string>;
+  readonly varsCache?: Record<string, string | null>;
   /** Risu's application-global chat variables (Lumiverse macro_variables.global). */
-  readonly globalVars?: Readonly<Record<string, string>>;
+  readonly globalVars?: Readonly<Record<string, string | null>>;
   readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   /** Output of `api.chat.getMessages()` — pre-Risu-frame-shift. Same shape
    *  the runtime would receive from Spindle directly. */

@@ -109,7 +109,7 @@ export function withCurrentDisplayMessage(
 }
 
 export function buildPreloaded(snap: DisplaySnapshot): TriggerRuntimePreloaded {
-  const varsCache: Record<string, string> = {};
+  const varsCache: Record<string, string | null> = {};
   for (const [k, v] of Object.entries(snap.vars.local)) varsCache['$' + k] = v;
   const lorebook: LorebookCache = {
     entries: [...snap.lorebookHost],
@@ -186,6 +186,7 @@ export function makeSnapshotHostApi(
     const orig = snap.vars.local;
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (orig[k] === v) continue;
       const s = typeof v === 'string' ? v : String(v);
       if (orig[k] !== s) out[k] = s;
     }

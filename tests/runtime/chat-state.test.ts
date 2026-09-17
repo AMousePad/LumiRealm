@@ -67,15 +67,14 @@ describe('loadVars', () => {
     expect(out).toEqual({ '$__phase': '"A"', '$user_set': 'value' });
   });
 
-  test('non-string values coerced to string', async () => {
+  test('non-string values coerce to strings while null stays unset', async () => {
     const { api } = makeMockApi({
       chat_variables: { num: 42, bool: true, nil: null },
     });
     const out = await loadVars(api);
-    // toStr contract: null/undefined coerce to ''.
     expect(out['$num']).toBe('42');
     expect(out['$bool']).toBe('true');
-    expect(out['$nil']).toBe('');
+    expect(out['$nil']).toBeNull();
   });
 
   test('failed reads do not pretend the chat has no saved variables', async () => {

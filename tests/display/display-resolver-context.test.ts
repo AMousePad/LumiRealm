@@ -152,6 +152,34 @@ describe('frontend display resolver message context', () => {
     }
   });
 
+  test('null snapshot values use Risu defaults while native rules retain present keys', async () => {
+    const base = snapshot();
+    setDisplaySnapshot({ ...base, vars: { local: { missing: null, empty: '', literal: 'null' }, global: { missing: null }, chat: {} }, scriptstateDefaults: { missing: 'DEFAULT', empty: 'DEFAULT', literal: 'DEFAULT' } });
+    expect((await applyRules([displayRule({ substitute_macros: 'raw', metadata: { _risu: {} },
+      replace_string: '{{getvar::missing}}|{{getvar::empty}}|{{getvar::literal}}|{{getglobalvar::missing}}',
+    })]))?.content).toBe('DEFAULT||null|null');
+    expect((await applyRules([displayRule({ substitute_macros: 'raw',
+      replace_string: '{{getchatvar::missing}}|{{haschatvar::missing}}|{{getgvar::missing}}|{{hasgvar::missing}}',
+    })]))?.content).toBe('null|true|null|true');
+  });
+
+  test('frontend Lua reads null through defaults without rewriting it during an unrelated save', async () => {
+    setWasmoonEnabled(false);
+    const base = snapshot(`
+      listenEdit("editDisplay", function(triggerId, data)
+        setChatVar(triggerId, "changed", "yes")
+        return getChatVar(triggerId, "missing") .. "|" .. getGlobalVar(triggerId, "missing")
+      end)
+    `);
+    setDisplaySnapshot({ ...base, vars: { local: { missing: null }, global: { missing: null }, chat: {} }, scriptstateDefaults: { missing: 'DEFAULT' } });
+    const writes: unknown[] = [];
+    const result = await createDisplayResolver((_chatId, vars) => { writes.push(vars); }).resolveBody({
+      content: 'text', context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+    });
+    expect(result?.content).toBe('DEFAULT|null');
+    expect(writes).toEqual([{ changed: 'yes' }]);
+  });
+
   test('native scratch writes survive rules and matches without leaking into Risu or later renders', async () => {
     const base = snapshot();
     setDisplaySnapshot({ ...base, vars: { local: { n: '40' }, global: {}, chat: {} } });

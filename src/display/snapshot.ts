@@ -57,9 +57,9 @@ export interface DisplaySnapshot {
     readonly messages: readonly Message[];
   };
   readonly vars: {
-    readonly local: Record<string, string>;
-    readonly global: Record<string, string>;
-    readonly chat: Record<string, string>;
+    readonly local: Record<string, string | null>;
+    readonly global: Record<string, string | null>;
+    readonly chat: Record<string, string | null>;
   };
   readonly scriptstateDefaults: Record<string, string>;
   readonly screenWidth: number;
@@ -116,7 +116,7 @@ export function getDisplaySnapshot(chatId: string): DisplaySnapshot | undefined 
 export function applyVarDelta(
   chatId: string,
   scope: 'local' | 'global' | 'chat',
-  values: Record<string, string>,
+  values: Record<string, string | null>,
 ): void {
   const prev = snapshots.get(chatId);
   if (!prev) return;

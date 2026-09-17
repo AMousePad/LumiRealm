@@ -140,9 +140,9 @@ export interface BuildEvaluatorCtxInput {
     readonly messages?: readonly Message[];
   };
   readonly variables: {
-    readonly local?: Readonly<Record<string, string>>;
-    readonly global?: Readonly<Record<string, string>>;
-    readonly chat?: Readonly<Record<string, string>>;
+    readonly local?: Readonly<Record<string, string | null>>;
+    readonly global?: Readonly<Record<string, string | null>>;
+    readonly chat?: Readonly<Record<string, string | null>>;
   };
   readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   readonly system?: {
@@ -236,9 +236,9 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
       // Character defaults shadow "null" on local scope.
       if (scope === "global") return envGlobal[name] ?? "null";
       const fromChat = envChat[name];
-      if (fromChat !== undefined) return fromChat;
+      if (fromChat != null) return fromChat;
       const fromLocal = envLocal[name];
-      if (fromLocal !== undefined) return fromLocal;
+      if (fromLocal != null) return fromLocal;
       const fromDefaults = defaults[name];
       if (fromDefaults !== undefined) return fromDefaults;
       return "null";

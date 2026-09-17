@@ -9,7 +9,7 @@ const _log = makeSafeLogger('runtime.setVar');
 
 export interface VarsState {
   // Keys are $-prefixed; loadVars/saveVars strip on persist.
-  readonly varsCache: Record<string, string>;
+  readonly varsCache: Record<string, string | null>;
   readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   readonly tempVars?: Record<string, string>;
   // indent -> name -> value; deepest indent wins over varsCache.
@@ -76,7 +76,7 @@ export function makeVarsApi(state: VarsState): VarsApi {
 
   function storedVar(n: string): string | undefined {
     const fromCache = state.varsCache['$' + n];
-    if (fromCache !== undefined) return toStr(fromCache);
+    if (fromCache != null) return toStr(fromCache);
     // Risu chatVar.svelte.ts: consult defaultVariables before returning 'null'.
     const defaults = state.scriptstateDefaults
       ?? getScriptstateDefaultsByCharacter(state.characterId);

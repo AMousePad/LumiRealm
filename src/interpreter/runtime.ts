@@ -314,7 +314,7 @@ export async function makeRisuTriggerRuntime(
   const globalVarsPromise = preloaded?.globalVars
     ? Promise.resolve({ ...preloaded.globalVars })
     : loadGlobalVars(api);
-  let varsPromise: Promise<Record<string, string>>;
+  let varsPromise: Promise<Record<string, string | null>>;
   let isInheritedVarsCache = false;
   let _tVars = 0;
   let _varsSrc: 'inherited' | 'preloaded' | 'fetched' = 'fetched';

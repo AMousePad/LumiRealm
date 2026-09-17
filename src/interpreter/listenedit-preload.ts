@@ -94,11 +94,11 @@ export async function preloadForListenEditChain(
   ]);
   const tParallel = Date.now() - t0;
 
-  let varsCache: Record<string, string> | undefined;
+  let varsCache: Record<string, string | null> | undefined;
   if (varsResult.status === 'fulfilled') varsCache = varsResult.value;
   else log.warn(`loadVars failed — ${(varsResult.reason as { message?: string })?.message ?? varsResult.reason}`);
 
-  let globalVars: Record<string, string> | undefined;
+  let globalVars: Record<string, string | null> | undefined;
   if (globalVarsResult.status === 'fulfilled') globalVars = globalVarsResult.value;
   else log.warn(`loadGlobalVars failed — ${(globalVarsResult.reason as { message?: string })?.message ?? globalVarsResult.reason}`);
 

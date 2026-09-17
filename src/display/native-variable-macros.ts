@@ -33,7 +33,7 @@ export function createNativeVariableMacros(
     }
     let text: string;
     switch (operation) {
-      case 'get': return { text: key ? values.get(key) ?? '' : '', terminal: false };
+      case 'get': return { text: key && values.has(key) ? String(values.get(key)) : '', terminal: false };
       case 'has': text = String(values.has(key)); break;
       case 'set': values.set(key, args[1] ?? ''); text = ''; break;
       case 'delete': case 'flush': values.delete(key); text = ''; break;

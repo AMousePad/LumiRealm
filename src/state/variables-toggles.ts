@@ -16,13 +16,14 @@ import { invalidateMacroInterceptorForChat } from './macro-interceptor-cache.js'
 import type { VariableStateStore } from './variables-state.js';
 import type { ToggleStateStore } from './toggle-state.js';
 
-function sanitizeVarMap(raw: unknown): Record<string, string> {
+function sanitizeVarMap(raw: unknown): Record<string, string | null> {
   if (!raw || typeof raw !== 'object') return {};
-  const out: Record<string, string> = {};
+  const out: Record<string, string | null> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof k !== 'string') continue;
-    if (v === undefined || v === null) {
-      out[k] = '';
+    if (v === undefined) continue;
+    if (v === null) {
+      out[k] = null;
     } else if (typeof v === 'string') {
       out[k] = v;
     } else {
@@ -142,7 +143,7 @@ export interface VariablesTogglesDeps {
     active: ActiveCard,
     chatId: string,
     userId: string,
-    vars: { local: Record<string, string>; global: Record<string, string>; chat: Record<string, string> },
+    vars: import('../display/snapshot.js').DisplaySnapshot['vars'],
     opts?: { guiReload?: boolean },
   ) => void;
   readonly log: {
