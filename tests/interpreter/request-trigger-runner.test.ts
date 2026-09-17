@@ -27,6 +27,22 @@ function requestTrigger(effect: TriggerScript['effect']): TriggerScript {
 }
 
 describe('structured request triggers', () => {
+  test('an invocation abort discards earlier request changes and skips later siblings', async () => {
+    const writes = { value: 0 };
+    const messages = [{ role: 'user' as const, content: 'original' }];
+    const result = await runRequestTriggerChain(messages, {
+      api: host(writes), chatId: 'chat', characterId: 'character', triggers: [
+        requestTrigger([
+          { type: 'v2SetRequestState', index: '0', indexType: 'value', value: 'discarded', valueType: 'value' },
+          { type: 'v2MakeArrayVar', var: '[]' },
+        ]),
+        requestTrigger([{ type: 'v2SetRequestState', index: '0', indexType: 'value', value: 'later', valueType: 'value' }]),
+      ],
+    });
+    expect(result).toEqual(messages);
+    expect(writes.value).toBe(0);
+  });
+
   test('resolves macro operands without persisting request variables', async () => {
     const writes = { value: 0 };
     const result = await runRequestTriggerChain([{ role: 'user', content: 'before' }], {

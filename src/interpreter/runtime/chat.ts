@@ -36,6 +36,7 @@ export interface ChatState {
   readonly loopCounter: { value: number };
   // Risu triggers.ts systemPrompt accumulator.
   readonly additionalSysPrompt: Record<'start' | 'historyend' | 'promptend', string>;
+  readonly deferSystemPrompt?: boolean;
   // Risu's `char.firstMessage`: the greeting, excluded from `chat.message[]`.
   // Risu's getFirstMessage / getCharacterLastMessage fall back to it.
   readonly firstMessage?: string | undefined;
@@ -115,6 +116,7 @@ export function makeChatApi(
     const loc = location === 'start' || location === 'historyend' || location === 'promptend'
       ? location as 'start' | 'historyend' | 'promptend' : 'promptend';
     state.additionalSysPrompt[loc] += toStr(value) + '\n\n';
+    if (state.deferSystemPrompt) return;
     try {
       state.loopCounter.value += 1;
       await api.chat.inject(

@@ -70,10 +70,11 @@ export async function runDisplayTriggerChain(
 
     try {
       for (const trigger of triggers) {
-        await interpretTrigger(trigger, runtime, triggerConsole, {
+        const result = await interpretTrigger(trigger, runtime, triggerConsole, {
           displayMode: true,
           lowLevelAccess: Boolean(trigger.lowLevelAccess),
         });
+        if (result === 'abort') return { content, ran: true };
       }
       return { content: runtime.getDisplayState(), ran: true };
     } catch (err) {

@@ -61,6 +61,17 @@ function snapshot(trigger: TriggerScript): DisplaySnapshot {
 }
 
 describe('frontend structured display triggers', () => {
+  test('an invocation abort discards earlier display changes and skips later siblings', async () => {
+    const snap = snapshot({ type: 'display', comment: '', conditions: [], effect: [
+      { type: 'v2SetDisplayState', value: 'discarded', valueType: 'value' },
+      { type: 'v2MakeArrayVar', var: '[]' },
+    ] } as TriggerScript);
+    const result = await runDisplayTriggerChain({ ...snap, luaTriggers: [...snap.luaTriggers, { luaCode: '', source: {
+      type: 'display', comment: '', conditions: [], effect: [{ type: 'v2SetDisplayState', value: 'later', valueType: 'value' }],
+    } as TriggerScript }] }, 'original');
+    expect(result).toEqual({ content: 'original', ran: true });
+  });
+
   test('evaluates trigger macros from the snapshot without host requests', async () => {
     const network = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected network request'));
     try {

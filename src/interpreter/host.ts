@@ -161,6 +161,7 @@ export interface TriggerRuntimePreloaded {
 }
 
 export interface TriggerRuntimeOpts {
+  readonly invocationState?: import('./runtime/invocation.js').TriggerInvocationState;
   readonly displayMode?: boolean;
   readonly displayData?: string;
   readonly requestData?: readonly {

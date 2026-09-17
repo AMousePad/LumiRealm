@@ -17,6 +17,8 @@ export interface VarsState {
   readonly currentIndent?: { value: number };
   // Boxed so reference is shared across module boundaries.
   readonly dirty: { value: boolean };
+  readonly storedVars?: () => Readonly<Record<string, string | null>>;
+  readonly onStoredWrite?: () => void;
   readonly characterId: string | null;
   // FE display dep recording: Lua var reads are invisible to the CBS recorder.
   readonly onVarRead?: (name: string) => void;
@@ -74,8 +76,8 @@ export function makeVarsApi(state: VarsState): VarsApi {
     return storedVar(n) ?? state.tempVars?.[n] ?? 'null';
   }
 
-  function storedVar(n: string): string | undefined {
-    const fromCache = state.varsCache['$' + n];
+  function storedVar(n: string, cache = state.varsCache): string | undefined {
+    const fromCache = cache['$' + n];
     if (fromCache != null) return toStr(fromCache);
     // Risu chatVar.svelte.ts: consult defaultVariables before returning 'null'.
     const defaults = state.scriptstateDefaults
@@ -87,7 +89,7 @@ export function makeVarsApi(state: VarsState): VarsApi {
 
   function getStoredVar(name: string): string {
     state.onVarRead?.(name);
-    return storedVar(name) ?? 'null';
+    return storedVar(name, state.storedVars?.() ?? state.varsCache) ?? 'null';
   }
 
   function setVar(name: string, value: unknown): void {
@@ -102,6 +104,7 @@ export function makeVarsApi(state: VarsState): VarsApi {
     // Risu runTrigger only marks stored state as changed when the value differs.
     if (state.varsCache['$' + n] === v) return;
     state.varsCache['$' + n] = v;
+    state.onStoredWrite?.();
     state.dirty.value = true;
     _log.info(`$${n}=${JSON.stringify(v.slice(0, 80))}`);
   }

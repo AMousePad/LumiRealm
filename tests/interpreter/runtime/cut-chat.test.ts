@@ -41,7 +41,8 @@ async function fixture(withGreeting = true) {
     },
     characters: { get: async id => ({ id }), update: async () => { throw new Error('Unexpected character write'); } },
   };
-  const runtime = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(), {
+  const scriptNS = makeDispatcherScriptNS();
+  const runtime = await makeRisuTriggerRuntime(api, {}, scriptNS, {
     preloaded: { messagesRaw: rows }, templateContext: basicTriggerContext,
   });
   async function run(effects: TriggerEffect[], execution: 'interpreted' | 'compiled') {
@@ -53,7 +54,7 @@ async function fixture(withGreeting = true) {
     } else await interpretTrigger(trigger, runtime, console, gates);
   }
   const contents = () => Array.from({ length: runtime.getMessageCount() }, (_, index) => runtime.getMessageAtIndex(index));
-  return { rows, deleted, faults, runtime, run, contents };
+  return { rows, deleted, faults, runtime, run, contents, scriptNS };
 }
 
 for (const execution of ['interpreted', 'compiled'] as const) {
@@ -170,4 +171,17 @@ test('failed queued cuts reconcile rows appended and then cut later in the same 
   await h.runtime.runLua('cutChat("test", 0, 2)\naddChat("test", "char", "new")\ncutChat("test", 0, 1)');
   await expect(h.runtime.flush()).rejects.toMatchObject({ name: 'ChatMutationError' });
   expect(h.contents()).toEqual(['A', 'B', 'C', 'D', 'new']);
+});
+
+
+test('a failed queued Lua cut is reconciled before a nested trigger can execute', async () => {
+  const h = await fixture();
+  h.faults.id = 'D';
+  let childRan = false;
+  h.scriptNS.registerManual('child', async () => { childRan = true; });
+  await h.runtime.runLua('cutChat("test", 0, 2)');
+  await expect(h.runtime.runTrigger('child')).rejects.toMatchObject({ name: 'ChatMutationError' });
+  expect(childRan).toBe(false);
+  expect(h.deleted).toEqual([]);
+  expect(h.contents()).toEqual(['A', 'B', 'C', 'D']);
 });

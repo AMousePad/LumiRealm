@@ -57,10 +57,11 @@ export async function runRequestTriggerChain(
 
   try {
     for (const trigger of triggers) {
-      await interpretTrigger(trigger, runtime, quietConsole, {
+      const result = await interpretTrigger(trigger, runtime, quietConsole, {
         displayMode: true,
         lowLevelAccess: Boolean(trigger.lowLevelAccess),
       });
+      if (result === 'abort') return messages.slice();
     }
 
     const state = runtime.getRequestStateMessages();

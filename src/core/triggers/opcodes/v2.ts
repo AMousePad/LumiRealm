@@ -245,7 +245,7 @@ function emitV2GetFirstMessage(op: TriggerEffect, ctx: EmitContext): EmitResult 
 
 
 function emitV2ShowAlert(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  if (ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   const e = op as unknown as { value: string; valueType: "var" | "value" };
   return {
     code: line(ctx, `await __risu.showAlert("normal", ${resolveCall(e.value, e.valueType)}, "");`),
@@ -274,7 +274,7 @@ function emitV2RunLLM(op: TriggerEffect, ctx: EmitContext): EmitResult {
 }
 
 function emitV2GetAlertInput(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  if (ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   const e = op as unknown as { display: string; displayType: "var" | "value"; outputVar: string };
   return {
     code: line(
@@ -286,7 +286,7 @@ function emitV2GetAlertInput(op: TriggerEffect, ctx: EmitContext): EmitResult {
 }
 
 function emitV2GetAlertSelect(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  if (ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   const e = op as unknown as {
     display: string;
     displayType: "var" | "value";
@@ -517,7 +517,7 @@ function emitV2MakeArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `{ const name = ${resolveCall(e.var, "value")}; if (name.startsWith('[') && name.endsWith(']')) return; __risu.setVar(name, "[]"); }`,
+      `{ const name = ${resolveCall(e.var, "value")}; if (name.startsWith('[') && name.endsWith(']')) return 'abort'; __risu.setVar(name, "[]"); }`,
     ),
     needsAwait: false,
   };
@@ -526,7 +526,7 @@ function emitV2MakeArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
 
 function emitV2MakeDictVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { var: string };
-  if (e.var.startsWith('{') && e.var.endsWith('}')) return { code: line(ctx, 'return;'), needsAwait: false };
+  if (e.var.startsWith('{') && e.var.endsWith('}')) return { code: line(ctx, "return 'abort';"), needsAwait: false };
   return {
     code: line(ctx, `__risu.setVar(${resolveCall(e.var, "value")}, "{}");`),
     needsAwait: false,
@@ -536,7 +536,7 @@ function emitV2MakeDictVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
 
 function emitV2ClearDict(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { var: string };
-  if (e.var.startsWith('{') && e.var.endsWith('}')) return { code: line(ctx, 'return;'), needsAwait: false };
+  if (e.var.startsWith('{') && e.var.endsWith('}')) return { code: line(ctx, "return 'abort';"), needsAwait: false };
   return {
     code: line(ctx, `__risu.setVar(${resolveCall(e.var, "value")}, "{}");`),
     needsAwait: false,
@@ -782,7 +782,7 @@ function emitV2SetLorebookAlwaysActive(op: TriggerEffect, ctx: EmitContext): Emi
 
 function emitV2GetDisplayState(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
-  if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (!ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   return {
     code: line(ctx, `${setResultCall(e.outputVar, `__risu.getDisplayState()`, true)};`),
     needsAwait: false,
@@ -791,7 +791,7 @@ function emitV2GetDisplayState(op: TriggerEffect, ctx: EmitContext): EmitResult 
 
 function emitV2SetDisplayState(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { value: string; valueType: "var" | "value" };
-  if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (!ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   return {
     code: line(ctx, `__risu.setDisplayState(${resolveCall(e.value, e.valueType)});`),
     needsAwait: false,
@@ -800,7 +800,7 @@ function emitV2SetDisplayState(op: TriggerEffect, ctx: EmitContext): EmitResult 
 
 function emitV2GetRequestState(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { index: string; indexType: "var" | "value"; outputVar: string };
-  if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (!ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   return {
     code: line(
       ctx,
@@ -817,7 +817,7 @@ function emitV2SetRequestState(op: TriggerEffect, ctx: EmitContext): EmitResult 
     value: string;
     valueType: "var" | "value";
   };
-  if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (!ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   return {
     code: line(
       ctx,
@@ -829,7 +829,7 @@ function emitV2SetRequestState(op: TriggerEffect, ctx: EmitContext): EmitResult 
 
 function emitV2GetRequestStateRole(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { index: string; indexType: "var" | "value"; outputVar: string };
-  if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (!ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   return {
     code: line(
       ctx,
@@ -846,7 +846,7 @@ function emitV2SetRequestStateRole(op: TriggerEffect, ctx: EmitContext): EmitRes
     value: string;
     valueType: "var" | "value";
   };
-  if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (!ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   return {
     code: line(
       ctx,
@@ -858,7 +858,7 @@ function emitV2SetRequestStateRole(op: TriggerEffect, ctx: EmitContext): EmitRes
 
 function emitV2GetRequestStateLength(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
-  if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
+  if (!ctx.displayMode) return { code: line(ctx, `return 'abort';`), needsAwait: false };
   return {
     code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getRequestStateLength())`, true)};`),
     needsAwait: false,

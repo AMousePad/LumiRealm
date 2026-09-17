@@ -166,7 +166,7 @@ function renderTriggerCode(a: RenderArgs): string {
 
   const inner = [
     `const __rc = await script.require(${JSON.stringify(a.runtimeLib)});`,
-    `const __risu = await __rc.makeRisuTriggerRuntime(api, data, script, ${rtOpts});`,
+    `const __risu = await __rc.makeRisuTriggerRuntime(api, data, script, ${a.isManual ? `{ ...${rtOpts}, invocationState: invokeCtx.invocationState }` : rtOpts});`,
     `try {`,
     bodyText,
     `} finally {`,

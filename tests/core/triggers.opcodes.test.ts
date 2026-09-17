@@ -120,12 +120,12 @@ describe("V2 emitters — value dispatch", () => {
     expect(result.code).toContain(`"10"`);
   });
 
-  test("display-only opcodes short-circuit to return when not displayMode", () => {
+  test("display-only opcodes abort the invocation when not displayMode", () => {
     const result = EMITTERS.v2GetDisplayState!(
       { type: "v2GetDisplayState", outputVar: "x" } as never,
       makeCtx({ displayMode: false }),
     );
-    expect(result.code).toContain("return;");
+    expect(result.code).toContain("return 'abort';");
   });
 
 

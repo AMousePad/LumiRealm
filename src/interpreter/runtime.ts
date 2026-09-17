@@ -89,7 +89,7 @@ export {
 export type { AuxDebugCaptureEvent } from './runtime/dispatch-context.js';
 
 import { loadGlobalVars, loadVars, saveVars } from './runtime/chat-state.js';
-import { inheritedVarsAls, withInheritedVarsCache } from './runtime/als.js';
+import { adoptInvocation, cloneInvocation, commitInvocation, initializeInvocation, invocationHostApi, type TriggerInvocationState } from './runtime/invocation.js';
 
 export { compareValues } from './runtime/compare.js';
 export { applyMatchTemplate } from './runtime/match-template.js';
@@ -210,6 +210,7 @@ export async function makeRisuTriggerRuntime(
   scriptNs: ScriptNS,
   opts: TriggerRuntimeOpts = {},
 ): Promise<RisuTriggerRuntime> {
+  const invocation: TriggerInvocationState = opts.invocationState ?? { stopSending: false };
   const displayMode = !!opts.displayMode;
   const lowLevelAccess = !!opts.lowLevelAccess;
   const characterId = opts.characterId || null;
@@ -274,7 +275,6 @@ export async function makeRisuTriggerRuntime(
     );
   }
 
-  // Nested runTrigger reuses parent varsCache; only outermost runtime flushes.
   // Per-await timing: every step here is an IPC round-trip in Spindle; the
   // editDisplay listenEdit chain creates a fresh runtime per trigger (16x on
   // a 16-trigger card), so the factory cost dominates the wall-clock budget.
@@ -293,7 +293,7 @@ export async function makeRisuTriggerRuntime(
   let isInheritedVarsCache = false;
   let _tVars = 0;
   let _varsSrc: 'inherited' | 'preloaded' | 'fetched' = 'fetched';
-  const inheritedFrame = inheritedVarsAls.getStore();
+  const inheritedFrame = invocation.varsCache;
   if (inheritedFrame) {
     varsPromise = Promise.resolve(inheritedFrame);
     isInheritedVarsCache = true;
@@ -310,6 +310,7 @@ export async function makeRisuTriggerRuntime(
     varsPromise = loadVars(api).then(vars => { _tVars = Date.now() - _t0; return vars; });
   }
   const [varsCache, globalVarsCache] = await Promise.all([varsPromise, globalVarsPromise]);
+  invocation.varsCache = varsCache;
   let messagesCache: HostMessage[] = [];
   // Risu's `char.firstMessage` (greeting), excluded from messagesCache to
   // match `chat.message[]`. getFirstMessage / getCharacterLastMessage use it.
@@ -318,7 +319,11 @@ export async function makeRisuTriggerRuntime(
   let _msgsSrc: 'preloaded' | 'fetched' = 'fetched';
   const _tMsgsStart = Date.now();
   try {
-    if (preloaded?.messagesRaw) {
+    if (invocation.messagesCache) {
+      messagesCache = invocation.messagesCache;
+      firstMessage = invocation.firstMessage;
+      _msgsSrc = 'preloaded';
+    } else if (preloaded?.messagesRaw) {
       _msgsSrc = 'preloaded';
       _msgsCount = preloaded.messagesRaw.length;
       const view = buildRisuChatView({ messages: preloaded.messagesRaw.map((m) => ({ ...m })) });
@@ -338,6 +343,14 @@ export async function makeRisuTriggerRuntime(
       }
     }
   } catch { messagesCache = []; }
+  invocation.messagesCache = messagesCache;
+  if (firstMessage !== undefined) invocation.firstMessage = firstMessage;
+  initializeInvocation(invocation, api, (id, content) => {
+    if (opts.invocationState && rememberOurWrite && portalChatId) {
+      try { rememberOurWrite(portalChatId, id, content); } catch { /* */ }
+    }
+  });
+  api = opts.invocationState ? invocationHostApi(invocation) : invocation.live!.api;
   const _tMsgs = _msgsSrc === 'preloaded' ? 0 : Date.now() - _tMsgsStart;
 
   const lorebook: LorebookCache = { entries: [], primaryBookId: null };
@@ -549,7 +562,7 @@ export async function makeRisuTriggerRuntime(
   }
 
   // `dirty` boxed so flush() observes setVar writes across the closure boundary.
-  const dirty: { value: boolean } = { value: false };
+  const dirty = invocation.live!.dirty;
   const localState = opts.localState ?? createTriggerLocalState();
   const tempVars = displayMode ? {} : undefined;
   const onVarRead = opts.onVarRead;
@@ -570,6 +583,8 @@ export async function makeRisuTriggerRuntime(
     varsCache,
     ...localState,
     dirty,
+    storedVars: () => invocation.live!.varsCache,
+    onStoredWrite: () => { invocation.live!.varsCache = varsCache; },
     characterId,
     parseTemplate: text => {
       if (!hasTriggerTemplate(text)) return text;
@@ -584,14 +599,11 @@ export async function makeRisuTriggerRuntime(
   });
   const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal } = _vars;
 
-  let stopSending = false;
   let sendAIprompt = false;
   const loopCounter: { value: number } = { value: 0 };
-  const additionalSysPrompt: Record<'start' | 'historyend' | 'promptend', string> = {
-    start: '', historyend: '', promptend: '',
-  };
+  const additionalSysPrompt = invocation.live!.additionalSysPrompt;
 
-  const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage }, (src) => notifyStateChanged(src));
+  const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage, deferSystemPrompt: Boolean(opts.invocationState) }, (src) => notifyStateChanged(src));
   const {
     getMessagesTail, getMessageCount, getLastMessage, getMessageAtIndex,
     getLastUserMessage, getLastCharMessage, getFirstMessage,
@@ -707,12 +719,14 @@ export async function makeRisuTriggerRuntime(
   }
 
   async function runTrigger(name: unknown): Promise<void> {
-    await withInheritedVarsCache(varsCache, async () => {
-      const mod = await scriptNs.require('risu-manual-' + toStr(name)) as { run?: (ctx: unknown) => Promise<unknown> } | null;
-      if (mod && typeof mod.run === 'function') {
-        await mod.run({ api, data, script: scriptNs });
-      }
-    });
+    await drainChatMutations();
+    const mod = await scriptNs.require('risu-manual-' + toStr(name)) as { run?: (ctx: unknown) => Promise<{ aborted?: boolean } | 'abort' | void> } | null;
+    if (!mod || typeof mod.run !== 'function') return;
+    const child = cloneInvocation(invocation);
+    const result = await mod.run({ api, data, script: scriptNs, invocationState: child });
+    if (result === 'abort' || result?.aborted) return;
+    adoptInvocation(invocation, child);
+    if (!opts.invocationState) await commitInvocation(invocation, portalChatId);
   }
 
   // Risu dropped triggercode; runCode is a no-op for parity.
@@ -770,7 +784,7 @@ export async function makeRisuTriggerRuntime(
         : await lua.execute(codeStr, globals, effective);
       const preview = result === undefined ? 'undefined' : String(JSON.stringify(result) ?? '').slice(0, 200);
       rlog(`DONE elapsed=${Date.now() - tStart}ms result_type=${typeof result} result_preview=${preview}`);
-      if (result === false) stopSending = true;
+      if (result === false) invocation.stopSending = true;
       return result;
     } catch (err) {
       rerr(`THREW after ${Date.now() - tStart}ms: ${(err as Error).message}`);
@@ -792,7 +806,7 @@ export async function makeRisuTriggerRuntime(
         onVarRead?.(k, 'global');
         return globalVarsCache[k] ?? 'null';
       },
-      stopChat: (_id: unknown) => { stopSending = true; },
+      stopChat: (_id: unknown) => { invocation.stopSending = true; },
       // Risu parity: fire-and-forget. Returning the Promise would force Lua to await or leak an unhandledRejection on modal-infra throw.
       alertError: (_id: unknown, value: unknown) => {
         if (api.ui?.alert) {
@@ -1259,11 +1273,7 @@ export async function makeRisuTriggerRuntime(
 
   async function flush(): Promise<boolean> {
     const flog = _logFlush.info;
-    // Persist on dirty=true even when frame is inherited: Risu's two-stage
-    // cycle (parent fires runTrigger, child writes, parent returns without
-    // writing itself) would lose child-only writes if we gated, since
-    // parent's own dirty stays false and its flush no-ops. inheritedVarsAls
-    // prevents cross-user mixing at source so no extra gate needed.
+    // Risu setVar updates live stored state even when a nested call later aborts.
     flog(`START dirty=${dirty.value} varsCache_keys=${Object.keys(varsCache).length} binding=${binding} inherited=${isInheritedVarsCache}`);
     if (Object.keys(varsCache).length > 0) {
       const preview = Object.entries(varsCache).slice(0, 10).map(([k,v]) => `${k}=${JSON.stringify(String(v).slice(0, 40))}`).join(' ');
@@ -1271,7 +1281,8 @@ export async function makeRisuTriggerRuntime(
     }
     const wasDirty = dirty.value;
     if (dirty.value) {
-      await saveVars(api, varsCache, portalChatId);
+      await saveVars(api, invocation.live!.varsCache, portalChatId);
+      invocation.live!.varsFlushed = true;
       flog(`saveVars OK`);
     }
     dirty.value = false;
@@ -1283,8 +1294,8 @@ export async function makeRisuTriggerRuntime(
   const controlRuntime = { ..._vars, compare, sleep };
   const publicApi: RisuTriggerRuntime = {
     advanceControl: (effects, index, state) => advanceTriggerControl(effects, index, state, controlRuntime),
-    get stopSending() { return stopSending; },
-    set stopSending(v) { stopSending = !!v; },
+    get stopSending() { return invocation.stopSending; },
+    set stopSending(v) { invocation.stopSending = !!v; },
     get sendAIprompt() { return sendAIprompt; },
     set sendAIprompt(v) { sendAIprompt = !!v; },
     displayMode, lowLevelAccess, characterId,

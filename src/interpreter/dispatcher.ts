@@ -13,10 +13,11 @@ import { makeSafeLogger } from '../util/safe-log.js';
 import { interpretTrigger, type InterpConsole } from './trigger-interpreter.js';
 import { withTriggerDepth } from './runtime/als.js';
 import { createTriggerLocalState, type TriggerLocalState } from './runtime/vars.js';
+import { commitInvocation, type TriggerInvocationState } from './runtime/invocation.js';
 
 export interface DispatcherScriptNS extends ScriptNS {
   /** Manual triggers registered by name — v2RunTrigger resolves through here. */
-  registerManual(name: string, runner: (ctx: { api: HostApi; data: DispatchData }) => Promise<void>): void;
+  registerManual(name: string, runner: (ctx: { api: HostApi; data: DispatchData; invocationState?: TriggerInvocationState }) => Promise<{ aborted?: boolean } | void>): void;
 }
 
 export function makeDispatcherScriptNS(): DispatcherScriptNS {
@@ -33,7 +34,7 @@ export function makeDispatcherScriptNS(): DispatcherScriptNS {
       return null;
     },
     registerManual(name: string, runner) {
-      manuals.set('risu-manual-' + name, { run: async (ctx) => runner(ctx as { api: HostApi; data: DispatchData }) });
+      manuals.set('risu-manual-' + name, { run: async (ctx) => runner(ctx as { api: HostApi; data: DispatchData; invocationState?: TriggerInvocationState }) });
     },
   };
 }
@@ -121,30 +122,35 @@ export async function dispatchBinding(
   dlog(`dispatchBinding: binding=${binding} matches=${matches.length}/${ctx.compiledTriggers.length} data=${JSON.stringify(ctx.data).slice(0, 200)}`);
   let stopSending = false;
   const localState = createTriggerLocalState();
+  const invocationState = ctx.opts.invocationState ?? { stopSending: false };
+  let aborted = false;
   for (const entry of matches) {
     const tStart = Date.now();
     dlog(`→ trigger START name=${entry.name} binding=${entry.binding} triggers=${JSON.stringify(entry.triggers)} effects=${entry.source?.effect?.length ?? 0}`);
-    // Out-param: a stopChat() issued before a later crash still counts.
     const flags = { stopSending: false };
     try {
-      await runInterpretedTrigger(
+      const result = await runInterpretedTrigger(
         entry,
         ctx.api,
         ctx.data,
         ctx.scriptNS,
-        { binding, displayMode: binding === 'display', localState },
+        { binding, displayMode: binding === 'display', localState, invocationState },
         flags,
       );
+      if (result === 'abort') { aborted = true; break; }
       dlog(`← trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms stopSending=${flags.stopSending}`);
     } catch (err) {
       dlog(`× trigger ERROR name=${entry.name} elapsed=${Date.now() - tStart}ms msg=${(err as Error).message} stopSending=${flags.stopSending}`);
+      aborted = true;
       if (onError) onError(err, entry.name);
       else throw err;
+      break;
     } finally {
       if (flags.stopSending) stopSending = true;
     }
   }
-  return { stopSending };
+  if (!aborted && !ctx.opts.invocationState) await commitInvocation(invocationState, ctx.opts.chatId, binding === 'start');
+  return { stopSending: !aborted && stopSending };
 }
 
 function makeMirroredConsole(name: string): InterpConsole {
@@ -170,6 +176,7 @@ interface TriggerInvocation {
   readonly binding: RisuBinding;
   readonly displayMode: boolean;
   readonly localState: TriggerLocalState;
+  readonly invocationState: TriggerInvocationState;
 }
 
 async function runInterpretedTrigger(
@@ -179,8 +186,8 @@ async function runInterpretedTrigger(
   scriptNS: DispatcherScriptNS,
   invocation: TriggerInvocation,
   outFlags?: { stopSending: boolean; varsFlushed?: boolean },
-): Promise<void> {
-  await withTriggerDepth(async () => {
+): Promise<'abort' | void> {
+  return await withTriggerDepth(async () => {
     const rLog = makeSafeLogger(`runTrigger[${entry.name}]`);
     const t0 = Date.now();
     const rt = await makeRisuTriggerRuntime(api, data, scriptNS, {
@@ -189,13 +196,15 @@ async function runInterpretedTrigger(
       binding: invocation.binding,
       characterId: entry.rtOpts.characterId,
       localState: invocation.localState,
+      invocationState: invocation.invocationState,
     });
     try {
-      await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {
+      const result = await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {
         displayMode: invocation.displayMode,
         lowLevelAccess: entry.rtOpts.lowLevelAccess,
       });
       rLog.info(`RETURN OK elapsed=${Date.now() - t0}ms`);
+      return result;
     } catch (err) {
       rLog.error(`THREW elapsed=${Date.now() - t0}ms — ${(err as Error).message}\n${(err as Error).stack ?? ''}`);
       throw err;
@@ -211,7 +220,7 @@ export async function dispatchByManualName(
   ctx: DispatchCtx,
   manualName: string,
   onError?: (err: unknown, triggerName: string) => void,
-  outFlags?: { stopSending: boolean; varsFlushed?: boolean },
+  outFlags?: { stopSending: boolean; varsFlushed?: boolean; aborted?: boolean },
 ): Promise<number> {
   const dlog = makeSafeLogger('dispatcher').info;
   const matches = ctx.compiledTriggers.filter((t) => {
@@ -223,22 +232,34 @@ export async function dispatchByManualName(
   dlog(`dispatchByManualName: name="${manualName}" matches=${matches.length}/${ctx.compiledTriggers.length}`);
   let fired = 0;
   const localState = createTriggerLocalState();
+  const invocationState = ctx.opts.invocationState ?? { stopSending: false };
+  let aborted = false;
   for (const entry of matches) {
     try {
-      await runInterpretedTrigger(
+      const result = await runInterpretedTrigger(
         entry,
         ctx.api,
         ctx.data,
         ctx.scriptNS,
-        { binding: 'manual', displayMode: false, localState },
+        { binding: 'manual', displayMode: false, localState, invocationState },
         outFlags,
       );
       fired++;
+      if (result === 'abort') { aborted = true; break; }
       dlog(`dispatchByManualName: fired entry name=${entry.name} type=${entry.type} binding=${entry.binding}`);
     } catch (err) {
-      onError?.(err, entry.name);
+      aborted = true;
+      if (onError) onError(err, entry.name);
+      else throw err;
+      break;
     }
   }
+  if (outFlags) {
+    outFlags.aborted = aborted;
+    if (aborted) outFlags.stopSending = false;
+  }
+  if (!aborted && !ctx.opts.invocationState) await commitInvocation(invocationState, ctx.opts.chatId);
+  if (outFlags && invocationState.live?.varsFlushed) outFlags.varsFlushed = true;
   return fired;
 }
 
@@ -250,11 +271,14 @@ export function registerManualTriggers(
   // Risu's runTrigger matches original comments, including duplicates across bindings.
   for (const name of new Set(compiled.map((entry) => entry.source.comment))) {
     scriptNS.registerManual(name, async (ctx) => {
+      const flags = { stopSending: false, aborted: false };
       await dispatchByManualName(
-        { compiledTriggers: compiled, api: ctx.api ?? api, data: ctx.data, scriptNS, opts: { binding: 'manual' } },
+        { compiledTriggers: compiled, api: ctx.api ?? api, data: ctx.data, scriptNS, opts: { binding: 'manual', ...(ctx.invocationState ? { invocationState: ctx.invocationState } : {}) } },
         name,
         (err) => { throw err; },
+        flags,
       );
+      return { aborted: flags.aborted };
     });
   }
 }

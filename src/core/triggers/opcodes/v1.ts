@@ -81,7 +81,7 @@ function emitShowAlert(op: TriggerEffect, ctx: EmitContext): EmitResult {
     return { code: line(ctx, `/* showAlert skipped — requires lowLevelAccess */`), needsAwait: false };
   }
   if (ctx.displayMode) {
-    return { code: line(ctx, `return;`), needsAwait: false };
+    return { code: line(ctx, `return 'abort';`), needsAwait: false };
   }
   const value = resolveCall(effect.value, "value");
   const inputVar = resolveCall(effect.inputVar, "value");

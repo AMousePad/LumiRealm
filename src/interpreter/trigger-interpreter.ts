@@ -24,7 +24,7 @@ export class TriggerBudgetExceededError extends Error {
 
 const DEFAULT_STEP_BUDGET = 5_000_000;
 
-type Flow = 'normal' | 'return' | 'break';
+type Flow = 'normal' | 'return' | 'break' | 'stop';
 
 type Any = Record<string, any>;
 
@@ -131,7 +131,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
     await rt.runLua(e.code);
   },
 
-  v2StopTrigger: () => 'return',
+  v2StopTrigger: () => 'stop',
   v2ConsoleLog: (op, ctx) => {
     const e = op as Any;
     ctx.console.log(ctx.rt.resolve(e.source, e.sourceType));
@@ -495,7 +495,7 @@ async function execLeaf(op: TriggerEffect, ctx: InterpCtx): Promise<Flow> {
   const handler = LEAVES[op.type];
   if (!handler) return 'normal';
   const r = await handler(op, ctx);
-  return r === 'return' || r === 'break' ? r : 'normal';
+  return r === 'return' || r === 'break' || r === 'stop' ? r : 'normal';
 }
 
 export async function interpretTrigger(
@@ -503,7 +503,7 @@ export async function interpretTrigger(
   rt: RisuTriggerRuntime,
   console: InterpConsole,
   opts: InterpretOpts,
-): Promise<void> {
+): Promise<'abort' | void> {
   if (triggerNeedsTemplates(trigger)) await rt.prepareTemplates();
   const conditions = (trigger.conditions ?? []) as readonly unknown[];
   if (conditions.length > 0 && !rt.checkConditions(conditions)) return;
@@ -522,7 +522,9 @@ export async function interpretTrigger(
     bumpBudget(ctx);
     const next = await rt.advanceControl(effects, index, control);
     if (next !== undefined) { index = next; continue; }
-    if (await execLeaf(effects[index]!, ctx) === 'return') return;
+    const flow = await execLeaf(effects[index]!, ctx);
+    if (flow === 'return') return 'abort';
+    if (flow === 'stop') return;
   }
 }
 
