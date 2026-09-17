@@ -22138,7 +22138,7 @@ var require_url_parse = __commonJS(function(exports, module) {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.9.2",
+  version: "0.10.0",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -48283,6 +48283,12 @@ function setupPermissionsModal(opts) {
   };
 }
 
+// src/bridge-permissions.ts
+var declaredPermissions = new Set(spindle_default.permissions);
+function filterBridgePermissions(permissions) {
+  return [...new Set(permissions.map((permission) => permission.trim()))].filter((permission) => declaredPermissions.has(permission)).sort();
+}
+
 // src/ui/bridge-status-banner.ts
 var EXT_LABELS = {
   lumiagent: "LumiAgent",
@@ -48415,13 +48421,14 @@ function setupBridgeStatusBanner(opts) {
     handleBackendMessage(msg) {
       if (msg.type !== "notify_bridge_status")
         return;
-      if (!msg.offline || msg.missingPermissions.length === 0) {
+      const missing = filterBridgePermissions(msg.missingPermissions);
+      if (!msg.offline || missing.length === 0) {
         lastKey = null;
         dismissedKeys.clear();
         clearBanner();
         return;
       }
-      show(msg.missingPermissions, msg.forCaller ?? null);
+      show(missing, msg.forCaller ?? null);
     },
     destroy() {
       clearBanner();

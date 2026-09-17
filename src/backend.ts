@@ -199,6 +199,7 @@ import {
   writeGlobalModuleArtifacts,
 } from './state/modules-store.js';
 import { registerLumiagentPhoneline } from './lumiagent-phoneline.js';
+import { probeLumiagentBridge } from './bridge-permissions.js';
 
 const runtimeVersionInfo = readRuntimeVersionInfo(spindle);
 const EXTENSION_VERSION = runtimeVersionInfo.extensionVersion;
@@ -294,29 +295,12 @@ function broadcastBridgeStatus(payload: {
   }
 }
 
-// Probes lumiagent.phoneline_probe and returns the parsed missing-perms list
-// when the host inheritance check rejects. Returns null on success or when
-// the endpoint is not registered (LumiAgent absent), so the caller does not
-// fire a banner in those cases.
-async function probeLumiagentBridge(): Promise<readonly string[] | null> {
-  try {
-    await spindle.rpcPool.read('lumiagent.phoneline_probe');
-    return null;
-  } catch (err) {
-    const message = (err as Error).message;
-    const m = /requires requester "[^"]+" to inherit owner "[^"]+" permissions: ([^]+?)$/.exec(message);
-    if (!m) return null;
-    const perms = m[1]!.split(/,\s*/).map((s) => s.trim()).filter((s) => s.length > 0);
-    return perms.length > 0 ? perms : null;
-  }
-}
-
 // On any permission change in this extension, probe the LumiAgent bridge to
 // surface a banner immediately rather than waiting for LumiAgent to dial in.
 // Symmetric to LumiAgent's own re-dial-on-perm-change behaviour.
 subscribeToMissingChanges(() => {
   void (async () => {
-    const missing = await probeLumiagentBridge();
+    const missing = await probeLumiagentBridge(spindle);
     if (missing && missing.length > 0) {
       log.warn(`permissions.changed: lumiagent bridge probe failed, LumiRealm missing=[${missing.join(',')}]`);
       broadcastBridgeStatus({

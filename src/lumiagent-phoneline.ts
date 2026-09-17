@@ -10,6 +10,7 @@
 
 import type { SpindleAPI, CharacterDTO } from 'lumiverse-spindle-types';
 import { readEnvelope, writeEnvelope, listModules, type ModuleEnvelope, type UserStorageLike } from './state/modules-store.js';
+import { parseBridgePermissionError } from './bridge-permissions.js';
 
 interface SurfaceDescriptor {
   id: string;
@@ -963,23 +964,6 @@ export interface BridgeStatusBroadcast {
 // caller. Survives between calls so the banner reflects the last outcome.
 const lastDialFailure = new Map<string, readonly string[]>();
 
-// Deliberately never requested in the manifest, so the banner must not ask
-// users to grant them. The bridge stays degraded without them by choice.
-const UNADVERTISED_BRIDGE_PERMS = new Set(['memories', 'regex_scripts_unrestricted']);
-
-function parseInheritanceError(message: string): readonly string[] | null {
-  // Host throws: 'Shared RPC endpoint "X" requires requester "R" to inherit
-  // owner "O" permissions: a, b, c'. We wrap that in 'could not read pending
-  // request from <id>: <innerMessage>' on rethrow but the substring we match
-  // on is preserved either way.
-  const m = /requires requester "[^"]+" to inherit owner "[^"]+" permissions: ([^]+?)$/.exec(message);
-  if (!m) return null;
-  const perms = m[1]!.split(/,\s*/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !UNADVERTISED_BRIDGE_PERMS.has(s));
-  return perms.length > 0 ? perms : null;
-}
-
 function buildBridgeBroadcast(): BridgeStatusBroadcast {
   if (lastDialFailure.size === 0) {
     return { offline: false, missingPermissions: [] };
@@ -1019,14 +1003,13 @@ export function registerLumiagentPhoneline(
     try {
       req = await spindle.rpcPool.read<PhoneLineRequest>(`${requesterId}.phoneline_request`);
     } catch (err) {
-      const message = (err as Error).message;
-      // Confused-deputy defence in the host throws this shape when LumiRealm
-      // does not declare every permission the caller does. Record the failure
-      // for the banner and rethrow so the caller's dial fails as before.
-      const missing = parseInheritanceError(message);
+      const message = err instanceof Error ? err.message : String(err);
+      const missing = parseBridgePermissionError(message);
       if (missing) {
         lastDialFailure.set(requesterId, missing);
-        log(`lumiagent-phoneline: bridge offline, LumiRealm missing perms the "${requesterId}" caller declares: [${missing.join(',')}]`);
+        log(`lumiagent-phoneline: bridge offline, LumiRealm missing permissions: [${missing.join(',')}]`);
+        try { notifyBridgeStatus(buildBridgeBroadcast()); } catch { /* */ }
+      } else if (lastDialFailure.delete(requesterId)) {
         try { notifyBridgeStatus(buildBridgeBroadcast()); } catch { /* */ }
       }
       throw new Error(`could not read pending request from ${requesterId}: ${message}`);

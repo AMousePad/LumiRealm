@@ -26586,7 +26586,7 @@ function makeVarsApi(state) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.9.2",
+  version: "0.10.0",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -44143,6 +44143,27 @@ async function openRisumUpload(readChunk) {
   };
 }
 
+// src/bridge-permissions.ts
+var declaredPermissions = new Set(spindle_default.permissions);
+function filterBridgePermissions(permissions) {
+  return [...new Set(permissions.map((permission) => permission.trim()))].filter((permission) => declaredPermissions.has(permission)).sort();
+}
+function parseBridgePermissionError(message) {
+  const match = /Shared RPC endpoint "[^"]+" requires (?:requester|owner) "([^"]+)"(?: to inherit owner "[^"]+")? permissions: ([^]+?)$/.exec(message);
+  if (!match || match[1] !== spindle_default.identifier)
+    return null;
+  const permissions = filterBridgePermissions(match[2].split(/,\s*/));
+  return permissions.length > 0 ? permissions : null;
+}
+async function probeLumiagentBridge(spindle2) {
+  try {
+    await spindle2.rpcPool.read("lumiagent.phoneline_probe");
+    return null;
+  } catch (err) {
+    return parseBridgePermissionError(err instanceof Error ? err.message : String(err));
+  }
+}
+
 // src/lumiagent-phoneline.ts
 var EXCLUDE_FROM_SEARCH = [
   "lumirealm.source",
@@ -44844,14 +44865,6 @@ async function dispatchMutation(req, mutations) {
   return { ok: false, error: "unknown mutation op" };
 }
 var lastDialFailure = new Map;
-var UNADVERTISED_BRIDGE_PERMS = new Set(["memories", "regex_scripts_unrestricted"]);
-function parseInheritanceError(message) {
-  const m = /requires requester "[^"]+" to inherit owner "[^"]+" permissions: ([^]+?)$/.exec(message);
-  if (!m)
-    return null;
-  const perms = m[1].split(/,\s*/).map((s) => s.trim()).filter((s) => s.length > 0 && !UNADVERTISED_BRIDGE_PERMS.has(s));
-  return perms.length > 0 ? perms : null;
-}
 function buildBridgeBroadcast() {
   if (lastDialFailure.size === 0) {
     return { offline: false, missingPermissions: [] };
@@ -44882,11 +44895,15 @@ function registerLumiagentPhoneline(spindle2, moduleStorage, log = () => {}, onM
     try {
       req = await spindle2.rpcPool.read(`${requesterId}.phoneline_request`);
     } catch (err) {
-      const message = err.message;
-      const missing = parseInheritanceError(message);
+      const message = err instanceof Error ? err.message : String(err);
+      const missing = parseBridgePermissionError(message);
       if (missing) {
         lastDialFailure.set(requesterId, missing);
-        log(`lumiagent-phoneline: bridge offline, LumiRealm missing perms the "${requesterId}" caller declares: [${missing.join(",")}]`);
+        log(`lumiagent-phoneline: bridge offline, LumiRealm missing permissions: [${missing.join(",")}]`);
+        try {
+          notifyBridgeStatus(buildBridgeBroadcast());
+        } catch {}
+      } else if (lastDialFailure.delete(requesterId)) {
         try {
           notifyBridgeStatus(buildBridgeBroadcast());
         } catch {}
@@ -45002,22 +45019,9 @@ function broadcastBridgeStatus(payload) {
     }
   }
 }
-async function probeLumiagentBridge() {
-  try {
-    await spindle.rpcPool.read("lumiagent.phoneline_probe");
-    return null;
-  } catch (err) {
-    const message = err.message;
-    const m = /requires requester "[^"]+" to inherit owner "[^"]+" permissions: ([^]+?)$/.exec(message);
-    if (!m)
-      return null;
-    const perms = m[1].split(/,\s*/).map((s) => s.trim()).filter((s) => s.length > 0);
-    return perms.length > 0 ? perms : null;
-  }
-}
 subscribeToMissingChanges(() => {
   (async () => {
-    const missing = await probeLumiagentBridge();
+    const missing = await probeLumiagentBridge(spindle);
     if (missing && missing.length > 0) {
       log8.warn(`permissions.changed: lumiagent bridge probe failed, LumiRealm missing=[${missing.join(",")}]`);
       broadcastBridgeStatus({
