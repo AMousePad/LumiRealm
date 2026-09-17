@@ -860,6 +860,12 @@ async function touchCharacterRecency(
   return recencyWriteChain;
 }
 
+function setChatStyleMode(chatId: string, mode: 'bounded' | 'extension-relaxed', userId: string | undefined): void {
+  spindle.chat.setStyleMode(chatId, mode, userId).catch((err: unknown) => {
+    log.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
+  });
+}
+
 function sendSetActiveChat(
   activeChatId: string | null,
   activeCharacterId: string | null,
@@ -1153,11 +1159,7 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   consumeIfOurWrite,
   send,
   sendSetActiveChat,
-  setChatStyleMode: (chatId, mode, userId) => {
-    spindle.chat.setStyleMode(chatId, mode, userId).catch((err: unknown) => {
-      log.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
-    });
-  },
+  setChatStyleMode,
   listCards,
   pushCards,
   deleteCardByChar,
@@ -1718,6 +1720,7 @@ const importHandlers = createImportHandlers({
   pushCards,
   ensureActiveCardForChat,
   sendSetActiveChat,
+  setChatStyleMode,
   invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
