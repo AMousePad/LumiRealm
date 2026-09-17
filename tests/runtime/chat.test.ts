@@ -102,13 +102,13 @@ describe('chat.read accessors', () => {
     expect(h.chat.getMessageAtIndex(1)).toBe('hello there');
   });
 
-  test('getMessageAtIndex negative (from end)', () => {
-    expect(h.chat.getMessageAtIndex(-1)).toBe('doing fine');
-    expect(h.chat.getMessageAtIndex(-2)).toBe('how are you');
+  test('structured getMessageAtIndex does not wrap negative indices', () => {
+    expect(h.chat.getMessageAtIndex(-1)).toBe('null');
+    expect(h.chat.getMessageAtIndex(-2)).toBe('null');
   });
 
-  test('getMessageAtIndex out of range → empty', () => {
-    expect(h.chat.getMessageAtIndex(99)).toBe('');
+  test('getMessageAtIndex out of range returns null', () => {
+    expect(h.chat.getMessageAtIndex(99)).toBe('null');
   });
 
   test('getMessagesTail returns last N', () => {
@@ -122,13 +122,13 @@ describe('chat.read accessors', () => {
     expect(h.chat.getMessagesTail(99).length).toBe(4);
   });
 
-  test('empty cache → all reads return empty', () => {
+  test('empty cache reports missing structured messages', () => {
     const empty = newChat([]);
     expect(empty.chat.getMessageCount()).toBe(0);
-    expect(empty.chat.getLastMessage()).toBe('');
+    expect(empty.chat.getLastMessage()).toBe('null');
     expect(empty.chat.getFirstMessage()).toBe('');
-    expect(empty.chat.getLastUserMessage()).toBe('');
-    expect(empty.chat.getLastCharMessage()).toBe('');
+    expect(empty.chat.getLastUserMessage()).toBe('null');
+    expect(empty.chat.getLastCharMessage()).toBe('null');
   });
 });
 
@@ -136,9 +136,10 @@ describe('chat.quickSearchChat', () => {
   let h: ReturnType<typeof newChat>;
   beforeEach(() => { h = newChat(); });
 
-  test('default (word) condition matches whole-word', () => {
-    expect(h.chat.quickSearchChat('fine', 'word', 5)).toBe(true);
-    expect(h.chat.quickSearchChat('partial-no-match', 'word', 5)).toBe(false);
+  test('strict condition matches a space-delimited token', () => {
+    expect(h.chat.quickSearchChat('fine', 'strict', 5)).toBe(true);
+    expect(h.chat.quickSearchChat('partial-no-match', 'strict', 5)).toBe(false);
+    expect(h.chat.quickSearchChat('fine', 'word', 5)).toBe(false);
   });
 
   test('loose condition substring-matches', () => {
@@ -152,9 +153,8 @@ describe('chat.quickSearchChat', () => {
   });
 
   test('depth limits search window', () => {
-    // Greeting "hi" only in first message; depth=1 should not see it
-    expect(h.chat.quickSearchChat('hi', 'word', 1)).toBe(false);
-    expect(h.chat.quickSearchChat('hi', 'word', 99)).toBe(true);
+    expect(h.chat.quickSearchChat('hi', 'strict', 1)).toBe(false);
+    expect(h.chat.quickSearchChat('hi', 'strict', 99)).toBe(true);
   });
 });
 

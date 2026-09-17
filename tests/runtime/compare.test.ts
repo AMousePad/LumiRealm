@@ -1,81 +1,28 @@
-import { describe, expect, test } from 'bun:test';
-import { compareValues } from '../../src/interpreter/runtime/compare.js';
+import { expect, test } from 'bun:test';
+import { compareValues, compareTriggerCondition } from '../../src/interpreter/runtime/compare.js';
 
-describe('compareValues', () => {
-  test('=, ==', () => {
-    expect(compareValues('a', 'a', '=')).toBe(true);
-    expect(compareValues('a', 'a', '==')).toBe(true);
-    expect(compareValues('a', 'b', '=')).toBe(false);
-    // String coercion: 1 vs "1" compares equal (toStr both)
-    expect(compareValues(1, '1', '==')).toBe(true);
-  });
+test.each([
+  ['a', 'a', '=', true], ['a', 'b', '=', false], ['a', 'b', '!=', true],
+  ['5', '3', '>', true], ['3', '5', '<', true], ['5', '5', '>=', true], ['5', '5', '<=', true],
+  ['["hello","world"]', 'world', '∋', true], ['["hello"]', 'world', '∋', false],
+  ['bad JSON', 'world', '∋', false], ['bad JSON', 'world', '∌', true],
+  ['hello', '["hello","world"]', '∈', true], ['missing', '["hello"]', '∉', true],
+  ['hello', 'bad JSON', '∈', false], ['hello', 'bad JSON', '∉', true],
+  ['Hello world', 'helloworld', '≒', true], ['Hello', 'world', '≒', false],
+  ['1.00001', '1', '≒', true], ['1.001', '1', '≒', false],
+])('Risu V2 comparison %s %s %s', (a, b, op, expected) => {
+  expect(compareValues(a, b, op as string)).toBe(expected);
+});
 
-  test('!=, ≠', () => {
-    expect(compareValues('a', 'b', '!=')).toBe(true);
-    expect(compareValues('a', 'b', '≠')).toBe(true);
-    expect(compareValues('a', 'a', '!=')).toBe(false);
-  });
+test.each(['==', '≠', '≥', '≤', 'contains', 'in', 'approx', 'truthy', 'null', 'unknown'])(
+  'unrecognized V2 operator %s does not take the branch', operator => {
+    expect(compareValues('same', 'same', operator)).toBe(false);
+  },
+);
 
-  test('numeric > < >= <=', () => {
-    expect(compareValues(5, 3, '>')).toBe(true);
-    expect(compareValues(3, 5, '<')).toBe(true);
-    expect(compareValues(5, 5, '>=')).toBe(true);
-    expect(compareValues(5, 5, '≥')).toBe(true);
-    expect(compareValues(5, 5, '<=')).toBe(true);
-    expect(compareValues(5, 5, '≤')).toBe(true);
-    // String numerics coerce
-    expect(compareValues('10', '2', '>')).toBe(true);
-  });
-
-  test('null', () => {
-    expect(compareValues('', '', 'null')).toBe(true);
-    expect(compareValues('null', '', 'null')).toBe(true);
-    expect(compareValues('undefined', '', 'null')).toBe(true);
-    expect(compareValues(null, '', 'null')).toBe(true);
-    expect(compareValues(undefined, '', 'null')).toBe(true);
-    expect(compareValues('value', '', 'null')).toBe(false);
-    expect(compareValues('0', '', 'null')).toBe(false);
-  });
-
-  test('truthy', () => {
-    expect(compareValues('value', '', 'truthy')).toBe(true);
-    expect(compareValues('value', '', 'true')).toBe(true);
-    // Risu's specific falsy set
-    expect(compareValues('', '', 'truthy')).toBe(false);
-    expect(compareValues('0', '', 'truthy')).toBe(false);
-    expect(compareValues('false', '', 'truthy')).toBe(false);
-    expect(compareValues('null', '', 'truthy')).toBe(false);
-    expect(compareValues('undefined', '', 'truthy')).toBe(false);
-  });
-
-  test('contains / notcontains: JSON array membership (Risu v2IfAdvanced)', () => {
-    expect(compareValues('["hello","world"]', 'world', 'contains')).toBe(true);
-    expect(compareValues('["hello","world"]', 'world', '∋')).toBe(true);
-    expect(compareValues('["hello","world"]', 'xyz', 'contains')).toBe(false);
-    // Non-JSON source is not substring-matched, it fails the parse.
-    expect(compareValues('hello world', 'world', 'contains')).toBe(false);
-    expect(compareValues('["hello","world"]', 'xyz', 'notcontains')).toBe(true);
-    expect(compareValues('["hello","world"]', 'xyz', '∌')).toBe(true);
-    expect(compareValues('hello world', 'world', 'notcontains')).toBe(true);
-  });
-
-  test('in / notin: membership in the parsed right-hand array', () => {
-    expect(compareValues('ack', '["ack","stack"]', 'in')).toBe(true);
-    expect(compareValues('ack', '["ack","stack"]', '∈')).toBe(true);
-    expect(compareValues('ack', 'haystack', 'in')).toBe(false);
-    expect(compareValues('xyz', '["ack","stack"]', 'notin')).toBe(true);
-    expect(compareValues('xyz', '["ack","stack"]', '∉')).toBe(true);
-    expect(compareValues('xyz', 'haystack', 'notin')).toBe(true);
-  });
-
-  test('approx — case-insensitive equal', () => {
-    expect(compareValues('Hello', 'hello', 'approx')).toBe(true);
-    expect(compareValues('Hello', 'hello', '≒')).toBe(true);
-    expect(compareValues('Hello', 'world', 'approx')).toBe(false);
-  });
-
-  test('default falls through to strict equal', () => {
-    expect(compareValues('a', 'a', 'unknown-op')).toBe(true);
-    expect(compareValues('a', 'b', 'unknown-op')).toBe(false);
-  });
+test.each([
+  ['true', 'true', true], ['1', 'true', true], ['value', 'true', false],
+  ['null', 'null', true], ['', 'null', false], ['undefined', 'null', false],
+])('Risu trigger predicate %s %s', (source, operator, expected) => {
+  expect(compareTriggerCondition(source as string, '', operator as string)).toBe(expected);
 });

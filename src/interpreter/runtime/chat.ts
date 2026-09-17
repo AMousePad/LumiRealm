@@ -21,8 +21,8 @@ export interface ChatApi {
   getMessageCount(): number;
   getLastMessage(): string;
   getMessageAtIndex(i: unknown): string;
-  getLastUserMessage(): string;
-  getLastCharMessage(): string;
+  getLastUserMessage(missing?: string): string;
+  getLastCharMessage(missing?: string): string;
   getFirstMessage(): string;
   impersonate(role: unknown, value: unknown): Promise<void>;
   systemPrompt(location: unknown, value: unknown): Promise<void>;
@@ -41,29 +41,28 @@ export function makeChatApi(
   notifyStateChanged: (source: string) => void,
 ): ChatApi {
   function getMessagesTail(n: number): readonly HostMessage[] {
-    return state.messagesCache.slice(Math.max(0, state.messagesCache.length - n));
+    return state.messagesCache.slice(0 - n);
   }
   function getMessageCount(): number { return state.messagesCache.length; }
   function getLastMessage(): string {
     const m = state.messagesCache[state.messagesCache.length - 1];
-    return toStr(m && m.content);
+    return toStr(m?.content ?? 'null');
   }
   function getMessageAtIndex(i: unknown): string {
     const n = Number(i);
-    const pick = n >= 0 ? state.messagesCache[n] : state.messagesCache[state.messagesCache.length + n];
-    return toStr(pick && pick.content);
+    return toStr(state.messagesCache[n]?.content ?? 'null');
   }
-  function getLastUserMessage(): string {
+  function getLastUserMessage(missing = 'null'): string {
     for (let i = state.messagesCache.length - 1; i >= 0; i--) {
       if (state.messagesCache[i]?.role === 'user') return toStr(state.messagesCache[i]!.content);
     }
-    return '';
+    return missing;
   }
-  function getLastCharMessage(): string {
+  function getLastCharMessage(missing = 'null'): string {
     for (let i = state.messagesCache.length - 1; i >= 0; i--) {
       if (state.messagesCache[i]?.role === 'assistant') return toStr(state.messagesCache[i]!.content);
     }
-    return '';
+    return missing;
   }
   function getFirstMessage(): string {
     // Risu v2GetFirstMessage returns char.firstMessage (the greeting), which
@@ -143,14 +142,14 @@ export function makeChatApi(
   }
 
   function quickSearchChat(value: unknown, condition: string, depth: unknown): boolean {
-    const msgs = getMessagesTail(Math.max(1, Number(depth) || 5));
-    const joined = msgs.map((m) => toStr(m.content)).join('\n').toLowerCase();
-    const needle = toStr(value).toLowerCase();
-    return condition === 'regex'
-      ? (() => { try { return new RegExp(needle).test(joined); } catch { return joined.indexOf(needle) >= 0; } })()
-      : condition === 'loose'
-      ? joined.indexOf(needle) >= 0
-      : joined.split(/\s+/).indexOf(needle) >= 0;
+    const n = Number(depth);
+    if (Number.isNaN(n)) return false;
+    const joined = getMessagesTail(n).map((m) => m.content).join(' ');
+    const needle = toStr(value);
+    if (condition === 'strict') return joined.split(' ').includes(needle);
+    if (condition === 'loose') return joined.toLowerCase().includes(needle.toLowerCase());
+    if (condition === 'regex') return new RegExp(needle).test(joined);
+    return false;
   }
 
   return {

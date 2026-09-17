@@ -92,7 +92,7 @@ import { inheritedVarsAls, withInheritedVarsCache } from './runtime/als.js';
 export { compareValues } from './runtime/compare.js';
 export { applyMatchTemplate } from './runtime/match-template.js';
 export { calcString } from './runtime/calc.js';
-import { compareValues } from './runtime/compare.js';
+import { compareValues, compareTriggerCondition } from './runtime/compare.js';
 import { unsupported } from './runtime/unsupported.js';
 
 
@@ -602,22 +602,17 @@ export async function makeRisuTriggerRuntime(
       const co = c as Record<string, unknown>;
       const type = co['type'];
       let pass = true;
-      if (type === 'chatindex') {
-        const idx = getMessageCount() - 1;
-        pass = compare(idx, resolve(co['value'], toStr(co['valueType'] ?? 'value')), toStr(co['operator'] ?? '='));
+      if (type === 'var' || type === 'value' || type === 'chatindex') {
+        const source = type === 'chatindex' ? String(getMessageCount())
+          : type === 'value' ? toStr(co['var']) : getVar(toStr(co['var']));
+        const target = resolve(co['value'], 'value');
+        pass = compareTriggerCondition(resolve(source, 'value'), target, toStr(co['operator']));
       } else if (type === 'exists') {
-        const depth = Math.max(1, Number(co['depth']) || 1);
-        const msgs = getMessagesTail(depth);
-        const needle = toStr(resolve(co['value'], toStr(co['valueType'] ?? 'value'))).toLowerCase();
-        const joined = msgs.map((m) => toStr(m.content)).join('\n').toLowerCase();
-        const cond = co['condition'];
-        pass = cond === 'loose' ? joined.indexOf(needle) >= 0
-          : cond === 'regex' ? (() => { try { return new RegExp(needle).test(joined); } catch { return joined.indexOf(needle) >= 0; } })()
-          : joined.split(/\s+/).indexOf(needle) >= 0;
-      } else {
-        const source = type === 'value' ? toStr(co['var']) : getVar(toStr(co['var']));
-        const target = resolve(co['value'], toStr(co['valueType'] ?? 'value'));
-        pass = compare(source, target, toStr(co['operator'] ?? '='));
+        const needle = resolve(resolve(co['value'], 'value'), 'value');
+        const joined = messagesCache.slice(-Number(co['depth'])).map(m => m.content).join(' ');
+        if (co['type2'] === 'loose') pass = joined.toLowerCase().includes(needle.toLowerCase());
+        else if (co['type2'] === 'strict') pass = joined.split(' ').includes(needle);
+        else if (co['type2'] === 'regex') pass = new RegExp(needle).test(joined);
       }
       if (!pass) return false;
     }
@@ -1014,11 +1009,8 @@ export async function makeRisuTriggerRuntime(
       setBackgroundEmbedding: (_id: unknown, _data: unknown) => { /* */ },
       // Risu scriptings.ts getCharacterLastMessage falls back to char.firstMessage
       // (the greeting) when chat.message[] has no char-role message.
-      getCharacterLastMessage: (_id: unknown) => {
-        const last = getLastCharMessage();
-        return last !== '' ? last : toStr(firstMessage ?? '');
-      },
-      getUserLastMessage: (_id: unknown) => getLastUserMessage(),
+      getCharacterLastMessage: (_id: unknown) => getLastCharMessage(toStr(firstMessage ?? '')),
+      getUserLastMessage: (_id: unknown) => getLastUserMessage(''),
       // Returns {success,result} JSON. Gated on lowLevelAccess.
       LLMMain: async (_id: unknown, promptStr: unknown, _useMulti: unknown, _optionsStr: unknown): Promise<string> => {
         if (!lowLevelAccess) {
