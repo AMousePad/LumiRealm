@@ -30,7 +30,6 @@ import {
   replaceString,
   random,
   setCharAt,
-  calculate,
   splitString,
 } from './runtime/strings-regex.js';
 import { toStr } from '../util/coerce.js';
@@ -95,7 +94,7 @@ import { inheritedVarsAls, withInheritedVarsCache } from './runtime/als.js';
 
 export { compareValues } from './runtime/compare.js';
 export { applyMatchTemplate } from './runtime/match-template.js';
-export { calcString } from './runtime/calc.js';
+import { calculate } from './runtime/calc.js';
 import { compareValues, compareTriggerCondition } from './runtime/compare.js';
 import { unsupported } from './runtime/unsupported.js';
 
@@ -161,7 +160,7 @@ export interface RisuTriggerRuntime {
   random(min: unknown, max: unknown): number;
   setCharAt(source: unknown, index: unknown, value: unknown): string;
   splitString(source: unknown, delimiter: unknown, kind?: string): readonly string[];
-  calculate(expr: unknown): string;
+  calculate(expression: unknown, expressionType: string, outputVar: string): void;
   // arrays
   makeArrayVar(name: string): void;
   arrayLength(name: string): string;
@@ -1302,7 +1301,11 @@ export async function makeRisuTriggerRuntime(
     runTrigger, runCode, runLua,
     extractRegex, regexTest, replaceString,
     random,
-    setCharAt, splitString, calculate,
+    setCharAt, splitString,
+    calculate: (expression, expressionType, outputVar) => calculate(_vars, name => {
+      onVarRead?.(name, 'global');
+      return globalVarsCache[name] ?? 'null';
+    }, expression, expressionType, outputVar),
     makeArrayVar, arrayLength, arrayGet, arraySet, arrayPush, arrayPop,
     arrayShift, arrayUnshift, arraySplice, arraySlice, arrayJoin,
     arrayIndexOf, arrayRemoveIndex,

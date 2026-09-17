@@ -1,7 +1,6 @@
 // Pure string, regex, and arithmetic helpers.
 
 import { toStr } from '../../util/coerce.js';
-import { calcString } from './calc.js';
 
 // Risu runTrigger substitutes the result in three passes, unlike String.replace templates.
 function formatResult(template: string, capture: (index: number) => string): string {
@@ -51,8 +50,6 @@ export function setCharAt(source: unknown, index: unknown, value: unknown): stri
   chars[Number(index)] = toStr(value);
   return chars.join('');
 }
-
-export function calculate(expr: unknown): string { return calcString(toStr(expr)); }
 
 export function splitString(source: unknown, delimiter: unknown, kind?: string): readonly string[] {
   let d: string | RegExp = toStr(delimiter);

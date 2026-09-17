@@ -5,7 +5,6 @@ import {
   replaceString,
   random,
   setCharAt,
-  calculate,
   splitString,
 } from '../../src/interpreter/runtime/strings-regex.js';
 
@@ -99,21 +98,6 @@ describe('setCharAt', () => {
 
   test('non-numeric index leaves the text unchanged', () => {
     expect(setCharAt('abc', 'foo', 'X')).toBe('abc');
-  });
-});
-
-describe('calculate', () => {
-  test('arithmetic delegates to calcString', () => {
-    expect(calculate('1+2')).toBe('3');
-    expect(calculate('10/2')).toBe('5');
-  });
-
-  test('non-arithmetic → NaN', () => {
-    expect(calculate('foo')).toBe('NaN');
-  });
-
-  test('coerces non-string input', () => {
-    expect(calculate(42)).toBe('42');
   });
 });
 

@@ -540,7 +540,7 @@ function emitV2Calculate(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `String(__risu.calculate(${resolveCall(e.expression, e.expressionType)}))`)};`,
+      `__risu.calculate(${JSON.stringify(e.expression)}, ${JSON.stringify(e.expressionType)}, ${JSON.stringify(e.outputVar)});`,
     ),
     needsAwait: false,
   };

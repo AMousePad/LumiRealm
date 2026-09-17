@@ -327,7 +327,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2Calculate: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.calculate(rt.resolve(e.expression, e.expressionType))));
+    rt.calculate(e.expression, e.expressionType, e.outputVar);
   },
   v2MakeArrayVar: (op, { rt }) => {
     const e = op as Any;
