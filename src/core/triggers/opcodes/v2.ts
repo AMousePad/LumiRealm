@@ -1,7 +1,20 @@
 import type { EmitContext, EmitFn, EmitResult } from "../types.js";
-import { line, resolveCall, setVarCall } from "../types.js";
+import { line, resolveCall } from "../types.js";
 import type { TriggerEffect } from "../../schemas/triggerscript.js";
 
+
+function setResultCall(name: string, value: string, direct = false): string {
+  return direct ? `__risu.setVar(${resolveCall(name, "value")}, ${value})`
+    : `__risu.setResult(${JSON.stringify(name)}, ${value})`;
+}
+
+function emitRegexEffect(op: TriggerEffect, ctx: EmitContext): EmitResult {
+  return { code: line(ctx, `__risu.regexEffect(${JSON.stringify(op)});`), needsAwait: false };
+}
+
+function emitCollectionEffect(op: TriggerEffect, ctx: EmitContext): EmitResult {
+  return { code: line(ctx, `__risu.collectionEffect(${JSON.stringify(op)});`), needsAwait: false };
+}
 
 function emitV2SetVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as {
@@ -154,7 +167,7 @@ function emitV2Tokenize(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `String(await __risu.tokenize(${resolveCall(e.value, e.valueType)}))`)};`,
+      `${setResultCall(e.outputVar, `String(await __risu.tokenize(${resolveCall(e.value, e.valueType)}))`)};`,
     ),
     needsAwait: true,
   };
@@ -172,7 +185,7 @@ function emitV2QuickSearchChat(op: TriggerEffect, ctx: EmitContext): EmitResult 
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `__risu.quickSearchChat(${resolveCall(e.value, e.valueType)}, ${JSON.stringify(e.condition)}, Number(${resolveCall(e.depth, e.depthType)})) ? "1" : "0"`)};`,
+      `${setResultCall(e.outputVar, `__risu.quickSearchChat(${resolveCall(e.value, e.valueType)}, ${JSON.stringify(e.condition)}, Number(${resolveCall(e.depth, e.depthType)})) ? "1" : "0"`)};`,
     ),
     needsAwait: false,
   };
@@ -182,7 +195,7 @@ function emitV2QuickSearchChat(op: TriggerEffect, ctx: EmitContext): EmitResult 
 function emitV2GetLastMessage(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getLastMessage()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastMessage()`, true)};`),
     needsAwait: false,
   };
 }
@@ -192,7 +205,7 @@ function emitV2GetMessageAtIndex(op: TriggerEffect, ctx: EmitContext): EmitResul
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `__risu.getMessageAtIndex(Number(${resolveCall(e.index, e.indexType)}))`)};`,
+      `${setResultCall(e.outputVar, `__risu.getMessageAtIndex(Number(${resolveCall(e.index, e.indexType)}))`)};`,
     ),
     needsAwait: false,
   };
@@ -201,7 +214,7 @@ function emitV2GetMessageAtIndex(op: TriggerEffect, ctx: EmitContext): EmitResul
 function emitV2GetMessageCount(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `String(__risu.getMessageCount())`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getMessageCount())`, true)};`),
     needsAwait: false,
   };
 }
@@ -209,7 +222,7 @@ function emitV2GetMessageCount(op: TriggerEffect, ctx: EmitContext): EmitResult 
 function emitV2GetLastUserMessage(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getLastUserMessage()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastUserMessage()`)};`),
     needsAwait: false,
   };
 }
@@ -217,7 +230,7 @@ function emitV2GetLastUserMessage(op: TriggerEffect, ctx: EmitContext): EmitResu
 function emitV2GetLastCharMessage(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getLastCharMessage()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastCharMessage()`)};`),
     needsAwait: false,
   };
 }
@@ -225,7 +238,7 @@ function emitV2GetLastCharMessage(op: TriggerEffect, ctx: EmitContext): EmitResu
 function emitV2GetFirstMessage(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getFirstMessage()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getFirstMessage()`, true)};`),
     needsAwait: false,
   };
 }
@@ -254,7 +267,7 @@ function emitV2RunLLM(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `await __risu.runLLM(${resolveCall(e.value, e.valueType)}, ${JSON.stringify(e.model)}, ${Boolean(e.streaming)})`)};`,
+      `${setResultCall(e.outputVar, `await __risu.runLLM(${resolveCall(e.value, e.valueType)}, ${JSON.stringify(e.model)}, ${Boolean(e.streaming)})`)};`,
     ),
     needsAwait: true,
   };
@@ -266,7 +279,7 @@ function emitV2GetAlertInput(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `await __risu.alertInput(${resolveCall(e.display, e.displayType)})`)};`,
+      `${setResultCall(e.outputVar, `await __risu.alertInput(${resolveCall(e.display, e.displayType)})`)};`,
     ),
     needsAwait: true,
   };
@@ -284,7 +297,7 @@ function emitV2GetAlertSelect(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `await __risu.alertSelect(${resolveCall(e.display, e.displayType)}, String(${resolveCall(e.value, e.valueType)}).split("|"))`)};`,
+      `${setResultCall(e.outputVar, `await __risu.alertSelect(${resolveCall(e.display, e.displayType)}, String(${resolveCall(e.value, e.valueType)}).split("|"))`)};`,
     ),
     needsAwait: true,
   };
@@ -304,7 +317,7 @@ function emitV2CheckSimilarity(op: TriggerEffect, ctx: EmitContext): EmitResult 
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `(await __risu.checkSimilarity(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.source, e.sourceType)})).join("§")`)};`,
+      `${setResultCall(e.outputVar, `(await __risu.checkSimilarity(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.source, e.sourceType)})).join("§")`)};`,
     ),
     needsAwait: true,
   };
@@ -324,7 +337,7 @@ function emitV2ImgGen(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `await __risu.runImgGen(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.negValue, e.negValueType)})`)};`,
+      `${setResultCall(e.outputVar, `await __risu.runImgGen(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.negValue, e.negValueType)})`)};`,
     ),
     needsAwait: true,
   };
@@ -346,57 +359,9 @@ function emitV2ExtractRegex(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(
+      `${setResultCall(
         e.outputVar,
-        `__risu.extractRegex(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.regex, e.regexType)}, ${resolveCall(e.flags, e.flagsType)}, ${resolveCall(e.result, e.resultType)})`,
-      )};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2RegexTest(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    value: string;
-    valueType: "var" | "value";
-    regex: string;
-    regexType: "var" | "value";
-    flags: string;
-    flagsType: "var" | "value";
-    outputVar: string;
-  };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(
-        e.outputVar,
-        `__risu.regexTest(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.regex, e.regexType)}, ${resolveCall(e.flags, e.flagsType)}) ? "1" : "0"`,
-      )};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2ReplaceString(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    source: string;
-    sourceType: "var" | "value";
-    regex: string;
-    regexType: "var" | "value";
-    result: string;
-    resultType: "var" | "value";
-    replacement: string;
-    replacementType: "var" | "value";
-    flags: string;
-    flagsType: "var" | "value";
-    outputVar: string;
-  };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(
-        e.outputVar,
-        `__risu.replaceString(${resolveCall(e.source, e.sourceType)}, ${resolveCall(e.regex, e.regexType)}, ${resolveCall(e.result, e.resultType)}, ${resolveCall(e.replacement, e.replacementType)}, ${resolveCall(e.flags, e.flagsType)})`,
+        `__risu.extractRegex(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.regex, e.regexType)}, ${resolveCall(e.flags, e.flagsType)}, () => ${resolveCall(e.result, e.resultType)})`,
       )};`,
     ),
     needsAwait: false,
@@ -415,7 +380,7 @@ function emitV2Random(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `String(__risu.random(Number(${resolveCall(e.min, e.minType)}), Number(${resolveCall(e.max, e.maxType)})))`)};`,
+      `${setResultCall(e.outputVar, `String(__risu.random(Number(${resolveCall(e.min, e.minType)}), Number(${resolveCall(e.max, e.maxType)})))`)};`,
     ),
     needsAwait: false,
   };
@@ -433,7 +398,7 @@ function emitV2GetCharAt(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `(String(${resolveCall(e.source, e.sourceType)})[Number(${resolveCall(e.index, e.indexType)})] ?? "null")`)};`,
+      `${setResultCall(e.outputVar, `(String(${resolveCall(e.source, e.sourceType)})[Number(${resolveCall(e.index, e.indexType)})] ?? "null")`)};`,
     ),
     needsAwait: false,
   };
@@ -444,7 +409,7 @@ function emitV2GetCharCount(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `String(String(${resolveCall(e.source, e.sourceType)}).length)`)};`,
+      `${setResultCall(e.outputVar, `String(String(${resolveCall(e.source, e.sourceType)}).length)`)};`,
     ),
     needsAwait: false,
   };
@@ -455,7 +420,7 @@ function emitV2ToLowerCase(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `String(${resolveCall(e.source, e.sourceType)}).toLowerCase()`)};`,
+      `${setResultCall(e.outputVar, `String(${resolveCall(e.source, e.sourceType)}).toLowerCase()`)};`,
     ),
     needsAwait: false,
   };
@@ -466,7 +431,7 @@ function emitV2ToUpperCase(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `String(${resolveCall(e.source, e.sourceType)}).toUpperCase()`)};`,
+      `${setResultCall(e.outputVar, `String(${resolveCall(e.source, e.sourceType)}).toUpperCase()`)};`,
     ),
     needsAwait: false,
   };
@@ -485,7 +450,7 @@ function emitV2SetCharAt(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(
+      `${setResultCall(
         e.outputVar,
         `__risu.setCharAt(${resolveCall(e.source, e.sourceType)}, Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)})`,
       )};`,
@@ -505,7 +470,7 @@ function emitV2SplitString(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(
+      `${setResultCall(
         e.outputVar,
         `JSON.stringify(__risu.splitString(${resolveCall(e.source, e.sourceType)}, ${resolveCall(e.delimiter, e.delimiterType)}, ${JSON.stringify(e.delimiterType)}))`,
       )};`,
@@ -525,7 +490,7 @@ function emitV2ConcatString(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `String(${resolveCall(e.source1, e.source1Type)}) + String(${resolveCall(e.source2, e.source2Type)})`)};`,
+      `${setResultCall(e.outputVar, `String(${resolveCall(e.source1, e.source1Type)}) + String(${resolveCall(e.source2, e.source2Type)})`)};`,
     ),
     needsAwait: false,
   };
@@ -552,167 +517,7 @@ function emitV2MakeArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `{ const name = ${resolveCall(e.var, "value")}; if (name.startsWith('[') && name.endsWith(']')) return; __risu.makeArrayVar(name); }`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2GetArrayVarLength(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; outputVar: string };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `String(__risu.arrayLength(${resolveCall(e.var, "value")}))`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2GetArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; index: string; indexType: "var" | "value"; outputVar: string };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `__risu.arrayGet(${resolveCall(e.var, "value")}, Number(${resolveCall(e.index, e.indexType)}))`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2SetArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    var: string;
-    index: string;
-    indexType: "var" | "value";
-    value: string;
-    valueType: "var" | "value";
-  };
-  return {
-    code: line(
-      ctx,
-      `__risu.arraySet(${resolveCall(e.var, "value")}, Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)});`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2PushArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; value: string; valueType: "var" | "value" };
-  return {
-    code: line(
-      ctx,
-      `__risu.arrayPush(${resolveCall(e.var, "value")}, ${resolveCall(e.value, e.valueType)});`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2PopArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; outputVar: string };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `__risu.arrayPop(${resolveCall(e.var, "value")})`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2ShiftArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; outputVar: string };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `__risu.arrayShift(${resolveCall(e.var, "value")})`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2UnshiftArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; value: string; valueType: "var" | "value" };
-  return {
-    code: line(
-      ctx,
-      `__risu.arrayUnshift(${resolveCall(e.var, "value")}, ${resolveCall(e.value, e.valueType)});`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2SpliceArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    var: string;
-    start: string;
-    startType: "var" | "value";
-    item: string;
-    itemType: "var" | "value";
-  };
-  return {
-    code: line(
-      ctx,
-      `__risu.arraySplice(${resolveCall(e.var, "value")}, Number(${resolveCall(e.start, e.startType)}), ${resolveCall(e.item, e.itemType)});`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2SliceArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    var: string;
-    start: string;
-    startType: "var" | "value";
-    end: string;
-    endType: "var" | "value";
-    outputVar: string;
-  };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(
-        e.outputVar,
-        `__risu.arraySlice(${resolveCall(e.var, "value")}, Number(${resolveCall(e.start, e.startType)}), Number(${resolveCall(e.end, e.endType)}))`,
-      )};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2JoinArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    var: string;
-    varType: "var" | "value";
-    delimiter: string;
-    delimiterType: "var" | "value";
-    outputVar: string;
-  };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `__risu.arrayJoin(${resolveCall(e.var, e.varType)}, ${resolveCall(e.delimiter, e.delimiterType)})`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2GetIndexOfValueInArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; value: string; valueType: "var" | "value"; outputVar: string };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `String(__risu.arrayIndexOf(${resolveCall(e.var, "value")}, ${resolveCall(e.value, e.valueType)}))`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2RemoveIndexFromArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; index: string; indexType: "var" | "value" };
-  return {
-    code: line(
-      ctx,
-      `__risu.arrayRemoveIndex(${resolveCall(e.var, "value")}, Number(${resolveCall(e.index, e.indexType)}));`,
+      `{ const name = ${resolveCall(e.var, "value")}; if (name.startsWith('[') && name.endsWith(']')) return; __risu.setVar(name, "[]"); }`,
     ),
     needsAwait: false,
   };
@@ -723,119 +528,17 @@ function emitV2MakeDictVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { var: string };
   if (e.var.startsWith('{') && e.var.endsWith('}')) return { code: line(ctx, 'return;'), needsAwait: false };
   return {
-    code: line(ctx, `__risu.makeDictVar(${resolveCall(e.var, "value")});`),
+    code: line(ctx, `__risu.setVar(${resolveCall(e.var, "value")}, "{}");`),
     needsAwait: false,
   };
 }
 
-function emitV2GetDictVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    var: string;
-    varType: "var" | "value";
-    key: string;
-    keyType: "var" | "value";
-    outputVar: string;
-  };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `__risu.dictGet(${resolveCall(e.var, e.varType)}, ${resolveCall(e.key, e.keyType)})`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2SetDictVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    var: string;
-    varType: "var" | "value";
-    key: string;
-    keyType: "var" | "value";
-    value: string;
-    valueType: "var" | "value";
-  };
-  // Risu triggers.ts: varType==='value' is a no-op.
-  if (e.varType === "value") {
-    return { code: line(ctx, `/* v2SetDictVar skipped — varType='value' is a no-op in Risu */`), needsAwait: false };
-  }
-  return {
-    code: line(
-      ctx,
-      `__risu.dictSet(${resolveCall(e.var, "value")}, ${resolveCall(e.key, e.keyType)}, ${resolveCall(e.value, e.valueType)});`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2DeleteDictKey(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; varType: "var" | "value"; key: string; keyType: "var" | "value" };
-  if (e.varType === "value") {
-    return { code: line(ctx, `/* v2DeleteDictKey skipped — varType='value' */`), needsAwait: false };
-  }
-  return {
-    code: line(
-      ctx,
-      `__risu.dictDelete(${resolveCall(e.var, "value")}, ${resolveCall(e.key, e.keyType)});`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2HasDictKey(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as {
-    var: string;
-    varType: "var" | "value";
-    key: string;
-    keyType: "var" | "value";
-    outputVar: string;
-  };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `__risu.dictHasKey(${resolveCall(e.var, e.varType)}, ${resolveCall(e.key, e.keyType)}) ? "1" : "0"`)};`,
-    ),
-    needsAwait: false,
-  };
-}
 
 function emitV2ClearDict(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { var: string };
   if (e.var.startsWith('{') && e.var.endsWith('}')) return { code: line(ctx, 'return;'), needsAwait: false };
   return {
-    code: line(ctx, `__risu.dictClear(${resolveCall(e.var, "value")});`),
-    needsAwait: false,
-  };
-}
-
-function emitV2GetDictSize(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; varType: "var" | "value"; outputVar: string };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `String(__risu.dictSize(${resolveCall(e.var, e.varType)}))`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2GetDictKeys(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; varType: "var" | "value"; outputVar: string };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `JSON.stringify(__risu.dictKeys(${resolveCall(e.var, e.varType)}))`)};`,
-    ),
-    needsAwait: false,
-  };
-}
-
-function emitV2GetDictValues(op: TriggerEffect, ctx: EmitContext): EmitResult {
-  const e = op as unknown as { var: string; varType: "var" | "value"; outputVar: string };
-  return {
-    code: line(
-      ctx,
-      `${setVarCall(e.outputVar, `JSON.stringify(__risu.dictValues(${resolveCall(e.var, e.varType)}))`)};`,
-    ),
+    code: line(ctx, `__risu.setVar(${resolveCall(e.var, "value")}, "{}");`),
     needsAwait: false,
   };
 }
@@ -844,7 +547,7 @@ function emitV2GetDictValues(op: TriggerEffect, ctx: EmitContext): EmitResult {
 function emitV2GetCharacterDesc(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getCharacterDesc()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getCharacterDesc()`, true)};`),
     needsAwait: true,
   };
 }
@@ -860,7 +563,7 @@ function emitV2SetCharacterDesc(op: TriggerEffect, ctx: EmitContext): EmitResult
 function emitV2GetPersonaDesc(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getPersonaDesc()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getPersonaDesc()`, true)};`),
     needsAwait: true,
   };
 }
@@ -876,7 +579,7 @@ function emitV2SetPersonaDesc(op: TriggerEffect, ctx: EmitContext): EmitResult {
 function emitV2GetReplaceGlobalNote(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getReplaceGlobalNote()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getReplaceGlobalNote()`, true)};`),
     needsAwait: true,
   };
 }
@@ -892,7 +595,7 @@ function emitV2SetReplaceGlobalNote(op: TriggerEffect, ctx: EmitContext): EmitRe
 function emitV2GetAuthorNote(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `await __risu.getAuthorNote()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getAuthorNote()`, true)};`),
     needsAwait: true,
   };
 }
@@ -927,7 +630,7 @@ function emitV2GetLorebook(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `__risu.getLorebookByKey(${resolveCall(e.target, e.targetType)})`)};`,
+      `${setResultCall(e.outputVar, `__risu.getLorebookByKey(${resolveCall(e.target, e.targetType)})`)};`,
     ),
     needsAwait: false,
   };
@@ -936,7 +639,7 @@ function emitV2GetLorebook(op: TriggerEffect, ctx: EmitContext): EmitResult {
 function emitV2GetLorebookCount(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `String(__risu.getLorebookCount())`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getLorebookCount())`, true)};`),
     needsAwait: false,
   };
 }
@@ -946,7 +649,7 @@ function emitV2GetLorebookEntry(op: TriggerEffect, ctx: EmitContext): EmitResult
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `__risu.getLorebookEntry(Number(${resolveCall(e.index, e.indexType)}))`)};`,
+      `${setResultCall(e.outputVar, `__risu.getLorebookEntry(Number(${resolveCall(e.index, e.indexType)}))`)};`,
     ),
     needsAwait: false,
   };
@@ -968,7 +671,7 @@ function emitV2GetLorebookIndexViaName(op: TriggerEffect, ctx: EmitContext): Emi
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `String(__risu.getLorebookIndexViaName(${resolveCall(e.name, e.nameType)}))`)};`,
+      `${setResultCall(e.outputVar, `String(__risu.getLorebookIndexViaName(${resolveCall(e.name, e.nameType)}))`)};`,
     ),
     needsAwait: false,
   };
@@ -977,7 +680,7 @@ function emitV2GetLorebookIndexViaName(op: TriggerEffect, ctx: EmitContext): Emi
 function emitV2GetAllLorebooks(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `JSON.stringify(__risu.getAllLorebooks())`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `JSON.stringify(__risu.getAllLorebooks())`, true)};`),
     needsAwait: false,
   };
 }
@@ -987,7 +690,7 @@ function emitV2GetLorebookByName(op: TriggerEffect, ctx: EmitContext): EmitResul
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `JSON.stringify(__risu.getLorebookByName(${resolveCall(e.name, e.nameType)}))`)};`,
+      `${setResultCall(e.outputVar, `JSON.stringify(__risu.getLorebookByName(${resolveCall(e.name, e.nameType)}))`)};`,
     ),
     needsAwait: false,
   };
@@ -998,7 +701,7 @@ function emitV2GetLorebookByIndex(op: TriggerEffect, ctx: EmitContext): EmitResu
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `__risu.getLorebookByIndex(Number(${resolveCall(e.index, e.indexType)}))`)};`,
+      `${setResultCall(e.outputVar, `__risu.getLorebookByIndex(Number(${resolveCall(e.index, e.indexType)}))`)};`,
     ),
     needsAwait: false,
   };
@@ -1060,7 +763,7 @@ function emitV2DeleteLorebookByIndex(op: TriggerEffect, ctx: EmitContext): EmitR
 function emitV2GetLorebookCountNew(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { outputVar: string };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `String(__risu.getLorebookCount())`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getLorebookCount())`, true)};`),
     needsAwait: false,
   };
 }
@@ -1081,7 +784,7 @@ function emitV2GetDisplayState(op: TriggerEffect, ctx: EmitContext): EmitResult 
   const e = op as unknown as { outputVar: string };
   if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `__risu.getDisplayState()`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getDisplayState()`, true)};`),
     needsAwait: false,
   };
 }
@@ -1101,7 +804,7 @@ function emitV2GetRequestState(op: TriggerEffect, ctx: EmitContext): EmitResult 
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `__risu.getRequestState(Number(${resolveCall(e.index, e.indexType)}))`)};`,
+      `${setResultCall(e.outputVar, `__risu.getRequestState(Number(${resolveCall(e.index, e.indexType)}))`)};`,
     ),
     needsAwait: false,
   };
@@ -1130,7 +833,7 @@ function emitV2GetRequestStateRole(op: TriggerEffect, ctx: EmitContext): EmitRes
   return {
     code: line(
       ctx,
-      `${setVarCall(e.outputVar, `__risu.getRequestStateRole(Number(${resolveCall(e.index, e.indexType)}))`)};`,
+      `${setResultCall(e.outputVar, `__risu.getRequestStateRole(Number(${resolveCall(e.index, e.indexType)}))`)};`,
     ),
     needsAwait: false,
   };
@@ -1157,7 +860,7 @@ function emitV2GetRequestStateLength(op: TriggerEffect, ctx: EmitContext): EmitR
   const e = op as unknown as { outputVar: string };
   if (!ctx.displayMode) return { code: line(ctx, `return;`), needsAwait: false };
   return {
-    code: line(ctx, `${setVarCall(e.outputVar, `String(__risu.getRequestStateLength())`)};`),
+    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getRequestStateLength())`, true)};`),
     needsAwait: false,
   };
 }
@@ -1210,8 +913,8 @@ export const V2_EMITTERS: Readonly<Record<string, EmitFn>> = {
   v2CheckSimilarity: emitV2CheckSimilarity,
   v2ImgGen: emitV2ImgGen,
   v2ExtractRegex: emitV2ExtractRegex,
-  v2RegexTest: emitV2RegexTest,
-  v2ReplaceString: emitV2ReplaceString,
+  v2RegexTest: emitRegexEffect,
+  v2ReplaceString: emitRegexEffect,
   v2Random: emitV2Random,
   v2GetCharAt: emitV2GetCharAt,
   v2GetCharCount: emitV2GetCharCount,
@@ -1222,27 +925,27 @@ export const V2_EMITTERS: Readonly<Record<string, EmitFn>> = {
   v2ConcatString: emitV2ConcatString,
   v2Calculate: emitV2Calculate,
   v2MakeArrayVar: emitV2MakeArrayVar,
-  v2GetArrayVarLength: emitV2GetArrayVarLength,
-  v2GetArrayVar: emitV2GetArrayVar,
-  v2SetArrayVar: emitV2SetArrayVar,
-  v2PushArrayVar: emitV2PushArrayVar,
-  v2PopArrayVar: emitV2PopArrayVar,
-  v2ShiftArrayVar: emitV2ShiftArrayVar,
-  v2UnshiftArrayVar: emitV2UnshiftArrayVar,
-  v2SpliceArrayVar: emitV2SpliceArrayVar,
-  v2SliceArrayVar: emitV2SliceArrayVar,
-  v2JoinArrayVar: emitV2JoinArrayVar,
-  v2GetIndexOfValueInArrayVar: emitV2GetIndexOfValueInArrayVar,
-  v2RemoveIndexFromArrayVar: emitV2RemoveIndexFromArrayVar,
+  v2GetArrayVarLength: emitCollectionEffect,
+  v2GetArrayVar: emitCollectionEffect,
+  v2SetArrayVar: emitCollectionEffect,
+  v2PushArrayVar: emitCollectionEffect,
+  v2PopArrayVar: emitCollectionEffect,
+  v2ShiftArrayVar: emitCollectionEffect,
+  v2UnshiftArrayVar: emitCollectionEffect,
+  v2SpliceArrayVar: emitCollectionEffect,
+  v2SliceArrayVar: emitCollectionEffect,
+  v2JoinArrayVar: emitCollectionEffect,
+  v2GetIndexOfValueInArrayVar: emitCollectionEffect,
+  v2RemoveIndexFromArrayVar: emitCollectionEffect,
   v2MakeDictVar: emitV2MakeDictVar,
-  v2GetDictVar: emitV2GetDictVar,
-  v2SetDictVar: emitV2SetDictVar,
-  v2DeleteDictKey: emitV2DeleteDictKey,
-  v2HasDictKey: emitV2HasDictKey,
+  v2GetDictVar: emitCollectionEffect,
+  v2SetDictVar: emitCollectionEffect,
+  v2DeleteDictKey: emitCollectionEffect,
+  v2HasDictKey: emitCollectionEffect,
   v2ClearDict: emitV2ClearDict,
-  v2GetDictSize: emitV2GetDictSize,
-  v2GetDictKeys: emitV2GetDictKeys,
-  v2GetDictValues: emitV2GetDictValues,
+  v2GetDictSize: emitCollectionEffect,
+  v2GetDictKeys: emitCollectionEffect,
+  v2GetDictValues: emitCollectionEffect,
   v2GetCharacterDesc: emitV2GetCharacterDesc,
   v2SetCharacterDesc: emitV2SetCharacterDesc,
   v2GetPersonaDesc: emitV2GetPersonaDesc,

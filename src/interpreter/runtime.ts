@@ -14,7 +14,7 @@ import { createTriggerTemplateParser } from './runtime/template.js';
 import { hasTriggerTemplate } from '../core/triggers/templates.js';
 import { advanceTriggerControl, type TriggerControlState } from '../core/triggers/control-flow.js';
 import type { TriggerEffect } from '../core/schemas/triggerscript.js';
-import { makeArraysDictsApi } from './runtime/arrays-dicts.js';
+import { runCollectionEffect } from './runtime/arrays-dicts.js';
 import { makeChatApi } from './runtime/chat.js';
 import { makeCharacterNoteApi } from './runtime/character-note.js';
 import {
@@ -26,8 +26,7 @@ import { makeDisplayStateApi } from './runtime/display-state.js';
 import { runLLM as _runLLM, parseLuaPromptArg } from './runtime/llm.js';
 import {
   extractRegex,
-  regexTest,
-  replaceString,
+  runRegexEffect,
   random,
   setCharAt,
   splitString,
@@ -117,6 +116,7 @@ export interface RisuTriggerRuntime {
   prepareTemplates(): Promise<void>;
   resolve(value: unknown, kind: 'var' | 'value' | 'regex' | string): string;
   setVar(name: string, value: unknown): void;
+  setResult(name: string, value: unknown): void;
   getVar(name: string): string;
   declareLocalVar(name: string, value: unknown, indent: number): void;
   setvarV1(name: string, op: string, rawValue: unknown): void;
@@ -155,36 +155,12 @@ export interface RisuTriggerRuntime {
   runLua(code: unknown, luaOpts?: Record<string, unknown>): Promise<unknown>;
   // string / regex / random
   extractRegex(value: unknown, regex: unknown, flags: unknown, result: unknown, v1?: boolean): string;
-  regexTest(value: unknown, regex: unknown, flags: unknown): boolean;
-  replaceString(source: unknown, regex: unknown, result: unknown, replacement: unknown, flags: unknown): string;
+  regexEffect(effect: TriggerEffect): void;
   random(min: unknown, max: unknown): number;
   setCharAt(source: unknown, index: unknown, value: unknown): string;
   splitString(source: unknown, delimiter: unknown, kind?: string): readonly string[];
   calculate(expression: unknown, expressionType: string, outputVar: string): void;
-  // arrays
-  makeArrayVar(name: string): void;
-  arrayLength(name: string): string;
-  arrayGet(name: string, i: unknown): string;
-  arraySet(name: string, i: unknown, v: unknown): void;
-  arrayPush(name: string, v: unknown): void;
-  arrayPop(name: string): string;
-  arrayShift(name: string): string;
-  arrayUnshift(name: string, v: unknown): void;
-  arraySplice(name: string, start: unknown, item: unknown): void;
-  arraySlice(name: string, start: unknown, end: unknown): string;
-  arrayJoin(name: string, delim: unknown): string;
-  arrayIndexOf(name: string, v: unknown): number;
-  arrayRemoveIndex(name: string, i: unknown): void;
-  // dicts
-  makeDictVar(name: string): void;
-  dictGet(name: string, k: unknown): string;
-  dictSet(name: string, k: unknown, v: unknown): void;
-  dictDelete(name: string, k: unknown): void;
-  dictHasKey(name: string, k: unknown): boolean;
-  dictClear(name: string): void;
-  dictSize(name: string): number;
-  dictKeys(name: string): string[];
-  dictValues(name: string): unknown[];
+  collectionEffect(effect: TriggerEffect): void;
   // character / persona / note
   getCharacterDesc(): Promise<string>;
   setCharacterDesc(value: unknown): Promise<void>;
@@ -1219,17 +1195,6 @@ export async function makeRisuTriggerRuntime(
   }
 
 
-  // String/regex/arithmetic helpers live in runtime/strings-regex.ts (pure, no closure deps).
-
-  const _arraysDicts = makeArraysDictsApi(_vars);
-  const {
-    makeArrayVar, arrayLength, arrayGet, arraySet, arrayPush, arrayPop,
-    arrayShift, arrayUnshift, arraySplice, arraySlice, arrayJoin,
-    arrayIndexOf, arrayRemoveIndex,
-    makeDictVar, dictGet, dictSet, dictDelete, dictHasKey, dictClear,
-    dictSize, dictKeys, dictValues,
-  } = _arraysDicts;
-
   const _charNote = makeCharacterNoteApi(api, { characterId, data: data as { characterId?: string } & Record<string, unknown> }, _vars);
   const {
     getCharacterDesc, setCharacterDesc,
@@ -1290,6 +1255,7 @@ export async function makeRisuTriggerRuntime(
     set sendAIprompt(v) { sendAIprompt = !!v; },
     displayMode, lowLevelAccess, characterId,
     resolve, setVar, getVar, declareLocalVar,
+    setResult: (name, value) => setVar(resolve(name, 'value'), value),
     setvarV1, setvarV2, compare, checkConditions, prepareTemplates,
     loopTick, sleep,
     impersonate, systemPrompt, command, cutChat, modifyChat,
@@ -1299,18 +1265,14 @@ export async function makeRisuTriggerRuntime(
     showAlert, alertInput, alertSelect,
     runLLM, checkSimilarity, runImgGen,
     runTrigger, runCode, runLua,
-    extractRegex, regexTest, replaceString,
+    extractRegex, regexEffect: (effect) => runRegexEffect(_vars, effect),
     random,
     setCharAt, splitString,
     calculate: (expression, expressionType, outputVar) => calculate(_vars, name => {
       onVarRead?.(name, 'global');
       return globalVarsCache[name] ?? 'null';
     }, expression, expressionType, outputVar),
-    makeArrayVar, arrayLength, arrayGet, arraySet, arrayPush, arrayPop,
-    arrayShift, arrayUnshift, arraySplice, arraySlice, arrayJoin,
-    arrayIndexOf, arrayRemoveIndex,
-    makeDictVar, dictGet, dictSet, dictDelete, dictHasKey, dictClear,
-    dictSize, dictKeys, dictValues,
+    collectionEffect: (effect) => runCollectionEffect(_vars, effect),
     getCharacterDesc, setCharacterDesc, getPersonaDesc, setPersonaDesc,
     getReplaceGlobalNote, setReplaceGlobalNote, getAuthorNote, setAuthorNote,
     modifyLorebook, getLorebookByKey, getLorebookCount, getLorebookEntry,

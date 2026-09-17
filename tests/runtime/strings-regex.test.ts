@@ -6,9 +6,41 @@ import {
   random,
   setCharAt,
   splitString,
+  runRegexEffect,
 } from '../../src/interpreter/runtime/strings-regex.js';
+import { makeVarsApi } from '../../src/interpreter/runtime/vars.js';
+
+describe('Risu runTrigger regex catch boundaries', () => {
+  for (const type of ['v2RegexTest', 'v2ReplaceString']) {
+    test(`${type} catches operand template failure`, () => {
+      const cache: Record<string, string | null> = {};
+      let sourceReads = 0;
+      const vars = makeVarsApi({
+        varsCache: cache, localScopes: new Map(), dirty: { value: false }, characterId: null,
+        parseTemplate: text => {
+          if (text === 'pattern') throw new Error('template failure');
+          if (text === 'source') return String(++sourceReads);
+          return text;
+        },
+      });
+      runRegexEffect(vars, {
+        type, outputVar: 'out', value: 'source', valueType: 'value', source: 'source', sourceType: 'value',
+        regex: 'pattern', regexType: 'value', result: '$0', resultType: 'value',
+        replacement: 'x', replacementType: 'value', flags: '', flagsType: 'value',
+      });
+      expect(cache.$out).toBe(type === 'v2RegexTest' ? '0' : '2');
+      expect(sourceReads).toBe(type === 'v2RegexTest' ? 1 : 2);
+    });
+  }
+});
 
 describe('extractRegex', () => {
+  test('invalid patterns fail before evaluating a V2 result template', () => {
+    let evaluated = false;
+    expect(() => extractRegex('abc', '[', '', () => { evaluated = true; return '$0'; })).toThrow(SyntaxError);
+    expect(evaluated).toBe(false);
+  });
+
   test('matches first group + applies template', () => {
     expect(extractRegex('hello world', '(\\w+) (\\w+)', '', '$2-$1')).toBe('world-hello');
   });
@@ -41,7 +73,7 @@ describe('regexTest', () => {
   });
 
   test('invalid regex → false', () => {
-    expect(regexTest('x', '(', '')).toBe(false);
+    expect(() => regexTest('x', '(', '')).toThrow(SyntaxError);
   });
 });
 
@@ -60,7 +92,7 @@ describe('replaceString', () => {
   });
 
   test('invalid regex → original source', () => {
-    expect(replaceString('hello', '(', '', '', '')).toBe('hello');
+    expect(() => replaceString('hello', '(', '', '', '')).toThrow(SyntaxError);
   });
 });
 

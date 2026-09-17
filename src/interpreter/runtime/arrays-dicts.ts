@@ -1,91 +1,142 @@
-// Risu runTrigger stores collections as JSON in ordinary chat variables.
-
-import { toStr } from '../../util/coerce.js';
+import type { TriggerEffect } from '../../core/schemas/triggerscript.js';
 import type { VarsApi } from './vars.js';
 
-export interface ArraysDictsApi {
-  makeArrayVar(name: string): void;
-  arrayLength(name: string): string;
-  arrayGet(name: string, i: unknown): string;
-  arraySet(name: string, i: unknown, v: unknown): void;
-  arrayPush(name: string, v: unknown): void;
-  arrayPop(name: string): string;
-  arrayShift(name: string): string;
-  arrayUnshift(name: string, v: unknown): void;
-  arraySplice(name: string, start: unknown, item: unknown): void;
-  arraySlice(name: string, start: unknown, end: unknown): string;
-  arrayJoin(name: string, delim: unknown): string;
-  arrayIndexOf(name: string, v: unknown): number;
-  arrayRemoveIndex(name: string, i: unknown): void;
-  makeDictVar(name: string): void;
-  dictGet(name: string, k: unknown): string;
-  dictSet(name: string, k: unknown, v: unknown): void;
-  dictDelete(name: string, k: unknown): void;
-  dictHasKey(name: string, k: unknown): boolean;
-  dictClear(name: string): void;
-  dictSize(name: string): number;
-  dictKeys(name: string): string[];
-  dictValues(name: string): unknown[];
-}
+// Risu runTrigger includes operand parsing and destination writes in each collection's catch boundary.
+export function runCollectionEffect(vars: VarsApi, effect: TriggerEffect): void {
+  const e = effect as Record<string, string>;
+  const { getVar, setVar } = vars;
+  const name = (value: string) => vars.resolve(value, 'value');
+  const value = (key: string) => vars.resolve(e[key], e[key + 'Type'] === 'value' ? 'value' : 'var');
+  const output = () => name(e.outputVar!);
+  const resetArray = () => setVar(name(e.var!), '[]');
 
-export function makeArraysDictsApi(vars: VarsApi): ArraysDictsApi {
-  // Risu applies native operations to parsed JSON, including non-collection values.
-  function read<T>(json: string, operation: (value: any) => T, fallback: T): T {
-    try { return operation(JSON.parse(json)); }
-    catch { return fallback; }
-  }
-  function changeArray<T>(name: string, operation: (value: any) => T, fallback: T, reset = true): T {
-    try {
-      const value = JSON.parse(vars.getVar(name));
-      const result = operation(value);
-      vars.setVar(name, JSON.stringify(value));
-      return result;
-    } catch {
-      if (reset) vars.setVar(name, '[]');
-      return fallback;
+  switch (effect.type) {
+    case 'v2GetArrayVarLength':
+    case 'v2GetArrayVar':
+    case 'v2SliceArrayVar':
+    case 'v2GetIndexOfValueInArrayVar': {
+      const fallback = { v2GetArrayVarLength: '0', v2GetArrayVar: 'null', v2SliceArrayVar: '[]', v2GetIndexOfValueInArrayVar: '-1' }[effect.type];
+      try {
+        const array = JSON.parse(getVar(name(e.var!)));
+        if (effect.type === 'v2GetArrayVarLength') setVar(output(), array.length.toString());
+        else if (effect.type === 'v2GetArrayVar') {
+          const index = Number(value('index'));
+          setVar(output(), array[index] ?? 'null');
+        } else if (effect.type === 'v2SliceArrayVar') {
+          const start = Number(value('start')), end = Number(value('end'));
+          setVar(output(), JSON.stringify(array.slice(start, end)));
+        } else {
+          const item = value('value');
+          setVar(output(), array.indexOf(item).toString());
+        }
+      } catch { setVar(output(), fallback); }
+      break;
+    }
+    case 'v2PushArrayVar':
+    case 'v2UnshiftArrayVar':
+    case 'v2SpliceArrayVar':
+    case 'v2RemoveIndexFromArrayVar': {
+      try {
+        const target = name(e.var!);
+        const array = JSON.parse(getVar(target));
+        if (effect.type === 'v2PushArrayVar' || effect.type === 'v2UnshiftArrayVar') {
+          const item = value('value');
+          if (effect.type === 'v2PushArrayVar') array.push(item);
+          else array.unshift(item);
+        } else if (effect.type === 'v2SpliceArrayVar') {
+          const start = Number(value('start')), item = value('item');
+          array.splice(start, 0, item);
+        } else {
+          const index = Number(value('index'));
+          array.splice(index, 1);
+        }
+        setVar(target, JSON.stringify(array));
+      } catch { resetArray(); }
+      break;
+    }
+    case 'v2PopArrayVar':
+    case 'v2ShiftArrayVar': {
+      try {
+        const target = name(e.var!);
+        const array = JSON.parse(getVar(target));
+        setVar(output(), (effect.type === 'v2PopArrayVar' ? array.pop() : array.shift()) ?? 'null');
+        setVar(target, JSON.stringify(array));
+      } catch {
+        resetArray();
+        setVar(output(), 'null');
+      }
+      break;
+    }
+    case 'v2SetArrayVar': {
+      const item = value('value'), index = Number(value('index'));
+      if (Number.isNaN(index)) break;
+      try {
+        const target = name(e.var!);
+        const array = JSON.parse(getVar(target));
+        array[index] = item;
+        setVar(target, JSON.stringify(array));
+      } catch { /* Risu leaves invalid storage unchanged for indexed assignment. */ }
+      break;
+    }
+    case 'v2JoinArrayVar': {
+      try {
+        const array = JSON.parse(value('var'));
+        const delimiter = value('delimiter');
+        setVar(output(), array.join(delimiter));
+      } catch { setVar(output(), ''); }
+      break;
+    }
+    case 'v2GetDictVar':
+    case 'v2HasDictKey': {
+      try {
+        const dict = JSON.parse(value('var'));
+        const key = value('key');
+        if (effect.type === 'v2GetDictVar') setVar(output(), dict[key] ?? 'null');
+        else setVar(output(), Object.hasOwn(dict, key) ? '1' : '0');
+      } catch { setVar(output(), effect.type === 'v2GetDictVar' ? 'null' : '0'); }
+      break;
+    }
+    case 'v2SetDictVar': {
+      try {
+        const item = value('value'), key = value('key');
+        if (e.varType === 'value') break;
+        const dict = JSON.parse(getVar(name(e.var!)));
+        dict[key] = item;
+        setVar(name(e.var!), JSON.stringify(dict));
+      } catch {
+        if (e.varType === 'var') {
+          const item = value('value'), key = value('key');
+          const dict: Record<string, string> = {};
+          dict[key] = item;
+          setVar(name(e.var!), JSON.stringify(dict));
+        }
+      }
+      break;
+    }
+    case 'v2DeleteDictKey': {
+      try {
+        if (e.varType === 'value') break;
+        const dict = JSON.parse(getVar(name(e.var!)));
+        const key = value('key');
+        delete dict[key];
+        setVar(name(e.var!), JSON.stringify(dict));
+      } catch {
+        if (e.varType === 'var') setVar(name(e.var!), '{}');
+      }
+      break;
+    }
+    case 'v2GetDictSize':
+    case 'v2GetDictKeys':
+    case 'v2GetDictValues': {
+      try {
+        const dict = JSON.parse(value('var'));
+        if (effect.type === 'v2GetDictSize') setVar(output(), Object.keys(dict).length.toString());
+        else {
+          const result = effect.type === 'v2GetDictKeys' ? Object.keys(dict) : Object.values(dict);
+          setVar(output(), JSON.stringify(result));
+        }
+      } catch { setVar(output(), effect.type === 'v2GetDictSize' ? '0' : '[]'); }
+      break;
     }
   }
-  function dictSet(name: string, key: unknown, value: unknown): void {
-    const k = toStr(key), v = toStr(value);
-    let dict: any;
-    try {
-      dict = JSON.parse(vars.getVar(name));
-      dict[k] = v;
-    } catch {
-      dict = {};
-      dict[k] = v;
-    }
-    vars.setVar(name, JSON.stringify(dict));
-  }
-
-  return {
-    makeArrayVar: (name) => vars.setVar(name, '[]'),
-    arrayLength: (name) => read(vars.getVar(name), a => a.length.toString(), '0'),
-    arrayGet: (name, i) => read(vars.getVar(name), a => toStr(a[Number(i)] ?? 'null'), 'null'),
-    arraySet: (name, i, v) => {
-      if (!Number.isNaN(Number(i))) changeArray(name, a => { a[Number(i)] = toStr(v); }, undefined, false);
-    },
-    arrayPush: (name, v) => { changeArray(name, a => a.push(toStr(v)), undefined); },
-    arrayPop: (name) => changeArray(name, a => toStr(a.pop() ?? 'null'), 'null'),
-    arrayShift: (name) => changeArray(name, a => toStr(a.shift() ?? 'null'), 'null'),
-    arrayUnshift: (name, v) => { changeArray(name, a => a.unshift(toStr(v)), undefined); },
-    arraySplice: (name, start, item) => { changeArray(name, a => a.splice(Number(start), 0, toStr(item)), undefined); },
-    arraySlice: (name, start, end) => read(vars.getVar(name), a => JSON.stringify(a.slice(Number(start), Number(end))), '[]'),
-    arrayJoin: (value, delim) => read(value, a => a.join(toStr(delim)), ''),
-    arrayIndexOf: (name, v) => read(vars.getVar(name), a => a.indexOf(toStr(v)), -1),
-    arrayRemoveIndex: (name, i) => { changeArray(name, a => a.splice(Number(i), 1), undefined); },
-
-    makeDictVar: (name) => vars.setVar(name, '{}'),
-    dictGet: (value, k) => read(value, d => toStr(d[toStr(k)] ?? 'null'), 'null'),
-    dictSet,
-    dictDelete: (name, k) => {
-      const json = read(vars.getVar(name), d => { delete d[toStr(k)]; return JSON.stringify(d); }, '{}');
-      vars.setVar(name, json);
-    },
-    dictHasKey: (value, k) => read(value, d => Object.hasOwn(d, toStr(k)), false),
-    dictClear: (name) => vars.setVar(name, '{}'),
-    dictSize: (value) => read(value, d => Object.keys(d).length, 0),
-    dictKeys: (value) => read(value, d => Object.keys(d), []),
-    dictValues: (value) => read(value, d => Object.values(d), []),
-  };
 }

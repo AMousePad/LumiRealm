@@ -186,38 +186,38 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2Tokenize: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(await rt.tokenize(rt.resolve(e.value, e.valueType))));
+    rt.setResult(e.outputVar, String(await rt.tokenize(rt.resolve(e.value, e.valueType))));
   },
   v2QuickSearchChat: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(
+    rt.setResult(
       e.outputVar,
       rt.quickSearchChat(rt.resolve(e.value, e.valueType), e.condition, Number(rt.resolve(e.depth, e.depthType))) ? '1' : '0',
     );
   },
   v2GetLastMessage: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getLastMessage());
+    rt.setVar(rt.resolve(e.outputVar, 'value'), rt.getLastMessage());
   },
   v2GetMessageAtIndex: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getMessageAtIndex(Number(rt.resolve(e.index, e.indexType))));
+    rt.setResult(e.outputVar, rt.getMessageAtIndex(Number(rt.resolve(e.index, e.indexType))));
   },
   v2GetMessageCount: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.getMessageCount()));
+    rt.setVar(rt.resolve(e.outputVar, 'value'), String(rt.getMessageCount()));
   },
   v2GetLastUserMessage: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getLastUserMessage());
+    rt.setResult(e.outputVar, rt.getLastUserMessage());
   },
   v2GetLastCharMessage: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getLastCharMessage());
+    rt.setResult(e.outputVar, rt.getLastCharMessage());
   },
   v2GetFirstMessage: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getFirstMessage());
+    rt.setVar(rt.resolve(e.outputVar, 'value'), rt.getFirstMessage());
   },
   v2ShowAlert: async (op, ctx) => {
     if (ctx.displayMode) return 'return';
@@ -227,17 +227,17 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   v2RunLLM: async (op, ctx) => {
     if (!ctx.lowLevelAccess) return;
     const e = op as Any;
-    ctx.rt.setVar(e.outputVar, await ctx.rt.runLLM(ctx.rt.resolve(e.value, e.valueType), e.model, Boolean(e.streaming)));
+    ctx.rt.setResult(e.outputVar, await ctx.rt.runLLM(ctx.rt.resolve(e.value, e.valueType), e.model, Boolean(e.streaming)));
   },
   v2GetAlertInput: async (op, ctx) => {
     if (ctx.displayMode) return 'return';
     const e = op as Any;
-    ctx.rt.setVar(e.outputVar, await ctx.rt.alertInput(ctx.rt.resolve(e.display, e.displayType)));
+    ctx.rt.setResult(e.outputVar, await ctx.rt.alertInput(ctx.rt.resolve(e.display, e.displayType)));
   },
   v2GetAlertSelect: async (op, ctx) => {
     if (ctx.displayMode) return 'return';
     const e = op as Any;
-    ctx.rt.setVar(
+    ctx.rt.setResult(
       e.outputVar,
       await ctx.rt.alertSelect(ctx.rt.resolve(e.display, e.displayType), String(ctx.rt.resolve(e.value, e.valueType)).split('|')),
     );
@@ -245,7 +245,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   v2CheckSimilarity: async (op, ctx) => {
     if (!ctx.lowLevelAccess) return;
     const e = op as Any;
-    ctx.rt.setVar(
+    ctx.rt.setResult(
       e.outputVar,
       ((await ctx.rt.checkSimilarity(ctx.rt.resolve(e.value, e.valueType), ctx.rt.resolve(e.source, e.sourceType))) as unknown as string[]).join('§'),
     );
@@ -253,77 +253,59 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   v2ImgGen: async (op, ctx) => {
     if (!ctx.lowLevelAccess) return;
     const e = op as Any;
-    ctx.rt.setVar(e.outputVar, await ctx.rt.runImgGen(ctx.rt.resolve(e.value, e.valueType), ctx.rt.resolve(e.negValue, e.negValueType)));
+    ctx.rt.setResult(e.outputVar, await ctx.rt.runImgGen(ctx.rt.resolve(e.value, e.valueType), ctx.rt.resolve(e.negValue, e.negValueType)));
   },
   v2ExtractRegex: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(
+    rt.setResult(
       e.outputVar,
       rt.extractRegex(
         rt.resolve(e.value, e.valueType),
         rt.resolve(e.regex, e.regexType),
         rt.resolve(e.flags, e.flagsType),
-        rt.resolve(e.result, e.resultType),
+        () => rt.resolve(e.result, e.resultType),
       ),
     );
   },
-  v2RegexTest: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(
-      e.outputVar,
-      rt.regexTest(rt.resolve(e.value, e.valueType), rt.resolve(e.regex, e.regexType), rt.resolve(e.flags, e.flagsType)) ? '1' : '0',
-    );
-  },
-  v2ReplaceString: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(
-      e.outputVar,
-      rt.replaceString(
-        rt.resolve(e.source, e.sourceType),
-        rt.resolve(e.regex, e.regexType),
-        rt.resolve(e.result, e.resultType),
-        rt.resolve(e.replacement, e.replacementType),
-        rt.resolve(e.flags, e.flagsType),
-      ),
-    );
-  },
+  v2RegexTest: (op, { rt }) => rt.regexEffect(op),
+  v2ReplaceString: (op, { rt }) => rt.regexEffect(op),
   v2Random: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.random(Number(rt.resolve(e.min, e.minType)), Number(rt.resolve(e.max, e.maxType)))));
+    rt.setResult(e.outputVar, String(rt.random(Number(rt.resolve(e.min, e.minType)), Number(rt.resolve(e.max, e.maxType)))));
   },
   v2GetCharAt: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.resolve(e.source, e.sourceType))[Number(rt.resolve(e.index, e.indexType))] ?? 'null');
+    rt.setResult(e.outputVar, String(rt.resolve(e.source, e.sourceType))[Number(rt.resolve(e.index, e.indexType))] ?? 'null');
   },
   v2GetCharCount: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(String(rt.resolve(e.source, e.sourceType)).length));
+    rt.setResult(e.outputVar, String(String(rt.resolve(e.source, e.sourceType)).length));
   },
   v2ToLowerCase: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.resolve(e.source, e.sourceType)).toLowerCase());
+    rt.setResult(e.outputVar, String(rt.resolve(e.source, e.sourceType)).toLowerCase());
   },
   v2ToUpperCase: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.resolve(e.source, e.sourceType)).toUpperCase());
+    rt.setResult(e.outputVar, String(rt.resolve(e.source, e.sourceType)).toUpperCase());
   },
   v2SetCharAt: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(
+    rt.setResult(
       e.outputVar,
       rt.setCharAt(rt.resolve(e.source, e.sourceType), Number(rt.resolve(e.index, e.indexType)), rt.resolve(e.value, e.valueType)),
     );
   },
   v2SplitString: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(
+    rt.setResult(
       e.outputVar,
       JSON.stringify(rt.splitString(rt.resolve(e.source, e.sourceType), rt.resolve(e.delimiter, e.delimiterType), e.delimiterType)),
     );
   },
   v2ConcatString: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.resolve(e.source1, e.source1Type)) + String(rt.resolve(e.source2, e.source2Type)));
+    rt.setResult(e.outputVar, String(rt.resolve(e.source1, e.source1Type)) + String(rt.resolve(e.source2, e.source2Type)));
   },
   v2Calculate: (op, { rt }) => {
     const e = op as Any;
@@ -333,102 +315,40 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
     const e = op as Any;
     const name = rt.resolve(e.var, 'value');
     if (name.startsWith('[') && name.endsWith(']')) return 'return';
-    rt.makeArrayVar(name);
+    rt.setVar(name, '[]');
   },
-  v2GetArrayVarLength: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.arrayLength(rt.resolve(e.var, 'value'))));
-  },
-  v2GetArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, rt.arrayGet(rt.resolve(e.var, 'value'), Number(rt.resolve(e.index, e.indexType))));
-  },
-  v2SetArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.arraySet(rt.resolve(e.var, 'value'), Number(rt.resolve(e.index, e.indexType)), rt.resolve(e.value, e.valueType));
-  },
-  v2PushArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.arrayPush(rt.resolve(e.var, 'value'), rt.resolve(e.value, e.valueType));
-  },
-  v2PopArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, rt.arrayPop(rt.resolve(e.var, 'value')));
-  },
-  v2ShiftArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, rt.arrayShift(rt.resolve(e.var, 'value')));
-  },
-  v2UnshiftArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.arrayUnshift(rt.resolve(e.var, 'value'), rt.resolve(e.value, e.valueType));
-  },
-  v2SpliceArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.arraySplice(rt.resolve(e.var, 'value'), Number(rt.resolve(e.start, e.startType)), rt.resolve(e.item, e.itemType));
-  },
-  v2SliceArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(
-      e.outputVar,
-      rt.arraySlice(rt.resolve(e.var, 'value'), Number(rt.resolve(e.start, e.startType)), Number(rt.resolve(e.end, e.endType))),
-    );
-  },
-  v2JoinArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, rt.arrayJoin(rt.resolve(e.var, e.varType), rt.resolve(e.delimiter, e.delimiterType)));
-  },
-  v2GetIndexOfValueInArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.arrayIndexOf(rt.resolve(e.var, 'value'), rt.resolve(e.value, e.valueType))));
-  },
-  v2RemoveIndexFromArrayVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.arrayRemoveIndex(rt.resolve(e.var, 'value'), Number(rt.resolve(e.index, e.indexType)));
-  },
+  v2GetArrayVarLength: (op, { rt }) => rt.collectionEffect(op),
+  v2GetArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2SetArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2PushArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2PopArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2ShiftArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2UnshiftArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2SpliceArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2SliceArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2JoinArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2GetIndexOfValueInArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2RemoveIndexFromArrayVar: (op, { rt }) => rt.collectionEffect(op),
   v2MakeDictVar: (op, { rt }) => {
     const e = op as Any;
     if (e.var.startsWith('{') && e.var.endsWith('}')) return 'return';
-    rt.makeDictVar(rt.resolve(e.var, 'value'));
+    rt.setVar(rt.resolve(e.var, 'value'), '{}');
   },
-  v2GetDictVar: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, rt.dictGet(rt.resolve(e.var, e.varType), rt.resolve(e.key, e.keyType)));
-  },
-  v2SetDictVar: (op, { rt }) => {
-    const e = op as Any;
-    if (e.varType === 'value') return;
-    rt.dictSet(rt.resolve(e.var, 'value'), rt.resolve(e.key, e.keyType), rt.resolve(e.value, e.valueType));
-  },
-  v2DeleteDictKey: (op, { rt }) => {
-    const e = op as Any;
-    if (e.varType === 'value') return;
-    rt.dictDelete(rt.resolve(e.var, 'value'), rt.resolve(e.key, e.keyType));
-  },
-  v2HasDictKey: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, rt.dictHasKey(rt.resolve(e.var, e.varType), rt.resolve(e.key, e.keyType)) ? '1' : '0');
-  },
+  v2GetDictVar: (op, { rt }) => rt.collectionEffect(op),
+  v2SetDictVar: (op, { rt }) => rt.collectionEffect(op),
+  v2DeleteDictKey: (op, { rt }) => rt.collectionEffect(op),
+  v2HasDictKey: (op, { rt }) => rt.collectionEffect(op),
   v2ClearDict: (op, { rt }) => {
     const e = op as Any;
     if (e.var.startsWith('{') && e.var.endsWith('}')) return 'return';
-    rt.dictClear(rt.resolve(e.var, 'value'));
+    rt.setVar(rt.resolve(e.var, 'value'), '{}');
   },
-  v2GetDictSize: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.dictSize(rt.resolve(e.var, e.varType))));
-  },
-  v2GetDictKeys: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, JSON.stringify(rt.dictKeys(rt.resolve(e.var, e.varType))));
-  },
-  v2GetDictValues: (op, { rt }) => {
-    const e = op as Any;
-    rt.setVar(e.outputVar, JSON.stringify(rt.dictValues(rt.resolve(e.var, e.varType))));
-  },
+  v2GetDictSize: (op, { rt }) => rt.collectionEffect(op),
+  v2GetDictKeys: (op, { rt }) => rt.collectionEffect(op),
+  v2GetDictValues: (op, { rt }) => rt.collectionEffect(op),
   v2GetCharacterDesc: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, await rt.getCharacterDesc());
+    rt.setVar(rt.resolve(e.outputVar, 'value'), await rt.getCharacterDesc());
   },
   v2SetCharacterDesc: async (op, { rt }) => {
     const e = op as Any;
@@ -436,7 +356,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2GetPersonaDesc: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, await rt.getPersonaDesc());
+    rt.setVar(rt.resolve(e.outputVar, 'value'), await rt.getPersonaDesc());
   },
   v2SetPersonaDesc: async (op, { rt }) => {
     const e = op as Any;
@@ -444,7 +364,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2GetReplaceGlobalNote: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, await rt.getReplaceGlobalNote());
+    rt.setVar(rt.resolve(e.outputVar, 'value'), await rt.getReplaceGlobalNote());
   },
   v2SetReplaceGlobalNote: async (op, { rt }) => {
     const e = op as Any;
@@ -452,7 +372,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2GetAuthorNote: async (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, await rt.getAuthorNote());
+    rt.setVar(rt.resolve(e.outputVar, 'value'), await rt.getAuthorNote());
   },
   v2SetAuthorNote: async (op, { rt }) => {
     const e = op as Any;
@@ -464,15 +384,15 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2GetLorebook: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getLorebookByKey(rt.resolve(e.target, e.targetType)));
+    rt.setResult(e.outputVar, rt.getLorebookByKey(rt.resolve(e.target, e.targetType)));
   },
   v2GetLorebookCount: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.getLorebookCount()));
+    rt.setVar(rt.resolve(e.outputVar, 'value'), String(rt.getLorebookCount()));
   },
   v2GetLorebookEntry: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getLorebookEntry(Number(rt.resolve(e.index, e.indexType))));
+    rt.setResult(e.outputVar, rt.getLorebookEntry(Number(rt.resolve(e.index, e.indexType))));
   },
   v2SetLorebookActivation: async (op, { rt }) => {
     const e = op as Any;
@@ -480,19 +400,19 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2GetLorebookIndexViaName: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.getLorebookIndexViaName(rt.resolve(e.name, e.nameType))));
+    rt.setResult(e.outputVar, String(rt.getLorebookIndexViaName(rt.resolve(e.name, e.nameType))));
   },
   v2GetAllLorebooks: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, JSON.stringify(rt.getAllLorebooks()));
+    rt.setVar(rt.resolve(e.outputVar, 'value'), JSON.stringify(rt.getAllLorebooks()));
   },
   v2GetLorebookByName: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, JSON.stringify(rt.getLorebookByName(rt.resolve(e.name, e.nameType))));
+    rt.setResult(e.outputVar, JSON.stringify(rt.getLorebookByName(rt.resolve(e.name, e.nameType))));
   },
   v2GetLorebookByIndex: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, rt.getLorebookByIndex(Number(rt.resolve(e.index, e.indexType))));
+    rt.setResult(e.outputVar, rt.getLorebookByIndex(Number(rt.resolve(e.index, e.indexType))));
   },
   v2CreateLorebook: async (op, { rt }) => {
     const e = op as Any;
@@ -519,7 +439,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2GetLorebookCountNew: (op, { rt }) => {
     const e = op as Any;
-    rt.setVar(e.outputVar, String(rt.getLorebookCount()));
+    rt.setVar(rt.resolve(e.outputVar, 'value'), String(rt.getLorebookCount()));
   },
   v2SetLorebookAlwaysActive: async (op, { rt }) => {
     const e = op as Any;
@@ -528,7 +448,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   v2GetDisplayState: (op, ctx) => {
     if (!ctx.displayMode) return 'return';
     const e = op as Any;
-    ctx.rt.setVar(e.outputVar, ctx.rt.getDisplayState());
+    ctx.rt.setVar(ctx.rt.resolve(e.outputVar, 'value'), ctx.rt.getDisplayState());
   },
   v2SetDisplayState: (op, ctx) => {
     if (!ctx.displayMode) return 'return';
@@ -538,7 +458,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   v2GetRequestState: (op, ctx) => {
     if (!ctx.displayMode) return 'return';
     const e = op as Any;
-    ctx.rt.setVar(e.outputVar, ctx.rt.getRequestState(Number(ctx.rt.resolve(e.index, e.indexType))));
+    ctx.rt.setResult(e.outputVar, ctx.rt.getRequestState(Number(ctx.rt.resolve(e.index, e.indexType))));
   },
   v2SetRequestState: (op, ctx) => {
     if (!ctx.displayMode) return 'return';
@@ -548,7 +468,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   v2GetRequestStateRole: (op, ctx) => {
     if (!ctx.displayMode) return 'return';
     const e = op as Any;
-    ctx.rt.setVar(e.outputVar, ctx.rt.getRequestStateRole(Number(ctx.rt.resolve(e.index, e.indexType))));
+    ctx.rt.setResult(e.outputVar, ctx.rt.getRequestStateRole(Number(ctx.rt.resolve(e.index, e.indexType))));
   },
   v2SetRequestStateRole: (op, ctx) => {
     if (!ctx.displayMode) return 'return';
@@ -558,7 +478,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   v2GetRequestStateLength: (op, ctx) => {
     if (!ctx.displayMode) return 'return';
     const e = op as Any;
-    ctx.rt.setVar(e.outputVar, String(ctx.rt.getRequestStateLength()));
+    ctx.rt.setVar(ctx.rt.resolve(e.outputVar, 'value'), String(ctx.rt.getRequestStateLength()));
   },
   v2RunTrigger: async (op, { rt }) => {
     const e = op as Any;

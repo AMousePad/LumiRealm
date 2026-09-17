@@ -128,21 +128,6 @@ describe("V2 emitters — value dispatch", () => {
     expect(result.code).toContain("return;");
   });
 
-  test("v2SetDictVar skipped when varType='value'", () => {
-    const result = EMITTERS.v2SetDictVar!(
-      {
-        type: "v2SetDictVar",
-        var: "d",
-        varType: "value",
-        key: "k",
-        keyType: "value",
-        value: "v",
-        valueType: "value",
-      } as never,
-      makeCtx(),
-    );
-    expect(result.code).toContain("skipped");
-  });
 
   test("v2ImgGen gated by lowLevelAccess", () => {
     const guarded = EMITTERS.v2ImgGen!(
@@ -167,21 +152,7 @@ describe("V2 string / array / dict emitters", () => {
     expect(result.code).toContain(".toLowerCase()");
   });
 
-  test("v2PushArrayVar resolves value side", () => {
-    const result = EMITTERS.v2PushArrayVar!(
-      { type: "v2PushArrayVar", var: "arr", value: "1", valueType: "value" } as never,
-      makeCtx(),
-    );
-    expect(result.code).toContain("__risu.arrayPush");
-  });
 
-  test("v2GetDictKeys stringifies output", () => {
-    const result = EMITTERS.v2GetDictKeys!(
-      { type: "v2GetDictKeys", var: "d", varType: "var", outputVar: "o" } as never,
-      makeCtx(),
-    );
-    expect(result.code).toContain("JSON.stringify");
-  });
 
   test("v2Calculate emits calculate call", () => {
     const result = EMITTERS.v2Calculate!(
