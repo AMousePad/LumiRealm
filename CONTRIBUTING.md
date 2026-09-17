@@ -50,7 +50,11 @@ bun run test            # fast suite (excludes *.slow.test.ts) — must pass bef
 bun run test:slow       # corpus sweeps; need a populated card library
 bun run test:all        # everything
 bun run test:parallel   # fast suite on all cores
+bun run test:browser:islands # native island layout and style lifecycle
 ```
+
+The island browser checks use synthetic fixtures and require Playwright's browsers:
+run `bunx playwright install chromium firefox` once before running them.
 
 Tests live under `tests/`, organized to mirror `src/` (`tests/core`, `tests/interpreter`, `tests/state`, `tests/display`, ...).
 

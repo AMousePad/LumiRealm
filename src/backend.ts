@@ -960,49 +960,11 @@ const readonlyResolver = createReadonlyResolver({
 const resolveReadonly = readonlyResolver.resolve;
 const resolveReadonlyMany = readonlyResolver.resolveMany;
 
-// Page size 200 matches Lumi's server-side clamp. Module-installed rows live
-// at character scope too, so we exclude them by metadata._risu.module_id.
-async function listLiveCharacterCrossRuleRules(
-  characterId: string,
-  userId: string,
-): Promise<readonly { replace_string: string }[]> {
-  const regexApi = spindle.regex_scripts;
-  const PAGE_SIZE = 200;
-  const out: { replace_string: string }[] = [];
-  let offset = 0;
-  while (true) {
-    const page = await regexApi.list({ userId, limit: PAGE_SIZE, offset });
-    if (!Array.isArray(page.data) || page.data.length === 0) break;
-    for (const r of page.data) {
-      const row = r as {
-        scope?: unknown;
-        scope_id?: unknown;
-        disabled?: unknown;
-        replace_string?: unknown;
-        metadata?: { _risu?: { module_id?: unknown } };
-      };
-      if (row.scope !== 'character') continue;
-      if (row.scope_id !== characterId) continue;
-      if (row.disabled === true) continue;
-      const mid = row.metadata?._risu?.module_id;
-      if (typeof mid === 'string' && mid.length > 0) continue;
-      if (typeof row.replace_string === 'string') {
-        out.push({ replace_string: row.replace_string });
-      }
-    }
-    offset += page.data.length;
-    if (typeof page.total === 'number' && offset >= page.total) break;
-  }
-  return out;
-}
-
 const bgHtmlRefresher = createBgHtmlRefresher({
   resolveReadonly,
   lastSentBgHtmlByChat,
-  listLiveCharacterCrossRuleRules,
   send,
   log,
-  errMsg,
 });
 const refreshBgHtml = bgHtmlRefresher.refresh;
 

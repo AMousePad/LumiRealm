@@ -114,8 +114,8 @@ export function normalizeMatchActionDisplayReplaceString(
 }
 
 // Display rows store the author's raw fragment (Risu parity): the display
-// resolver wraps the whole resolved message in one island, so no per-rule
-// island wrapper exists and cross-rule tag balance survives storage.
+// resolver assembles the resolved message in one tree, preserving tag balance
+// across rules without adding per-rule wrappers.
 export function normalizeDisplayReplaceString(
   replaceString: string,
   options: {

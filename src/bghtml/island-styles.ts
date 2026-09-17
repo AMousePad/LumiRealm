@@ -1,381 +1,184 @@
-// Lumi shadow-wraps styled HTML; doc-level CSS doesn't pierce shadow boundaries.
-// Adopt a constructed CSSStyleSheet into each chat-message shadow via MutationObserver.
-// replaceSync propagates live to all adopters with one sheet shared by reference.
+import environmentCss from './risu-environment.css' with { type: 'text' };
+import { stripCssImports } from './strip-imports.js';
 
-import { setupQuoteMarks, type QuoteMarks } from './quote-marks.js';
+const ISLAND_SELECTOR = '[data-lumiverse-html-island]';
+const BASE_SELECTOR = 'style[data-lumi-island-base]';
+const OPT_OUT = 'not-island-prose';
 
-interface Flog {
-  error(msg: string, ...rest: unknown[]): void;
-  warn(msg: string, ...rest: unknown[]): void;
-  info(msg: string, ...rest: unknown[]): void;
-  debug(msg: string, ...rest: unknown[]): void;
-  trace(msg: string, ...rest: unknown[]): void;
+function changesStyle(record: MutationRecord): boolean {
+  if ((record.target instanceof Element ? record.target : record.target.parentElement)?.closest('style')) return true;
+  return [...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element
+    && (node.matches('style') || node.querySelector('style') !== null));
 }
 
-export interface IslandStyles {
-  setStylesheet(css: string): void;
-  setCrossRuleSheets(cssParts: readonly string[]): void;
-  clear(): void;
-  destroy(): void;
+// The retained native islands have no Risu chat-shell ancestors. Keep this
+// compatibility environment inside their shadows, away from themed prose.
+export function rescopeRisuEnvironment(css: string): string {
+  return css
+    .replace(/\.prose-invert\b/g, ':host')
+    .replace(/\.prose\b(?!-)/g, ':host')
+    .replace(/\.chattext\b/g, ':host')
+    .replace(/\.chat-width\b/g, ':host')
+    .replace(/:root\b(?!,)/g, ':root,:host')
+    .replace(/--FontColorQuote2:\s*(#[0-9a-fA-F]{3,8})/g,
+      '--FontColorQuote2:var(--lumiverse-prose-dialogue,$1)')
+    // Risu's Chat.svelte sets these inline; host font scale substitutes for Risu zoom.
+    + '\n:host{font-size:calc(14px * var(--lumiverse-font-scale,1));'
+    + 'line-height:calc(20px * var(--lumiverse-font-scale,1));overflow:visible !important}\n';
 }
 
-export interface SetupIslandStylesOptions {
-  readonly riskuEnvironmentCss?: string;
-}
+export function setupIslandStyles() {
+  let chatId: string | null = null;
+  let environment: CSSStyleSheet | null = null;
+  let shared: CSSStyleSheet[] = [];
+  let lastCss: readonly string[] = [];
+  let backgroundCss: readonly string[] = [];
+  let messageCss: readonly string[] = [];
+  let messageSheets: CSSStyleSheet[] = [];
+  const scopedSheets = new WeakMap<CSSStyleSheet, CSSStyleSheet>();
+  let syncPending = false;
+  const roots = new Map<ShadowRoot, { base: Element | null; addedOptOut: boolean; observer: MutationObserver }>();
 
-export function setupIslandStyles(flog: Flog, opts: SetupIslandStylesOptions = {}): IslandStyles {
-  let sheet: CSSStyleSheet | null = null;
-  let envSheet: CSSStyleSheet | null = null;
-  const allOwnedSheets = new WeakSet<CSSStyleSheet>();
-  try {
-    sheet = new CSSStyleSheet();
-    allOwnedSheets.add(sheet);
-  } catch (err) {
-    flog.error('island-styles: CSSStyleSheet constructor unavailable (browser predates 2023)', err);
-    return {
-      setStylesheet: () => { /* no-op */ },
-      setCrossRuleSheets: () => { /* no-op */ },
-      clear: () => { /* no-op */ },
-      destroy: () => { /* no-op */ },
-    };
+  function scheduleSync(): void {
+    if (syncPending) return;
+    syncPending = true;
+    queueMicrotask(() => { syncPending = false; syncMessageStyles(); });
   }
 
-  const quoteMarks: QuoteMarks = setupQuoteMarks(flog);
-
-  let crossRuleSheets: CSSStyleSheet[] = [];
-  // Last-applied snapshots so we can short-circuit no-op refreshes. Mortal
-  // Realm fires bg-html refresh 3x on chat-open (SETTINGS_UPDATED + CHAT_CHANGED
-  // + …) with byte-identical content; without this gate each re-applies
-  // chat-scope CSS + nudges 35 live shadow-roots × 11 sheets = ~385
-  // adoption operations on the no-op pass alone.
-  let lastSheetCss: string | null = null;
-  let lastCrossRuleKey: string | null = null;
-
-  if (opts.riskuEnvironmentCss && opts.riskuEnvironmentCss.length > 0) {
-    try {
-      const rescoped = rescopeRisuEnvironment(opts.riskuEnvironmentCss);
-      envSheet = new CSSStyleSheet();
-      allOwnedSheets.add(envSheet);
-      envSheet.replaceSync(rescoped.css);
-      flog.info(
-        `island-styles: Risu environment sheet built ${opts.riskuEnvironmentCss.length}->${rescoped.css.length} bytes, ` +
-          `${envSheet.cssRules.length} top-level rules ` +
-          `(rewrites: :root=${rescoped.rootHits} .prose=${rescoped.proseHits} ` +
-          `.prose-invert=${rescoped.proseInvertHits} .chattext=${rescoped.chattextHits} ` +
-          `.chat-width=${rescoped.chatWidthHits} quote2var=${rescoped.quoteVarHits})`,
-      );
-      if (rescoped.quoteVarHits === 0) {
-        flog.warn(
-          'island-styles: quote2 dialogue-colour rewrite matched nothing, bundle format may have changed and island quotes will fall back to the Risu default grey',
-        );
-      }
-    } catch (err) {
-      flog.error(
-        'island-styles: Risu environment sheet construction failed (falling back to per-card sheet only)',
-        err,
-      );
-      envSheet = null;
+  // Risu ParseMarkdown emits CSS from rendered output. Unmatched replacements
+  // must never contribute styles, including animations for other card screens.
+  function syncMessageStyles(): void {
+    if (!chatId) return;
+    const sources: { anchor: Element; style: HTMLStyleElement }[] = [];
+    for (const style of document.querySelectorAll<HTMLStyleElement>('[data-message-id] style')) {
+      sources.push({ anchor: style, style });
     }
+    for (const root of roots.keys()) {
+      if (!root.host.isConnected) continue;
+      for (const style of root.querySelectorAll<HTMLStyleElement>(`style:not([data-lumi-island-base])`)) {
+        sources.push({ anchor: root.host, style });
+      }
+    }
+    sources.sort((a, b) => a.anchor === b.anchor ? 0
+      : a.anchor.compareDocumentPosition(b.anchor) & 4 ? -1 : 1);
+    const parts = sources.map(({ style }) => {
+      const css = stripCssImports(style.textContent ?? '');
+      return style.media ? `@media ${style.media}{${css}}` : css;
+    }).filter(css => css.trim().length > 0);
+    if (parts.length === messageCss.length && parts.every((css, i) => css === messageCss[i])) return;
+    messageCss = parts;
+    applyStylesheets();
+    const previous = new Set(messageSheets);
+    messageSheets = shared.slice(backgroundCss.length).map(sheet => {
+      let scoped = scopedSheets.get(sheet);
+      if (!scoped) {
+        const css = Array.from(sheet.cssRules, rule => rule.cssText).join('\n');
+        scoped = new CSSStyleSheet();
+        scoped.replaceSync(`[data-message-id] [data-component="MessageContent"] {\n${css}\n}`);
+        scopedSheets.set(sheet, scoped);
+      }
+      return scoped;
+    });
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets.filter(s => !previous.has(s)), ...messageSheets];
   }
 
-  // WeakSet for adopt-once dedup, WeakRef array for iteration + GC pruning.
-  const adopted = new WeakSet<ShadowRoot>();
-  const adoptedRefs: WeakRef<ShadowRoot>[] = [];
-
-  // outsideChatShadowCount surging indicates Lumi started shadow-wrapping
-  // non-chat surfaces (extractHtmlIslands drift).
-  let adoptionCount = 0;
-  let chatShadowCount = 0;
-  let outsideChatShadowCount = 0;
-  const ADOPT_LOG_STRIDE = 50;
-
-  function injectInto(shadow: ShadowRoot): void {
-    if (adopted.has(shadow)) return;
-    if (!sheet) return;
-    try {
-      const append: CSSStyleSheet[] = [];
-      if (envSheet) append.push(envSheet);
-      if (sheet) append.push(sheet);
-      for (const s of crossRuleSheets) append.push(s);
-      const next = [...shadow.adoptedStyleSheets, ...append];
-      shadow.adoptedStyleSheets = next;
-      adopted.add(shadow);
-      adoptedRefs.push(new WeakRef(shadow));
-
-      // Lumi's ISLAND_BASE_CSS applies a different prose baseline that conflicts.
-      if (shadow.host instanceof Element) {
-        shadow.host.classList.add('not-island-prose');
-      }
-      const initialBase = shadow.querySelector('style[data-lumi-island-base]');
-      if (initialBase) initialBase.remove();
-
-      // Risu-card gate: only mark quotes when per-card CSS is loaded (non-Risu
-      // chats leave perCardSheet empty, so the walker stays out of vanilla DOM).
-      if (sheet.cssRules.length > 0) {
-        quoteMarks.walkShadow(shadow);
-        quoteMarks.watchShadow(shadow);
-      }
-
-      adoptionCount++;
-      if (adoptionCount <= 8) {
-        const host = shadow.host;
-        const hostTag = host instanceof Element ? host.tagName.toLowerCase() : '?';
-        const hostClass = host instanceof Element ? host.className : '';
-        const childCount = shadow.childElementCount;
-        const sheetRules = sheet.cssRules.length;
-        const envRules = envSheet ? envSheet.cssRules.length : 0;
-        flog.debug(
-          `island-styles: adopted #${adoptionCount} into <${hostTag} class="${hostClass}"> ` +
-            `(shadow has ${childCount} top-level children; envSheet ${envRules} rules + perCardSheet ${sheetRules} rules)`,
-        );
-      } else if (adoptionCount % ADOPT_LOG_STRIDE === 0) {
-        flog.info(
-          `island-styles: adopted=${adoptionCount} (chat shadows visited=${chatShadowCount}, outside-chat shadows visited=${outsideChatShadowCount})`,
-        );
-      }
-    } catch (err) {
-      flog.warn('island-styles: adoptedStyleSheets append failed', err);
+  function release(root: ShadowRoot): void {
+    const state = roots.get(root)!;
+    state.observer.disconnect();
+    root.adoptedStyleSheets = root.adoptedStyleSheets.filter(s => s !== environment && !shared.includes(s));
+    if (state.addedOptOut) root.host.classList.remove(OPT_OUT);
+    if (state.base && !root.querySelector(BASE_SELECTOR)
+      && !root.host.matches('.not-prose,.not-island-prose')
+      && !root.querySelector('.not-prose,.not-island-prose')) {
+      root.prepend(state.base);
     }
+    roots.delete(root);
   }
 
-  function visit(el: Element): void {
-    // Only inject into open shadows inside [data-message-id] chat bubbles.
-    const root = el.shadowRoot;
-    if (!root || root.mode !== 'open') return;
-    if (el.closest('[data-message-id]')) {
-      chatShadowCount++;
-      injectInto(root);
-    } else {
-      outsideChatShadowCount++;
-    }
+  function adopt(host: Element): boolean {
+    const root = host.shadowRoot;
+    if (!root || roots.has(root) || !host.isConnected || !host.closest('[data-message-id]')) return false;
+    const base = root.querySelector(BASE_SELECTOR);
+    const addedOptOut = !host.classList.contains(OPT_OUT);
+    root.adoptedStyleSheets = [...root.adoptedStyleSheets, environment!, ...shared];
+    const observer = new MutationObserver(records => { if (records.some(changesStyle)) scheduleSync(); });
+    observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['media'] });
+    roots.set(root, { base, addedOptOut, observer });
+    host.classList.add(OPT_OUT);
+    base?.remove();
+    return true;
   }
 
-  function walkSubtree(root: Node): void {
-    if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
-      return;
+  function scan(node: Node): boolean {
+    if (!(node instanceof Element)) return false;
+    let changed = false;
+    const hosts = [...node.querySelectorAll(ISLAND_SELECTOR)];
+    if (node.matches(ISLAND_SELECTOR)) hosts.unshift(node);
+    for (const host of hosts) {
+      if (adopt(host) || (host.shadowRoot && roots.has(host.shadowRoot))) changed = true;
     }
-    if (root instanceof Element) visit(root);
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-    let cur: Node | null = walker.nextNode();
-    while (cur) {
-      if (cur instanceof Element) {
-        visit(cur);
-        if (cur.shadowRoot && cur.shadowRoot.mode === 'open') {
-          walkSubtree(cur.shadowRoot);
-        }
-      }
-      cur = walker.nextNode();
-    }
+    return changed;
   }
 
-  const observer = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      for (const node of m.addedNodes) {
-        if (node instanceof Element) walkSubtree(node);
-      }
+  const observer = new MutationObserver(records => {
+    let changed = false;
+    for (const root of roots.keys()) {
+      if (!root.host.isConnected || !root.host.closest('[data-message-id]')) { release(root); changed = true; }
     }
+    for (const record of records) {
+      for (const node of record.addedNodes) changed = scan(node) || changed;
+    }
+    if (changed || records.some(changesStyle)) scheduleSync();
   });
 
-  // TODO: tighten to a stable chat container if MutationObserver shows up in profiling.
-  try {
-    observer.observe(document.body, { childList: true, subtree: true });
-  } catch (err) {
-    flog.error('island-styles: observer.observe failed', err);
-  }
-
-  // Scan shadows that already exist at setup time (page refresh on active chat).
-  try {
-    walkSubtree(document.body);
-  } catch (err) {
-    flog.warn('island-styles: initial walk failed', err);
-  }
-
-  flog.info('island-styles: setup complete (adopting into Lumi message-island shadows)');
-
-  function nudgeAdopters(reason: string): void {
-    if (adoptedRefs.length === 0) return;
-    let nudged = 0;
-    let dead = 0;
-    for (let i = adoptedRefs.length - 1; i >= 0; i--) {
-      const shadow = adoptedRefs[i]!.deref();
-      if (!shadow) {
-        adoptedRefs.splice(i, 1);
-        dead++;
-        continue;
-      }
-      try {
-        // adoptedStyleSheets is a live proxy, snapshot via Array.from.
-        const current = Array.from(shadow.adoptedStyleSheets);
-        shadow.adoptedStyleSheets = [];
-        shadow.adoptedStyleSheets = current;
-        nudged++;
-      } catch {
-        /* */
-      }
-    }
-    if (nudged > 0 || dead > 0) {
-      flog.info(
-        `island-styles: nudged adopters reason=${reason} ` +
-          `nudged=${nudged} dead_refs_pruned=${dead} live=${adoptedRefs.length}`,
-      );
+  function applyStylesheets(): void {
+    const parts = [...backgroundCss, ...messageCss];
+    if (parts.length === lastCss.length && parts.every((css, i) => css === lastCss[i])) return;
+    const previous = new Set(shared);
+    const cached = new Map(lastCss.map((css, i) => [css, shared[i]!]));
+    // Preserve stylesheet boundaries: malformed CSS in one rule must not
+    // consume the next rule's declarations.
+    shared = parts.map(css => {
+      const existing = cached.get(css);
+      if (existing) return existing;
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(css);
+      cached.set(css, sheet);
+      return sheet;
+    });
+    lastCss = [...parts];
+    for (const root of roots.keys()) {
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets.filter(s => !previous.has(s)), ...shared];
     }
   }
 
-  function reAdoptAll(): void {
-    for (let i = adoptedRefs.length - 1; i >= 0; i--) {
-      const shadow = adoptedRefs[i]!.deref();
-      if (!shadow) {
-        adoptedRefs.splice(i, 1);
-        continue;
-      }
-      try {
-        const append: CSSStyleSheet[] = [];
-        if (envSheet) append.push(envSheet);
-        if (sheet) append.push(sheet);
-        for (const s of crossRuleSheets) append.push(s);
-        const existing = Array.from(shadow.adoptedStyleSheets);
-        const filtered = existing.filter((s) => !allOwnedSheets.has(s));
-        shadow.adoptedStyleSheets = [...filtered, ...append];
-      } catch (err) {
-        flog.warn('island-styles: re-adopt failed', err);
-      }
+  function setStylesheets(parts: readonly string[]): void {
+    backgroundCss = parts;
+    applyStylesheets();
+  }
+
+  function setActiveChat(next: string | null): void {
+    if (next === chatId) return;
+    observer.disconnect();
+    for (const root of roots.keys()) release(root);
+    messageCss = [];
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter(s => !messageSheets.includes(s));
+    messageSheets = [];
+    setStylesheets([]);
+    chatId = next;
+    if (!next) return;
+    if (!environment) {
+      environment = new CSSStyleSheet();
+      environment.replaceSync(rescopeRisuEnvironment(environmentCss));
     }
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['media'] });
+    scan(document.body);
+    syncMessageStyles();
   }
 
   return {
-    setStylesheet(css: string): void {
-      if (!sheet) return;
-      // Skip the work when content is byte-identical to the last apply.
-      // bg-html refresh fires multiple times on chat-open with identical
-      // payload; without this gate every refresh re-parses + re-adopts into
-      // every live shadow root.
-      if (lastSheetCss !== null && lastSheetCss === css) {
-        flog.info(`island-styles: setStylesheet skipped — content unchanged (${css.length} bytes)`);
-        return;
-      }
-      try {
-        sheet.replaceSync(css);
-        lastSheetCss = css;
-        nudgeAdopters('setStylesheet');
-      } catch (err) {
-        flog.error('island-styles: replaceSync failed', err);
-      }
-    },
-    setCrossRuleSheets(cssParts: readonly string[]): void {
-      // Same content-skip as setStylesheet. Cross-rule sheets fire
-      // alongside setStylesheet on every bg-html refresh. On island-heavy
-      // cards the 9-sheet bundle is ~62KB, and re-parsing byte-identical
-      // input was the bulk of the chat-open lag.
-      const key = cssParts.length + '\x1f' + cssParts.join('\x1e');
-      if (lastCrossRuleKey === key) {
-        flog.info(
-          `island-styles: setCrossRuleSheets skipped — content unchanged (parts=${cssParts.length})`,
-        );
-        return;
-      }
-      const next: CSSStyleSheet[] = [];
-      let okCount = 0;
-      let failCount = 0;
-      for (let i = 0; i < cssParts.length; i++) {
-        const part = cssParts[i] ?? '';
-        if (part.trim().length === 0) continue;
-        try {
-          const s = new CSSStyleSheet();
-          allOwnedSheets.add(s);
-          s.replaceSync(part);
-          next.push(s);
-          okCount++;
-        } catch (err) {
-          failCount++;
-          flog.warn(
-            `island-styles: cross-rule sheet ${i} parse failed (skipped): ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-      crossRuleSheets = next;
-      lastCrossRuleKey = key;
-      reAdoptAll();
-      flog.info(
-        `island-styles: cross-rule sheets set ok=${okCount} failed=${failCount} total_parts=${cssParts.length}`,
-      );
-    },
-    clear(): void {
-      if (!sheet) return;
-      try {
-        sheet.replaceSync('');
-        lastSheetCss = null;
-        lastCrossRuleKey = null;
-        nudgeAdopters('clear');
-      } catch { /* */ }
-    },
-    destroy(): void {
-      try { observer.disconnect(); } catch { /* */ }
-      if (sheet) {
-        try { sheet.replaceSync(''); } catch { /* */ }
-      }
-      sheet = null;
-      envSheet = null;
-    },
-  };
-}
-
-// Risu CSS assumes a chat-shell ancestor (.chattext/.prose/.prose-invert/.chat-width).
-// Those ancestors don't exist inside the extractHtmlIslands shadow, so rewrite
-// them to :host. Rewrite order matters: .prose-invert before .prose. Also rewrites
-// :root to :root,:host (CSS vars absent inside shadow). Appends a :host baseline
-// mirroring chat-shell default font/line-height.
-
-interface RescopeResult {
-  readonly css: string;
-  readonly rootHits: number;
-  readonly proseHits: number;
-  readonly proseInvertHits: number;
-  readonly chattextHits: number;
-  readonly chatWidthHits: number;
-  readonly quoteVarHits: number;
-}
-
-export function rescopeRisuEnvironment(input: string): RescopeResult {
-  let css = input;
-  // .prose-invert must run before .prose rewrite
-  const proseInvertHits = (css.match(/\.prose-invert\b/g) ?? []).length;
-  css = css.replaceAll(/\.prose-invert\b/g, ':host');
-  const proseHits = (css.match(/\.prose\b(?!-)/g) ?? []).length;
-  css = css.replaceAll(/\.prose\b(?!-)/g, ':host');
-  const chattextHits = (css.match(/\.chattext\b/g) ?? []).length;
-  css = css.replaceAll(/\.chattext\b/g, ':host');
-  const chatWidthHits = (css.match(/\.chat-width\b/g) ?? []).length;
-  css = css.replaceAll(/\.chat-width\b/g, ':host');
-  // (?!,) skips already-paired :root,:host (Tailwind v4 @theme output)
-  const rootHits = (css.match(/:root\b(?!,)/g) ?? []).length;
-  css = css.replaceAll(/:root\b(?!,)/g, ':root,:host');
-  const quoteVarHits = (css.match(/--FontColorQuote2:\s*#[0-9a-fA-F]{3,8}/g) ?? []).length;
-  css = css.replaceAll(
-    /--FontColorQuote2:\s*(#[0-9a-fA-F]{3,8})/g,
-    '--FontColorQuote2:var(--lumiverse-prose-dialogue,$1)',
-  );
-  // overflow:visible !important defeats Lumi's `_htmlIsland_*` host
-  // `overflow: hidden` (set from outside the shadow at equal specificity, so
-  // :host loses without !important). Font-size / line-height are intentionally
-  // not set here, so Lumi's --lumiverse-font-scale inheritance reaches card content.
-  css +=
-    '\n:host{overflow:visible !important}\n' +
-    ':host :where(font,span[style*="color"]) mark[risu-mark=quote1],' +
-    ':host :where(font,span[style*="color"]) mark[risu-mark=quote2]{color:inherit}\n' +
-    // Emphasis inside author-coloured containers or quote marks inherits the
-    // surrounding colour, mirroring Lumi's proseDialogue and font/span[style]
-    // nested exemptions. :where/:is pin specificity to tie the rescoped
-    // em/strong rules per nesting tier, so later card sheets still win.
-    ':host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong,x-em){color:inherit}\n' +
-    ':host :where(font,span[style*="color"],mark[risu-mark=quote1],mark[risu-mark=quote2]) :is(em,strong) :is(em,strong){color:inherit}\n';
-
-  return {
-    css,
-    rootHits,
-    proseHits,
-    proseInvertHits,
-    chattextHits,
-    chatWidthHits,
-    quoteVarHits,
+    setActiveChat,
+    setStylesheets,
+    destroy: () => setActiveChat(null),
   };
 }

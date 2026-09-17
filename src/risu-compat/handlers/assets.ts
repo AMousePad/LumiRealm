@@ -141,8 +141,7 @@ register("image", (ctx, args) => {
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
   if (!hit) return "";
-  // Both class forms: unprefixed matches card-authored CSS (LumiRealm unprefixes card
-  // HTML+CSS), prefixed matches the shipped risu-environment.css baseline. Risu parity.
+  // Preserve both authored and Risu-prefixed class selectors.
   return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="${hit.src}" alt="${hit.src}" style="${ASSET_WIDTH_STYLE}"/></div>\n`;
 }, "Inlay image wrapper. parser.svelte.ts.");
 

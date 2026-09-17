@@ -19,6 +19,7 @@
     "test:slow": "bun scripts/run-tests.ts --slow",
     "test:all": "bun scripts/run-tests.ts --all",
     "test:parallel": "bun scripts/test-parallel.ts",
+    "test:browser:islands": "bun tests/browser/run-island-styles-harness.ts",
     "deploy": "powershell.exe -File scripts/deploy.ps1"
   },
   "dependencies": {

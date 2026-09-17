@@ -116,6 +116,29 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
+  test.each([
+    'Narration with **bold** and *italics*.',
+    '```html\n</div>\n```',
+    '<div class="scene"><section>Unfinished',
+    '</div><p>After a stray close</p>',
+    '<style>.panel { color: red }</style><div class="panel">Panel</div>',
+    '<input id="toggle" type="checkbox"><label for="toggle">Open</label><div>Panel</div>',
+  ])('returns display output verbatim for host rendering: %s', async (html) => {
+    setDisplaySnapshot(snapshot());
+    expect((await applyRules([displayRule({ replace_string: html })]))?.content).toBe(html);
+  });
+
+  test('assembles Risu regex fragments without adding render boundaries', async () => {
+    setDisplaySnapshot(snapshot());
+    const metadata = { _risu: { origin: 'module' } };
+    const result = await applyRules([
+      displayRule({ find_regex: 'OPEN', replace_string: '<div class="scene">', metadata }),
+      displayRule({ find_regex: 'LINE', replace_string: '<p>{{char}}</p>', metadata }),
+      displayRule({ find_regex: 'CLOSE', replace_string: '</div>', metadata }),
+    ], 'OPENLINECLOSE');
+    expect(result?.content).toBe('<div class="scene"><p>Character</p></div>');
+  });
+
   test('native local variables start empty instead of reading persisted Risu state', async () => {
     const base = snapshot();
     setDisplaySnapshot({ ...base, vars: { local: { route: 'CHAT' }, global: { route: 'GLOBAL' }, chat: {} }, scriptstateDefaults: { fallback: 'DEFAULT' } });

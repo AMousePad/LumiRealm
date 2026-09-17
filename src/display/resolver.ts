@@ -28,7 +28,6 @@ import { type FeRegexScript, type FeRegexMatch } from './regex-apply.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
 import { decorateNativeRegexActions } from './regex-actions.js';
 import { createNativeVariableMacros } from './native-variable-macros.js';
-import { wrapResolvedContentAsIsland } from './fragment-assembly.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
 import {
@@ -497,9 +496,6 @@ export function createDisplayResolver(
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
         feContent = await runApply(snap, args, recorder, onEffect);
-        // The wrap must stay after runApply: its at-action effects persist the
-        // in-flight string, and island markup must never reach storage.
-        feContent = wrapResolvedContentAsIsland(feContent);
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;

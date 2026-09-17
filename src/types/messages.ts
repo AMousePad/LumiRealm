@@ -539,7 +539,6 @@ export type BackendToFrontend =
       type: 'render_bg_html';
       chatId: string;
       bgHtml: string;
-      crossRuleStyles?: readonly string[];
     }
   | {
       type: 'clear_bg_html';

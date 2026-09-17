@@ -75,8 +75,7 @@ register("hiddenkey", () => "",
 // Risu: cbs (displaying=false) and prompt-assembly (commit=true) both return ''. Only the display path renders the div.
 register("comment", (ctx, a) => {
   if (ctx.commit || ctx.cbsContext) return "";
-  // Both class forms so card-authored CSS (unprefixed by LumiRealm) and the shipped
-  // risu-environment.css baseline (.x-risu-risu-comment) both match, matching Risu.
+  // Preserve both authored and Risu-prefixed class selectors.
   return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
 }, "Comment macro. Empty at prompt time and in cbs; displays as <div class=\"risu-comment\">…</div> at render time.");
 
@@ -106,10 +105,6 @@ register("risu", (_c, a) => {
   return `<img src="/logo2.png" style="height:${size}px;width:${size}px" />`;
 }, "Embeds the RisuAI logo image.");
 
-// Unprefixed `button-default` matches card-authored CSS (LumiRealm unprefixes card
-// HTML+CSS), `x-risu-button-default` matches the shipped risu-environment.css baseline.
-// Risu prefixes HTML and card CSS together, so emitting both keeps card overrides and
-// the baseline applying, matching Risu's cascade.
 // Risu emits the label raw, so card-authored HTML entity glyphs must survive (only
 // escape a bare ampersand that does not start a valid entity). Angle brackets stay
 // escaped for Lumi-sanitizer safety, matching cards that use angle-bracket

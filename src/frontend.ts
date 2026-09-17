@@ -16,9 +16,6 @@ import { STYLES } from './ui/styles.js';
 import { createSidebar } from './ui/sidebar.js';
 import { createAuxDebugPanel } from './ui/aux-debug.js';
 import { setupBgHtmlRenderer } from './bghtml/render.js';
-import { setupIslandStyles } from './bghtml/island-styles.js';
-// Risu compiled CSS (Tailwind v4 + theme vars). GPL-3.0 output; reason LumiRealm is GPL-3.0.
-import risuEnvironmentCss from './bghtml/risu-environment.css' with { type: 'text' };
 import { setupImportOverlay } from './ui/import-overlay.js';
 import { setupBgmPlayer } from './audio/bgm.js';
 import { setupSvgRasterizer } from './svg-raster.js';
@@ -351,12 +348,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     };
   }
 
-  const islandStyles = setupIslandStyles(flog, {
-    riskuEnvironmentCss: risuEnvironmentCss,
-  });
-  cleanups.push(() => islandStyles.destroy());
-
-  const bgRenderer = setupBgHtmlRenderer(ctx, flog, islandStyles);
+  const bgRenderer = setupBgHtmlRenderer(ctx, flog);
   cleanups.push(() => bgRenderer.destroy());
 
   // BGM player: singleton <audio> driven by `risu-ctrl="bgm___volume___url"` markers.
@@ -664,6 +656,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (msg.type === 'set_active_chat') {
       const prevChatId = activeRisuChatId;
       activeRisuChatId = msg.chatId;
+      bgRenderer.setActiveChat(msg.chatId);
       sendDisplayAuthority(msg.chatId);
       if (activeRisuChatId !== prevChatId) {
         if (sidebar) sidebar.setActiveChatId(activeRisuChatId);
