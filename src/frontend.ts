@@ -1,6 +1,7 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
+import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
   setDisplaySnapshot,
   getDisplaySnapshot,
@@ -105,6 +106,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const display = ctx.display;
   if (!display) throw new Error('LumiRealm requires the current Lumiverse display resolver API');
+  const activationPatterns = createActivationPatternCache();
+  cleanups.push(subscribeActivationPatternChanges(ctx.events, activationPatterns, keys => display.invalidate(keys)));
+  const invalidateActivationVars = (chatId: string, changed: string[]): void => {
+    if (activationPatterns.invalidate(chatId, changed)) changed.push(ACTIVATION_INPUT_DEP_KEY);
+  };
   cleanups.push(display.registerResolver(createDisplayResolver(
     (chatId, vars) => {
       // Mirror editDisplay writes into the local snapshot so init-once guards
@@ -129,6 +135,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         );
       });
     },
+    activationPatterns,
   )));
   // Ownership is per-character: the host reads character.extensions.lumirealm.display_owner
   // (stamped by writeLumirealm + the boot backfill). display_authority is a separate signal
@@ -594,6 +601,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       if (getDisplayResolutionMode() !== 'off') {
         const prev = getDisplaySnapshot(msg.snapshot.chatId);
         setDisplaySnapshot(msg.snapshot);
+        const changed = prev ? diffSnapshotVars(prev, msg.snapshot) : [];
+        invalidateActivationVars(msg.snapshot.chatId, changed);
         // Cache every chat, but only the visible one has DOM to re-resolve.
         if (!isVisibleChat(msg.snapshot.chatId)) return;
         // Risu ReloadGUIPointer analog: reloadDisplay/v2UpdateGUI and dirty
@@ -608,10 +617,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           const ns = msg.snapshot;
           if (prev.userName !== ns.userName || prev.charName !== ns.charName
             || prev.personaText !== ns.personaText || prev.personaImage !== ns.personaImage) {
+            activationPatterns.invalidate(msg.snapshot.chatId);
             display.invalidate(['*']);
             return;
           }
-          const changed = diffSnapshotVars(prev, msg.snapshot);
           const pc = prev.chat, nc = msg.snapshot.chat;
           if (pc.lastMessageId !== nc.lastMessageId || pc.messageCount !== nc.messageCount
             || pc.lastMessage !== nc.lastMessage || pc.lastUserMessage !== nc.lastUserMessage
@@ -642,6 +651,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           }
           applyVarDelta(msg.chatId, scope, { ...incoming });
         }
+        invalidateActivationVars(msg.chatId, changed);
         if (changed.length > 0 && isVisibleChat(msg.chatId)) display.invalidate(changed);
       }
       // fall through to sidebar broadcast
@@ -660,6 +670,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       bgRenderer.setActiveChat(msg.chatId);
       sendDisplayAuthority(msg.chatId);
       if (activeRisuChatId !== prevChatId) {
+        activationPatterns.invalidate();
         if (sidebar) sidebar.setActiveChatId(activeRisuChatId);
         if (getDisplayResolutionMode() !== 'off' && msg.chatId && getDisplaySnapshot(msg.chatId)) {
           display.invalidate(['*']);

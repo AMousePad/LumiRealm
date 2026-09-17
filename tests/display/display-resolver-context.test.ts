@@ -7,6 +7,7 @@ import {
 } from '../../src/display/snapshot.js';
 import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
 import type { FeRegexScript } from '../../src/display/regex-apply.js';
+import { createActivationPatternCache } from '../../src/display/activation-patterns.js';
 
 function displayRule(overrides: Partial<FeRegexScript> = {}): FeRegexScript {
   return {
@@ -137,6 +138,58 @@ describe('frontend display resolver message context', () => {
       displayRule({ find_regex: 'CLOSE', replace_string: '</div>', metadata }),
     ], 'OPENLINECLOSE');
     expect(result?.content).toBe('<div class="scene"><p>Character</p></div>');
+  });
+
+  test('missing native activation input rejects only its rule and recovers after a persisted update', async () => {
+    setDisplaySnapshot(snapshot());
+    let value: string | undefined;
+    const cache = createActivationPatternCache(async (_preset, patterns) => patterns.map(source => value
+      ? { source, resolved: value } : { source, error: 'Missing activation input' }));
+    const resolver = createDisplayResolver(undefined, undefined, cache);
+    const args = {
+      content: 'TOKEN', context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+      scripts: [displayRule({ id: 'native', preset_id: 'preset', find_regex: '{{getchatvar::mode}}', replace_string: 'NATIVE',
+        metadata: { prompt_activation: { source: 'ai_output', lifetime: 'latest', mappings: [
+          { capture: '0', value: 'TOKEN', enabled: true, block_ids: ['block'] },
+        ] } } }),
+      displayRule({ id: 'risu', metadata: { _risu: { origin: 'module' } }, replace_string: '{{char}}' })],
+    };
+    const missing = await resolver.applyScripts(args);
+    expect(missing?.content).toBe('Character');
+    expect(missing?.touchedVars).toContain('chat:mode');
+    value = 'TOKEN';
+    cache.invalidate('chat-1', ['local:mode']);
+    expect((await resolver.applyScripts(args))?.content).toBe('NATIVE');
+  });
+
+  test('native activation finds use prepared literal patterns in every macro mode', async () => {
+    setDisplaySnapshot({ ...snapshot(), charName: 'A.B' });
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+      requests++;
+      const body = JSON.parse(String(init.body));
+      expect(body.patterns).toEqual(['^{{char}}$']);
+      expect(body.content).toBeUndefined();
+      return Response.json({ patterns: [{ source: '^{{char}}$', resolved: '^(?:A\\.B)$' }] });
+    }) as typeof fetch;
+    try {
+      const resolver = createDisplayResolver();
+      for (const mode of ['none', 'find', 'escaped', 'raw', 'after'] as const) {
+        const scripts = [displayRule({ preset_id: 'preset', find_regex: '^{{char}}$', replace_string: 'MATCH', substitute_macros: mode,
+          metadata: { prompt_activation: { source: 'ai_output', lifetime: 'latest', mappings: [
+            { capture: '0', value: 'A.B', enabled: true, block_ids: ['block'] },
+          ] } },
+        })];
+        for (const content of ['A.B', 'AXB']) {
+          const result = await resolver.applyScripts({ content, scripts,
+            context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+          });
+          expect(result?.content).toBe(content === 'A.B' ? 'MATCH' : 'AXB');
+        }
+      }
+      expect(requests).toBe(1);
+    } finally { globalThis.fetch = originalFetch; }
   });
 
   test('native local variables start empty instead of reading persisted Risu state', async () => {

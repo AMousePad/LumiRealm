@@ -15,6 +15,7 @@ export interface FeRegexScript {
   readonly max_depth: number | null;
   readonly disabled?: boolean;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly preset_id?: string | null;
   readonly actions?: readonly NativeRegexAction[];
 }
 
@@ -23,6 +24,11 @@ export interface FeRegexMatch {
   readonly index: number;
   readonly groups: (string | undefined)[];
   readonly namedGroups?: Record<string, string | undefined>;
+}
+
+export function isRisuRegexScript(script: FeRegexScript): boolean {
+  const source = script.metadata?.['_risu'];
+  return source !== null && typeof source === 'object' && !Array.isArray(source);
 }
 
 export function compileRegex(pattern: string, flags: string): RegExp | null {

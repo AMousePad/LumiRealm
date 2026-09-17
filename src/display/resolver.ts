@@ -24,7 +24,8 @@ import {
   waitForSnapshot,
   type DisplaySnapshot,
 } from './snapshot.js';
-import { type FeRegexScript, type FeRegexMatch } from './regex-apply.js';
+import { isRisuRegexScript, type FeRegexScript, type FeRegexMatch } from './regex-apply.js';
+import { ActivationPatternError, createActivationPatternCache, type ActivationPatternCache } from './activation-patterns.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
 import { decorateNativeRegexActions } from './regex-actions.js';
 import { createNativeVariableMacros } from './native-variable-macros.js';
@@ -202,11 +203,10 @@ function scriptApplies(
   return true;
 }
 
-function toCoreScript(script: FeRegexScript, nativeEval: (text: string) => string): RegexCoreScript {
+function toCoreScript(script: FeRegexScript, nativeEval: (text: string) => string, prepared: ReadonlyMap<string, string | ActivationPatternError>): RegexCoreScript {
   const matchActions = readRegexMatchActions(script.metadata);
   const actions = script.actions;
-  const risu = script.metadata?.['_risu'];
-  const isRisu = risu !== null && typeof risu === 'object' && !Array.isArray(risu);
+  const isRisu = isRisuRegexScript(script);
   return {
     find_regex: script.find_regex,
     replace_string: script.replace_string,
@@ -219,6 +219,7 @@ function toCoreScript(script: FeRegexScript, nativeEval: (text: string) => strin
     trim_strings: script.trim_strings,
     // Only Risu's processScriptFull adds a CBS pass after ordinary replacement.
     reResolveAfterRule: isRisu,
+    ...(typeof prepared.get(script.id) === 'string' ? { preResolvedFind: prepared.get(script.id) as string } : {}),
     ...(!isRisu ? { evalTemplate: nativeEval } : {}),
     ...(actions && actions.length > 0 ? {
       decorateReplacement: (replacement: string, match: FeRegexMatch, input: string) =>
@@ -281,12 +282,20 @@ async function runApply(
   snap: DisplaySnapshot,
   args: SpindleDisplayScriptsArgs,
   recorder: VarReadRecorder,
+  activationPatterns: ActivationPatternCache,
   onEffect?: DisplayRuntimeEffectSink,
 ): Promise<string> {
   const ctx = args.context;
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
   const scripts = args.scripts as readonly FeRegexScript[];
-  const plan = buildModuleDisplayPlan(scripts, snap.atActions);
+  const prepared = await activationPatterns.resolve(scripts.filter(script => scriptApplies(script, ctx)), ctx, recorder.touched);
+  // Lumiverse's compiler rejects invalid activation inputs per rule, leaving other rules runnable.
+  const plan = buildModuleDisplayPlan(scripts.filter(script => {
+    const result = prepared.get(script.id);
+    if (!(result instanceof ActivationPatternError)) return true;
+    log.error(`applyScripts: activation input failed for rule=${script.id}: ${String(result)}`);
+    return false;
+  }), snap.atActions);
   const hasRepeatBack = plan.some(
     (step) =>
       step.kind === 'script'
@@ -327,10 +336,10 @@ async function runApply(
       );
       continue;
     }
-    const coreScripts = [toCoreScript(step.script, nativeEval)];
+    const coreScripts = [toCoreScript(step.script, nativeEval, prepared)];
     while (plan[index + 1]?.kind === 'script') {
       const next = plan[++index]!;
-      if (next.kind === 'script') coreScripts.push(toCoreScript(next.script, nativeEval));
+      if (next.kind === 'script') coreScripts.push(toCoreScript(next.script, nativeEval, prepared));
     }
     content = applyRegexScriptsCore(content, coreScripts, {
       placement,
@@ -353,6 +362,7 @@ async function runApply(
 export function createDisplayResolver(
   writeback?: DisplayWritebackSink,
   onEffect?: DisplayRuntimeEffectSink,
+  activationPatterns: ActivationPatternCache = createActivationPatternCache(),
 ): SpindleDisplayResolver {
   return {
     ready(chatId: string): boolean {
@@ -496,7 +506,7 @@ export function createDisplayResolver(
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
-        feContent = await runApply(snap, args, recorder, onEffect);
+        feContent = await runApply(snap, args, recorder, activationPatterns, onEffect);
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
