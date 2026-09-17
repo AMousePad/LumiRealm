@@ -699,17 +699,10 @@ export async function makeRisuTriggerRuntime(
   }
 
   async function runTrigger(name: unknown): Promise<void> {
-    const candidates = ['risu-manual-' + toStr(name), toStr(name)];
     await withInheritedVarsCache(varsCache, async () => {
-      for (const n of candidates) {
-        try {
-          const mod = await scriptNs.require(n);
-          const modObj = mod as { run?: (ctx: unknown) => Promise<unknown> };
-          if (modObj && typeof modObj.run === 'function') {
-            await modObj.run({ api, data, script: scriptNs });
-            return;
-          }
-        } catch { /* try next */ }
+      const mod = await scriptNs.require('risu-manual-' + toStr(name)) as { run?: (ctx: unknown) => Promise<unknown> } | null;
+      if (mod && typeof mod.run === 'function') {
+        await mod.run({ api, data, script: scriptNs });
       }
     });
   }

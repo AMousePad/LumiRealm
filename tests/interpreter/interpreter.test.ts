@@ -22,6 +22,8 @@ import {
 } from '../../src/interpreter/dispatcher.js';
 import type { HostApi, HostMessage, DispatchData } from '../../src/interpreter/host.js';
 import type { RisuPayload } from '../../src/core/payload/index.js';
+import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
+import { interpretTrigger } from '../../src/interpreter/trigger-interpreter.js';
 
 // ─── Mock HostApi ────────────────────────────────────────────────────────────
 
@@ -237,6 +239,90 @@ describe('interpreter — dispatchBinding filters by binding', () => {
 });
 
 describe('interpreter — manual invocation mode', () => {
+  test.each(['setup list', '설정 목록', 'setup.list!', 'x'.repeat(80)])(
+    'nested setup preserves the original name: %s', async (name) => {
+      const setup = mkTrigger({
+        comment: name,
+        type: 'manual',
+        effect: [{ type: 'v2SetVar', indent: 0, var: 'limit', operator: '=', value: '3', valueType: 'value' }] as never,
+      });
+      const caller = mkTrigger({
+        effect: [
+          { type: 'v2RunTrigger', indent: 0, target: name },
+          { type: 'v2SetVar', indent: 0, var: 'i', operator: '=', value: '0', valueType: 'value' },
+          { type: 'v2Loop', indent: 0 },
+          { type: 'v2SetVar', indent: 1, var: 'i', operator: '+=', value: '1', valueType: 'value' },
+          { type: 'v2If', indent: 1, source: 'i', condition: '=', target: 'limit', targetType: 'var' },
+          { type: 'v2BreakLoop', indent: 2 },
+          { type: 'v2EndIndent', indent: 2, endOfLoop: false },
+          { type: 'v2EndIndent', indent: 1, endOfLoop: true },
+        ] as never,
+      });
+      const api = makeMockApi(makeMockState());
+      const scriptNS = makeDispatcherScriptNS();
+      registerManualTriggers(scriptNS, prepareTriggers(makePayload([setup]), 'C1'), api);
+      const runtime = await makeRisuTriggerRuntime(api, {}, scriptNS, { characterId: 'C1' });
+
+      await interpretTrigger(caller, runtime, console, {
+        displayMode: false, lowLevelAccess: false, stepBudget: 100,
+      });
+
+      expect(runtime.getVar('limit')).toBe('3');
+      expect(runtime.getVar('i')).toBe('3');
+    },
+  );
+
+  test('distinct names stay separate and repeated names run in source order', async () => {
+    const names = ['setup list', 'setup_list', 'risu-manual-setup_list', 'setup list'];
+    const targets = names.map((name, i) => mkTrigger({
+      comment: name,
+      type: 'manual',
+      effect: [
+        { type: 'setvar', var: 'order', operator: '*=', value: '10' },
+        { type: 'setvar', var: 'order', operator: '+=', value: String(i + 1) },
+      ] as never,
+    }));
+    const caller = mkTrigger({
+      effect: [
+        { type: 'v2RunTrigger', indent: 0, target: 'setup_list' },
+        { type: 'v2RunTrigger', indent: 0, target: 'setup list' },
+        { type: 'runtrigger', value: 'risu-manual-setup_list' },
+      ] as never,
+    });
+    const state = makeMockState({ chatMetadata: { chat_variables: { order: '0' } } });
+    await dispatch(makePayload([caller, ...targets]), makeMockApi(state), 'input');
+    expect((state.chatMetadata.chat_variables as Record<string, string>).order).toBe('2143');
+  });
+
+  test('nested calls use comment names across bindings and respect conditions', async () => {
+    const target = mkTrigger({
+      comment: 'show panel',
+      type: 'display',
+      effect: [{ type: 'setvar', var: 'visible', operator: '=', value: 'yes' }] as never,
+    });
+    const caller = mkTrigger({
+      effect: [{ type: 'v2RunTrigger', indent: 0, target: 'show panel' }] as never,
+    });
+    const skipped = mkTrigger({
+      ...target,
+      conditions: [{ type: 'var', var: 'enabled', operator: '=', value: 'yes' }] as never,
+      effect: [{ type: 'setvar', var: 'skipped', operator: '=', value: 'no' }] as never,
+    });
+    const state = makeMockState();
+    await dispatch(makePayload([caller, target, skipped]), makeMockApi(state), 'input');
+    expect(state.chatMetadata.chat_variables).toEqual({ visible: 'yes' });
+  });
+
+  test('a failing nested setup stops the caller instead of continuing with missing state', async () => {
+    const failure = new Error('setup failed');
+    const scriptNS = makeDispatcherScriptNS();
+    let calls = 0;
+    scriptNS.registerManual('setup', async () => { calls++; throw failure; });
+    const runtime = await makeRisuTriggerRuntime(makeMockApi(makeMockState()), {}, scriptNS);
+    await expect(runtime.runTrigger('setup')).rejects.toBe(failure);
+    expect(calls).toBe(1);
+  });
+
   test('display-declared comment trigger persists when invoked manually', async () => {
     const trigger = mkTrigger({
       comment: 'wiki',

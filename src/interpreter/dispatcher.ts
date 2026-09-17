@@ -28,14 +28,11 @@ export function makeDispatcherScriptNS(): DispatcherScriptNS {
       if (name === 'risu-compat') { nlog(`require('risu-compat') → OK`); return risuCompat; }
       if (name === 'risu-compat-lua') { nlog(`require('risu-compat-lua') → OK`); return risuCompatLua; }
       if (manuals.has(name)) { nlog(`require('${name}') → manual OK`); return manuals.get(name); }
-      const stripped = name.replace(/^risu-manual-/, '');
-      if (manuals.has(stripped)) { nlog(`require('${name}') → manual(stripped='${stripped}') OK`); return manuals.get(stripped); }
       nlog(`require('${name}') → NULL (not found; manuals=${JSON.stringify([...manuals.keys()])})`);
       return null;
     },
     registerManual(name: string, runner) {
       manuals.set('risu-manual-' + name, { run: async (ctx) => runner(ctx as { api: HostApi; data: DispatchData }) });
-      manuals.set(name, { run: async (ctx) => runner(ctx as { api: HostApi; data: DispatchData }) });
     },
   };
 }
@@ -245,15 +242,13 @@ export function registerManualTriggers(
   compiled: readonly CompiledTriggerEntry[],
   api: HostApi,
 ): void {
-  for (const entry of compiled) {
-    if (entry.type !== 'library') continue;
-    scriptNS.registerManual(entry.name, async (ctx) => {
-      await runInterpretedTrigger(
-        entry,
-        ctx.api ?? api,
-        ctx.data,
-        scriptNS,
-        { binding: 'manual', displayMode: false },
+  // Risu's runTrigger matches original comments, including duplicates across bindings.
+  for (const name of new Set(compiled.map((entry) => entry.source.comment))) {
+    scriptNS.registerManual(name, async (ctx) => {
+      await dispatchByManualName(
+        { compiledTriggers: compiled, api: ctx.api ?? api, data: ctx.data, scriptNS, opts: { binding: 'manual' } },
+        name,
+        (err) => { throw err; },
       );
     });
   }
