@@ -438,7 +438,9 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2MakeArrayVar: (op, { rt }) => {
     const e = op as Any;
-    rt.makeArrayVar(rt.resolve(e.var, 'value'));
+    const name = rt.resolve(e.var, 'value');
+    if (name.startsWith('[') && name.endsWith(']')) return 'return';
+    rt.makeArrayVar(name);
   },
   v2GetArrayVarLength: (op, { rt }) => {
     const e = op as Any;
@@ -493,6 +495,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2MakeDictVar: (op, { rt }) => {
     const e = op as Any;
+    if (e.var.startsWith('{') && e.var.endsWith('}')) return 'return';
     rt.makeDictVar(rt.resolve(e.var, 'value'));
   },
   v2GetDictVar: (op, { rt }) => {
@@ -502,12 +505,12 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   v2SetDictVar: (op, { rt }) => {
     const e = op as Any;
     if (e.varType === 'value') return;
-    rt.dictSet(rt.resolve(e.var, e.varType), rt.resolve(e.key, e.keyType), rt.resolve(e.value, e.valueType));
+    rt.dictSet(rt.resolve(e.var, 'value'), rt.resolve(e.key, e.keyType), rt.resolve(e.value, e.valueType));
   },
   v2DeleteDictKey: (op, { rt }) => {
     const e = op as Any;
     if (e.varType === 'value') return;
-    rt.dictDelete(rt.resolve(e.var, e.varType), rt.resolve(e.key, e.keyType));
+    rt.dictDelete(rt.resolve(e.var, 'value'), rt.resolve(e.key, e.keyType));
   },
   v2HasDictKey: (op, { rt }) => {
     const e = op as Any;
@@ -515,6 +518,7 @@ const LEAVES: Readonly<Record<string, LeafHandler>> = {
   },
   v2ClearDict: (op, { rt }) => {
     const e = op as Any;
+    if (e.var.startsWith('{') && e.var.endsWith('}')) return 'return';
     rt.dictClear(rt.resolve(e.var, 'value'));
   },
   v2GetDictSize: (op, { rt }) => {

@@ -1,12 +1,11 @@
-// Risu triggers.ts+ array/dict opcodes.
-// Storage: __risuArr__<name> / __risuDict__<name> as JSON in varsCache.
+// Risu runTrigger stores collections as JSON in ordinary chat variables.
 
 import { toStr } from '../../util/coerce.js';
 import type { VarsApi } from './vars.js';
 
 export interface ArraysDictsApi {
   makeArrayVar(name: string): void;
-  arrayLength(name: string): number;
+  arrayLength(name: string): string;
   arrayGet(name: string, i: unknown): string;
   arraySet(name: string, i: unknown, v: unknown): void;
   arrayPush(name: string, v: unknown): void;
@@ -30,50 +29,63 @@ export interface ArraysDictsApi {
 }
 
 export function makeArraysDictsApi(vars: VarsApi): ArraysDictsApi {
-  function readArray(name: string): unknown[] {
-    const raw = vars.getVar('__risuArr__' + name);
+  // Risu applies native operations to parsed JSON, including non-collection values.
+  function read<T>(json: string, operation: (value: any) => T, fallback: T): T {
+    try { return operation(JSON.parse(json)); }
+    catch { return fallback; }
+  }
+  function changeArray<T>(name: string, operation: (value: any) => T, fallback: T, reset = true): T {
     try {
-      const v = JSON.parse(raw);
-      return Array.isArray(v) ? v : [];
-    } catch { return []; }
+      const value = JSON.parse(vars.getVar(name));
+      const result = operation(value);
+      vars.setVar(name, JSON.stringify(value));
+      return result;
+    } catch {
+      if (reset) vars.setVar(name, '[]');
+      return fallback;
+    }
   }
-  function writeArray(name: string, arr: unknown[]): void {
-    vars.setVar('__risuArr__' + name, JSON.stringify(arr));
-  }
-  function readDict(name: string): Record<string, unknown> {
-    const raw = vars.getVar('__risuDict__' + name);
+  function dictSet(name: string, key: unknown, value: unknown): void {
+    const k = toStr(key), v = toStr(value);
+    let dict: any;
     try {
-      const v = JSON.parse(raw);
-      return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
-    } catch { return {}; }
-  }
-  function writeDict(name: string, dict: Record<string, unknown>): void {
-    vars.setVar('__risuDict__' + name, JSON.stringify(dict));
+      dict = JSON.parse(vars.getVar(name));
+      dict[k] = v;
+    } catch {
+      dict = {};
+      dict[k] = v;
+    }
+    vars.setVar(name, JSON.stringify(dict));
   }
 
   return {
-    makeArrayVar:    (name) => writeArray(name, []),
-    arrayLength:     (name) => readArray(name).length,
-    arrayGet:        (name, i) => toStr(readArray(name)[Number(i)] ?? ''),
-    arraySet:        (name, i, v) => { const a = readArray(name); a[Number(i)] = toStr(v); writeArray(name, a); },
-    arrayPush:       (name, v) => { const a = readArray(name); a.push(toStr(v)); writeArray(name, a); },
-    arrayPop:        (name) => { const a = readArray(name); const r = a.pop(); writeArray(name, a); return toStr(r ?? ''); },
-    arrayShift:      (name) => { const a = readArray(name); const r = a.shift(); writeArray(name, a); return toStr(r ?? ''); },
-    arrayUnshift:    (name, v) => { const a = readArray(name); a.unshift(toStr(v)); writeArray(name, a); },
-    arraySplice:     (name, start, item) => { const a = readArray(name); a.splice(Number(start), 0, toStr(item)); writeArray(name, a); },
-    arraySlice:      (name, start, end) => readArray(name).slice(Number(start), Number(end)).join(','),
-    arrayJoin:       (name, delim) => readArray(name).join(toStr(delim)),
-    arrayIndexOf:    (name, v) => readArray(name).indexOf(toStr(v)),
-    arrayRemoveIndex:(name, i) => { const a = readArray(name); a.splice(Number(i), 1); writeArray(name, a); },
+    makeArrayVar: (name) => vars.setVar(name, '[]'),
+    arrayLength: (name) => read(vars.getVar(name), a => a.length.toString(), '0'),
+    arrayGet: (name, i) => read(vars.getVar(name), a => toStr(a[Number(i)] ?? 'null'), 'null'),
+    arraySet: (name, i, v) => {
+      if (!Number.isNaN(Number(i))) changeArray(name, a => { a[Number(i)] = toStr(v); }, undefined, false);
+    },
+    arrayPush: (name, v) => { changeArray(name, a => a.push(toStr(v)), undefined); },
+    arrayPop: (name) => changeArray(name, a => toStr(a.pop() ?? 'null'), 'null'),
+    arrayShift: (name) => changeArray(name, a => toStr(a.shift() ?? 'null'), 'null'),
+    arrayUnshift: (name, v) => { changeArray(name, a => a.unshift(toStr(v)), undefined); },
+    arraySplice: (name, start, item) => { changeArray(name, a => a.splice(Number(start), 0, toStr(item)), undefined); },
+    arraySlice: (name, start, end) => read(vars.getVar(name), a => JSON.stringify(a.slice(Number(start), Number(end))), '[]'),
+    arrayJoin: (value, delim) => read(value, a => a.join(toStr(delim)), ''),
+    arrayIndexOf: (name, v) => read(vars.getVar(name), a => a.indexOf(toStr(v)), -1),
+    arrayRemoveIndex: (name, i) => { changeArray(name, a => a.splice(Number(i), 1), undefined); },
 
-    makeDictVar:     (name) => writeDict(name, {}),
-    dictGet:         (name, k) => toStr(readDict(name)[toStr(k)] ?? ''),
-    dictSet:         (name, k, v) => { const d = readDict(name); d[toStr(k)] = toStr(v); writeDict(name, d); },
-    dictDelete:      (name, k) => { const d = readDict(name); delete d[toStr(k)]; writeDict(name, d); },
-    dictHasKey:      (name, k) => Object.prototype.hasOwnProperty.call(readDict(name), toStr(k)),
-    dictClear:       (name) => writeDict(name, {}),
-    dictSize:        (name) => Object.keys(readDict(name)).length,
-    dictKeys:        (name) => Object.keys(readDict(name)),
-    dictValues:      (name) => Object.values(readDict(name)),
+    makeDictVar: (name) => vars.setVar(name, '{}'),
+    dictGet: (value, k) => read(value, d => toStr(d[toStr(k)] ?? 'null'), 'null'),
+    dictSet,
+    dictDelete: (name, k) => {
+      const json = read(vars.getVar(name), d => { delete d[toStr(k)]; return JSON.stringify(d); }, '{}');
+      vars.setVar(name, json);
+    },
+    dictHasKey: (value, k) => read(value, d => Object.hasOwn(d, toStr(k)), false),
+    dictClear: (name) => vars.setVar(name, '{}'),
+    dictSize: (value) => read(value, d => Object.keys(d).length, 0),
+    dictKeys: (value) => read(value, d => Object.keys(d), []),
+    dictValues: (value) => read(value, d => Object.values(d), []),
   };
 }

@@ -550,7 +550,7 @@ function emitV2MakeArrayVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `__risu.makeArrayVar(${resolveCall(e.var, "value")});`,
+      `{ const name = ${resolveCall(e.var, "value")}; if (name.startsWith('[') && name.endsWith(']')) return; __risu.makeArrayVar(name); }`,
     ),
     needsAwait: false,
   };
@@ -719,6 +719,7 @@ function emitV2RemoveIndexFromArrayVar(op: TriggerEffect, ctx: EmitContext): Emi
 
 function emitV2MakeDictVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { var: string };
+  if (e.var.startsWith('{') && e.var.endsWith('}')) return { code: line(ctx, 'return;'), needsAwait: false };
   return {
     code: line(ctx, `__risu.makeDictVar(${resolveCall(e.var, "value")});`),
     needsAwait: false,
@@ -758,7 +759,7 @@ function emitV2SetDictVar(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `__risu.dictSet(${resolveCall(e.var, e.varType)}, ${resolveCall(e.key, e.keyType)}, ${resolveCall(e.value, e.valueType)});`,
+      `__risu.dictSet(${resolveCall(e.var, "value")}, ${resolveCall(e.key, e.keyType)}, ${resolveCall(e.value, e.valueType)});`,
     ),
     needsAwait: false,
   };
@@ -772,7 +773,7 @@ function emitV2DeleteDictKey(op: TriggerEffect, ctx: EmitContext): EmitResult {
   return {
     code: line(
       ctx,
-      `__risu.dictDelete(${resolveCall(e.var, e.varType)}, ${resolveCall(e.key, e.keyType)});`,
+      `__risu.dictDelete(${resolveCall(e.var, "value")}, ${resolveCall(e.key, e.keyType)});`,
     ),
     needsAwait: false,
   };
@@ -797,6 +798,7 @@ function emitV2HasDictKey(op: TriggerEffect, ctx: EmitContext): EmitResult {
 
 function emitV2ClearDict(op: TriggerEffect, ctx: EmitContext): EmitResult {
   const e = op as unknown as { var: string };
+  if (e.var.startsWith('{') && e.var.endsWith('}')) return { code: line(ctx, 'return;'), needsAwait: false };
   return {
     code: line(ctx, `__risu.dictClear(${resolveCall(e.var, "value")});`),
     needsAwait: false,

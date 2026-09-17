@@ -158,7 +158,7 @@ export interface RisuTriggerRuntime {
   calculate(expr: unknown): string;
   // arrays
   makeArrayVar(name: string): void;
-  arrayLength(name: string): number;
+  arrayLength(name: string): string;
   arrayGet(name: string, i: unknown): string;
   arraySet(name: string, i: unknown, v: unknown): void;
   arrayPush(name: string, v: unknown): void;
