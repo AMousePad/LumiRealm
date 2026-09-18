@@ -64,8 +64,8 @@ describe("history (cbs.ts:1511)", () => {
     const out = JSON.parse(call("history", [], ctx));
     expect(out).toHaveLength(2);
     const fm = JSON.parse(out[0]);
-    expect(fm.role).toBe("char");
-    expect(fm.data).toBe("GREETING");
+    expect(fm).toEqual({ role: "char", data: "GREETING" });
+    expect(JSON.parse(out[1])).toEqual({ role: "user", data: "u", time: 1 });
   });
   test("'role' arg → array of 'role: data' strings, no first-greeting", () => {
     const ctx = makeMockContext({

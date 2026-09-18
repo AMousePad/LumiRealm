@@ -73,7 +73,6 @@ register("history", (ctx, a) => {
     const head = [{
       role: "char" as const,
       data: ctx.evaluate ? ctx.evaluate(fm) : fm,
-      time: 0,
     }];
     return makeArray([
       ...head,

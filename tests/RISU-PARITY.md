@@ -1,6 +1,6 @@
 # Lua and CBS divergence tests
 
-The tables include legacy runtime fixtures and the embedded comparison executor.
+The tables include legacy runtime fixtures and the upstream Wasmoon test adapter.
 Production Lua now uses the browser controller described in
 [LUA-MIGRATION.md](LUA-MIGRATION.md). These expected failures are not a measurement
 of that controller's current behavior or proof of complete production parity.
@@ -18,11 +18,11 @@ $env:RISU_PARITY_STRICT = '1'
 try { bun test risu-divergence } finally { Remove-Item Env:RISU_PARITY_STRICT }
 ```
 
-After the deeper caller/adapter audit, the result is **72 passing examples and 46 known differences across 118 tests**. Examples share root causes; this is not a count of independent bugs or a compatibility percentage.
+After the history greeting correction, the result is **73 passing examples and 45 known differences across 118 tests**. Examples share root causes; this is not a count of independent bugs or a compatibility percentage.
 
 | Suite | Tests | Known differences | Passing controls |
 | --- | ---: | ---: | ---: |
-| [CBS](interpreter/cbs-risu-divergence.test.ts) | 39 | 26 | 13 |
+| [CBS](interpreter/cbs-risu-divergence.test.ts) | 39 | 25 | 14 |
 | [Lua APIs](interpreter/lua-api-risu-divergence.test.ts) | 34 | 9 | 25 |
 | [Hook chains](interpreter/listen-edit-risu-divergence.test.ts) | 11 | 0 | 11 |
 | [Frontend boundaries](display/lua-risu-divergence.test.ts) | 9 | 1 | 8 |
