@@ -9,6 +9,7 @@ export interface FeRegexScript {
   readonly replace_string: string;
   readonly flags: string;
   readonly placement: readonly string[];
+  readonly scope?: 'global' | 'character' | 'chat';
   readonly substitute_macros: FeRegexMode;
   readonly trim_strings: readonly string[];
   readonly min_depth: number | null;

@@ -19,6 +19,7 @@ export interface RegexCoreScript {
   readonly preResolvedFind?: string;
   readonly preResolvedReplace?: string;
   readonly reResolveAfterRule?: boolean;
+  readonly risuActions?: readonly string[];
   readonly evalTemplate?: (text: string) => string;
   readonly matchActions?: readonly (
     | 'move_top'
@@ -34,8 +35,7 @@ export interface ApplyRegexCoreOptions {
   readonly placement: string;
   readonly depth: number | undefined;
   readonly evalTemplate: (text: string) => string;
-  // Risu re-parses CBS after every script. Fires only when the rule changed
-  // the text and the result carries CBS syntax.
+  // Reparse changed output for callers using the host substitution modes.
   readonly reResolveAfterRule?: boolean;
   /** Nearest earlier same-role message, or the greeting when none exists. */
   readonly previousContent?: string;
@@ -75,7 +75,9 @@ export function applyRegexScriptsCore(
     let findRegex = script.find_regex;
     if (script.preResolvedFind !== undefined) {
       findRegex = script.preResolvedFind;
-    } else if (script.substitute_macros !== 'none') {
+    } else if (script.risuActions !== undefined
+      ? script.risuActions.includes('cbs')
+      : script.substitute_macros !== 'none') {
       findRegex = evalTemplate(findRegex);
     }
 
@@ -88,6 +90,10 @@ export function applyRegexScriptsCore(
     if (!regex) continue;
 
     try {
+      if (script.risuActions !== undefined) {
+        result = applyRisuRule(result, regex, script, evalTemplate, previousContent);
+        continue;
+      }
       const behaviorResult = applyMatchActions(
         result,
         regex,
@@ -140,6 +146,44 @@ export function applyRegexScriptsCore(
   }
 
   return result;
+}
+
+function applyRisuRule(
+  content: string,
+  regex: RegExp,
+  script: RegexCoreScript,
+  evalTemplate: (text: string) => string,
+  previousContent: string | undefined,
+): string {
+  const movesTop = script.matchActions?.includes('move_top');
+  const movesBottom = script.matchActions?.includes('move_bottom');
+  const requiresMatch = script.risuActions!.length > 0
+    || (script.matchActions?.length ?? 0) > 0 || script.replace_string.startsWith('@@');
+  // Risu's processScriptFull reuses lastIndex after its metadata-branch probe.
+  if (requiresMatch && !regex.test(content)) {
+    return script.matchActions?.includes('repeat_back')
+      ? applyMatchActions(content, regex, script, previousContent, evalTemplate).content
+      : content;
+  }
+  if (movesTop || movesBottom) {
+    const match = content.match(regex);
+    const remainder = content.replace(regex, '');
+    if (!match) return remainder;
+    const replacement = script.replace_string
+      .replace(/(?<!\$)\$[0-9]+/g, token => {
+        const index = Number.parseInt(token.slice(1), 10);
+        return index < match.length ? String(match[index]) : token;
+      })
+      .replace(/\$&/g, match[0]!)
+      .replace(/(?<!\$)\$<([^>]+)>/g, token => {
+        const name = Number.parseInt(token.slice(2, -1), 10);
+        return match.groups?.[name] || token;
+      });
+    return applyTrimStrings(movesTop ? `${replacement}\n${remainder}` : `${remainder}\n${replacement}`, script.trim_strings);
+  }
+  const replaced = replaceWithDecoration(content, regex, script.replace_string, script.decorateReplacement);
+  const trimmed = applyTrimStrings(replaced, script.trim_strings);
+  return hasCbsSyntax(trimmed) ? evalTemplate(trimmed) : trimmed;
 }
 
 function replaceWithDecoration(

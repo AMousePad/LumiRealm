@@ -114,7 +114,7 @@ describe("migrateCharacterIfNeeded — asset_index rebuild", () => {
     expect(result.kind).toBe("migrated");
     if (result.kind !== "migrated") throw new Error("not migrated");
     expect(result.stepsApplied.map((s) => s.version)).toEqual([
-      5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+      5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
     ]);
     const v5Step = result.stepsApplied.find((s) => s.version === 5)!;
     expect(v5Step.notes.join(' ')).toContain('assets=2');
@@ -418,7 +418,7 @@ describe("character migration registry — targeted-step contract", () => {
     );
     expect(result.kind).toBe("migrated");
     if (result.kind !== "migrated") throw new Error("not migrated");
-    expect(result.stepsApplied.map((step) => step.version)).toEqual([15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+    expect(result.stepsApplied.map((step) => step.version)).toEqual([15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
     expect(writtenVersion).toBe(CURRENT_CHARACTER_SCHEMA_VERSION);
   });
 

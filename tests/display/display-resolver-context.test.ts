@@ -117,6 +117,67 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
+  test.each(['none', 'escaped'] as const)('Risu %s rules parse moved panel macros even without a match', async (mode) => {
+    const moved = displayRule({
+      id: 'panel', replace_string: '<div class="panel {{getvar::panel_open}}">Settings</div>',
+      metadata: { _risu: { phase: 'editdisplay' }, match_actions: ['move_bottom'] },
+    });
+    const following = displayRule({
+      id: 'ordinary', find_regex: 'ABSENT', replace_string: 'unused', substitute_macros: mode,
+      metadata: { _risu: { phase: 'editdisplay' } },
+    });
+    for (const state of ['', 'opened', '']) {
+      setDisplaySnapshot({ ...snapshot(), vars: { local: { panel_open: state }, global: {}, chat: {} } });
+      const result = await applyRules([moved, following]);
+      expect(result?.content).toBe(`\n<div class="panel ${state}">Settings</div>`);
+      expect(result?.touchedVars).toContain('local:panel_open');
+    }
+  });
+
+  test('native nonmatching rules do not parse macros left by a moved Risu fragment', async () => {
+    setDisplaySnapshot(snapshot());
+    const result = await applyRules([
+      displayRule({
+        id: 'panel', replace_string: '<div>{{char}}</div>',
+        metadata: { _risu: { phase: 'editdisplay' }, match_actions: ['move_bottom'] },
+      }),
+      displayRule({ id: 'native', find_regex: 'ABSENT', replace_string: 'unused' }),
+    ]);
+    expect(result?.content).toBe('\n<div>{{char}}</div>');
+  });
+
+  test('global native after rules run before character panels despite overlapping UI sort orders', async () => {
+    const scripts = [
+      displayRule({
+        id: 'panel', scope: 'character',
+        replace_string: '<div class="panel {{getvar::panel_open}}">Settings</div>',
+        metadata: { _risu: { phase: 'editdisplay' }, match_actions: ['move_bottom'] },
+      }),
+      displayRule({ id: 'preset', scope: 'global', preset_id: 'preset', find_regex: 'ABSENT', substitute_macros: 'after' }),
+      displayRule({ id: 'ordinary', scope: 'character', find_regex: 'ABSENT', metadata: { _risu: { phase: 'editdisplay' } } }),
+      displayRule({ id: 'chat', scope: 'chat', find_regex: 'Settings', replace_string: 'Chat settings' }),
+    ];
+    for (const state of ['', 'opened', '']) {
+      setDisplaySnapshot({ ...snapshot(), vars: { local: { panel_open: state }, chat: {}, global: {} } });
+      expect((await applyRules(scripts))?.content).toBe(`\n<div class="panel ${state}">Chat settings</div>`);
+    }
+    expect(scripts.map(script => script.id)).toEqual(['panel', 'preset', 'ordinary', 'chat']);
+  });
+
+  test.each(['none', 'after', 'escaped'] as const)('flagged Risu %s rules require a match before parsing moved macros', async (mode) => {
+    setDisplaySnapshot(snapshot());
+    const moved = displayRule({
+      id: 'panel', replace_string: '{{char}}',
+      metadata: { _risu: { phase: 'editdisplay' }, match_actions: ['move_bottom'] },
+    });
+    const flagged = displayRule({
+      id: 'flagged', find_regex: 'ABSENT', substitute_macros: mode,
+      metadata: { _risu: { phase: 'editdisplay', has_meta: true, flag_actions: ['no_end_nl'] } },
+    });
+    expect((await applyRules([moved, flagged]))?.content).toBe('\n{{char}}');
+    expect((await applyRules([moved, { ...flagged, find_regex: '$', replace_string: '!' }]))?.content).toBe('\nCharacter!');
+  });
+
   test.each([
     'Narration with **bold** and *italics*.',
     '```html\n</div>\n```',

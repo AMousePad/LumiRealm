@@ -207,10 +207,14 @@ function toCoreScript(script: FeRegexScript, nativeEval: (text: string) => strin
   const matchActions = readRegexMatchActions(script.metadata);
   const actions = script.actions;
   const isRisu = isRisuRegexScript(script);
+  const risu = script.metadata?.['_risu'] as Record<string, unknown> | undefined;
+  const unicodeFlags = risu?.['unicode_flags'];
   return {
     find_regex: script.find_regex,
     replace_string: script.replace_string,
-    flags: script.flags,
+    flags: isRisu && typeof unicodeFlags === 'string'
+      && script.flags === (unicodeFlags.replace(/u/g, '') || 'u')
+      ? unicodeFlags : script.flags,
     substitute_macros: script.substitute_macros,
     placement: script.placement,
     target: 'display',
@@ -219,6 +223,9 @@ function toCoreScript(script: FeRegexScript, nativeEval: (text: string) => strin
     trim_strings: script.trim_strings,
     // Only Risu's processScriptFull adds a CBS pass after ordinary replacement.
     reResolveAfterRule: isRisu,
+    ...(isRisu ? { risuActions: Array.isArray(risu?.['flag_actions'])
+      ? risu['flag_actions'].filter((action): action is string => typeof action === 'string')
+      : [] } : {}),
     ...(typeof prepared.get(script.id) === 'string' ? { preResolvedFind: prepared.get(script.id) as string } : {}),
     ...(!isRisu ? { evalTemplate: nativeEval } : {}),
     ...(actions && actions.length > 0 ? {
@@ -287,7 +294,12 @@ async function runApply(
 ): Promise<string> {
   const ctx = args.context;
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
-  const scripts = args.scripts as readonly FeRegexScript[];
+  // Match the host execution pipeline's scope order; UI list sort numbers
+  // overlap between global presets and character rules.
+  const scopeOrder = { global: 0, character: 1, chat: 2 };
+  const scripts = [...args.scripts as readonly FeRegexScript[]].sort(
+    (a, b) => scopeOrder[a.scope ?? 'global'] - scopeOrder[b.scope ?? 'global'],
+  );
   const prepared = await activationPatterns.resolve(scripts.filter(script => scriptApplies(script, ctx)), ctx, recorder.touched);
   // Lumiverse's compiler rejects invalid activation inputs per rule, leaving other rules runnable.
   const plan = buildModuleDisplayPlan(scripts.filter(script => {

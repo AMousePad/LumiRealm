@@ -242,6 +242,7 @@ export function mapRegex(
       baseFlags = baseFlags.replace(/g/g, "");
     }
     if (baseFlags.length === 0) baseFlags = "u";
+    const unicodeFlags = movesMatch ? normalised.flag.replace(/g/g, "") || "u" : normalised.flag;
 
     let baseReplace = outNormalised;
     if (baseReplace.endsWith(">") && !hasNoEndNl) baseReplace += "\n";
@@ -282,6 +283,8 @@ export function mapRegex(
         origin,
         order_index: i,
         has_meta: normalised.actions.length > 0,
+        // Preserve execution flags while the host validates unresolved CBS without u.
+        ...(effectivePhase.target === "display" && unicodeFlags !== baseFlags ? { unicode_flags: unicodeFlags } : {}),
         ...(normalised.order !== undefined ? { order_flag: normalised.order } : {}),
         ...(action ? { at_action: action } : {}),
         ...(normalised.actions.length > 0 ? { flag_actions: normalised.actions } : {}),

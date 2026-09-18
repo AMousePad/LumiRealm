@@ -109,7 +109,7 @@ describe('module migrations: v5 refresh attached regex', () => {
     }));
     expect(result.kind).toBe('migrated');
     if (result.kind !== 'migrated') throw new Error('not migrated');
-    expect(result.stepsApplied.map((step) => step.version)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    expect(result.stepsApplied.map((step) => step.version)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
     expect(writtenVersion).toBe(CURRENT_MODULE_SCHEMA_VERSION);
   });
 
@@ -125,7 +125,7 @@ describe('module migrations: v5 refresh attached regex', () => {
 
     expect(result.kind).toBe('migrated');
     if (result.kind !== 'migrated') throw new Error('not migrated');
-    expect(result.stepsApplied.map((step) => step.version)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    expect(result.stepsApplied.map((step) => step.version)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
     expect(repairLog).toEqual([env.id]);
   });
 
@@ -191,7 +191,7 @@ describe('module migrations: v5 refresh attached regex', () => {
     }));
 
     expect(result.kind).toBe('migrated');
-    // v17 patches both rows, then v18 + v19 see them again (no display target, no-op).
-    expect(patches).toEqual([{ folder: 'Module: TestModule' }, null, null, null, null, null]);
+    // Later display migrations leave these non-display rows alone.
+    expect(patches).toEqual([{ folder: 'Module: TestModule' }, null, null, null, null, null, null, null]);
   });
 });

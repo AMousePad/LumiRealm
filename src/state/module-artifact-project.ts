@@ -264,6 +264,7 @@ export function projectModuleRegexEntries(
       flags = flags.replace(/g/g, '');
     }
     if (flags.length === 0) flags = 'u';
+    const unicodeFlags = movesMatch ? normalisedFlag.flag.replace(/g/g, '') || 'u' : normalisedFlag.flag;
     const baseSubstitute = movesMatch
       ? 'none'
       : pickSubstituteMacroMode(replaceString, false);
@@ -302,6 +303,7 @@ export function projectModuleRegexEntries(
           phase: ruleType,
           source_index: sourceIndex,
           source_row_index: sortBase,
+          ...(target === 'display' && unicodeFlags !== flags ? { unicode_flags: unicodeFlags } : {}),
           ...(normalisedFlag.order !== undefined ? { order_flag: normalisedFlag.order } : {}),
           ...(normalisedFlag.actions.length > 0
             ? { flag_actions: normalisedFlag.actions }

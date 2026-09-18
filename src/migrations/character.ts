@@ -7,6 +7,7 @@ import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
 import { stripLegacyIslandWrappers } from '../core/mappers/island-merge.js';
 import { regexRowTargetsDisplay } from './regex-row.js';
+import { unicodeRegexPatch } from './regex-unicode.js';
 import { lorePriorityPatch, lorePriorityTargets } from './lore-priority.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import type { SvgRasterTask } from '../core/svg-rasterize.js';
@@ -998,6 +999,21 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
     description: 'Restore Risu insertion-order priority on source-matched lore entries with the old zero default.',
     touches: ['world_book_entries'],
     apply: applyV26RestoreLorePriority,
+  },
+  {
+    version: 27,
+    description: 'Restore Unicode display execution flags on source-matched regex rows without changing host validation flags.',
+    touches: ['regex_scripts'],
+    async apply(args, deps) {
+      const sources = args.newBundle.regexScripts as unknown as readonly Readonly<Record<string, unknown>>[];
+      const patch = (row: Readonly<Record<string, unknown>>) => unicodeRegexPatch(row, sources);
+      const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, patch);
+      if (result.failed > 0) throw new Error(`failed to restore Unicode flags on ${result.failed} regex rows`);
+      return {
+        nextEnvelope: { ...args.envelope, regex_scripts: args.envelope.regex_scripts.map(row => ({ ...row, ...patch(row as unknown as Readonly<Record<string, unknown>>) })) },
+        notes: [`restored Unicode flags on ${result.updated} regex rows`],
+      };
+    },
   },
 ];
 

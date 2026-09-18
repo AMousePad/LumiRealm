@@ -5,9 +5,10 @@ import type { ModuleEnvelope } from '../state/modules-store.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
 import { projectModuleLorebookForCreate } from '../state/world-book-ops.js';
-import { normalizeModuleDisplayReplaceString } from '../state/module-artifact-project.js';
+import { normalizeModuleDisplayReplaceString, projectModuleRegexEntries } from '../state/module-artifact-project.js';
 import { stripLegacyIslandWrappers } from '../core/mappers/island-merge.js';
 import { regexRowTargetsDisplay } from './regex-row.js';
+import { unicodeRegexPatch } from './regex-unicode.js';
 import { lorePriorityPatch, lorePriorityTargets } from './lore-priority.js';
 import {
   computeEntrySourceHash,
@@ -530,6 +531,18 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
     description: 'Restore Risu insertion-order priority on source-matched module lore with the old zero default.',
     touches: ['world_book_entries'],
     apply: applyV20RestoreLorePriority,
+  },
+  {
+    version: 21,
+    description: 'Restore Unicode display execution flags on source-matched module regex rows without changing host validation flags.',
+    touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
+    async apply(args, deps) {
+      const sources = projectModuleRegexEntries(args.env.id, args.env.module.name, null, args.env.module.regex, () => 'source');
+      const result = await deps.applyModuleRegexRowPatch(args.env.id, row =>
+        unicodeRegexPatch(row, sources as unknown as readonly Readonly<Record<string, unknown>>[]));
+      if (result.failed > 0) throw new Error(`failed to restore Unicode flags on ${result.failed} module regex rows`);
+      return { nextEnv: args.env, notes: [`restored Unicode flags on ${result.updated} regex rows`] };
+    },
   },
 ];
 
