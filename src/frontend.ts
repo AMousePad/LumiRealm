@@ -1,6 +1,7 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
+import { createDisplayVariableMirror } from './display/variable-mirror.js';
 import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
   setDisplaySnapshot,
@@ -111,11 +112,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const invalidateActivationVars = (chatId: string, changed: string[]): void => {
     if (activationPatterns.invalidate(chatId, changed)) changed.push(ACTIVATION_INPUT_DEP_KEY);
   };
+  const variableMirror = createDisplayVariableMirror(ctx.events, (chatId, changed) => {
+    invalidateActivationVars(chatId, changed);
+    if (isVisibleChat(chatId)) display.invalidate(changed);
+  });
+  cleanups.push(() => variableMirror.dispose());
   cleanups.push(display.registerResolver(createDisplayResolver(
     (chatId, vars) => {
       // Mirror editDisplay writes into the local snapshot so init-once guards
       // see their guard var set next render. Without it the guard never engages,
       // init re-runs every render, and writeback clobbers committed progress.
+      variableMirror.recordWrite(chatId, vars);
       applyVarDelta(chatId, 'local', vars);
       ctx.sendToBackend({ type: 'display_writeback', chatId, vars });
     },
