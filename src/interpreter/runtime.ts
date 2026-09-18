@@ -299,10 +299,8 @@ export async function makeRisuTriggerRuntime(
     isInheritedVarsCache = true;
     _varsSrc = 'inherited';
   } else if (preloaded?.varsCache) {
-    // Shallow-clone so per-trigger writes don't corrupt the shared snapshot.
-    // Risu's listenEdit chain runs each trigger in fresh Lua state , varsCache
-    // mutations from one trigger should not leak into the next via the
-    // shared preload (they'd leak via flush() at chain end if needed).
+    // Isolate invocation state from its preload; frontend Lua uses live
+    // variable accessors independently of this copy.
     varsPromise = Promise.resolve({ ...preloaded.varsCache });
     _varsSrc = 'preloaded';
   } else {
@@ -789,6 +787,8 @@ export async function makeRisuTriggerRuntime(
     } catch (err) {
       rerr(`THREW after ${Date.now() - tStart}ms: ${(err as Error).message}`);
       throw err;
+    } finally {
+      opts.luaVariables?.flush();
     }
   }
 
@@ -799,12 +799,19 @@ export async function makeRisuTriggerRuntime(
       };
     }
     return {
-      getChatVar: (_id: unknown, key: unknown) => getVar(toStr(key)),
-      setChatVar: (_id: unknown, key: unknown, value: unknown) => setVar(toStr(key), toStr(value)),
+      getChatVar: (_id: unknown, key: unknown) => {
+        const k = toStr(key);
+        if (!opts.luaVariables) return getVar(k);
+        onVarRead?.(k, 'chat');
+        return opts.luaVariables.get(k, 'chat');
+      },
+      setChatVar: (_id: unknown, key: unknown, value: unknown) => opts.luaVariables
+        ? opts.luaVariables.set(toStr(key), toStr(value))
+        : setVar(toStr(key), toStr(value)),
       getGlobalVar: (_id: unknown, key: unknown) => {
         const k = toStr(key);
         onVarRead?.(k, 'global');
-        return globalVarsCache[k] ?? 'null';
+        return opts.luaVariables ? opts.luaVariables.get(k, 'global') : globalVarsCache[k] ?? 'null';
       },
       stopChat: (_id: unknown) => { invocation.stopSending = true; },
       // Risu parity: fire-and-forget. Returning the Promise would force Lua to await or leak an unhandledRejection on modal-infra throw.

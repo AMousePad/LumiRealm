@@ -390,7 +390,7 @@ export function createDisplayResolver(
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
         const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
-        const liveSnap = (snap.luaTriggers.length > 0 || rowlessAtActions.length > 0)
+        let liveSnap = (snap.luaTriggers.length > 0 || rowlessAtActions.length > 0)
           ? withCurrentDisplayMessage(snap, args.context, args.content)
           : snap;
         let body = parseDisplayCaller(buildInput(liveSnap, args.content, args.context), recorder);
@@ -399,7 +399,9 @@ export function createDisplayResolver(
             liveSnap,
             body,
             args.context,
-            (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })),
+            (t) => Promise.resolve(runPipeline(buildInput({
+              ...liveSnap, vars: getDisplaySnapshot(chatId)?.vars ?? liveSnap.vars,
+            }, t, args.context), { recorder })),
             (vars) => writeback?.(chatId, vars),
             onEffect,
             // Same key shape as the CBS recorder so snapshot-diff invalidation
@@ -412,6 +414,7 @@ export function createDisplayResolver(
               }
             },
           );
+          liveSnap = { ...liveSnap, vars: getDisplaySnapshot(chatId)?.vars ?? liveSnap.vars };
         }
         const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
         body = displayTriggerResult.content;

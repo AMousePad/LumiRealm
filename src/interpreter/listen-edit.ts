@@ -1,7 +1,7 @@
 // Risu scriptings.ts runLuaEditTrigger.
 // Iterates all triggerlua triggers, threading data through each in sequence.
 
-import type { HostApi, DispatchData, ScriptNS, TriggerRuntimePreloaded } from "./host.js";
+import type { HostApi, DispatchData, ScriptNS, TriggerRuntimeOpts, TriggerRuntimePreloaded } from "./host.js";
 import { makeRisuTriggerRuntime } from "./runtime.js";
 import { errMsg } from "../util/coerce.js";
 import { makeSafeLogger } from "../util/safe-log.js";
@@ -27,6 +27,7 @@ export interface ListenEditOpts {
   readonly preloaded?: TriggerRuntimePreloaded;
   readonly wasmoonKey?: string;
   readonly onVarRead?: (name: string, scope: 'chat' | 'global') => void;
+  readonly luaVariables?: TriggerRuntimeOpts['luaVariables'];
 }
 
 export async function runListenEditChain<T>(
@@ -63,16 +64,8 @@ export async function runListenEditChain<T>(
       `chatId=${opts.chatId ?? "<none>"} characterId=${opts.characterId ?? "<none>"}`,
   );
 
-  // PER-CHAIN PRELOAD: fetch chat-state ONCE for the whole chain instead of
-  // once per trigger. Risu's listenEdit chain runs each trigger in a fresh
-  // Lua VM (preserved); the data the Lua reads is identical across triggers
-  // in the same chain (no chat mutations between triggers , editDisplay's
-  // commit:false gates writes), so the snapshot is safely shareable.
-  //
-  // On a 16-trigger listenEdit chain, the per-trigger state reads (local/global
-  // vars + messages + character/lorebook) collapse to one parallel preload +
-  // 16x Lua (or zero state reads if the cross-chain cache hits), which kills
-  // the IPC channel contention that caused 4.5s stalls in the editDisplay path.
+  // Reuse preloaded context across the chain; frontend Lua variables use
+  // the caller's live accessors instead of that snapshot.
   const tPreload = Date.now();
   const preloaded = opts.preloaded ?? await preloadForListenEditChain(
     api,
@@ -108,6 +101,7 @@ export async function runListenEditChain<T>(
           ...(opts.characterId !== undefined ? { characterId: opts.characterId } : {}),
           ...(opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {}),
           ...(opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {}),
+          ...(opts.luaVariables !== undefined ? { luaVariables: opts.luaVariables } : {}),
           // Hand the per-chain snapshot to the runtime so it skips its own
           // repeated state fetches (local/global vars, messages, character/lorebook).
           preloaded,

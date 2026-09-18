@@ -174,6 +174,12 @@ export interface TriggerRuntimeOpts {
   readonly chatId?: string;
   /** Pre-fetched chat-state snapshot — see `TriggerRuntimePreloaded`. */
   readonly preloaded?: TriggerRuntimePreloaded;
+  /** Frontend display hooks use live chat state, as in Risu's runScripted. */
+  readonly luaVariables?: {
+    get(name: string, scope: 'chat' | 'global'): string;
+    set(name: string, value: string): void;
+    flush(): void;
+  };
   readonly localState?: import('./runtime/vars.js').TriggerLocalState;
   // Backend uses this to filter MESSAGE_EDITED self-echoes from Lua setChat.
   readonly rememberOurWrite?: (chatId: string, msgId: string, content: string) => void;
