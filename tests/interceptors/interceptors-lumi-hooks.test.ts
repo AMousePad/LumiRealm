@@ -486,6 +486,21 @@ describe('createLumiInterceptors', () => {
     expect(stub.chatsUpdateCalls.length).toBe(0);
   });
 
+  test('worldInfoInterceptor: requests insertion output order only for imported lore', async () => {
+    setupSpindle(stub, captured);
+    const { deps } = makeMockDeps();
+    createLumiInterceptors(deps).registerAll();
+    const imported = { id: 'imported', disabled: false, comment: '', content: 'Profile',
+      key: [], keysecondary: [], priority: 300, extensions: { _risu_source_hash: 'source' } };
+    const result = await captured.worldInfoInterceptor!({
+      chatId: 'chat-1', entries: [imported, { ...imported, id: 'native', extensions: {} }],
+      messages: [], chatTurn: 0, chatMetadata: {},
+      activationSettings: { globalScanDepth: null, maxRecursionPasses: 0 },
+    });
+    expect(result).toEqual({ mutated: [{ id: 'imported', outputOrder: 'insertion' }] });
+    expect(imported).not.toHaveProperty('outputOrder');
+  });
+
   test('worldInfoInterceptor: handles missing userId cleanly', async () => {
     setupSpindle(stub, captured);
     const { deps } = makeMockDeps();

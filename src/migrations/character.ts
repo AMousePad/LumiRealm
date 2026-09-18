@@ -7,6 +7,7 @@ import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
 import { stripLegacyIslandWrappers } from '../core/mappers/island-merge.js';
 import { regexRowTargetsDisplay } from './regex-row.js';
+import { lorePriorityPatch, lorePriorityTargets } from './lore-priority.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import type { SvgRasterTask } from '../core/svg-rasterize.js';
 import {
@@ -20,12 +21,14 @@ import {
   type ProjectedCharacterRegexScript,
 } from '../payload/character-regex-projection.js';
 import {
+  computeEntrySourceHash,
   LEGACY_ENTRY_HASH_FIELDS_V1,
   computeEntrySourceHashWithFields,
 } from '../core/mappers/lorebook-hash.js';
 
 export interface LiveWorldBookEntry {
   readonly id: string;
+  readonly priority?: number;
   readonly exclude_greeting: boolean;
   readonly extensions: Readonly<Record<string, unknown>> | null;
 }
@@ -61,6 +64,7 @@ export interface MigrationDeps {
     entryId: string,
     input: {
       readonly exclude_greeting: boolean;
+      readonly priority?: number;
       readonly extensions: Readonly<Record<string, unknown>>;
     },
     userId: string,
@@ -461,6 +465,9 @@ async function applyV6BackfillArrayIndex(
     const idx = ext['_risu_array_index'];
     if (typeof hash === 'string' && typeof idx === 'number') {
       indexBySourceHash.set(hash, idx);
+      for (const legacyHash of lorePriorityTargets([e as unknown as Record<string, unknown>]).keys()) {
+        indexBySourceHash.set(legacyHash, idx);
+      }
     }
   }
   if (indexBySourceHash.size === 0) {
@@ -724,6 +731,9 @@ async function applyV15ExcludeGreetingPerEntry(
     );
     targetBySourceHash.set(legacyHash, currentHash);
     targetBySourceHash.set(currentHash, currentHash);
+    for (const oldHash of lorePriorityTargets([record]).keys()) {
+      targetBySourceHash.set(oldHash, computeEntrySourceHash({ ...record, priority: 0 }));
+    }
   }
   if (targetBySourceHash.size === 0) {
     return {
@@ -813,6 +823,26 @@ async function applyV17UseFindMacroMode(
       `failed=${result.failed}`,
     ],
   };
+}
+
+async function applyV26RestoreLorePriority(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const targets = lorePriorityTargets(args.newBundle.worldBookEntries as unknown as Record<string, unknown>[]);
+  let updated = 0;
+  for (const bookId of await deps.getCharacterWorldBookIds(args.characterId, args.userId)) {
+    for (const entry of await deps.listWorldBookEntries(bookId, args.userId)) {
+      if (entry.extensions?.['_risu_module_id']) continue;
+      const patch = lorePriorityPatch(entry, targets);
+      if (!patch) continue;
+      await deps.updateWorldBookEntryActivation(entry.id, {
+        ...patch, exclude_greeting: entry.exclude_greeting,
+      }, args.userId);
+      updated += 1;
+    }
+  }
+  return { nextEnvelope: args.envelope, notes: [`restored priority on ${updated} lore entries`] };
 }
 
 export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
@@ -962,6 +992,12 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
       'Re-run the legacy island-wrapper strip with the array-shaped target gate.',
     touches: ['regex_scripts'],
     apply: applyV24StripLegacyIslandWrappers,
+  },
+  {
+    version: 26,
+    description: 'Restore Risu insertion-order priority on source-matched lore entries with the old zero default.',
+    touches: ['world_book_entries'],
+    apply: applyV26RestoreLorePriority,
   },
 ];
 

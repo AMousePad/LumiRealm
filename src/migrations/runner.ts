@@ -297,6 +297,7 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       listWorldBookEntries: async (wbId, uid) => {
         const out: {
           id: string;
+          priority?: number;
           exclude_greeting: boolean;
           extensions: Record<string, unknown> | null;
         }[] = [];
@@ -316,6 +317,7 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
               : null;
             out.push({
               id,
+              priority: e.priority,
               exclude_greeting: ee.exclude_greeting === true,
               extensions: ext,
             });
@@ -450,6 +452,7 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
       listWorldBookEntries: async (worldBookId) => {
         const out: {
           id: string;
+          priority?: number;
           exclude_greeting: boolean;
           extensions: Record<string, unknown> | null;
         }[] = [];
@@ -471,6 +474,7 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
                 : null;
             out.push({
               id: entry.id,
+              priority: entry.priority,
               exclude_greeting: entryRecord.exclude_greeting === true,
               extensions,
             });

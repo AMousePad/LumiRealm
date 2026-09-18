@@ -1121,6 +1121,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         outcome.mutated.length === 0 &&
         selectionMutations.size === 0 &&
         runtimePlacements.size === 0 &&
+        selectionEntries.length === 0 &&
         activationOverrides === undefined
       ) return;
       const result: {
@@ -1131,6 +1132,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           content?: string;
           selectionContent?: string;
           placement?: import('lumiverse-spindle-types').WorldInfoInterceptorPlacementDTO;
+          outputOrder?: 'insertion';
         }[];
         activationOverrides?: {
           disableRecursion?: true;
@@ -1141,13 +1143,15 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       if (
         outcome.mutated.length > 0 ||
         selectionMutations.size > 0 ||
-        runtimePlacements.size > 0
+        runtimePlacements.size > 0 ||
+        selectionEntries.length > 0
       ) {
         const mutations = new Map<string, {
           id: string;
           content?: string;
           selectionContent?: string;
           placement?: import('lumiverse-spindle-types').WorldInfoInterceptorPlacementDTO;
+          outputOrder?: 'insertion';
         }>();
         for (const mutation of outcome.mutated) {
           mutations.set(mutation.entryId, {
@@ -1167,6 +1171,13 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             ...mutations.get(id),
             id,
             placement,
+          });
+        }
+        for (const entry of selectionEntries) {
+          mutations.set(entry.id, {
+            ...mutations.get(entry.id),
+            id: entry.id,
+            outputOrder: 'insertion',
           });
         }
         result.mutated = [...mutations.values()];

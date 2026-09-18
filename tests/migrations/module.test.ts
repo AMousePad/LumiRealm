@@ -109,8 +109,8 @@ describe('module migrations: v5 refresh attached regex', () => {
     }));
     expect(result.kind).toBe('migrated');
     if (result.kind !== 'migrated') throw new Error('not migrated');
-    expect(result.stepsApplied.map((step) => step.version)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
-    expect(writtenVersion).toBe(19);
+    expect(result.stepsApplied.map((step) => step.version)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    expect(writtenVersion).toBe(CURRENT_MODULE_SCHEMA_VERSION);
   });
 
   it('repairs existing source-row bindings once', async () => {
@@ -125,7 +125,7 @@ describe('module migrations: v5 refresh attached regex', () => {
 
     expect(result.kind).toBe('migrated');
     if (result.kind !== 'migrated') throw new Error('not migrated');
-    expect(result.stepsApplied.map((step) => step.version)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    expect(result.stepsApplied.map((step) => step.version)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
     expect(repairLog).toEqual([env.id]);
   });
 

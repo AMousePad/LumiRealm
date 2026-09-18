@@ -8,13 +8,16 @@ import { projectModuleLorebookForCreate } from '../state/world-book-ops.js';
 import { normalizeModuleDisplayReplaceString } from '../state/module-artifact-project.js';
 import { stripLegacyIslandWrappers } from '../core/mappers/island-merge.js';
 import { regexRowTargetsDisplay } from './regex-row.js';
+import { lorePriorityPatch, lorePriorityTargets } from './lore-priority.js';
 import {
+  computeEntrySourceHash,
   LEGACY_ENTRY_HASH_FIELDS_V1,
   computeEntrySourceHashWithFields,
 } from '../core/mappers/lorebook-hash.js';
 
 export interface LiveModuleWorldBookEntry {
   readonly id: string;
+  readonly priority?: number;
   readonly exclude_greeting: boolean;
   readonly extensions: Readonly<Record<string, unknown>> | null;
 }
@@ -43,6 +46,7 @@ export interface ModuleMigrationDeps {
     entryId: string,
     input: {
       readonly exclude_greeting: boolean;
+      readonly priority?: number;
       readonly extensions: Readonly<Record<string, unknown>>;
     },
   ) => Promise<void>;
@@ -282,6 +286,9 @@ async function applyV10ExcludeGreetingPerEntry(
     );
     targetBySourceHash.set(legacyHash, currentHash);
     targetBySourceHash.set(currentHash, currentHash);
+    for (const oldHash of lorePriorityTargets([entry]).keys()) {
+      targetBySourceHash.set(oldHash, computeEntrySourceHash({ ...entry, priority: 0 }));
+    }
   }
 
   const entries = await deps.listWorldBookEntries(worldBookId);
@@ -395,6 +402,27 @@ async function applyV14UseFindMacroMode(
   };
 }
 
+async function applyV20RestoreLorePriority(
+  args: ModuleMigrationStepArgs,
+  deps: ModuleMigrationDeps,
+): Promise<ModuleMigrationStepResult> {
+  const bookId = args.env.installed_world_book_id;
+  if (!bookId) return { nextEnv: args.env, notes: ['module has no installed world book'] };
+  const projected = projectModuleLorebookForCreate(args.env.module.lorebook ?? [], args.env.id, bookId);
+  const targets = lorePriorityTargets(projected);
+  let updated = 0;
+  for (const entry of await deps.listWorldBookEntries(bookId)) {
+    if (entry.extensions?.['_risu_module_id'] !== args.env.id) continue;
+    const patch = lorePriorityPatch(entry, targets);
+    if (!patch) continue;
+    await deps.updateWorldBookEntryActivation(entry.id, {
+      ...patch, exclude_greeting: entry.exclude_greeting,
+    });
+    updated += 1;
+  }
+  return { nextEnv: args.env, notes: [`restored priority on ${updated} lore entries`] };
+}
+
 export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
   {
     version: 5,
@@ -496,6 +524,12 @@ export const MODULE_MIGRATIONS: readonly ModuleMigrationStep[] = [
       'Re-run the legacy island-wrapper strip with the array-shaped target gate.',
     touches: ['regex_scripts_attached_chars', 'regex_scripts_global'],
     apply: applyV18StripLegacyIslandWrappers,
+  },
+  {
+    version: 20,
+    description: 'Restore Risu insertion-order priority on source-matched module lore with the old zero default.',
+    touches: ['world_book_entries'],
+    apply: applyV20RestoreLorePriority,
   },
 ];
 
