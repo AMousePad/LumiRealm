@@ -27,13 +27,17 @@ export function installConsoleCapture(): void {
     (console as unknown as Record<string, (...args: unknown[]) => void>)[m] = (...args: unknown[]) => {
       try { originalConsole[m]?.(...args); } catch { /* */ }
       try {
+        const level = methodToLevel(m);
+        if (!logStore.shouldEmit(level)) return;
+        if (typeof args[0] === 'string' && (args[0].startsWith('[lumirealm] ')
+          || (args[0] === '[lumirealm]' && args.length > 1))) return;
         if (args[0] === '[WS] ←' && args[1] === 'SPINDLE_FRONTEND_MSG') {
           const payload = args[2] as { identifier?: string; data?: { type?: string } } | undefined;
           if (payload?.identifier === 'lumirealm' && isLogTransportNoise(payload.data?.type ?? '')) return;
         }
         const text = args.map(formatArg).join(' ');
         if (text.startsWith('[lumirealm] ')) return;
-        logStore.push(methodToLevel(m), 'console', text);
+        logStore.push(level, 'console', text);
       } catch { /* never throw from console */ }
     };
   }

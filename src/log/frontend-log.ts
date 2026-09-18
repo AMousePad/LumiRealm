@@ -28,11 +28,12 @@ function consoleFor(level: LogLevel): (...args: unknown[]) => void {
 
 export function makeFrontendLogger(category: string): FrontendLogger {
   function emit(level: LogLevel, msg: string, rest: readonly unknown[]): void {
-    const consoleEmit = level === 'error' || logStore.shouldEmit(level);
+    const record = logStore.shouldEmit(level);
+    const consoleEmit = level === 'error' || record;
     if (consoleEmit) {
       try { consoleFor(level)('[lumirealm]', `${category}:`, msg, ...rest); } catch { /* */ }
     }
-    logStore.push(level, category, formatLine(msg, rest));
+    if (record) logStore.push(level, category, formatLine(msg, rest));
   }
   return {
     error: (m, ...r) => emit('error', m, r),
