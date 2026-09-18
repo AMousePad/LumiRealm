@@ -224,10 +224,7 @@ export function projectModuleRegexEntries(
     }
     const ruleType = typeof eo['type'] === 'string' ? eo['type'] : 'editdisplay';
     const { placement, target, disabled } = riskCustomScriptTypeToLumi(ruleType);
-    const ableFlagRaw = eo['ableFlag'];
-    const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null
-      ? true
-      : !!ableFlagRaw;
+    const ableFlag = !!eo['ableFlag'];
     const rawFlag = typeof eo['flag'] === 'string' ? eo['flag'] : undefined;
     const normalisedFlag = normaliseRisuFlag(rawFlag, ableFlag);
     const directAction = detectAtAction(replaceString);

@@ -379,7 +379,7 @@ export interface NormalisedFlag {
 
 // Port of Risu's flag-meta parser + char-filter from scripts.ts.
 export function normaliseRisuFlag(rawFlag: string | undefined, ableFlag: boolean): NormalisedFlag {
-  let raw = ableFlag ? (rawFlag ?? "g") : "g";
+  let raw = ableFlag ? (rawFlag || "g") : "g";
   const actions: string[] = [];
   let order: number | undefined;
 

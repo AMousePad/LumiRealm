@@ -20744,7 +20744,7 @@ var UNKNOWN_PHASE_FALLBACK = {
   disabled: true
 };
 function normaliseRisuFlag(rawFlag, ableFlag) {
-  let raw = ableFlag ? rawFlag ?? "g" : "g";
+  let raw = ableFlag ? rawFlag || "g" : "g";
   const actions = [];
   let order;
   if (ableFlag && raw.indexOf("<") >= 0) {
@@ -25128,8 +25128,7 @@ function projectModuleRegexEntries(moduleId, moduleName, characterId, raw, idGen
     }
     const ruleType = typeof eo["type"] === "string" ? eo["type"] : "editdisplay";
     const { placement, target, disabled } = riskCustomScriptTypeToLumi(ruleType);
-    const ableFlagRaw = eo["ableFlag"];
-    const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null ? true : !!ableFlagRaw;
+    const ableFlag = !!eo["ableFlag"];
     const rawFlag = typeof eo["flag"] === "string" ? eo["flag"] : undefined;
     const normalisedFlag = normaliseRisuFlag(rawFlag, ableFlag);
     const directAction = detectAtAction(replaceString);
@@ -36717,7 +36716,7 @@ function isAtActionPhase(phase) {
   return phase === "editinput" || phase === "editoutput" || phase === "editprocess" || phase === "editdisplay" || phase === "edittrans";
 }
 function normalizeRuntimeFlag(rawFlag, ableFlag) {
-  let raw = ableFlag ? rawFlag ?? "g" : "g";
+  let raw = ableFlag ? rawFlag || "g" : "g";
   let order;
   const actions = [];
   if (ableFlag && raw.includes("<")) {
