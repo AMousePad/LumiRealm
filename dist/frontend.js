@@ -28614,52 +28614,149 @@ function luaToJs(L, idx) {
   }
   return null;
 }
-var pendingPromises = new Map;
-var nextPromiseToken = 1;
-function luaAwaitMethod(L) {
-  lua.lua_getfield(L, 1, toL("__token"));
-  const token = lua.lua_tointeger(L, -1);
-  lua.lua_pop(L, 1);
-  const entry = pendingPromises.get(token);
-  if (entry && entry.done) {
-    if (entry.error !== undefined) {
-      lauxlib.luaL_error(L, toL("await error: " + String(entry.errorMsg ?? entry.error)));
-      return 0;
+function createPromiseBridge(root) {
+  const pending = new Map;
+  let nextToken = 1;
+  let disposed = false;
+  function retain(L, index) {
+    lua.lua_checkstack(L, 4);
+    lua.lua_pushvalue(L, index);
+    const ref = lauxlib.luaL_ref(L, lua.LUA_REGISTRYINDEX);
+    return (target) => lua.lua_rawgeti(target, lua.LUA_REGISTRYINDEX, ref);
+  }
+  function tokenAt(L, index) {
+    lua.lua_getfield(L, index, toL("__token"));
+    const token = lua.lua_tointeger(L, -1);
+    lua.lua_pop(L, 1);
+    return token;
+  }
+  function pushPromise(L, rec) {
+    const token = nextToken++;
+    pending.set(token, rec);
+    rec.promise.catch(() => {});
+    lua.lua_createtable(L, 0, 3);
+    lua.lua_pushinteger(L, token);
+    lua.lua_setfield(L, -2, toL("__token"));
+    lua.lua_pushjsfunction(L, (thread) => {
+      const awaited = pending.get(tokenAt(thread, 1));
+      if (!awaited)
+        return lauxlib.luaL_error(thread, toL("invalid promise"));
+      lua.lua_pushinteger(thread, tokenAt(thread, 1));
+      return lua.lua_yieldk(thread, 1, 0, (resumed) => {
+        awaited.pushValue(resumed);
+        if (awaited.failed)
+          return lua.lua_error(resumed);
+        return 1;
+      });
+    });
+    lua.lua_setfield(L, -2, toL("await"));
+    lua.lua_getglobal(L, toL("__risuFinally"));
+    lua.lua_setfield(L, -2, toL("finally"));
+  }
+  async function drive(co, nargs) {
+    let status = lua.lua_resume(co, root, nargs);
+    while (status === lua.LUA_YIELD) {
+      const token = lua.lua_tointeger(co, -1);
+      lua.lua_settop(co, 0);
+      const rec = pending.get(token);
+      if (!rec)
+        throw new Error("Unsupported Lua yield: expected a promise token");
+      await rec.promise.catch(() => {});
+      if (disposed)
+        throw new Error("Lua execution disposed");
+      status = lua.lua_resume(co, root, 0);
     }
-    pushJs(L, entry.value);
+    if (status !== lua.LUA_OK) {
+      const raw = lua.lua_tostring(co, -1);
+      throw new Error(raw ? toJS(raw) : "Lua coroutine failed (non-string error)");
+    }
+  }
+  function start(L) {
+    lauxlib.luaL_checktype(L, 1, lua.LUA_TFUNCTION);
+    const nargs = lua.lua_gettop(L) - 1;
+    const co = lua.lua_newthread(L);
+    lauxlib.luaL_ref(L, lua.LUA_REGISTRYINDEX);
+    for (let i = 1;i <= nargs + 1; i++)
+      lua.lua_pushvalue(L, i);
+    lua.lua_xmove(L, co, nargs + 1);
+    const rec = { promise: Promise.resolve(), failed: false, pushValue: (target) => lua.lua_pushnil(target) };
+    rec.promise = drive(co, nargs).then(() => {
+      if (disposed)
+        return;
+      if (lua.lua_gettop(co))
+        rec.pushValue = retain(co, 1);
+    }, (err) => {
+      rec.failed = true;
+      if (!disposed && lua.lua_gettop(co))
+        rec.pushValue = retain(co, -1);
+      else
+        rec.pushValue = (target) => pushJs(target, String(err));
+      throw err;
+    });
+    pushPromise(L, rec);
     return 1;
   }
-  lua.lua_pushinteger(L, token);
-  return lua.lua_yield(L, 1);
-}
-function makeWrapper(fn) {
-  return function(L) {
-    const nargs = lua.lua_gettop(L);
-    const args = [];
-    for (let i = 1;i <= nargs; i++)
-      args.push(luaToJs(L, i));
-    let result;
-    try {
-      result = fn.apply(null, args);
-    } catch (e) {
-      lauxlib.luaL_error(L, toL("JS error: " + (e instanceof Error ? e.message : String(e))));
-      return 0;
+  function all(L) {
+    lauxlib.luaL_checktype(L, 1, lua.LUA_TTABLE);
+    const records = [];
+    for (let i = 1;i <= lua.lua_rawlen(L, 1); i++) {
+      lua.lua_rawgeti(L, 1, i);
+      const rec = pending.get(tokenAt(L, -1));
+      lua.lua_pop(L, 1);
+      if (!rec)
+        return lauxlib.luaL_error(L, toL("invalid aggregate promise"));
+      records.push(rec);
     }
-    if (result && typeof result.then === "function") {
-      const token = nextPromiseToken++;
-      pendingPromises.set(token, { promise: result, done: false });
-      lua.lua_createtable(L, 0, 2);
-      lua.lua_pushinteger(L, token);
-      lua.lua_setfield(L, -2, toL("__token"));
-      lua.lua_pushjsfunction(L, luaAwaitMethod);
-      lua.lua_setfield(L, -2, toL("await"));
-      return 1;
-    }
-    if (result === undefined)
-      return 0;
-    pushJs(L, result);
+    const rec = { promise: Promise.resolve(), failed: false, pushValue: (target) => {
+      lua.lua_createtable(target, records.length, 0);
+      records.forEach((item, index) => {
+        item.pushValue(target);
+        lua.lua_rawseti(target, -2, index + 1);
+      });
+    } };
+    rec.promise = Promise.all(records.map((item) => item.promise.catch((err) => {
+      if (!rec.failed) {
+        rec.failed = true;
+        rec.pushValue = item.pushValue;
+      }
+      throw err;
+    }))).then(() => {});
+    pushPromise(L, rec);
     return 1;
-  };
+  }
+  function makeWrapper(fn) {
+    return function(L) {
+      const args = [];
+      for (let i = 1;i <= lua.lua_gettop(L); i++)
+        args.push(luaToJs(L, i));
+      let result;
+      try {
+        result = fn(...args);
+      } catch (err) {
+        return lauxlib.luaL_error(L, toL("JS error: " + String(err)));
+      }
+      if (result && typeof result.then === "function") {
+        const rec = { promise: Promise.resolve(), failed: false, pushValue: (target) => lua.lua_pushnil(target) };
+        rec.promise = Promise.resolve(result).then((value) => {
+          rec.pushValue = (target) => pushJs(target, value);
+        }, (err) => {
+          rec.failed = true;
+          rec.pushValue = (target) => pushJs(target, err instanceof Error ? err.message : String(err));
+          throw err;
+        });
+        pushPromise(L, rec);
+        return 1;
+      }
+      if (result === undefined)
+        return 0;
+      pushJs(L, result);
+      return 1;
+    };
+  }
+  return { makeWrapper, start, all, drive, dispose() {
+    disposed = true;
+    pending.clear();
+  } };
 }
 function registerJsonModule(L) {
   const preloadCode = "package.preload.json = function() " + getJsonLuaSource() + " end";
@@ -28688,6 +28785,7 @@ async function execute(code, globals, opts = {}) {
   fverbose(`execute: code[0..300]=${JSON.stringify(codeStr.slice(0, 300))}`);
   const __perfCreate0 = perfEnabled() ? Date.now() : 0;
   const L = lauxlib.luaL_newstate();
+  const bridge = createPromiseBridge(L);
   try {
     lualib.luaL_openlibs(L);
     fverbose(`execute: luaL_openlibs done`);
@@ -28701,66 +28799,65 @@ async function execute(code, globals, opts = {}) {
         const fn = globals[name];
         if (typeof fn !== "function")
           continue;
-        lua.lua_pushjsfunction(L, makeWrapper(fn));
+        lua.lua_pushjsfunction(L, bridge.makeWrapper(fn));
         lua.lua_setglobal(L, toL(name));
         pushed += 1;
       }
       fverbose(`execute: pushed ${pushed} js globals`);
     }
+    lua.lua_pushjsfunction(L, bridge.start);
+    lua.lua_setglobal(L, toL("__risuStartAsync"));
+    lua.lua_pushjsfunction(L, bridge.all);
+    lua.lua_setglobal(L, toL("__risuAll"));
     const prelude = `
 json = require 'json'
 
-local function __risuAwait(self)
-  if self.__risu_failed then error(self.__risu_err) end
-  return table.unpack(self.__risu_results, 1, self.__risu_n)
-end
-
-local function __risuFinally(self, cb)
-  if type(cb) == 'function' then pcall(cb) end
-  return self
+local function __risuCall(callback, ...)
+  local value = callback(...)
+  while type(value) == 'table' and type(value.await) == 'function' do
+    value = value:await()
+  end
+  return value
 end
 
 function async(callback)
   return function(...)
-    local n = select('#', ...)
-    local args = {...}
-    local ok, r1, r2, r3, r4, r5, r6, r7, r8 = pcall(callback, table.unpack(args, 1, n))
-    local thenable = { await = __risuAwait, ['finally'] = __risuFinally }
-    if ok then
-      thenable.__risu_failed = false
-      thenable.__risu_n = 8
-      thenable.__risu_results = { r1, r2, r3, r4, r5, r6, r7, r8 }
-    else
-      thenable.__risu_failed = true
-      thenable.__risu_err = r1
-    end
-    return thenable
+    return __risuStartAsync(function(...) return __risuCall(callback, ...) end, ...)
   end
+end
+
+function __risuRunEntry(callback, ...)
+  local values = table.pack(callback(...))
+  if values.n == 1 then
+    return __risuCall(function() return values[1] end)
+  end
+  return table.unpack(values, 1, values.n)
+end
+
+function __risuFinally(self, cb)
+  return async(function()
+    local ok, value = pcall(function() return self:await() end)
+    if type(cb) == 'function' then __risuCall(cb) end
+    if not ok then error(value) end
+    return value
+  end)()
 end
 
 Promise = {}
 Promise.resolve = function(v)
+  if type(v) == 'table' and type(v.await) == 'function' then return v end
   return { await = function(self) return v end, ['finally'] = __risuFinally }
 end
 Promise.reject = function(err)
   return { await = function(self) error(err) end, ['finally'] = __risuFinally }
 end
-
--- Wasmoon's injected Promise.all accepts promises and plain values in input order.
--- Awaiting uses the existing Fengari driver; async workers retain its sequential scheduling.
 Promise.all = function(values)
   if type(values) ~= 'table' then error('argument must be an array of promises') end
-  return { await = function(self)
-    local results = {}
-    for i, value in ipairs(values) do
-      if type(value) == 'table' and type(value.await) == 'function' then
-        results[i] = value:await()
-      else
-        results[i] = value
-      end
-    end
-    return results
-  end, ['finally'] = __risuFinally }
+  local workers = {}
+  for i, value in ipairs(values) do
+    workers[i] = async(function() return Promise.resolve(value):await() end)()
+  end
+  return __risuAll(workers)
 end
 
 function getChat(id, index)
@@ -28966,45 +29063,14 @@ end
       lua.lua_pop(L, 1);
       fverbose(`execute: entry '${opts.entry}' exists — starting coroutine`);
       const co = lua.lua_newthread(L);
+      lua.lua_getglobal(co, toL("__risuRunEntry"));
       lua.lua_getglobal(co, toL(String(opts.entry)));
       const args = Array.isArray(opts.args) ? opts.args : [];
       for (const a of args)
         pushJs(co, a);
-      const nresultsRef = { ref: 0 };
-      let status = lua.lua_resume(co, L, args.length, nresultsRef);
-      let iters = 0;
-      while (status === lua.LUA_YIELD) {
-        iters += 1;
-        const tokenArg = lua.lua_tointeger(co, -1);
-        lua.lua_pop(co, nresultsRef.ref || 1);
-        const rec = pendingPromises.get(tokenArg);
-        if (!rec) {
-          fverbose(`execute: yield iter=${iters} token=${tokenArg} — no pending record, pushing nil`);
-          lua.lua_pushnil(co);
-          status = lua.lua_resume(co, L, 1, nresultsRef);
-          continue;
-        }
-        try {
-          rec.value = await rec.promise;
-          rec.done = true;
-          fverbose(`execute: yield iter=${iters} token=${tokenArg} resolved OK`);
-          pushJs(co, rec.value);
-          status = lua.lua_resume(co, L, 1, nresultsRef);
-        } catch (awaitErr) {
-          rec.done = true;
-          rec.error = awaitErr;
-          rec.errorMsg = awaitErr instanceof Error ? awaitErr.message : String(awaitErr);
-          flogErr(`execute: yield iter=${iters} token=${tokenArg} REJECTED — ${rec.errorMsg}`);
-          throw new Error("Lua await error: " + rec.errorMsg);
-        }
-      }
-      if (status !== lua.LUA_OK) {
-        const err = toJS(lua.lua_tostring(co, -1));
-        flogErr(`execute: entry '${opts.entry}' FAILED after ${iters} yields — ${err}`);
-        throw new Error("Lua entry '" + opts.entry + "' error: " + err);
-      }
+      await bridge.drive(co, args.length + 1);
       const nret = lua.lua_gettop(co);
-      flog(`execute: entry '${opts.entry}' OK after ${iters} yields nret=${nret} elapsed=${Date.now() - tStart}ms`);
+      flog(`execute: entry '${opts.entry}' OK nret=${nret} elapsed=${Date.now() - tStart}ms`);
       if (nret === 0)
         return;
       return luaToJs(co, -1);
@@ -29022,6 +29088,7 @@ end
     flogErr(`execute: THREW — ${err.message}`);
     throw err;
   } finally {
+    bridge.dispose();
     try {
       lua.lua_close(L);
     } catch {}
