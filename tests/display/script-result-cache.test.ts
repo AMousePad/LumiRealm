@@ -1,15 +1,10 @@
-import { afterEach, expect, mock, spyOn, test } from 'bun:test';
-import { dirname, join } from 'node:path';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mapRegex } from '../../src/core/mappers/regex.js';
 import { createDisplayResolver } from '../../src/display/resolver.js';
 import { clearDisplaySnapshot, setDisplaySnapshot } from '../../src/display/snapshot.js';
 import type { FeRegexScript } from '../../src/display/regex-apply.js';
 import { snapshot, context } from '../helpers/display-lua-fixture.js';
 import { frontendRuntime } from '../helpers/frontend-runtime.js';
-
-mock.module('../../src/display/_glue-wasm-b64.js', () => ({
-  GLUE_WASM_DATA_URI: join(dirname(Bun.resolveSync('wasmoon', import.meta.dir)), 'glue.wasm'),
-}));
 
 const rule = (out: string, find = 'TOKEN', flag = 'g') => mapRegex([
   { in: find, out, flag, ableFlag: true, type: 'editdisplay', comment: 'Synthetic' },

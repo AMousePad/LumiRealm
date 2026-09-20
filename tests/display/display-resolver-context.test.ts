@@ -117,6 +117,29 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
+  test('Lua display hooks cannot emit saved-message edits but retain variable writeback', async () => {
+    setWasmoonEnabled(false);
+    setDisplaySnapshot(paginatedSnapshot(`
+      listenEdit('editDisplay', function(id, value)
+        setChat(id, 0, 'changed')
+        setChatVar(id, 'display_flag', 'yes')
+        return getChatData(id, 0)
+      end)
+    `));
+    const effects: unknown[] = [];
+    const writes: unknown[] = [];
+    const result = await createDisplayResolver(
+      (_chatId, values) => { writes.push(values); },
+      effect => { effects.push(effect); },
+    ).resolveBody({
+      content: 'Input',
+      context: { chatId: 'chat-1', characterId: 'char-1', messageIndex: 32, role: 'assistant', isUser: false, depth: 0 },
+    });
+    expect(result?.content).toBe('message 1');
+    expect(effects).toEqual([]);
+    expect(writes).toEqual([{ display_flag: 'yes' }]);
+  });
+
   test.each(['none', 'escaped'] as const)('Risu %s rules parse moved panel macros even without a match', async (mode) => {
     const moved = displayRule({
       id: 'panel', replace_string: '<div class="panel {{getvar::panel_open}}">Settings</div>',

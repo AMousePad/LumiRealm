@@ -1,5 +1,4 @@
-import { afterEach, expect, test, mock } from 'bun:test';
-import { dirname, join } from 'node:path';
+import { afterEach, expect, test } from 'bun:test';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import { setupFrontendLua } from '../../src/frontend-lua/frontend.js';
 import { snapshot, context } from '../helpers/display-lua-fixture.js';
@@ -13,10 +12,6 @@ import type { StateRevision } from '../../src/frontend-lua/ordered-state.js';
 import { runEditDisplayChain } from '../../src/display/lua-runner.js';
 import { withCurrentDisplayMessage } from '../../src/display/host-shim.js';
 import type { TriggerScript } from '../../src/core/schemas/triggerscript.js';
-
-mock.module('../../src/display/_glue-wasm-b64.js', () => ({
-  GLUE_WASM_DATA_URI: join(dirname(Bun.resolveSync('wasmoon', import.meta.dir)), 'glue.wasm'),
-}));
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
