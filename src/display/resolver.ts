@@ -39,7 +39,7 @@ import {
   type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import { buildModuleDisplayPlan } from './module-action-plan.js';
-import { parseDisplayCaller } from './caller-parser.js';
+import { deferDisplayAssets, displayAssetBaseline, finalizeDisplayAssets, parseDisplayCaller } from './caller-parser.js';
 import { evaluate } from '../interpreter/evaluator/scanner.js';
 const log = makeSafeLogger('display-resolver');
 
@@ -103,7 +103,7 @@ function evalTemplate(
 ): string {
   return runPipeline({
     ...buildInput(snap, text, context), visualize: false, rmVar: false, reparseMacroResults: false,
-  }, { recorder });
+  }, { recorder, resolveLeaf: deferDisplayAssets });
 }
 
 async function fetchBackendBody(
@@ -414,6 +414,7 @@ export function createDisplayResolver(
       if (!snap) return null;
 
       let feContent: string;
+      let processingState: string | undefined;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
         const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
@@ -421,6 +422,7 @@ export function createDisplayResolver(
           ? withCurrentDisplayMessage(snap, args.context, args.content)
           : snap;
         let body = parseDisplayCaller(buildInput(liveSnap, args.content, args.context), recorder);
+        processingState = displayAssetBaseline(body);
         if (liveSnap.luaTriggers.length > 0) {
           // Risu ChatBody reruns parsing on input changes and GUI reloads, not persistence echoes.
           // Keep the host's outer render cache; every actual resolution still executes Lua.
@@ -509,6 +511,7 @@ export function createDisplayResolver(
 
       return {
         content: feContent,
+        ...(processingState !== undefined ? { processingState } : {}),
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile,
       };
@@ -561,7 +564,11 @@ export function createDisplayResolver(
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
-        feContent = await runApply(snap, args, recorder, activationPatterns, scriptCache, onEffect);
+        feContent = args.scripts.length === 0 ? args.content
+          : await runApply(snap, args, recorder, activationPatterns, scriptCache, onEffect);
+        if (args.processingState !== feContent) {
+          feContent = finalizeDisplayAssets(buildInput(snap, feContent, args.context), recorder);
+        }
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;

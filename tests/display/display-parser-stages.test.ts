@@ -16,7 +16,7 @@ function snapshot(hook: string): DisplaySnapshot {
       description: '{{char}}', personality: '', scenario: '', exampleDialogue: '', mainPrompt: '',
       postHistoryInstructions: '', creatorNotes: '', jailbreakPrompt: '', globalNote: '', authorsNote: '',
       firstMessage: 'Greeting', alternateGreetings: [], selectedAlternateGreetingIndex: -1,
-      additionalAssets: {}, emotionImages: {}, image: '', imageId: null,
+      additionalAssets: { pic: { imageIds: ['picture'], ext: 'png' } }, emotionImages: {}, image: '', imageId: null,
     },
     chat: { messageCount: 5, lastMessage: 'Assistant3', lastUserMessage: 'User2', lastCharMessage: 'Assistant3', lastMessageId: 4, messages },
     vars: { local: { x: '2', inner: '{{char}}', outer: '{{getvar::inner}}', key: 'inner', temp: '{{settempvar::scratch::changed}}' }, global: {}, chat: {} },
@@ -30,9 +30,11 @@ function snapshot(hook: string): DisplaySnapshot {
 
 const returns = (text: string) => `listenEdit("editDisplay", function(id, data, meta) return [=[${text}]=] end)`;
 const identity = 'listenEdit("editDisplay", function(id, data, meta) return data end)';
+const picture = '<img src="/api/v1/images/picture" alt="/api/v1/images/picture" style=" "/>';
+const file = (text: string) => `{{file::note.txt::${Buffer.from(text).toString('base64')}}}`;
 type Fixture = {
   name: string; input?: string; hook?: string; expected: string; index?: number;
-  description?: string; native?: boolean;
+  description?: string; native?: boolean; body?: string;
   rules?: readonly (readonly [string, string, string?])[];
 };
 const fixtures: Fixture[] = [
@@ -73,6 +75,26 @@ const fixtures: Fixture[] = [
   { name: 'nonvisual regex parsing still resolves missing assets', rules: [['text', '{{source::missing}}']], expected: '' },
   { name: 'native comment replacements retain their display behavior', native: true, rules: [['text', '{{comment::note}}']], expected: '<div class="risu-comment x-risu-risu-comment">note</div>' },
   { name: 'native file replacements retain their display behavior', native: true, rules: [['text', '{{file::note.txt::SGVsbG8=}}']], expected: '<br><div class="x-risu-risu-file">note.txt</div><br>' },
+  { name: 'hook-decoded images resolve after the body stage', hook: returns(file('{{img::pic}}')), body: '{{img::pic}}', expected: picture },
+  { name: 'regex-decoded images resolve after the final rule', rules: [['text', file('{{img::pic}}')]], expected: picture },
+  { name: 'a regex can match a hook-decoded asset before rendering', hook: returns(file('{{img::pic}}')), rules: [['\\{\\{img::pic\\}\\}', 'matched']], expected: 'matched' },
+  { name: 'a regex can match a direct hook asset before rendering', hook: returns('{{img::pic}}'), body: '{{img::pic}}', rules: [['\\{\\{img::pic\\}\\}', 'matched']], expected: 'matched' },
+  { name: 'later regex sees the asset token created by an earlier rule', rules: [['text', '{{img::pic}}'], ['\\{\\{img::pic\\}\\}', 'matched']], expected: 'matched' },
+  { name: 'an unmatched later rule does not resolve an asset early', rules: [['text', file('{{img::pic}}')], ['absent', 'unused'], ['\\{\\{img::pic\\}\\}', 'matched']], expected: 'matched' },
+  { name: 'final asset pass leaves decoded ordinary macros and writes literal', hook: returns(file('{{img::pic}}|{{char}}|{{setvar::x::9}}|{{settempvar::scratch::changed}}')), expected: `${picture}|{{char}}|{{setvar::x::9}}|{{settempvar::scratch::changed}}` },
+  { name: 'initial images are still rendered before the hook', input: '{{img::pic}}', hook: 'listenEdit("editDisplay", function(id, data) return string.find(data, "<img", 1, true) and "rendered" or "literal" end)', expected: 'rendered' },
+  { name: 'normal display removes a late background asset', hook: returns('{{bg::pic}}'), body: '{{bg::pic}}', expected: '' },
+  { name: 'final asset matching preserves case-sensitive macro syntax', hook: returns(file('{{IMG::pic}}|{{img::}}')), expected: '{{IMG::pic}}|{{img::}}' },
+  { name: 'final asset pass preserves unverified inlays', hook: returns(file('{{img::pic}}|{{inlay::missing}}')), expected: `${picture}|{{inlay::missing}}` },
+  { name: 'ordinary prose retains literal punctuation', input: 'Text { } # }}} 한글', body: 'Text { } # }}} 한글', expected: 'Text { } # }}} 한글' },
+  { name: 'legacy angle identities still enter the caller parser', input: '<char> / <USER>', expected: 'Character / User' },
+  { name: 'normalized asset names remain literal for later rules', hook: returns('{{ _IM-G::pic}}'), body: '{{ _IM-G::pic}}', rules: [['\\{\\{ _IM-G::pic\\}\\}', 'matched']], expected: 'matched' },
+  { name: 'unfinished asset prefixes remain literal', hook: returns(file('{{img::'.repeat(512))), expected: '{{img::'.repeat(512) },
+  { name: 'a final asset is resolved before an unfinished suffix', hook: returns(file('{{img::pic}}' + '{{img::'.repeat(512))), expected: picture + '{{img::'.repeat(512) },
+  { name: 'initial asset removal does not trigger an unchanged final pass', input: '{{im{{bg::pic}}g::pic}}', body: '{{img::pic}}', expected: '{{img::pic}}' },
+  { name: 'net unchanged regex output skips the final asset pass', input: '{{im{{bg::pic}}g::pic}}', rules: [['img', 'raw'], ['raw', 'img']], expected: '{{img::pic}}' },
+  { name: 'changed regex output triggers the final asset pass', input: '{{im{{bg::pic}}g::pic}}', rules: [['img', 'raw']], expected: '/api/v1/images/picture' },
+  { name: 'initial unfinished asset prefixes remain literal', input: '{{img::'.repeat(256), expected: '{{img::'.repeat(256) },
 ];
 
 afterEach(async () => { clearDisplaySnapshot('display-stages'); await clearLuaEngines(); });
@@ -95,11 +117,12 @@ for (const fixture of fixtures) {
       const resolver = createDisplayResolver((_chatId, values) => { writes.push(values); });
       const body = await resolver.resolveBody({ content: fixture.input ?? 'text', context });
       expect(body).not.toBeNull();
+      if (fixture.body !== undefined) expect(body!.content).toBe(fixture.body);
       const scripts = mapRegex((fixture.rules ?? []).map(([find, out, flag]) => ({
         in: find, out, flag: flag ?? 'g', ableFlag: true, type: 'editdisplay', comment: '',
       })), { characterId: snap.characterId }).rows;
       const final = await resolver.applyScripts({
-        content: body!.content, context,
+        ...body!, context,
         scripts: fixture.native ? scripts.map(script => ({ ...script, metadata: {} })) : [...scripts],
       });
       expect(final?.content).toBe(fixture.expected);
