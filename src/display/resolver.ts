@@ -429,9 +429,10 @@ export function createDisplayResolver(
             (t) => {
               const current = getDisplaySnapshot(chatId);
               const source = current?.characterId === liveSnap.characterId ? current : liveSnap;
+              const { currentMessageRoleOverride: _messageRole, ...input } = buildInput(source, t, args.context);
               return evaluate(t, buildEvaluatorContext({
-                ...buildInput(source, t, args.context),
-                recorder, commit: false, rmVar: false, runVar: false, cbsContext: false,
+                ...input,
+                recorder, commit: false, rmVar: false, runVar: false, cbsContext: true,
                 reparseMacroResults: false, currentMessageIndexOverride: -1,
               }));
             },

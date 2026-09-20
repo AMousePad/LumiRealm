@@ -1,5 +1,4 @@
 // Asset macros. Risu source: parser.svelte.ts.
-// Always return HTML when the asset resolves; `ctx.commit` is a side-effect gate, not a phase signal.
 // `raw` is an alias of `path` registered by the evaluator's catalog alias walk.
 
 import type { CharacterAsset, MacroHandler, RisuRuntimeContext } from "../../core/cbs/index.js";
@@ -7,7 +6,10 @@ import { registry } from "../registry.js";
 import { pickHashRand } from "../risu-helpers.js";
 
 function register(name: string, handler: MacroHandler, description: string): void {
-  registry.register({ name, handler, description, category: "Risu / Assets", scoped: false });
+  registry.register({ name, description, category: "Risu / Assets", scoped: false,
+    // Risu's plain parser has no asset callbacks and preserves the original payload.
+    handler: (ctx, args, raw) => ctx.cbsContext ? `{{${raw}}}` : handler(ctx, args, raw),
+  });
 }
 
 /** Risu's assetWidth style string. Empty when the host setting is unavailable. */
@@ -111,15 +113,8 @@ function videoTag(src: string, opts: { controls: boolean; muted: boolean }): str
 }
 
 
-// Asset macros are 'doc_only' in Risu cbs: matcher returns null and the
-// parser emits the literal. Mirror that on cbsContext.
-function literal(name: string, args: readonly string[]): string {
-  return `{{${name}${args.length > 0 ? "::" + args.join("::") : ""}}}`;
-}
-
 // parser.svelte.ts. Bare URL (canonical; `raw` is an alias).
 register("path", (ctx, args) => {
-  if (ctx.cbsContext) return literal("path", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -127,7 +122,6 @@ register("path", (ctx, args) => {
 }, "Asset URL by name, plain string (for src=/url()). parser.svelte.ts.");
 
 register("img", (ctx, args) => {
-  if (ctx.cbsContext) return literal("img", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -136,7 +130,6 @@ register("img", (ctx, args) => {
 }, "Inline <img> for a named asset. parser.svelte.ts.");
 
 register("image", (ctx, args) => {
-  if (ctx.cbsContext) return literal("image", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -146,7 +139,6 @@ register("image", (ctx, args) => {
 }, "Inlay image wrapper. parser.svelte.ts.");
 
 register("emotion", (ctx, args) => {
-  if (ctx.cbsContext) return literal("emotion", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.emotionImages, name, ctx.legacyMediaFindings);
@@ -155,7 +147,6 @@ register("emotion", (ctx, args) => {
 }, "Emotion image by name. parser.svelte.ts.");
 
 register("asset", (ctx, args) => {
-  if (ctx.cbsContext) return literal("asset", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -168,7 +159,6 @@ register("asset", (ctx, args) => {
 
 // parser.svelte.ts. Risu emits only in "back" mode; this handler always emits the back-mode div.
 register("bg", (ctx, args) => {
-  if (ctx.cbsContext) return literal("bg", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -177,7 +167,6 @@ register("bg", (ctx, args) => {
 }, "Background panel. parser.svelte.ts.");
 
 register("video", (ctx, args) => {
-  if (ctx.cbsContext) return literal("video", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -186,7 +175,6 @@ register("video", (ctx, args) => {
 }, "Full-featured video. parser.svelte.ts.");
 
 register("video-img", (ctx, args) => {
-  if (ctx.cbsContext) return literal("video-img", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -195,7 +183,6 @@ register("video-img", (ctx, args) => {
 }, "Muted autoplay video (image-substitute). parser.svelte.ts.");
 
 register("audio", (ctx, args) => {
-  if (ctx.cbsContext) return literal("audio", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -205,7 +192,6 @@ register("audio", (ctx, args) => {
 
 // Lumi has no BGM engine; the div sits hidden. Preserving the shape means a future hook works without card changes.
 register("bgm", (ctx, args) => {
-  if (ctx.cbsContext) return literal("bgm", args);
   const name = String(args[0] ?? "");
   if (!name) return "";
   const hit = findAsset(ctx, ctx.character.additionalAssets, name, ctx.legacyMediaFindings);
@@ -216,21 +202,18 @@ register("bgm", (ctx, args) => {
 // parser.svelte.ts. `<id>` is a Lumi image UUID; `/api/v1/images/<id>` serves the bytes.
 // All three handlers assume image; audio/video inlays are a known gap.
 register("inlay", (ctx, args) => {
-  if (ctx.cbsContext) return literal("inlay", args);
   const id = String(args[0] ?? "");
   if (!id) return "";
   return `<img src="/api/v1/images/${id}"/>`;
 }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
 
 register("inlayed", (ctx, args) => {
-  if (ctx.cbsContext) return literal("inlayed", args);
   const id = String(args[0] ?? "");
   if (!id) return "";
   return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>\n\n`;
 }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
 
 register("inlayeddata", (ctx, args) => {
-  if (ctx.cbsContext) return literal("inlayeddata", args);
   const id = String(args[0] ?? "");
   if (!id) return "";
   return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>\n\n`;
@@ -238,7 +221,6 @@ register("inlayeddata", (ctx, args) => {
 
 // parser.svelte.ts. Returns stable `/api/v1/images/<id>` URLs.
 register("source", (ctx, args) => {
-  if (ctx.cbsContext) return literal("source", args);
   const kind = String(args[0] ?? "").toLowerCase();
   if (kind === "char") return ctx.character.image;
   if (kind === "user") return ctx.identity.personaImage;

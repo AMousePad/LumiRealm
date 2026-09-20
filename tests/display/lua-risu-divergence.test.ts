@@ -30,7 +30,7 @@ describe('Risu Lua frontend boundaries', () => {
     expect(result?.content).toBe('Hello|0');
   });
 
-  (process.env.RISU_PARITY_STRICT === '1' ? test : test.failing)('Lua CBS omits display role and first-message conditions', async () => {
+  test('Lua CBS omits display role and first-message conditions', async () => {
     setDisplaySnapshot(snapshot(`listenEdit('editDisplay',function(id,text) return cbs('{{isfirstmsg}}|{{role}}') end)`));
     const result = await createDisplayResolver().resolveBody({ content: 'Hello', context: { ...context, role: 'user' } });
     expect(result?.content).toBe('0|null');

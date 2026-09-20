@@ -19,7 +19,7 @@ async function runtime(host = makeLuaDivergenceHost(), script = divergenceLuaScr
   });
 }
 
-divergence('Lua CBS default conditions do not imply a greeting', async () => {
+test('Lua CBS default conditions do not imply a greeting', async () => {
   const rt = await runtime();
   expect(await rt.runLua(`function onStart(id) return cbs('{{isfirstmsg}}|{{role}}') end`)).toBe('0|null');
 });

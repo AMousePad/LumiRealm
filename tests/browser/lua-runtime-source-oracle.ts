@@ -21,7 +21,7 @@ await factory.mountFile('json.lua', await Bun.file(risuDir + '/public/lua/json.l
 const wrapperStart = source.indexOf('return `', source.indexOf('function luaCodeWrapper(code:string)')) + 8;
 assert.equal((await Bun.file('src/interpreter/lua-wrapper.lua').text()).replace(/\r\n/g, '\n'), source.slice(wrapperStart, source.indexOf('${code}', wrapperStart)).replace(/\r\n/g, '\n'));
 
-export function oracle() {
+export function oracle(parse?: (text: string, options: unknown) => string) {
   const chat: any = { message: [{ role: 'user', data: 'Hello', time: 1700000000000 }, { role: 'char', data: 'Welcome', time: 1700000005000 }], scriptstate: { $x: '2' } };
   const char: any = { type: 'character', name: 'Character', desc: 'Description', firstMessage: 'Greeting', chatPage: 0, chats: [chat], triggerscript: [] };
   const db = { characters: [char] }; const errors: string[] = [];
@@ -30,7 +30,7 @@ export function oracle() {
     getChatVar: (key: string) => String(chat.scriptstate['$' + key] ?? 'null'),
     setChatVar: (key: string, value: unknown) => { const changed = chat.scriptstate['$' + key] !== value; chat.scriptstate['$' + key] = value; return changed; },
     getGlobalChatVar: () => 'null', getModuleTriggers: () => [],
-    risuChatParser: (text: string) => text.replaceAll('{{char}}', char.name),
+    risuChatParser: parse ?? ((text: string) => text.replaceAll('{{char}}', char.name)),
     getDatabase: () => db, DBState: { db }, get: () => 0, selectedCharID: 0,
     v4: () => crypto.randomUUID(), console: { log() {}, error: (error: unknown) => errors.push(String(error)) },
   };
