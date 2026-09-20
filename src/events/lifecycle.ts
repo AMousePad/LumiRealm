@@ -479,10 +479,13 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       if (!chatId) return;
       const active = await deps.ensureActiveCardForChat(chatId, characterId, userId);
       if (!active) return;
-      // Risu runCurrentChatFunction executes stored writes before output triggers.
-      if (userId !== undefined) await deps.runMessageVarPass(chatId, active.card.character_id, userId);
-      for (const binding of deps.generationEndedBindings) {
-        await deps.runBinding(active, chatId, binding, userId, (raw as { frontendSessionId?: string }).frontendSessionId);
+      // Risu sendChat exits on request failure before stored writes and output triggers.
+      const payload = raw as { error?: string; frontendSessionId?: string };
+      if (typeof payload.error !== 'string') {
+        if (userId !== undefined) await deps.runMessageVarPass(chatId, active.card.character_id, userId);
+        for (const binding of deps.generationEndedBindings) {
+          await deps.runBinding(active, chatId, binding, userId, payload.frontendSessionId);
+        }
       }
       deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);

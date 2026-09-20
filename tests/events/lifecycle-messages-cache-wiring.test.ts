@@ -286,3 +286,22 @@ test('output bindings see message variables before they run', async () => {
   await handlers.GENERATION_ENDED({ chatId: 'chat' }, 'user');
   expect(content).toBe('{{setvar::weather::Rain}}');
 });
+
+test.each(['Provider rejected the request', ''])('failed generation skips output writes and bindings (%j)', async (error) => {
+  const calls: string[] = [];
+  const active = { card: { character_id: 'character' } } as any;
+  const handlers = createLifecycleEventHandlers({
+    ...makeDeps(log),
+    ensureActiveCardForChat: async () => active,
+    generationEndedBindings: ['output'],
+    runMessageVarPass: async () => { calls.push('writes'); },
+    runBinding: async () => { calls.push('output'); return { stopSending: false }; },
+    invalidateRenderMcpForChat: () => { calls.push('render'); },
+    invalidateMacroInterceptorForChat: () => { calls.push('macros'); },
+    refreshBgHtml: async () => { calls.push('background'); },
+    refreshVariables: async () => { calls.push('variables'); },
+  });
+  await handlers.GENERATION_ENDED({ chatId: 'chat', error, content: '{{setvar::state::partial}}' }, 'user');
+  expect(calls).toEqual(['render', 'macros', 'background', 'variables']);
+  expect(log.refresh).toEqual(['chat']);
+});
