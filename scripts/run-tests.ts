@@ -54,7 +54,7 @@ function main(): void {
     process.exit(0);
   }
 
-  const rels = filtered.map((p) => relative(REPO_ROOT, p));
+  const rels = filtered.map((p) => `./${relative(REPO_ROOT, p).replaceAll("\\", "/")}`);
   process.stdout.write(`run-tests ${mode}: ${rels.length} files\n`);
 
   const child = spawn("bun", ["test", ...rels], {
