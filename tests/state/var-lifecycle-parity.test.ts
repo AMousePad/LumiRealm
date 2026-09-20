@@ -141,8 +141,8 @@ describe('readonly world-info CBS resolve', () => {
     }>;
     // Index 0 is the greeting row Risu prepends to {{history}}.
     expect(history.slice(1)).toEqual([
-      { role: 'user', data: 'question', time: 123, speaker: 'Bob' },
-      { role: 'char', data: 'answer', time: 456, speaker: 'Alice' },
+      { role: 'user', data: 'question', time: 123000, speaker: 'Bob' },
+      { role: 'char', data: 'answer', time: 456000, speaker: 'Alice' },
     ]);
   });
 

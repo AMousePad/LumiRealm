@@ -102,9 +102,9 @@ describe("readonly resolver Risu chat view", () => {
     const history = (JSON.parse(historyRaw) as string[]).map((item) => JSON.parse(item));
     expect(history).toEqual([
       { role: "char", data: "Stored greeting" },
-      { role: "user", data: "first user", time: 20, speaker: "Bob" },
-      { role: "char", data: "first answer", time: 30, speaker: "Alice" },
-      { role: "user", data: "second user", time: 40, speaker: "Bob" },
+      { role: "user", data: "first user", time: 20000, speaker: "Bob" },
+      { role: "char", data: "first answer", time: 30000, speaker: "Alice" },
+      { role: "user", data: "second user", time: 40000, speaker: "Bob" },
     ]);
   });
 });

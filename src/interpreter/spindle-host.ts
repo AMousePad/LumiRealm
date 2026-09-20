@@ -21,6 +21,7 @@ import { filterSamplerParamsForProvider } from '../util/samplers-wire.js';
 import { awaitAlertDismissal } from './alert-bridge.js';
 import { awaitPickResolution } from './pick-bridge.js';
 import { backendLuaStateScope, hostCharacterState } from './runtime/lua-state.js';
+import { hostMessageTime } from '../util/message-time.js';
 
 const log = makeSafeLogger('spindle-host.llm.generate');
 
@@ -40,6 +41,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       id: m.id,
       content: typeof m.content === 'string' ? m.content : '',
       role: m.role,
+      createdAt: hostMessageTime(m),
     }));
   }
 

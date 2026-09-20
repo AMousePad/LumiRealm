@@ -10,6 +10,18 @@ function initial(): RuntimeStateDto {
       { id: 'user', content: 'before', role: 'user', index_in_chat: 1 }], lore: [], globalVariables: {} };
 }
 
+test('snapshot and message patches convert host timestamps once', () => {
+  const data = initial();
+  data.messages[1]!.send_date = 1700000000.125;
+  const state = new FrontendRuntimeState(data, async () => { throw new Error('Unexpected write'); }, () => {});
+  expect(state.messages[0]!.createdAt).toBe(1700000000125);
+  state.apply(revision(2), { message: { ...data.messages[1]!, send_date: 0, created_at: 2 } });
+  expect(state.messages[0]!.createdAt).toBe(0);
+  state.replace({ ...data, revision: revision(3) });
+  expect(state.messages[0]!.createdAt).toBe(1700000000125);
+  expect(state.hostMessages()[1]!.createdAt).toBe(1700000000125);
+});
+
 test('queued synchronous Lua mutations stay visible while earlier message writes complete', async () => {
   const replies: ((reply: RuntimeStateWrite) => void)[] = [];
   const state = new FrontendRuntimeState(initial(), () => new Promise(resolve => replies.push(resolve)), () => {});

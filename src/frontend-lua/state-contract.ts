@@ -2,6 +2,7 @@ import type { StateRevision } from './ordered-state.js';
 import type { HostApi, HostMessage, HostCharacter, HostPersona, HostWorldInfoEntry } from '../interpreter/host.js';
 import type { DisplaySnapshot } from '../display/snapshot.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
+import { hostMessageTime } from '../util/message-time.js';
 
 export interface RuntimeMessageDto {
   id: string; content: string; role?: string; is_user?: boolean; name?: string;
@@ -50,7 +51,7 @@ export type RuntimeService =
 export function runtimeMessage(message: RuntimeMessageDto): HostMessage {
   return { id: message.id, content: message.content,
     role: message.role ?? (message.is_user ? 'user' : message.extra?.spindle_role === 'system' ? 'system' : 'assistant'),
-    createdAt: message.send_date ?? message.created_at ?? 0,
+    createdAt: hostMessageTime(message),
     ...(message.name ? { speaker: message.name } : {}),
     ...(typeof message.extra?.greeting_index === 'number' ? { greetingIndex: message.extra.greeting_index } : {}) };
 }

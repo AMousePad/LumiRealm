@@ -6,6 +6,7 @@ export interface HostMessage {
   readonly id: string;
   readonly content: string;
   readonly role: 'user' | 'assistant' | 'system' | string;
+  /** Milliseconds since the Unix epoch, matching Risu chat.message.time. */
   readonly createdAt?: number;
   readonly speaker?: string;
   readonly greetingIndex?: number;

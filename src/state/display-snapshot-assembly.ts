@@ -14,6 +14,7 @@ import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import type { RisuChatView } from '../interpreter/risu-chat-view.js';
 import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import type { TriggerScript } from '../core/schemas/triggerscript.js';
+import { hostMessageTime } from '../util/message-time.js';
 
 export interface DisplaySnapshotAssemblyDeps {
   readonly modulesByNamespaceFromCard: (
@@ -60,13 +61,11 @@ async function fetchHostMessages(chatId: string): Promise<HostMessage[]> {
         send_date?: unknown;
         name?: unknown;
       };
-      const sendDate = typeof raw.send_date === 'number' ? raw.send_date : null;
-      const createdAt = typeof raw.created_at === 'number' ? raw.created_at : null;
       return {
         id: m.id,
         content: typeof m.content === 'string' ? m.content : '',
         role: m.role,
-        createdAt: sendDate ?? createdAt ?? 0,
+        createdAt: hostMessageTime(raw),
         ...(typeof raw.name === 'string' && raw.name.length > 0
           ? { speaker: raw.name }
           : {}),

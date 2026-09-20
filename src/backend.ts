@@ -2,6 +2,7 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { FrontendToBackend, BackendToFrontend, CardSummary } from './types/messages.js';
 import { errMsg } from './util/coerce.js';
+import { hostMessageTime } from './util/message-time.js';
 import {
   setupRealmBackend,
   isRealmFrontendMessage,
@@ -1081,9 +1082,7 @@ async function refreshMessagesCache(chatId: string, _userId: string | undefined)
       const msgs = sliced.map((m) => {
         const role = m.role === 'user' ? ('user' as const) : ('assistant' as const);
         const content = typeof m.content === 'string' ? m.content : '';
-        const sendDate = typeof m.send_date === 'number' ? m.send_date : null;
-        const createdAt = typeof m.created_at === 'number' ? m.created_at : null;
-        return { role, content, createdAt: sendDate ?? createdAt ?? 0 };
+        return { role, content, createdAt: hostMessageTime(m) };
       });
       setCachedMessages(chatId, msgs);
     } catch (err) {
