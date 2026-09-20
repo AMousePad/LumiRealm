@@ -34,7 +34,7 @@ export function oracle() {
     getDatabase: () => db, DBState: { db }, get: () => 0, selectedCharID: 0,
     v4: () => crypto.randomUUID(), console: { log() {}, error: (error: unknown) => errors.push(String(error)) },
   };
-  const api = new Function(...Object.keys(env), compiled + '\nluaFactory=factory; return { runScripted,runLuaEditTrigger,close:()=>{for(const state of ScriptingEngines.values())state.engine?.global.close()} };')(...Object.values(env));
+  const api = new Function(...Object.keys(env), '"use strict";\n' + compiled + '\nluaFactory=factory; return { runScripted,runLuaEditTrigger,close:()=>{for(const state of ScriptingEngines.values())state.engine?.global.close()} };')(...Object.values(env));
   return { ...api, chat, char, errors };
 }
 

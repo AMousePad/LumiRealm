@@ -26,7 +26,7 @@ export const cbsRisuCases: readonly CbsRisuCase[] = [
   { name: 'last user alias is empty without a message index', template: '{{lastusermessage}}', expected: '', source: 'cbs.ts:214 registerCBS(previoususerchat)' },
   { name: 'formatted time honors the format and timestamp', template: '{{time::YYYY::1700000000000}}', expected: '1970', source: 'cbs.ts:1587 registerCBS(time); parser/parser.svelte.ts:1102 dateTimeFormat', knownFailure: true },
   { name: 'formatted date preserves Risu timestamp scaling', template: '{{date::YYYY::1700000000000}}', expected: '1970', source: 'cbs.ts:1565 registerCBS(date); parser/parser.svelte.ts:1102 dateTimeFormat', knownFailure: true },
-  { name: 'dictionary element accepts an array index', template: '{{dictelement::["a","b"]::1}}', expected: 'b', source: 'cbs.ts:1190 registerCBS(dictelement)', knownFailure: true },
+  { name: 'dictionary element accepts an array index', template: '{{dictelement::["a","b"]::1}}', expected: 'b', source: 'cbs.ts:1190 registerCBS(dictelement)' },
   { name: 'splice without replacement serializes undefined as null', template: '{{arraysplice::["a","b"]::0::1}}', expected: '[null,"b"]', source: 'cbs.ts:1271 registerCBS(arraysplice)', knownFailure: true },
   { name: 'assert without a value serializes undefined as null', template: '{{arrayassert::["a"]::3}}', expected: '["a",null,null,null]', source: 'cbs.ts:1282 registerCBS(arrayassert)', knownFailure: true },
   { name: 'function empty return remains empty', template: '{{#func f}}x{{return::}}y{{/func}}{{call::f}}', expected: '', source: 'cbs.ts:779 registerCBS(return); parser/parser.svelte.ts:1816 risuChatParser', knownFailure: true },
