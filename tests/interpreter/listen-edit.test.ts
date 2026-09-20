@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
   runListenEditChain,
+  type ListenEditMode,
   type ListenEditTrigger,
 } from '../../src/interpreter/listen-edit.js';
 import type { HostApi, ScriptNS, DispatchData, HostMessage } from '../../src/interpreter/host.js';
@@ -53,6 +54,62 @@ function makeMockScriptNS(): ScriptNS {
 }
 
 const dispatchData: DispatchData = { characterId: 'c-test' };
+
+// Risu's runLuaEditTrigger preserves nullish results between scripts, after luaCodeWrapper threads listeners within each script.
+describe('listenEdit nullish script results', () => {
+  async function runChain(mode: ListenEditMode, codes: string[], value: unknown) {
+    const api = makeMockHostApi();
+    const metadata = new Map<string, unknown>();
+    api.chat.getMetadata = async key => metadata.get(key) ?? null;
+    api.chat.setMetadata = async (key, next) => { metadata.set(key, structuredClone(next)); };
+    const output = await runListenEditChain(
+      codes.map(luaCode => ({ source: { effect: [{ type: 'triggerlua' }] }, luaCode })),
+      mode, value, {}, api, dispatchData, makeMockScriptNS(),
+    );
+    return { output, metadata };
+  }
+
+  for (const mode of ['editInput', 'editOutput', 'editDisplay', 'editRequest'] as const) {
+    test(`${mode} keeps prior transformed output and flushes a nil-returning script's writes`, async () => {
+      const request = mode === 'editRequest';
+      const input = request ? [{ role: 'user', content: 'Input' }] : 'Input';
+      const result = await runChain(mode, [
+        `listenEdit('${mode}', function(id, v)
+          ${request ? "v[1].content = v[1].content .. ' edited'; return v" : "return v .. ' edited'"}
+        end)`,
+        `listenEdit('${mode}', function(id, v) setChatVar(id, 'touched', '1'); return nil end)`,
+        `listenEdit('${mode}', function(id, v) return v end)`,
+      ], input);
+      expect(result.output).toEqual(request ? [{ role: 'user', content: 'Input edited' }] : 'Input edited');
+      expect(result.metadata.get('chat_variables')).toEqual({ touched: '1' });
+    });
+
+    test(`${mode} passes nil to the next listener inside the same script`, async () => {
+      const result = await runChain(mode, [
+        `listenEdit('${mode}', function(id, v) return nil end)
+         listenEdit('${mode}', function(id, v) return type(v) end)`,
+      ], mode === 'editRequest' ? [{ role: 'user', content: 'Input' }] : 'Input');
+      expect(result.output).toBe('nil');
+    });
+  }
+
+  test('an implicit nil return preserves the input', async () => {
+    const result = await runChain('editOutput', [
+      `listenEdit('editOutput', function(id, v) end)`,
+    ], 'Input');
+    expect(result.output).toBe('Input');
+  });
+
+  for (const [luaValue, expected] of [['false', false], ['0', 0], ["''", '']] as const) {
+    test(`a later nil result preserves the earlier ${luaValue} result`, async () => {
+      const result = await runChain('editOutput', [
+        `listenEdit('editOutput', function(id, v) return ${luaValue} end)`,
+        `listenEdit('editOutput', function(id, v) return nil end)`,
+      ], 'Input');
+      expect(result.output).toBe(expected);
+    });
+  }
+});
 
 describe('runListenEditChain — Phase 6', () => {
   test('returns input unchanged when no triggers', async () => {
@@ -253,5 +310,26 @@ end)
       makeMockScriptNS(),
     );
     expect(out).toBe('unchanged');
+  });
+
+  test('a state decode error preserves prior output and skips the rest of its callback', async () => {
+    const api = makeMockHostApi();
+    let variables: unknown = { __broken: 'invalid json' };
+    api.chat.getMetadata = async key => key === 'chat_variables' ? variables : null;
+    api.chat.setMetadata = async (key, value) => { if (key === 'chat_variables') variables = value; };
+    const output = await runListenEditChain([
+      { source: { effect: [{ type: 'triggerlua' }] }, luaCode:
+        `listenEdit('editOutput', function(id, v) return v .. ' before' end)` },
+      { source: { effect: [{ type: 'triggerlua' }] }, luaCode:
+        `listenEdit('editOutput', function(id, v)
+          getState(id, 'broken')
+          setChatVar(id, 'unreached', '1')
+          return 'Discarded'
+        end)` },
+      { source: { effect: [{ type: 'triggerlua' }] }, luaCode:
+        `listenEdit('editOutput', function(id, v) return v .. ' after' end)` },
+    ], 'editOutput', 'Input', {}, api, dispatchData, makeMockScriptNS());
+    expect(output).toBe('Input before after');
+    expect(variables).toEqual({ __broken: 'invalid json' });
   });
 });
