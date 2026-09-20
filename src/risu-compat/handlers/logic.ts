@@ -41,13 +41,13 @@ register("any", (_c, a) => bag(a).some((f) => f === "1") ? "1" : "0",
   "Returns '1' if any value is '1'.");
 
 // cbs.ts.
-register("startswith", (_c, a) => (a[0] ?? "").startsWith(a[1] ?? "") ? "1" : "0",
+register("startswith", (_c, a) => a[0]!.startsWith(a[1]!) ? "1" : "0",
   "Returns '1' if args[0] starts with args[1].");
-register("endswith", (_c, a) => (a[0] ?? "").endsWith(a[1] ?? "") ? "1" : "0",
+register("endswith", (_c, a) => a[0]!.endsWith(a[1]!) ? "1" : "0",
   "Returns '1' if args[0] ends with args[1].");
-register("contains", (_c, a) => (a[0] ?? "").includes(a[1] ?? "") ? "1" : "0",
+register("contains", (_c, a) => a[0]!.includes(a[1]!) ? "1" : "0",
   "Returns '1' if args[0] contains args[1] anywhere.");
 
 // cbs.ts.
-register("iserror", (_c, a) => (a[0] ?? "").toLocaleLowerCase().startsWith("error:") ? "1" : "0",
+register("iserror", (_c, a) => a[0]!.toLocaleLowerCase().startsWith("error:") ? "1" : "0",
   "Returns '1' if the argument begins with 'error:' (case-insensitive).");

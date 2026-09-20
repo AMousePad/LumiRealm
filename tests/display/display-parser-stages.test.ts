@@ -95,6 +95,10 @@ const fixtures: Fixture[] = [
   { name: 'net unchanged regex output skips the final asset pass', input: '{{im{{bg::pic}}g::pic}}', rules: [['img', 'raw'], ['raw', 'img']], expected: '{{img::pic}}' },
   { name: 'changed regex output triggers the final asset pass', input: '{{im{{bg::pic}}g::pic}}', rules: [['img', 'raw']], expected: '/api/v1/images/picture' },
   { name: 'initial unfinished asset prefixes remain literal', input: '{{img::'.repeat(256), expected: '{{img::'.repeat(256) },
+  { name: 'initial string conditions distinguish missing and empty needles', input: '{{startswith::abc}}|{{startswith::abc::}}', expected: '0|1' },
+  { name: 'hook string arguments retain JavaScript defaults', hook: returns('{{split::abc}}|{{join::["a","b"]}}|{{replace::abc::b}}'), expected: '["abc"]|a,b|aundefinedc' },
+  { name: 'regex string arguments retain JavaScript defaults', rules: [['text', '{{split::abc}}|{{join::["a","b"]}}|{{replace::abc::b}}']], expected: '["abc"]|a,b|aundefinedc' },
+  { name: 'a regex can match a string macro with missing input', hook: returns('{{trim}}'), body: '{{trim}}', rules: [['\\{\\{trim\\}\\}', 'matched']], expected: 'matched' },
 ];
 
 afterEach(async () => { clearDisplaySnapshot('display-stages'); await clearLuaEngines(); });
