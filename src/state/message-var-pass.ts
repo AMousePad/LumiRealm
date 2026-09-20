@@ -53,8 +53,7 @@ export function createMessageVarPass(deps: MessageVarPassDeps): MessageVarPass {
 
     const api = makeSpindleHost({ chatId, characterId, userId });
 
-    // Persist BEFORE the message writeback. Callers run this after trigger
-    // dispatch, so loadVars already reflects trigger writes and we merge on top.
+    // Persist before stripping the message so its variable writes are not lost.
     if (varWrites.length > 0) {
       try {
         const current = await loadVars(api, chatId);

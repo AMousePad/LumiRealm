@@ -1,6 +1,8 @@
 type HostApi = import('lumiverse-spindle-types').SpindleAPI;
+type MacroHandler = Parameters<HostApi['registerMacroInterceptor']>[0];
 type InterceptHandler = import('lumiverse-spindle-types').InterceptorHandler;
-declare const spindle: Omit<HostApi, 'registerInterceptor' | 'registerContextHandler'> & {
+declare const spindle: Omit<HostApi, 'registerInterceptor' | 'registerContextHandler' | 'registerMacroInterceptor'> & {
+  registerMacroInterceptor(handler: (ctx: Parameters<MacroHandler>[0] & { sourceOwner?: { extensionIdentifier: string } }) => ReturnType<MacroHandler>, priority: number, options: { handlesOwnedSources: boolean }): void;
   registerInterceptor(handler: (messages: Parameters<InterceptHandler>[0], context: Parameters<InterceptHandler>[1] & { frontendSessionId?: string }, signal?: AbortSignal) => ReturnType<InterceptHandler>, priority: number, options: { required: boolean }): unknown;
   registerContextHandler(handler: (context: unknown, signal?: AbortSignal) => Promise<unknown>, priority: number, options: { timeoutMs: number; required: boolean }): void;
 };
@@ -189,6 +191,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       const chatEnv = ctx.env.chat as { id?: string; messageCount?: number; lastMessageId?: number };
       const sourceHint = (ctx as { sourceHint?: string }).sourceHint;
       const characterPromptSource = sourceHint?.startsWith('prompt_source:character.') === true;
+      const ownedSource = ctx.sourceOwner?.extensionIdentifier === 'lumirealm';
       log.trace(
         `macroInterceptor.enter #${callId} chat=${chatId ?? '<none>'} active_present=${activeBefore} ` +
           `commit=${ctx.commit} phase=${ctx.phase} sourceHint=${sourceHint ?? '<none>'} userId=${ctx.userId ?? '<none>'} ` +
@@ -197,7 +200,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           `tmpl_head=${JSON.stringify(templateHead)}`,
       );
 
-      if (!characterPromptSource && !ctx.template.includes('{{')) {
+      if (!ownedSource && !characterPromptSource && !ctx.template.includes('{{')) {
         log.trace(`macroInterceptor.exit #${callId} path=no_cbs elapsed=${Date.now() - t0}ms`);
         return;
       }
@@ -226,7 +229,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       }
 
       const micDynForKey = (ctx.env as { dynamicMacros?: Record<string, string> }).dynamicMacros;
-      const micCtxKey = `${micDynForKey?.chat_index ?? ''}|${micDynForKey?.role ?? ''}`;
+      const micCtxKey = `${micDynForKey?.chat_index ?? ''}|${micDynForKey?.role ?? ''}|${ownedSource}`;
       const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
       if (hit !== null) {
         maybeEmitMicCacheStats();
@@ -290,6 +293,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       try {
         resolved = runPipeline({
           template: ctx.template,
+          ...(ownedSource ? { reparseMacroResults: false } : {}),
           phase: ctx.commit ? 'commit' : 'display',
           chatId,
           ...(ctx.userId !== undefined ? { userId: ctx.userId } : {}),
@@ -389,7 +393,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         }
       }
       return { text: resolved, touchedVars, volatile: recorder.volatile };
-    }), 100);
+    }), 100, { handlesOwnedSources: true });
     log.info('macroInterceptor: registered at priority=100');
   }
 

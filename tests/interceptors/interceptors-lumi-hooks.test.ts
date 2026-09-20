@@ -15,6 +15,7 @@ import { resetListenEditPreloadCache } from '../../src/interpreter/listenedit-pr
 interface CapturedHandlers {
   macroInterceptor: ((ctx: unknown) => Promise<unknown>) | null;
   macroPriority: number | undefined;
+  macroOptions?: Readonly<Record<string, unknown>> | undefined;
   messageContentProcessor: ((ctx: unknown) => Promise<{ content?: string } | void>) | null;
   mcpPriority: number | undefined;
   interceptor: ((messages: unknown[], context: unknown) => Promise<unknown>) | null;
@@ -35,9 +36,10 @@ interface SpindleStub {
 
 function setupSpindle(stub: SpindleStub, captured: CapturedHandlers): void {
   (globalThis as unknown as { spindle: unknown }).spindle = {
-    registerMacroInterceptor(handler: typeof captured.macroInterceptor, priority?: number) {
+    registerMacroInterceptor(handler: typeof captured.macroInterceptor, priority?: number, options?: Readonly<Record<string, unknown>>) {
       captured.macroInterceptor = handler;
       captured.macroPriority = priority;
+      captured.macroOptions = options;
     },
     registerMessageContentProcessor(handler: typeof captured.messageContentProcessor, priority?: number) {
       captured.messageContentProcessor = handler;
@@ -277,6 +279,7 @@ describe('createLumiInterceptors', () => {
     createLumiInterceptors(deps).registerAll();
     expect(captured.macroInterceptor).not.toBeNull();
     expect(captured.macroPriority).toBe(100);
+    expect(captured.macroOptions).toEqual({ handlesOwnedSources: true });
     expect(captured.messageContentProcessor).not.toBeNull();
     expect(captured.mcpPriority).toBe(100);
     expect(captured.interceptor).not.toBeNull();

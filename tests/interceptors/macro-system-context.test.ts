@@ -109,6 +109,14 @@ describe('macro interceptor system context', () => {
     });
     expect(ownedResult.claimed).toBeUndefined();
 
+    const stateCtx = {
+      ...ctx, template: '{{getvar::weather}}|{{setvar::weather::Clear}}|{{getvar::nested}}',
+      env: { ...ctx.env, variables: { local: { weather: 'native' }, global: {}, chat: { weather: 'Rain', nested: '{{char}}' } } },
+    };
+    expect((await macroInterceptor!(stateCtx)).text).toBe('Rain|{{setvar::weather::Clear}}|Character');
+    expect((await macroInterceptor!({ ...stateCtx, sourceOwner: { extensionIdentifier: 'lumirealm' } })).text)
+      .toBe('Rain|{{setvar::weather::Clear}}|{{char}}');
+
     expect((await macroInterceptor!({
       ...ctx,
       sourceHint: 'prompt_source:character.system_prompt',

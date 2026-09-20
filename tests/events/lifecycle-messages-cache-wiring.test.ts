@@ -266,3 +266,23 @@ describe("lifecycle — persona change refresh", () => {
     expect(plog.varRefreshes).toEqual([]);
   });
 });
+
+
+test('output bindings see message variables before they run', async () => {
+  const vars: Record<string, string> = {};
+  let content = '{{setvar::weather::Clear}}';
+  const active = { card: { character_id: 'character' } } as any;
+  const handlers = createLifecycleEventHandlers({
+    ...makeDeps(log),
+    ensureActiveCardForChat: async () => active,
+    generationEndedBindings: ['output'],
+    runMessageVarPass: async () => { vars.weather = 'Clear'; content = ''; },
+    runBinding: async () => {
+      expect(vars.weather).toBe('Clear'); expect(content).toBe('');
+      content = '{{setvar::weather::Rain}}';
+      return { stopSending: false };
+    },
+  });
+  await handlers.GENERATION_ENDED({ chatId: 'chat' }, 'user');
+  expect(content).toBe('{{setvar::weather::Rain}}');
+});
