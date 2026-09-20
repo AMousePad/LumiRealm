@@ -48,13 +48,13 @@ register("arrayelement", (_c, a) => {
 }, "Returns the element at index (JSON-stringifies if object). 'null' if OOB.");
 
 register("dictelement", (_c, a) => {
-  const el = parseDict(a[0] ?? "")[a[1] ?? ""] ?? "null";
+  const el = parseDict(a[0]!)[a[1]!] ?? "null";
   return typeof el === "object" ? JSON.stringify(el) : String(el);
 }, "Returns dict[key] or 'null'.");
 
 register("objectassert", (_c, a) => {
-  const d = parseDict(a[0] ?? "");
-  if (!d[a[1] ?? ""]) d[a[1] ?? ""] = a[2] ?? "";
+  const d = parseDict(a[0]!);
+  if (!d[a[1]!]) d[a[1]!] = a[2];
   return JSON.stringify(d);
 }, "Sets obj[key] = value if missing or falsy; returns JSON.");
 
