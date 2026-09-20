@@ -113,6 +113,55 @@ for (const engine of [chromium, firefox]) {
     assert.equal(renderedStyles.repeatedRuleColor, 'rgb(1, 2, 3)');
     for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport);
+      const controls = await page.evaluate(() => {
+        document.body.innerHTML = '<img id="outside" /><div data-message-id="choices"><img id="avatar" />'
+          + '<div data-component="MessageContent" style="font:14px/20px sans-serif">'
+          + '<div class="tile"><img id="portrait" /><button risu-btn="choose">Choose</button></div>'
+          + '<img id="inline" style="margin:3px 0" /><img id="optout" class="not-prose" />'
+          + '<div class="not-prose"><img id="nested-optout" /></div></div></div>';
+        const base = document.createElement('style');
+        base.textContent = '*{margin:0;box-sizing:border-box}button{font:inherit}';
+        document.head.append(base);
+        const noop = () => {};
+        const renderer = (window as any).setupBgHtmlRenderer({ dom: {
+          createElement(tag: string, attrs: Record<string, string>) {
+            const el = document.createElement(tag);
+            for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+            return el;
+          },
+        } }, { info: noop, debug: noop, trace: noop, warn: noop, error: noop });
+        const css = '.tile{display:flex;flex-direction:column;width:250px;overflow:hidden}'
+          + '.tile img{display:block;width:250px;height:360px;transform:scale(1.18)}'
+          + '.tile button{padding:10px;border:0}';
+        renderer.setActiveChat('choices');
+        const render = (extra = '') => renderer.handleMessage({ type: 'render_bg_html', chatId: 'choices', bgHtml: `<style>${css}${extra}</style>` });
+        render();
+        const margins = () => Object.fromEntries(['portrait', 'inline', 'optout', 'nested-optout', 'avatar', 'outside'].map(id => {
+          const style = getComputedStyle(document.getElementById(id)!);
+          return [id, [style.marginTop, style.marginBottom]];
+        }));
+        const initial = margins();
+        const button = document.querySelector('button[risu-btn]')!;
+        const rect = button.getBoundingClientRect();
+        const labelTarget = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.closest('[risu-btn]')?.getAttribute('risu-btn');
+        const portrait = document.getElementById('portrait')!.getBoundingClientRect();
+        const portraitTarget = document.elementFromPoint(portrait.x + portrait.width / 2, portrait.y + portrait.height / 2)?.closest('[risu-btn]')?.getAttribute('risu-btn');
+        render('img{margin-top:5px;margin-bottom:7px}');
+        const authored = margins();
+        renderer.destroy();
+        const cleared = margins();
+        base.remove();
+        return { initial, labelTarget, portraitTarget, authored, cleared };
+      });
+      assert.deepEqual(controls.initial, {
+        portrait: ['28px', '28px'], inline: ['3px', '3px'], optout: ['0px', '0px'],
+        'nested-optout': ['0px', '0px'], avatar: ['0px', '0px'], outside: ['0px', '0px'],
+      });
+      assert.equal(controls.labelTarget, 'choose');
+      assert.equal(controls.portraitTarget, undefined);
+      assert.deepEqual(controls.authored.portrait, ['5px', '7px']);
+      assert.deepEqual(controls.authored.inline, ['3px', '3px']);
+      assert.deepEqual(controls.cleared.portrait, ['0px', '0px']);
       const images = await page.evaluate(async () => {
         document.body.innerHTML = '<div data-message-id="scene"><div class="prose"><div class="backdrop"><img alt="" /></div><div class="frame"><img alt="" /></div></div></div>';
         const nativeStyle = document.createElement('style');

@@ -142,7 +142,10 @@ export function setupBgHtmlRenderer(
         // [data-message-id] img specificity (0,1,1) beats Lumi's .proseImage (0,1,0).
         // Risu leaves image height to the author; a viewport cap shrinks layered backdrops.
         const imgReset =
-          "[data-message-id] img { max-width: 100%; max-height: none; }\n";
+          "[data-message-id] img { max-width: 100%; max-height: none; }\n"
+          // Risu's prose image margins also apply outside native shadow islands.
+          + '[data-message-id] :where([data-component="MessageContent"] img)'
+          + ':not(:where(.not-prose,.not-prose *)){margin-top:2em;margin-bottom:2em}\n';
         // Lumi sets overflow:hidden + contain:layout, which clips absolute
         // hover popups and creates a containing block for position:fixed.
         // The per-chat extension-relaxed mode handles fixed, drop both for Risu chats.
