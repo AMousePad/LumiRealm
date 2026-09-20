@@ -250,6 +250,42 @@ describe("evaluator: #func / {{call::name::args}}", () => {
   });
 });
 
+describe("evaluator: return values match Risu's risuChatParser", () => {
+  test("an explicit empty return replaces the entire parser output", () => {
+    expect(evaluate("before{{return::}}after", makeCtx())).toBe("");
+  });
+
+  test("an empty function return exits only that invocation", () => {
+    expect(evaluate(
+      "{{#func empty}}before{{return::}}after{{/func}}left{{call::empty}}right",
+      makeCtx(),
+    )).toBe("leftright");
+  });
+
+  test("an omitted return argument keeps Risu's null fallback", () => {
+    expect(evaluate("before{{return}}after", makeCtx())).toBe("null");
+    expect(evaluate("{{#func omitted}}{{return}}{{/func}}{{call::omitted}}", makeCtx()))
+      .toBe("null");
+  });
+
+  test("a return flag without a value keeps Risu's null fallback", () => {
+    expect(evaluate("{{settempvar::__force_return__::1}}after", makeCtx())).toBe("null");
+  });
+
+  test("an explicitly empty temporary return value remains empty", () => {
+    expect(evaluate(
+      "{{settempvar::__return__::}}{{settempvar::__force_return__::1}}after",
+      makeCtx(),
+    )).toBe("");
+  });
+
+  for (const value of ["0", "false", "null", "text"]) {
+    test(`return preserves the string ${value}`, () => {
+      expect(evaluate(`before{{return::${value}}}after`, makeCtx())).toBe(value);
+    });
+  }
+});
+
 describe("evaluator: retired prefixed names", () => {
   test("leaves a prefixed leaf macro literal", () => {
     const source = "{{risu_getvar::x}}";

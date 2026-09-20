@@ -143,7 +143,7 @@ describe("return (Risu cbs)", () => {
   test("writes __force_return__ + __return__ to temp; returns empty (parser short-circuits at the leaf-dispatch site)", () => {
     const ctx = makeMockContext();
     expect(get("return")(ctx, ["hello"], "")).toBe("");
-    expect(ctx.vars.get("temp", "__force_return__")).toBe("1");
-    expect(ctx.vars.get("temp", "__return__")).toBe("hello");
+    expect(ctx.tempVars.__force_return__).toBe("1");
+    expect(ctx.tempVars.__return__).toBe("hello");
   });
 });

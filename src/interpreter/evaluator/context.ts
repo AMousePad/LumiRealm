@@ -422,7 +422,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
 
 // Independent risuChatParser calls reset functions and temporary variables,
 // while retaining the character, assets and live saved-variable reader.
-export function freshParserContext(base: Omit<EvaluatorCtx, 'functions'>): EvaluatorCtx {
+export function freshParserContext(base: Omit<EvaluatorCtx, 'functions' | 'tempVars'>): EvaluatorCtx {
   const temp = new Map<string, string>();
   const vars: EvaluatorCtx['vars'] = {
     get: (scope, name) => scope === 'temp' ? temp.get(name) ?? '' : base.vars.get(scope, name),
@@ -440,7 +440,7 @@ export function freshParserContext(base: Omit<EvaluatorCtx, 'functions'>): Evalu
       else base.vars.delete(scope, name);
     },
   };
-  const out: EvaluatorCtx = { ...base, vars, functions: makeFunctionRegistry() };
+  const out: EvaluatorCtx = { ...base, vars, tempVars: {}, functions: makeFunctionRegistry() };
   // Risu field/history reparses receive matcherArg.displaying, not visualize.
   // Lazy require dodges the circular dependency through dispatch and handlers.
   (out as { evaluate?: (text: string) => string }).evaluate = (text: string) => {

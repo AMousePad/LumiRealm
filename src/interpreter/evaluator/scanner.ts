@@ -106,10 +106,11 @@ export function evaluate(
   if (callStack > CALL_STACK_LIMIT) {
     return "ERROR: Call stack limit reached";
   }
-  const innerCtx: EvaluatorCtx = callStack === ctx.callStack ? ctx
-    : Object.assign(Object.create(Object.getPrototypeOf(ctx) ?? null), ctx, {
-        callStack,
-      });
+  // Risu creates an ordinary object per parser call, including recursive calls.
+  const tempVars: EvaluatorCtx['tempVars'] = {};
+  const innerCtx: EvaluatorCtx = Object.assign(Object.create(Object.getPrototypeOf(ctx) ?? null), ctx, {
+    callStack, tempVars,
+  });
 
   let da = template.replace(/<(user|char|bot)>/gi, "{{$1}}");
 
@@ -303,13 +304,7 @@ export function evaluate(
         } else {
           nested[0] += mc;
         }
-        // Risu parser.svelte.ts: parser short-circuits when {{return::v}} sets __force_return__. Reset the flags so outer evaluate calls (description recursion etc.) don't inherit the halt.
-        if (innerCtx.vars.get("temp", "__force_return__") === "1") {
-          const ret = innerCtx.vars.get("temp", "__return__") || "null";
-          innerCtx.vars.delete("temp", "__force_return__");
-          innerCtx.vars.delete("temp", "__return__");
-          return ret;
-        }
+        if (tempVars.__force_return__) return tempVars.__return__ ?? "null";
         break;
       }
       default:

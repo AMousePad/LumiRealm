@@ -90,6 +90,7 @@ export interface Clock {
 export interface RisuRuntimeContext {
   readonly chatId: string;
   readonly vars: VariableStore;
+  readonly tempVars: Record<string, string | undefined>;
   readonly identity: IdentityFields;
   readonly character: CharacterFields;
   readonly messages: MessageHistory;
