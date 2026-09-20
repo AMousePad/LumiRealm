@@ -79,11 +79,13 @@ register("makearray", (_c, a) => makeArray(a), "Creates a JSON array from the gi
 
 register("makedict", (_c, a) => {
   const d: Record<string, string> = {};
-  for (let i = 0; i + 1 < a.length; i += 2) {
-    d[a[i] ?? ""] = a[i + 1] ?? "";
+  for (const pair of a) {
+    const separator = pair.indexOf("=");
+    if (separator === -1) continue;
+    d[pair.slice(0, separator)] = pair.slice(separator + 1);
   }
   return JSON.stringify(d);
-}, "Creates a JSON object from interleaved key-value arguments.");
+}, "Creates a JSON object from key=value arguments.");
 
 // cbs.ts.
 register("range", (_c, a) => {

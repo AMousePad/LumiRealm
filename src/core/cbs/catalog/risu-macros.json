@@ -1946,7 +1946,7 @@
       "o"
     ],
     "category": "other",
-    "argShape": "K1::V1[::K2::V2…]",
+    "argShape": "K1=V1[::K2=V2…]",
     "minArgs": 0,
     "maxArgs": -1,
     "pure": true,
@@ -1955,8 +1955,8 @@
     "lumiverseCollision": null,
     "risuFile": "src/ts/cbs.ts",
     "risuLine": 1303,
-    "summary": "Creates a JSON object from interleaved key-value arguments. Note: Risu's built-in parses 'key=value' strings; our port accepts separate args — behavior documented.",
-    "notes": "Risu's upstream makedict parses each arg as 'key=value'. Our port accepts alternating key/value args (pair-wise), which matches the risu-compat handler."
+    "summary": "Creates a JSON object from key=value arguments, splitting each at its first equals sign.",
+    "notes": "Arguments without an equals sign are ignored; later duplicate keys replace earlier values."
   },
   {
     "name": "max",
