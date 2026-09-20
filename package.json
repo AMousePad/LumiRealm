@@ -23,14 +23,14 @@
     "deploy": "powershell.exe -File scripts/deploy.ps1"
   },
   "dependencies": {
-    "fengari-web": "^0.1.4",
     "fflate": "^0.8.2",
     "tus-js-client": "^4.3.1",
+    "uuid": "9.0.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "fengari": "^0.1.5",
+    "@types/uuid": "9.0.8",
     "happy-dom": "^15.0.0",
     "juice": "^11.0.0",
     "lumiverse-spindle-types": "0.6.25",

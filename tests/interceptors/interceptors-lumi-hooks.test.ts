@@ -1,4 +1,5 @@
 import { basicTriggerContext } from '../helpers/trigger-runtime.js';
+import { frontendExecutorFor } from '../helpers/frontend-executor.js';
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   createLumiInterceptors,
@@ -214,6 +215,7 @@ function makeMockDeps(overrides?: Partial<CreateLumiInterceptorsDeps>): {
     messageVarCalls: [],
   };
   const deps: CreateLumiInterceptorsDeps = {
+    executeFrontend: frontendExecutorFor(chatId => deps.activeCardByChat.get(chatId)),
     activeCardByChat: new Map(),
     captureUserId: (userId, where) => {
       state.captureCalls.push({ userId, where });
@@ -283,7 +285,7 @@ describe('createLumiInterceptors', () => {
     expect(captured.worldInfoPriority).toBe(100);
     expect(captured.contextHandler).not.toBeNull();
     expect(captured.contextPriority).toBe(100);
-    expect(captured.contextOptions).toEqual({ timeoutMs: 30_000 });
+    expect(captured.contextOptions).toEqual({ timeoutMs: 30_000, required: true });
   });
 
   test('macroInterceptor: passthrough when template lacks {{', async () => {

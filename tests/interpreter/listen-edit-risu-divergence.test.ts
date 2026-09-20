@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { runListenEditChain, type ListenEditMode } from '../../src/interpreter/listen-edit.js';
 import { divergenceLuaScriptNS, makeLuaDivergenceHost } from '../helpers/lua-risu-divergence.js';
 
-const divergence = process.env.RISU_PARITY_STRICT === '1' ? test : test.failing;
+const divergence = test;
 
 // RisuAI e565563a288ebe4c65b6099a1645ba477d1c84b4, scriptings.ts: runLuaEditTrigger and runScripted.
 // Runtime callback errors are caught inside runScripted; chunk compilation errors reach the outer chain catch.

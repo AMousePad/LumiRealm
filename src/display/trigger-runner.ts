@@ -1,4 +1,4 @@
-import { makeDispatcherScriptNS } from '../interpreter/dispatcher.js';
+import { makeFrontendScriptNS } from '../frontend-lua/executor.js';
 import { makeRisuTriggerRuntime } from '../interpreter/runtime.js';
 import { selectRestrictedTriggers } from '../interpreter/restricted-trigger.js';
 import {
@@ -8,6 +8,7 @@ import {
 import { makeSafeLogger } from '../util/safe-log.js';
 import { buildPreloaded, makeSnapshotHostApi } from './host-shim.js';
 import type { DisplaySnapshot } from './snapshot.js';
+import { getDisplayLuaEnvironment } from './lua-runner.js';
 
 const log = makeSafeLogger('display-trigger');
 
@@ -45,16 +46,18 @@ export async function runDisplayTriggerChain(
     'display',
   );
   if (triggers.length === 0) return { content, ran: false };
+  const local = getDisplayLuaEnvironment(snap);
+  const { luaChat: _chat, luaVariables: _variables, ...options } = local?.options ?? {};
 
   try {
     const runtime = await makeRisuTriggerRuntime(
-      makeSnapshotHostApi(snap),
+      local?.api ?? makeSnapshotHostApi(snap),
       {
         characterId: snap.characterId,
         characterName: snap.charName,
         userName: snap.userName,
       },
-      makeDispatcherScriptNS(),
+      makeFrontendScriptNS(),
       {
         chatId: snap.chatId,
         characterId: snap.characterId,
@@ -62,6 +65,7 @@ export async function runDisplayTriggerChain(
         displayMode: true,
         displayData: content,
         preloaded: buildPreloaded(snap),
+        ...options,
         templateContext: async () => ({
           ...snap, character: snap.character, chat: snap.chat, variables: snap.vars, commit: false,
         }),
@@ -86,5 +90,5 @@ export async function runDisplayTriggerChain(
   } catch (err) {
     log.warn(`display trigger runtime failed: ${String(err)}`);
     return { content, ran: true };
-  }
+  } finally { await local?.flush(); }
 }

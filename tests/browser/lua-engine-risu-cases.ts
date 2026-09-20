@@ -2,8 +2,6 @@ export interface EngineCase {
   readonly name: string;
   readonly code: string;
   readonly expected: readonly unknown[];
-  readonly fengariDiverges?: boolean;
-  readonly wasmoonDiverges?: boolean;
 }
 
 // Expected values are verified by the pinned Risu wrapper in the browser harness.
@@ -11,62 +9,62 @@ export const engineCases: readonly EngineCase[] = [
   {
     name: 'Lua version matches Risu',
     code: 'function probe() return _VERSION end',
-    expected: ['Lua 5.4'], fengariDiverges: true,
+    expected: ['Lua 5.4'],
   },
   {
     name: 'integer arithmetic retains the Lua 5.4 range',
     code: 'function probe() return tostring(2147483647 + 1).."|"..tostring(math.maxinteger) end',
-    expected: ['2147483648|9223372036854775807'], fengariDiverges: true,
+    expected: ['2147483648|9223372036854775807'],
   },
   {
     name: 'unchanged code preserves Lua globals between invocations',
     code: 'counter = counter or 0; function probe() counter = counter + 1; return counter end',
-    expected: [1, 2], fengariDiverges: true,
+    expected: [1, 2],
   },
   {
     name: 'async entry returns its resolved value',
     code: 'probe = async(function() return promiseValue():await() + 1 end)',
-    expected: [3], fengariDiverges: true,
+    expected: [3],
   },
   {
     name: 'async entry preserves boolean false',
     code: 'probe = async(function() return false end)',
-    expected: [false], fengariDiverges: true,
+    expected: [false],
   },
   {
     name: 'pcall catches a rejected awaited host promise',
     code: 'probe = async(function() local ok = pcall(function() return promiseReject():await() end); return tostring(ok) end)',
-    expected: ['false'], fengariDiverges: true,
+    expected: ['false'],
   },
   {
     name: 'the JavaScript caller receives the first Lua return value',
     code: 'function probe() return "one", "two" end',
-    expected: ['one'], fengariDiverges: true,
+    expected: ['one'],
   },
   {
     name: 'invalid state JSON raises a catchable Lua error',
     code: 'function probe(id) local ok, value = pcall(getState, id, "bad"); return tostring(ok).."|"..type(value) end',
-    expected: ['false|string'], fengariDiverges: true, wasmoonDiverges: true,
+    expected: ['false|string'],
   },
   {
     name: 'getRecentChats decodes the public wrapper result',
     code: 'function probe(id) return getRecentChats(id, 1)[1].data end',
-    expected: ['Latest'], fengariDiverges: true, wasmoonDiverges: true,
+    expected: ['Latest'],
   },
   {
     name: 'setStateChanged exposes the public wrapper',
     code: 'function probe(id) return setStateChanged(id, "count", 1) end',
-    expected: [true], fengariDiverges: true, wasmoonDiverges: true,
+    expected: [true],
   },
   {
     name: 'a plain callback can call synchronous cbs',
     code: 'function probe() return cbs("{{char}}") end',
-    expected: ['Character'], wasmoonDiverges: true,
+    expected: ['Character'],
   },
   {
     name: 'top-level code can call synchronous cbs',
     code: 'local name = cbs("{{char}}"); function probe() return name end',
-    expected: ['Character'], fengariDiverges: true,
+    expected: ['Character'],
   },
   {
     name: 'JSON and Unicode controls share the same representation',

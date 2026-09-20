@@ -1,3 +1,4 @@
+import { frontendExecutorFor } from '../../tests/helpers/frontend-executor.js';
 import { basicTriggerContext } from '../../tests/helpers/trigger-runtime.js';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { RisuPayload } from '../core/payload/index.js';
@@ -28,6 +29,7 @@ describe('trigger dispatcher flush', () => {
         get: async () => ({ id: 'character', world_book_ids: [] }),
         update: async () => {},
       },
+      personas: { getActive: async () => null },
       generate: { raw: async () => ({ content: '' }) },
     };
 
@@ -50,18 +52,10 @@ describe('trigger dispatcher flush', () => {
       ownerUserId: 'user',
     } as unknown as ActiveCard;
     const dispatcher = createTriggerDispatcher({
-      compiledByCharacter: new Map(),
-      getCachedSettingsSync: () => ({ enabled: true, legacyMediaFindings: false }) as never,
-      makeStateChangedCallback: () => () => {},
-      makeAuxDebugCapture: () => undefined,
-      prepareTriggerContext: basicTriggerContext,
-    resolveReadonly: async (text) => text,
+      execute: frontendExecutorFor(() => active),
       ensureActiveCardForChat: async () => active,
       refreshBgHtml: async () => {},
       refreshVariables: async () => {},
-      toastFor: () => {},
-      log: { info: () => {}, warn: () => {}, error: () => {} },
-      errMsg: (error) => error instanceof Error ? error.message : String(error),
     });
 
     await dispatcher.dispatchManualTrigger('manual-chat', 'writeManual', 'manual-id', 'user');

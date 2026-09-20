@@ -1,10 +1,10 @@
 import { LuaFactory } from 'wasmoon';
 import { GLUE_WASM_DATA_URI } from '../../src/display/_glue-wasm-b64';
 import { executeWasmoon } from '../../src/interpreter/lua-wasmoon';
-import { execute } from '../../src/interpreter/lua-bridge';
 import jsonLuaSource from '../../src/interpreter/lua-json.lua' with { type: 'text' };
 import { engineCases, engineGlobals } from './lua-engine-risu-cases';
 import { risuPrelude } from './lua-engine-risu-oracle';
+import { checkDisplay } from './lua-display-risu-entry';
 
 async function run() {
   const factory = new LuaFactory(GLUE_WASM_DATA_URI);
@@ -12,8 +12,8 @@ async function run() {
   const results = [];
   for (const fixture of engineCases) {
     const row: Record<string, unknown> = { name: fixture.name };
-    for (const kind of ['risu', 'wasmoon', 'fengari'] as const) {
-      const globals = engineGlobals(kind === 'risu');
+    for (const kind of ['risu', 'wasmoon'] as const) {
+      const globals = engineGlobals(true);
       const oracle = kind === 'risu' ? await factory.createEngine({ injectObjects: true }) : undefined;
       const values: unknown[] = [];
       try {
@@ -24,9 +24,7 @@ async function run() {
         for (const _ of fixture.expected) {
           values.push(oracle
             ? await oracle.global.get('probe')('safe')
-            : kind === 'wasmoon'
-              ? await executeWasmoon(fixture.code, globals, { entry: 'probe', args: ['safe'], wasmoonKey: fixture.name })
-              : await execute(fixture.code, globals, { entry: 'probe', args: ['safe'] }));
+            : await executeWasmoon(fixture.code, globals, { entry: 'probe', args: ['safe'], wasmoonKey: fixture.name }));
         }
         row[kind] = { values };
       } catch (error) {
@@ -40,4 +38,5 @@ async function run() {
   return results;
 }
 
-Object.assign(globalThis, { engineResults: run() });
+const engineResults = run();
+Object.assign(globalThis, { engineResults, displayResults: engineResults.then(checkDisplay) });

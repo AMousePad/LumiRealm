@@ -10,6 +10,7 @@ import type {
 import { runPipeline, type RunPipelineInput } from '../interpreter/evaluator/pipeline.js';
 import {
   MSG_DEP_KEY,
+  buildEvaluatorContext,
   type VarReadRecorder,
 } from '../interpreter/evaluator/context.js';
 import {
@@ -39,6 +40,7 @@ import {
 } from './host-shim.js';
 import { buildModuleDisplayPlan } from './module-action-plan.js';
 import { parseDisplayCaller } from './caller-parser.js';
+import { evaluate } from '../interpreter/evaluator/scanner.js';
 const log = makeSafeLogger('display-resolver');
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
@@ -290,6 +292,7 @@ async function runApply(
   args: SpindleDisplayScriptsArgs,
   recorder: VarReadRecorder,
   activationPatterns: ActivationPatternCache,
+  cache: Map<string, SpindleDisplayResolveResult>,
   onEffect?: DisplayRuntimeEffectSink,
 ): Promise<string> {
   const ctx = args.context;
@@ -324,49 +327,69 @@ async function runApply(
     return runPipeline(buildInput(snap, text, ctx), { recorder, resolveLeaf: nativeVariables });
   };
 
-  for (let index = 0; index < plan.length; index++) {
-    const step = plan[index]!;
-    if (step.kind === 'skip') {
-      warnActionBinding(step.script.id, step.reason);
-      continue;
-    }
-    if (step.kind === 'action') {
-      if (!scriptApplies(step.script, ctx)) continue;
-      const dependencies = getRuntimeAtActionDependencies(step.action);
-      if (dependencies.messages) recorder.touched.add(MSG_DEP_KEY);
-      if (dependencies.effects) recorder.volatile = true;
-      content = await runEditDisplayAtActions(
-        snap,
-        content,
-        ctx,
-        [step.action],
-        {
-          resolveTemplate: (text) =>
-            evalTemplate(snap, text, ctx, recorder),
-          ...(onEffect ? { onEffect } : {}),
-        },
-      );
-      continue;
-    }
-    const coreScripts = [toCoreScript(step.script, nativeEval, prepared)];
-    while (plan[index + 1]?.kind === 'script') {
-      const next = plan[++index]!;
-      if (next.kind === 'script') coreScripts.push(toCoreScript(next.script, nativeEval, prepared));
-    }
-    content = applyRegexScriptsCore(content, coreScripts, {
-      placement,
-      depth: ctx.depth,
-      ...behaviorContext,
-      evalTemplate: (text) => {
-        try {
-          return evalTemplate(snap, text, ctx, recorder);
-        } catch (err) {
-          recorder.volatile = true;
-          throw err;
+  // Risu processScriptFull caches after Lua/CBS, including evaluated <cbs> inputs.
+  // Native rows stay live and split cache batches without changing execution order.
+  for (let start = 0; start < plan.length;) {
+    const risu = isRisuRegexScript(plan[start]!.script);
+    let end = start + 1;
+    while (end < plan.length && isRisuRegexScript(plan[end]!.script) === risu) end++;
+    const reads: VarReadRecorder = risu ? { touched: new Set<string>(), volatile: false } : recorder;
+    const key = risu ? JSON.stringify([
+      snap.chatId, snap.characterId, resolveRisuDisplayMessageIndex(snap, ctx), start, content,
+      plan.slice(start, end).map(step => [step.script, scriptApplies(step.script, ctx),
+        (step.script.metadata?.['_risu'] as { flag_actions?: string[] } | undefined)?.flag_actions?.includes('cbs')
+          ? evalTemplate(snap, step.script.find_regex, ctx, reads) : step.script.find_regex,
+        step.kind === 'action' ? step.action : step.kind === 'skip' ? step.reason : null]),
+    ]) : undefined;
+    const cached = key === undefined ? undefined : cache.get(key);
+    if (cached?.content) {
+      content = cached.content;
+      for (const dependency of cached.touchedVars ?? []) reads.touched.add(dependency);
+      if (cached.cacheable === false) reads.volatile = true;
+    } else {
+      for (let index = start; index < end; index++) {
+        const step = plan[index]!;
+        if (step.kind === 'skip') {
+          warnActionBinding(step.script.id, step.reason);
+          continue;
         }
-      },
-      reResolveAfterRule: true,
-    });
+        if (step.kind === 'action') {
+          if (!scriptApplies(step.script, ctx)) continue;
+          const dependencies = getRuntimeAtActionDependencies(step.action);
+          if (dependencies.messages) reads.touched.add(MSG_DEP_KEY);
+          if (dependencies.effects) reads.volatile = true;
+          content = await runEditDisplayAtActions(snap, content, ctx, [step.action], {
+            resolveTemplate: text => evalTemplate(snap, text, ctx, reads),
+            ...(onEffect ? { onEffect } : {}),
+          });
+          continue;
+        }
+        const coreScripts = [toCoreScript(step.script, nativeEval, prepared)];
+        while (index + 1 < end && plan[index + 1]?.kind === 'script') {
+          const next = plan[++index]!;
+          if (next.kind === 'script') coreScripts.push(toCoreScript(next.script, nativeEval, prepared));
+        }
+        content = applyRegexScriptsCore(content, coreScripts, {
+          placement,
+          depth: ctx.depth,
+          ...behaviorContext,
+          evalTemplate: text => {
+            try { return evalTemplate(snap, text, ctx, reads); }
+            catch (err) { reads.volatile = true; throw err; }
+          },
+          reResolveAfterRule: true,
+        });
+      }
+      if (key !== undefined) {
+        cache.set(key, { content, touchedVars: [...reads.touched], cacheable: !reads.volatile });
+        if (cache.size > 1000) cache.delete(cache.keys().next().value!);
+      }
+    }
+    if (reads !== recorder) {
+      for (const dependency of reads.touched) recorder.touched.add(dependency);
+      if (reads.volatile) recorder.volatile = true;
+    }
+    start = end;
   }
   return content;
 }
@@ -375,8 +398,10 @@ export function createDisplayResolver(
   writeback?: DisplayWritebackSink,
   onEffect?: DisplayRuntimeEffectSink,
   activationPatterns: ActivationPatternCache = createActivationPatternCache(),
-): SpindleDisplayResolver {
+): SpindleDisplayResolver & { resetScriptCache(): void } {
+  const scriptCache = new Map<string, SpindleDisplayResolveResult>();
   return {
+    resetScriptCache() { scriptCache.clear(); },
     ready(chatId: string): boolean {
       return isDisplayResolutionReady(chatId);
     },
@@ -395,13 +420,21 @@ export function createDisplayResolver(
           : snap;
         let body = parseDisplayCaller(buildInput(liveSnap, args.content, args.context), recorder);
         if (liveSnap.luaTriggers.length > 0) {
+          // Risu ChatBody reruns parsing on input changes and GUI reloads, not persistence echoes.
+          // Keep the host's outer render cache; every actual resolution still executes Lua.
           body = await runEditDisplayChain(
             liveSnap,
             body,
             args.context,
-            (t) => Promise.resolve(runPipeline(buildInput({
-              ...liveSnap, vars: getDisplaySnapshot(chatId)?.vars ?? liveSnap.vars,
-            }, t, args.context), { recorder })),
+            (t) => {
+              const current = getDisplaySnapshot(chatId);
+              const source = current?.characterId === liveSnap.characterId ? current : liveSnap;
+              return evaluate(t, buildEvaluatorContext({
+                ...buildInput(source, t, args.context),
+                recorder, commit: false, rmVar: false, runVar: false, cbsContext: false,
+                reparseMacroResults: false, currentMessageIndexOverride: -1,
+              }));
+            },
             (vars) => writeback?.(chatId, vars),
             onEffect,
             // Same key shape as the CBS recorder so snapshot-diff invalidation
@@ -413,8 +446,12 @@ export function createDisplayResolver(
                 recorder.touched.add(`local:${name}`);
               }
             },
+            () => recorder.touched.add(MSG_DEP_KEY),
           );
-          liveSnap = { ...liveSnap, vars: getDisplaySnapshot(chatId)?.vars ?? liveSnap.vars };
+          const current = getDisplaySnapshot(chatId);
+          if (current?.characterId === liveSnap.characterId) {
+            liveSnap = withCurrentDisplayMessage(current, args.context, args.content);
+          }
         }
         const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
         body = displayTriggerResult.content;
@@ -521,7 +558,7 @@ export function createDisplayResolver(
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
-        feContent = await runApply(snap, args, recorder, activationPatterns, onEffect);
+        feContent = await runApply(snap, args, recorder, activationPatterns, scriptCache, onEffect);
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;

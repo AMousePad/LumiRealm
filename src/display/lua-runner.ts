@@ -1,5 +1,5 @@
 import type { SpindleDisplayContext } from 'lumiverse-spindle-types';
-import type { DispatchData, HostMessage } from '../interpreter/host.js';
+import type { DispatchData, HostMessage, HostApi, TriggerRuntimeOpts } from '../interpreter/host.js';
 import { runListenEditChain } from '../interpreter/listen-edit.js';
 import {
   runAtActionsForPhase,
@@ -16,10 +16,15 @@ import { applyVarDelta, getDisplaySnapshot, type DisplaySnapshot } from './snaps
 import { makeDispatcherScriptNS, registerManualTriggers } from '../interpreter/dispatcher.js';
 import { setWasmoonExecutor } from '../interpreter/runtime.js';
 import { executeWasmoon } from '../interpreter/lua-wasmoon.js';
+import { makeFrontendScriptNS } from '../frontend-lua/executor.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
 setWasmoonExecutor(executeWasmoon);
 const varLog = makeSafeLogger('runtime.setVar');
+let environment: ((snapshot: DisplaySnapshot) => { api: HostApi; options: TriggerRuntimeOpts; flush(): Promise<void> }) | undefined;
+
+export function setDisplayLuaEnvironment(provider: typeof environment): void { environment = provider; }
+export function getDisplayLuaEnvironment(snapshot: DisplaySnapshot) { return environment?.(snapshot); }
 
 function risuChatIndex(context: SpindleDisplayContext, snap: DisplaySnapshot): number {
   return resolveRisuDisplayMessageIndex(snap, context);
@@ -29,14 +34,16 @@ export async function runEditDisplayChain(
   snap: DisplaySnapshot,
   content: string,
   context: SpindleDisplayContext,
-  resolveTemplate: (text: string) => Promise<string>,
+  resolveTemplate: (text: string) => string,
   onVarWrite: DisplayVarWriteback,
   onEffect?: DisplayRuntimeEffectSink,
   onVarRead?: (name: string, scope: 'chat' | 'global') => void,
+  onMessageRead?: () => void,
 ): Promise<string> {
   if (snap.luaTriggers.length === 0) return content;
-  const api = makeSnapshotHostApi(snap, onVarWrite, onEffect);
-  const scriptNS = makeDispatcherScriptNS();
+  const local = environment?.(snap);
+  const api = local?.api ?? makeSnapshotHostApi(snap, onVarWrite, onEffect);
+  const scriptNS = makeFrontendScriptNS();
   registerManualTriggers(scriptNS, snap.compiledLibraries, api);
   const data: DispatchData = {
     characterId: snap.characterId,
@@ -47,7 +54,7 @@ export async function runEditDisplayChain(
   let vars = snap.vars;
   const currentVars = () => getDisplaySnapshot(snap.chatId)?.vars ?? vars;
   const written = new Set<string>();
-  return runListenEditChain<string>(
+  try { return await runListenEditChain<string>(
     snap.luaTriggers,
     'editDisplay',
     content,
@@ -56,9 +63,6 @@ export async function runEditDisplayChain(
     data,
     scriptNS,
     {
-      chatId: snap.chatId,
-      characterId: snap.characterId,
-      resolveTemplate,
       preloaded: buildPreloaded(snap),
       luaVariables: {
         get(name, scope) {
@@ -74,6 +78,7 @@ export async function runEditDisplayChain(
           applyVarDelta(snap.chatId, 'local', { [name]: value });
           written.add(name);
           varLog.info(`$${name}=${JSON.stringify(value.slice(0, 80))}`);
+          return true;
         },
         flush() {
           // A later queued hook can already have written; persist its current value.
@@ -88,8 +93,13 @@ export async function runEditDisplayChain(
       // Risu owns one engine per hook mode and recreates it when source changes.
       wasmoonKey: 'editDisplay',
       ...(onVarRead ? { onVarRead } : {}),
+      ...(onMessageRead ? { onMessageRead } : {}),
+      ...local?.options,
+      chatId: snap.chatId,
+      characterId: snap.characterId,
+      luaTemplate: resolveTemplate,
     },
-  );
+  ); } finally { await local?.flush(); }
 }
 
 export async function runEditDisplayAtActions(
@@ -103,14 +113,15 @@ export async function runEditDisplayAtActions(
   } = {},
 ): Promise<string> {
   if (actions.length === 0) return content;
-  const api = makeSnapshotHostApi(snap, undefined, options.onEffect);
+  const local = environment?.(snap);
+  const api = local?.api ?? makeSnapshotHostApi(snap, undefined, options.onEffect);
   const role = (context.role ?? undefined) as HostMessage['role'] | undefined;
-  return runAtActionsForPhase(actions, 'editdisplay', content, {
+  try { return await runAtActionsForPhase(actions, 'editdisplay', content, {
     api,
     chatIndex: risuChatIndex(context, snap),
     ...(role ? { role } : {}),
     ...(options.resolveTemplate
       ? { resolveTemplate: options.resolveTemplate }
       : {}),
-  });
+  }); } finally { await local?.flush(); }
 }

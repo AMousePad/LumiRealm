@@ -4,10 +4,7 @@
 // of render-MCP calls (e.g. 14 visible messages on chat-open with a
 // listenEdit-heavy card) shares a single fetch.
 //
-// Risu invariant: each trigger still gets a fresh Lua VM (preserved). Only
-// the *data* the Lua reads is shared. editDisplay listeners can't write
-// chat state (commit:false gates writes), so the snapshot can be safely
-// reused across the chain.
+// Lua engines live per mode, while frontend variable accessors read live state.
 
 import type { HostApi, HostMessage, TriggerRuntimePreloaded } from './host.js';
 import {

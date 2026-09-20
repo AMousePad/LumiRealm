@@ -16,20 +16,20 @@ describe('Lua API Risu divergences', () => {
   });
 
   for (const name of ['setChatVarChanged', 'getChatData', 'getChatRole', 'getRecentChatsMain']) {
-    divergence(`registers ${name}`, async () => {
+    test(`registers ${name}`, async () => {
       const fixture = await captureLuaRuntime();
       expect(typeof fixture.globals[name]).toBe('function');
     });
   }
 
-  divergence('getChat includes the original message timestamp', async () => {
+  test('getChat includes the original message timestamp', async () => {
     const fixture = await captureLuaRuntime();
     expect(JSON.parse(String(await fixture.call('getChatMain', 0)))).toEqual({
       role: 'user', data: 'Hello', time: 1700000000000,
     });
   });
 
-  divergence('getFullChat includes timestamps for every message', async () => {
+  test('getFullChat includes timestamps for every message', async () => {
     const fixture = await captureLuaRuntime();
     expect(JSON.parse(String(await fixture.call('getFullChatMain')))).toEqual([
       { role: 'user', data: 'Hello', time: 1700000000000 },
@@ -43,21 +43,21 @@ describe('Lua API Risu divergences', () => {
   });
 
   for (const index of [0.5, -0.5, NaN]) {
-    divergence(`getChat applies Array.at coercion to ${index}`, async () => {
+    test(`getChat applies Array.at coercion to ${index}`, async () => {
       const fixture = await captureLuaRuntime();
       const message = JSON.parse(String(await fixture.call('getChatMain', index)));
       expect(message?.data).toBe('Hello');
     });
   }
 
-  divergence('setChat truncates a fractional index before editing', async () => {
+  test('setChat truncates a fractional index before editing', async () => {
     const fixture = await captureLuaRuntime();
     await fixture.call('setChat', 0.5, 'Edited');
     await fixture.runtime.flush();
     expect(fixture.messages.find(message => message.id === 'user')?.content).toBe('Edited');
   });
 
-  divergence('setChatRole accepts a negative index', async () => {
+  test('setChatRole accepts a negative index', async () => {
     const fixture = await captureLuaRuntime();
     await fixture.call('setChatRole', -1, 'user');
     await fixture.runtime.flush();
@@ -66,7 +66,7 @@ describe('Lua API Risu divergences', () => {
   });
 
   for (const index of [0.5, -0.5, NaN]) {
-    divergence(`removeChat applies splice coercion to ${index} in persisted messages`, async () => {
+    test(`removeChat applies splice coercion to ${index} in persisted messages`, async () => {
       const fixture = await captureLuaRuntime();
       await fixture.call('removeChat', index);
       await fixture.runtime.flush();
@@ -142,35 +142,37 @@ describe('Lua API Risu divergences', () => {
     });
   });
 
-  divergence('getBackgroundEmbedding reads character background HTML', async () => {
+  test('getBackgroundEmbedding reads character background HTML', async () => {
     const fixture = await captureLuaRuntime();
     expect(await fixture.call('getBackgroundEmbedding')).toBe('<div>Background</div>');
   });
 
-  divergence('setBackgroundEmbedding persists character background HTML', async () => {
+  test('setBackgroundEmbedding persists character background HTML', async () => {
     const fixture = await captureLuaRuntime();
     await fixture.call('setBackgroundEmbedding', '<div>Changed</div>');
+    await fixture.runtime.flush();
     expect(fixture.character.backgroundHTML).toBe('<div>Changed</div>');
   });
 
-  divergence('setCharacterFirstMessage returns true after a valid update', async () => {
+  test('setCharacterFirstMessage returns true after a valid update', async () => {
     const fixture = await captureLuaRuntime();
-    expect(await fixture.call('setCharacterFirstMessageMain', 'Changed')).toBe(true);
+    expect(await fixture.call('setCharacterFirstMessage', 'Changed')).toBe(true);
   });
 
-  divergence('setCharacterFirstMessage rejects non-string data without a mutation', async () => {
+  test('setCharacterFirstMessage rejects non-string data without a mutation', async () => {
     const fixture = await captureLuaRuntime();
-    const result = await fixture.call('setCharacterFirstMessageMain', 42);
+    const result = await fixture.call('setCharacterFirstMessage', 42);
     expect({ result, firstMessage: fixture.character.firstMessage }).toEqual({ result: false, firstMessage: 'Greeting' });
   });
 
   test('control: setCharacterFirstMessage persists valid text', async () => {
     const fixture = await captureLuaRuntime();
-    await fixture.call('setCharacterFirstMessageMain', 'Changed');
+    await fixture.call('setCharacterFirstMessage', 'Changed');
+    await fixture.runtime.flush();
     expect(fixture.character.firstMessage).toBe('Changed');
   });
 
-  divergence('sleep resolves true', async () => {
+  test('sleep resolves true', async () => {
     const fixture = await captureLuaRuntime();
     expect(await fixture.call('sleep', 0)).toBe(true);
   });

@@ -33,10 +33,12 @@
     "web_search"
   ],
   "requested_capabilities": [
-    "base64_decode"
+    "base64_decode",
+    "dynamic_code_execution"
   ],
   "entry_backend": "dist/backend.js",
   "entry_frontend": "dist/frontend.js",
+  "interceptorTimeoutMs": 30000,
   "minimum_lumiverse_version": "1.2.0",
   "lumirealm": {
     "risu_app_version": "2026.6.215",

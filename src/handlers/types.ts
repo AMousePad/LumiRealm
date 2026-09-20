@@ -19,6 +19,7 @@ export type HandlerRegistry = {
 /** Per-call context passed alongside the typed msg. Backend builds this once
  *  per onFrontendMessage tick from the userId + module-scope helpers. */
 export interface HandlerCallCtx {
+  readonly frontendSessionId?: string;
   readonly userId: string;
   readonly send: (msg: BackendToFrontend, userId: string) => void;
   readonly log: {

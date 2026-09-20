@@ -1,3 +1,4 @@
+import { runLuaCallback } from '../../helpers/trigger-runtime.js';
 import { describe, expect, test } from 'bun:test';
 import type { TriggerEffect } from '../../../src/core/schemas/triggerscript.js';
 import type { HostMessage } from '../../../src/interpreter/host.js';
@@ -14,7 +15,7 @@ for (const execution of ['interpreted', 'compiled'] as const) {
   describe(`${execution} structured message reads match Risu runTrigger`, () => {
     const run = async (effect: TriggerEffect, rows = messages) => {
       const result = await runTriggerEffects([effect], {}, {
-        preloaded: { messagesRaw: [greeting, ...rows] },
+        characterId: 'test-character', preloaded: { luaState: { character: { id: 'test-character', firstMessage: 'Greeting' }, persona: null, authorsNote: '' }, messagesRaw: [greeting, ...rows] },
       }, [], execution);
       return result.saved['out'];
     };
@@ -72,12 +73,15 @@ for (const execution of ['interpreted', 'compiled'] as const) {
 
 describe('Lua message reads retain their separate Risu semantics', () => {
   async function read(rows: HostMessage[]) {
-    const { runtime } = await runTriggerEffects([], {}, { preloaded: { messagesRaw: [greeting, ...rows] } });
-    await runtime.runLua(`
-      setChatVar("test", "user", getUserLastMessage("test"))
-      setChatVar("test", "character", getCharacterLastMessage("test"))
-      local last = getChat("test", -1)
-      setChatVar("test", "last", last and last.data or "missing")
+    const { runtime } = await runTriggerEffects([], {}, { preloaded: {
+      messagesRaw: [greeting, ...rows],
+      luaState: { character: { id: 'character', firstMessage: 'Greeting' }, persona: null, authorsNote: '' },
+    } });
+    await runLuaCallback(runtime, `
+      setChatVar(id, "user", getUserLastMessage(id))
+      setChatVar(id, "character", getCharacterLastMessage(id))
+      local last = getChat(id, -1)
+      setChatVar(id, "last", last and last.data or "missing")
     `);
     return { user: runtime.getVar('user'), character: runtime.getVar('character'), last: runtime.getVar('last') };
   }

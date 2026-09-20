@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { TriggerScript, TriggerEffect } from '../../src/core/schemas/triggerscript.js';
 import type { HostApi, HostMessage, InjectOpts } from '../../src/interpreter/host.js';
 import { dispatchByManualName, dispatchBinding, prepareTriggers, registerManualTriggers, makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
+import { execute } from '../../src/interpreter/lua-bridge.js';
 import { makeRisuTriggerRuntime, withDispatchContext } from '../../src/interpreter/runtime.js';
 import { initializeInvocation, type TriggerInvocationState } from '../../src/interpreter/runtime/invocation.js';
 import { basicTriggerContext } from '../helpers/trigger-runtime.js';
@@ -41,7 +42,7 @@ async function run(sources: TriggerScript[], initial: Record<string, string> = {
     characters: { get: async () => ({ id: 'character' }), update: async () => {} },
   };
   const compiledTriggers = prepareTriggers({ triggers: sources } as never, 'character');
-  const scriptNS = makeDispatcherScriptNS();
+  const scriptNS = makeDispatcherScriptNS(execute);
   registerManualTriggers(scriptNS, compiledTriggers, api);
   const context = { api, compiledTriggers, scriptNS, data: {}, opts: {} };
   const flags = { stopSending: false, varsFlushed: false };
@@ -96,10 +97,10 @@ test('an aborted outer invocation preserves earlier saved writes while discardin
 test('Lua message mutations inside an aborted invocation are also discarded', async () => {
   const result = await run([trigger('outer', [
     set('saved', 'yes'),
-    { type: 'triggerlua', code: 'function onButtonClick(id) setChat(id, 0, "lua") end' },
+    { type: 'triggerlua', code: 'function outer(id) setChat(id, 0, "lua"); setChatVar(id, "executed", "yes") end' },
     abort,
   ])]);
-  expect(result.saved).toEqual({ saved: 'yes' });
+  expect(result.saved).toEqual({ saved: 'yes', executed: 'yes' });
   expect(result.messages[0]?.content).toBe('original');
   expect(result.mutations).toEqual([]);
 });

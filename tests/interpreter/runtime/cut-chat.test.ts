@@ -1,8 +1,10 @@
+import { runLuaCallback } from '../../helpers/trigger-runtime.js';
 import { describe, expect, test } from 'bun:test';
 import type { HostApi, HostMessage } from '../../../src/interpreter/host.js';
 import type { TriggerEffect, TriggerScript } from '../../../src/core/schemas/triggerscript.js';
 import { makeRisuTriggerRuntime } from '../../../src/interpreter/runtime.js';
 import { makeDispatcherScriptNS } from '../../../src/interpreter/dispatcher.js';
+import { execute } from '../../../src/interpreter/lua-bridge.js';
 import { interpretTrigger } from '../../../src/interpreter/trigger-interpreter.js';
 import { compileTrigger } from '../../../src/core/triggers/compile.js';
 import { basicTriggerContext } from '../../helpers/trigger-runtime.js';
@@ -41,7 +43,7 @@ async function fixture(withGreeting = true) {
     },
     characters: { get: async id => ({ id }), update: async () => { throw new Error('Unexpected character write'); } },
   };
-  const scriptNS = makeDispatcherScriptNS();
+  const scriptNS = makeDispatcherScriptNS(execute);
   const runtime = await makeRisuTriggerRuntime(api, {}, scriptNS, {
     preloaded: { messagesRaw: rows }, templateContext: basicTriggerContext,
   });
@@ -117,7 +119,7 @@ for (const [argumentsText, expected] of [
 ] as const) {
   test(`Lua cutChat(${argumentsText}) completes before the next Lua message read`, async () => {
     const h = await fixture();
-    await h.runtime.runLua(`cutChat("test", ${argumentsText})\nsetChatVar("test", "length", tostring(getChatLength("test")))`);
+    await runLuaCallback(h.runtime, `cutChat(id, ${argumentsText})\nsetChatVar(id, "length", tostring(getChatLength(id)))`);
     await h.runtime.flush();
     expect(h.runtime.getVar('length')).toBe(String(expected.length));
     expect(h.contents()).toEqual([...expected]);
@@ -127,7 +129,7 @@ for (const [argumentsText, expected] of [
 
 test('Lua cut waits for a preceding addChat to receive its real host ID', async () => {
   const h = await fixture();
-  await h.runtime.runLua('addChat("test", "char", "temporary")\ncutChat("test", 0, 4)');
+  await runLuaCallback(h.runtime, 'addChat(id, "char", "temporary")\ncutChat(id, 0, 4)');
   await h.runtime.flush();
   expect(h.contents()).toEqual(['A', 'B', 'C', 'D']);
   expect(h.rows.map(row => row.content)).toEqual(['Greeting', 'A', 'B', 'C', 'D']);
@@ -137,7 +139,7 @@ test('Lua cut waits for a preceding addChat to receive its real host ID', async 
 test('queued Lua deletion failures reject flush and reconcile optimistic message reads', async () => {
   const h = await fixture();
   h.faults.id = 'D';
-  await h.runtime.runLua('cutChat("test", 0, 1)\nsetChatVar("test", "length", tostring(getChatLength("test")))');
+  await runLuaCallback(h.runtime, 'cutChat(id, 0, 1)\nsetChatVar(id, "length", tostring(getChatLength(id)))');
   expect(h.runtime.getVar('length')).toBe('1');
   await expect(h.runtime.flush()).rejects.toMatchObject({ name: 'ChatMutationError' });
   expect(h.contents()).toEqual(['A', 'B', 'C', 'D']);
@@ -149,7 +151,7 @@ for (const lua of [false, true]) {
     h.faults.id = 'A';
     h.faults.afterDelete = true;
     if (lua) {
-      await h.runtime.runLua('cutChat("test", 1, 4)');
+      await runLuaCallback(h.runtime, 'cutChat(id, 1, 4)');
       await expect(h.runtime.flush()).rejects.toMatchObject({ name: 'ChatMutationError' });
     } else await expect(h.runtime.cutChat(1, 4)).rejects.toMatchObject({ name: 'ChatMutationError' });
     expect(h.contents()).toEqual(['B', 'C', 'D']);
@@ -159,7 +161,7 @@ for (const lua of [false, true]) {
 test('a queued Lua cut failure stops a following structured cut', async () => {
   const h = await fixture();
   h.faults.id = 'D';
-  await h.runtime.runLua('cutChat("test", 0, 2)');
+  await runLuaCallback(h.runtime, 'cutChat(id, 0, 2)');
   await expect(h.runtime.cutChat(0, 1)).rejects.toMatchObject({ name: 'ChatMutationError' });
   expect(h.deleted).toEqual([]);
   expect(h.contents()).toEqual(['A', 'B', 'C', 'D']);
@@ -168,7 +170,7 @@ test('a queued Lua cut failure stops a following structured cut', async () => {
 test('failed queued cuts reconcile rows appended and then cut later in the same Lua script', async () => {
   const h = await fixture();
   h.faults.id = 'D';
-  await h.runtime.runLua('cutChat("test", 0, 2)\naddChat("test", "char", "new")\ncutChat("test", 0, 1)');
+  await runLuaCallback(h.runtime, 'cutChat(id, 0, 2)\naddChat(id, "char", "new")\ncutChat(id, 0, 1)');
   await expect(h.runtime.flush()).rejects.toMatchObject({ name: 'ChatMutationError' });
   expect(h.contents()).toEqual(['A', 'B', 'C', 'D', 'new']);
 });
@@ -178,8 +180,8 @@ test('a failed queued Lua cut is reconciled before a nested trigger can execute'
   const h = await fixture();
   h.faults.id = 'D';
   let childRan = false;
-  h.scriptNS.registerManual('child', async () => { childRan = true; });
-  await h.runtime.runLua('cutChat("test", 0, 2)');
+  h.scriptNS.registerManual(async name => { expect(name).toBe('child'); childRan = true; });
+  await runLuaCallback(h.runtime, 'cutChat(id, 0, 2)');
   await expect(h.runtime.runTrigger('child')).rejects.toMatchObject({ name: 'ChatMutationError' });
   expect(childRan).toBe(false);
   expect(h.deleted).toEqual([]);

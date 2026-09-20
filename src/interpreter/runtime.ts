@@ -10,7 +10,10 @@ import {
 } from './host.js';
 import { buildRisuChatView } from './risu-chat-view.js';
 import { makeVarsApi, createTriggerLocalState } from './runtime/vars.js';
-import { createTriggerTemplateParser } from './runtime/template.js';
+import { createLuaTemplateParser, createTriggerTemplateParser } from './runtime/template.js';
+import { prepareLuaHostState, type LuaHostState } from './runtime/lua-state.js';
+import { LuaCallbackError, type ExecuteOpts } from './lua-engine.js';
+import { currentUserId } from './runtime/als.js';
 import { hasTriggerTemplate } from '../core/triggers/templates.js';
 import { advanceTriggerControl, type TriggerControlState } from '../core/triggers/control-flow.js';
 import type { TriggerEffect } from '../core/schemas/triggerscript.js';
@@ -47,32 +50,17 @@ const _logLLMMain         = makeSafeLogger('runtime.LLMMain');
 const _logAxLLMMain       = makeSafeLogger('runtime.axLLMMain');
 const _logFlush           = makeSafeLogger('runtime.flush');
 const _logLuaPrint        = makeSafeLogger('runtime.lua');
-const _logCbs             = makeSafeLogger('runtime.cbs');
 
 type WasmoonExec = (
   code: string,
   globals: Record<string, unknown>,
-  opts: { entry?: string; args?: readonly unknown[]; wasmoonKey: string },
+  opts: ExecuteOpts & { wasmoonKey: string },
 ) => Promise<unknown>;
 let _wasmoonExec: WasmoonExec | null = null;
 export function setWasmoonExecutor(fn: WasmoonExec): void { _wasmoonExec = fn; }
 let _wasmoonEnabled = true;
 export function setWasmoonEnabled(b: boolean): void { _wasmoonEnabled = b; }
 export function isWasmoonEnabled(): boolean { return _wasmoonEnabled; }
-
-// Per-process alert gate so a Lua loop calling cbs() doesn't stack modals.
-let _cbsUnresolvedAlertFired = false;
-function warnCbsUnresolvedOnce(api: HostApi): void {
-  _logCbs.warn('cbs(): no resolver wired, returning input verbatim');
-  if (_cbsUnresolvedAlertFired) return;
-  _cbsUnresolvedAlertFired = true;
-  try {
-    api.ui?.alert?.(
-      'A card script called cbs(template) but no resolver was wired. Output will contain raw {{...}} markers. Report this if you see it.',
-      'error',
-    );
-  } catch { /* */ }
-}
 
 // Compiled triggers' rtOpts are JSON-frozen, so non-serialisable fields
 // (Function, Set) ride the side-channel. Safe: dispatch is serial,
@@ -222,7 +210,7 @@ export async function makeRisuTriggerRuntime(
   const portalChatId: string | undefined = opts.chatId ?? dispatchCtx.chatId;
   const rememberOurWrite: ((chatId: string, msgId: string, content: string) => void) | undefined =
     opts.rememberOurWrite ?? dispatchCtx.rememberOurWrite;
-  const stateChanged: (() => void) | undefined =
+  const stateChanged: ((source?: string) => void) | undefined =
     opts.stateChanged ?? dispatchCtx.stateChanged;
   const auxConnectionId: string | null =
     (opts.auxConnectionId ?? dispatchCtx.auxConnectionId ?? null);
@@ -237,10 +225,6 @@ export async function makeRisuTriggerRuntime(
   const submodelSamplers = opts.submodelSamplers ?? dispatchCtx.submodelSamplers ?? auxSamplers;
   const auxDebugCapture: ((event: AuxDebugCaptureEvent) => void) | undefined =
     opts.auxDebugCapture ?? dispatchCtx.auxDebugCapture;
-  // Bind at factory time so cbs() invoked from Lua resolves against the
-  // user this runtime was built for, not whoever last set the global.
-  const capturedResolveTemplate: ((text: string) => Promise<string>) | undefined =
-    opts.resolveTemplate ?? dispatchCtx.resolveTemplate;
   const auxParamsWire = samplersToWire(auxSamplers);
   const submodelParamsWire = samplersToWire(submodelSamplers);
   const auxPrefillCompat: boolean =
@@ -253,7 +237,7 @@ export async function makeRisuTriggerRuntime(
       return;
     }
     _logStateChanged.info(`source=${source} → calling backend`);
-    try { stateChanged(); }
+    try { stateChanged(source); }
     catch (err) {
       _logStateChanged.warn(`callback threw: ${(err as Error).message}`);
     }
@@ -317,7 +301,11 @@ export async function makeRisuTriggerRuntime(
   let _msgsSrc: 'preloaded' | 'fetched' = 'fetched';
   const _tMsgsStart = Date.now();
   try {
-    if (invocation.messagesCache) {
+    if (opts.luaChat && !opts.invocationState) {
+      messagesCache = opts.luaChat.messages;
+      firstMessage = opts.luaChat.firstMessage;
+      _msgsSrc = 'preloaded';
+    } else if (invocation.messagesCache) {
       messagesCache = invocation.messagesCache;
       firstMessage = invocation.firstMessage;
       _msgsSrc = 'preloaded';
@@ -417,7 +405,7 @@ export async function makeRisuTriggerRuntime(
   let cutChatFailure: { cause: unknown; previous: HostMessage[] } | undefined;
 
   function enqueueChatMutation(label: string, operation: () => Promise<void>): Promise<void> {
-    const next = chatMutationTail.then(operation);
+    const next = opts.luaChat?.enqueue ? opts.luaChat.enqueue(operation) : chatMutationTail.then(operation);
     chatMutationTail = next.catch((err) => {
       _logSetFullChat.warn(
         `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -454,7 +442,7 @@ export async function makeRisuTriggerRuntime(
 
   async function persistChatSend(entry: HostMessage): Promise<void> {
     try {
-      const result = await api.chat.sendMessage(entry.content, { role: entry.role });
+      const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, { role: entry.role, ...(opts.luaChat?.enqueue ? { messageId: entry.id } : {}) });
       const id = result && typeof result.id === 'string' ? result.id : '';
       if (id) (entry as { id: string }).id = id;
     } catch (err) {
@@ -465,7 +453,7 @@ export async function makeRisuTriggerRuntime(
   async function persistChatDelete(entry: HostMessage): Promise<void> {
     try {
       const id = await resolveHostMessageId(entry);
-      if (id) await api.chat.deleteMessage(id);
+      if (id) await (opts.luaChat?.persistence ?? api.chat).deleteMessage(id);
     } catch (err) {
       _logSetFullChat.warn(
         `delete msgId=${entry.id} threw: ${err instanceof Error ? err.message : String(err)}`,
@@ -480,7 +468,7 @@ export async function makeRisuTriggerRuntime(
       if (rememberOurWrite && portalChatId) {
         try { rememberOurWrite(portalChatId, id, next.content); } catch { /* */ }
       }
-      await api.chat.editMessage(id, next.content);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content);
     } catch (err) {
       _logSetFullChat.warn(
         `edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`,
@@ -745,6 +733,43 @@ export async function makeRisuTriggerRuntime(
     );
   }
 
+  let luaState: LuaHostState | undefined = preloaded?.luaState;
+  let parseLuaTemplate = opts.luaTemplate;
+  const identityWrites: Promise<void>[] = [];
+  async function prepareLua(): Promise<void> {
+    luaState ??= await prepareLuaHostState(api, characterId ?? data.characterId);
+    if (parseLuaTemplate) return;
+    const prepare = opts.templateContext ?? dispatchCtx.templateContext;
+    if (!prepare) return;
+    const input = await prepare();
+    parseLuaTemplate = createLuaTemplateParser(() => ({
+      ...input,
+      charName: luaState!.character?.name ?? input.charName,
+      userName: luaState!.persona?.name ?? input.userName,
+      personaText: luaState!.persona?.description ?? input.personaText ?? '',
+      character: { ...input.character, ...luaState!.character },
+      chat: { ...input.chat, messages: messagesCache.map(m => ({ ...m, createdAt: m.createdAt ?? 0, role: risuRoleToLumi(lumiRoleToRisu(m.role)) as 'user' | 'assistant' | 'system' })), messageCount: messagesCache.length,
+        lastMessage: messagesCache.at(-1)?.content ?? '', lastUserMessage: getLastUserMessage(''),
+        lastCharMessage: getLastCharMessage(luaState!.character?.firstMessage ?? '') },
+    }), (scope, name) => {
+      onVarRead?.(name, scope === 'global' ? 'global' : 'chat');
+      return opts.luaVariables ? opts.luaVariables.get(name, scope === 'global' ? 'global' : 'chat')
+        : scope === 'global' ? globalVarsCache[name] ?? 'null' : _vars.getStoredVar(name);
+    });
+  }
+  function luaCbs(value: unknown): string {
+    if (!parseLuaTemplate) return unsupported('lua.cbs', 'no synchronous evaluation context was prepared');
+    return parseLuaTemplate(value as string);
+  }
+  function updateLuaCharacter(patch: Partial<import('./host.js').HostCharacter>): void {
+    const character = luaState!.character;
+    if (!character) return unsupported('lua.character', 'no current character');
+    if (!luaState!.updateCharacter) return unsupported('lua.character', 'character state is read-only');
+    const pending = luaState!.updateCharacter(patch);
+    pending.catch(() => undefined);
+    identityWrites.push(pending);
+  }
+
   async function runLua(code: unknown, luaOpts?: Record<string, unknown>): Promise<unknown> {
     // RISU_COMPAT_VERBOSE=1 enables phase/globals logging.
     let verbose = false;
@@ -770,33 +795,75 @@ export async function makeRisuTriggerRuntime(
       manual: 'onButtonClick', request: 'onRequest',
     };
     const effective: Record<string, unknown> = { ...(luaOpts || {}) };
-    if (!effective['entry']) effective['entry'] = entryMap[binding] || binding || 'onRun';
-    if (!effective['args']) effective['args'] = [String(Math.random()).slice(2, 10)];
+    if (!effective['entry']) {
+      if (binding === 'manual' && typeof data.manualName === 'string') {
+        const mode = data.manualName;
+        effective['mode'] ??= mode;
+        effective['entry'] = ['input', 'output', 'start'].includes(mode) ? entryMap[mode] : mode;
+        if (['editInput', 'editOutput', 'editDisplay', 'editRequest'].includes(mode)) {
+          effective['entry'] = 'callListenMain';
+          effective['args'] ??= [mode, undefined, '""', '{}'];
+        } else if (mode === 'onButtonClick') effective['args'] ??= [undefined, ''];
+      } else effective['entry'] = entryMap[binding] || binding || 'onRun';
+    }
+    if (!effective['args']) effective['args'] = [];
+    effective['data'] ??= (effective['args'] as readonly unknown[])[1] ?? '';
     rverbose(`calling lua.execute entry=${String(effective['entry'])} args=${JSON.stringify(effective['args'])}`);
+    await prepareLua();
+    effective['mode'] = effective['mode'] ?? (effective['entry'] === 'callListenMain'
+      ? (effective['args'] as unknown[])[0]
+      : ['input', 'output', 'start'].includes(binding) ? binding : effective['entry']);
+    effective['scope'] = currentUserId() ?? '';
+    effective['enforceAccess'] = true;
+    effective['lowLevelAccess'] = lowLevelAccess;
+    effective['synchronizeState'] = luaState?.synchronize;
+    effective['signal'] = opts.luaSignal;
     const globals = makeRisuLuaGlobals();
     rverbose(`globals keys=${Object.keys(globals).length}: ${Object.keys(globals).slice(0, 20).join(',')}${Object.keys(globals).length > 20 ? '…' : ''}`);
     const wasmoonKey = typeof effective['wasmoonKey'] === 'string' ? effective['wasmoonKey'] as string : null;
     try {
-      const result = (wasmoonKey && _wasmoonExec && _wasmoonEnabled)
-        ? await _wasmoonExec(codeStr, globals, { entry: String(effective['entry']), args: effective['args'] as readonly unknown[], wasmoonKey })
+      let result = (wasmoonKey && _wasmoonExec && _wasmoonEnabled)
+        ? await _wasmoonExec(codeStr, globals, { ...effective as ExecuteOpts, wasmoonKey })
         : await lua.execute(codeStr, globals, effective);
+      if (effective['entry'] === 'callListenMain') {
+        try { result = JSON.parse(result as string); }
+        catch (err) {
+          // runScripted retains the raw return when its JSON.parse assignment fails.
+          rerr(`Lua edit result is not JSON: ${String(err)}`);
+          return result;
+        }
+      }
       const preview = result === undefined ? 'undefined' : String(JSON.stringify(result) ?? '').slice(0, 200);
       rlog(`DONE elapsed=${Date.now() - tStart}ms result_type=${typeof result} result_preview=${preview}`);
       if (result === false) invocation.stopSending = true;
       return result;
     } catch (err) {
       rerr(`THREW after ${Date.now() - tStart}ms: ${(err as Error).message}`);
-      throw err;
+      if (!(err instanceof LuaCallbackError)) {
+        // Risu keeps writes made before a chunk aborts, even when no callback ran.
+        await flush();
+        throw err;
+      }
+      return undefined;
     } finally {
-      opts.luaVariables?.flush();
+      await opts.luaVariables?.flush();
     }
   }
 
   function makeRisuLuaGlobals(): Record<string, unknown> {
+    function readMessages(): HostMessage[] { opts.onMessageRead?.(); return messagesCache; }
     function luaReject(name: string, reason: string): () => Promise<never> {
       return function () {
         return Promise.reject(new Error('risu-compat: lua.' + name + ' unavailable: ' + reason));
       };
+    }
+    function writeVariable(key: unknown, value: unknown): true | undefined {
+      const name = toStr(key);
+      const text = toStr(value);
+      if (opts.luaVariables) return opts.luaVariables.set(name, text) === true ? true : undefined;
+      if (varsCache['$' + name] === text) return;
+      setVar(name, text);
+      return true;
     }
     return {
       getChatVar: (_id: unknown, key: unknown) => {
@@ -805,9 +872,8 @@ export async function makeRisuTriggerRuntime(
         onVarRead?.(k, 'chat');
         return opts.luaVariables.get(k, 'chat');
       },
-      setChatVar: (_id: unknown, key: unknown, value: unknown) => opts.luaVariables
-        ? opts.luaVariables.set(toStr(key), toStr(value))
-        : setVar(toStr(key), toStr(value)),
+      setChatVar: (_id: unknown, key: unknown, value: unknown) => { writeVariable(key, value); },
+      setChatVarChanged: (_id: unknown, key: unknown, value: unknown) => writeVariable(key, value),
       getGlobalVar: (_id: unknown, key: unknown) => {
         const k = toStr(key);
         onVarRead?.(k, 'global');
@@ -849,15 +915,13 @@ export async function makeRisuTriggerRuntime(
         return api.ui.confirm(toStr(value), '');
       },
       getChatMain: (_id: unknown, index: unknown) => {
-        const n = Number(index);
-        const real = n >= 0 ? n : messagesCache.length + n;
-        const m = messagesCache[real];
+        const m = readMessages().at(Number(index));
         // Risu chat.message[i].role is 'user' | 'char' (scriptings.ts:154-165,182).
         // Cards branch on `msg.role == "char"`; surface Lumi roles in Risu shape.
-        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }) : JSON.stringify(null);
+        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }) : JSON.stringify(null);
       },
       setChat: (_id: unknown, index: unknown, value: unknown) => {
-        const n = Number(index);
+        const n = Math.trunc(Number(index)) || 0;
         const real = n >= 0 ? n : messagesCache.length + n;
         if (!messagesCache[real]) {
           // Risu silently no-ops on out-of-range; log for diagnosis (off-by-one callers).
@@ -911,7 +975,8 @@ export async function makeRisuTriggerRuntime(
         enqueueChatMutation('setChat', () => persistChatEdit(oldEntry, newEntry));
       },
       setChatRole: (_id: unknown, index: unknown, value: unknown) => {
-        const n = Number(index);
+        const rawIndex = Math.trunc(Number(index)) || 0;
+        const n = rawIndex < 0 ? messagesCache.length + Math.trunc(rawIndex) : Math.trunc(rawIndex);
         if (!messagesCache[n]) return;
         const desired = messagesCache.map((message) => ({
           role: lumiRoleToRisu(message.role),
@@ -944,17 +1009,8 @@ export async function makeRisuTriggerRuntime(
         });
       },
       removeChat: (_id: unknown, index: unknown) => {
-        const n = Number(index);
-        if (!Number.isFinite(n)) return;
-        // Mirror Risu's `chat.message.splice(index, 1)` JS clamping exactly so
-        // positive/negative/out-of-range indices remove the same element. `start`
-        // also locates the Lumi row ('' id while the send is still pending).
-        const len = messagesCache.length;
-        const start = n < 0 ? Math.max(len + n, 0) : Math.min(n, len);
-        if (start >= len) return;
-        const m = messagesCache[start];
+        const [m] = messagesCache.splice(Number(index), 1);
         if (m) enqueueChatMutation('removeChat', () => persistChatDelete(m));
-        messagesCache.splice(start, 1);
       },
       addChat: (_id: unknown, role: unknown, value: unknown) => {
         const raw = toStr(value);
@@ -980,37 +1036,15 @@ export async function makeRisuTriggerRuntime(
         });
         reconcileFullChat(JSON.stringify(desired));
       },
-      getChatLength: (_id: unknown) => messagesCache.length,
-      getFullChatMain: (_id: unknown) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
+      getChatData: (_id: unknown, index: number) => readMessages().at(index)?.content ?? '',
+      getChatRole: (_id: unknown, index: number) => { const message = readMessages().at(index); return message ? lumiRoleToRisu(message.role) : ''; },
+      getRecentChatsMain: (_id: unknown, count: number) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map(m => ({ role: lumiRoleToRisu(m.role), data: m.content, time: m.createdAt ?? 0 }))),
+      getChatLength: (_id: unknown) => readMessages().length,
+      getFullChatMain: (_id: unknown) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }))),
       setFullChatMain: (_id: unknown, value: unknown) => { reconcileFullChat(value); },
-      sleep: (_id: unknown, ms: unknown) => new Promise<void>((r) => setTimeout(r, Math.max(0, Number(ms) || 0))),
-      // Risu parity: user-facing `cbs` is sync. The lua-bridge prelude wraps `cbsMain():await()` so cards calling `cbs("...")` get a string.
-      cbsMain: async (value: unknown): Promise<string> => {
-        const text = toStr(value);
-        // Closure-captured resolver. Late-reading the dispatch context here
-        // would route cbs() through whichever user's setDispatchContext won
-        // the race, leaking their data into this runtime's Lua.
-        const resolver = capturedResolveTemplate;
-        if (resolver) {
-          try {
-            return await resolver(text);
-          } catch (err) {
-            _logCbs.warn(`cbs resolver threw — returning input verbatim: ${err instanceof Error ? err.message : String(err)}`);
-            return text;
-          }
-        }
-        if (api.utils?.template?.render) {
-          try {
-            return await api.utils.template.render(text, {});
-          } catch (err) {
-            _logCbs.warn(`cbs api.utils.template.render threw — returning input verbatim: ${err instanceof Error ? err.message : String(err)}`);
-            return text;
-          }
-        }
-        warnCbsUnresolvedOnce(api);
-        return text;
-      },
-      logMain: (value: unknown) => { try { _logLuaPrint.debug(toStr(value)); } catch { /* */ } },
+      sleep: (_id: unknown, ms: number) => new Promise<boolean>(resolve => setTimeout(() => resolve(true), ms)),
+      cbs: luaCbs,
+      logMain: (value: string) => { _logLuaPrint.debug(JSON.parse(value)); },
       // reloadDisplay forces refresh from async/callback paths.
       reloadDisplay: (_id: unknown) => {
         notifyStateChanged('reloadDisplay');
@@ -1018,52 +1052,40 @@ export async function makeRisuTriggerRuntime(
       reloadChat: (_id: unknown, _index: unknown) => {
         notifyStateChanged('reloadChat');
       },
-      getNameMain: async (_id: unknown) => {
-        const cid = characterId || (data as { characterId?: string }).characterId;
-        if (!cid) return '';
-        try {
-          return toStr((await api.characters.get(cid)).name);
-        } catch {
-          return toStr((data as { characterName?: unknown }).characterName || '');
-        }
+      getName: (_id: unknown) => luaState!.character?.name,
+      setName: (_id: unknown, name: unknown) => {
+        if (typeof name !== 'string') throw new Error('Invalid data type');
+        updateLuaCharacter({ name });
       },
-      setNameMain: async (_id: unknown, name: unknown) => {
-        const cid = characterId || (data as { characterId?: string }).characterId;
-        if (cid) await api.characters.update(cid, { name: toStr(name) });
+      getDescription: (_id: unknown) => luaState!.character?.description,
+      setDescription: (_id: unknown, description: string) => { updateLuaCharacter({ description }); },
+      getCharacterFirstMessage: (_id: unknown) => luaState!.character?.firstMessage,
+      setCharacterFirstMessage: (_id: unknown, firstMessage: unknown) => {
+        if (typeof firstMessage !== 'string') return false;
+        updateLuaCharacter({ firstMessage });
+        return true;
       },
-      getDescriptionMain: (_id: unknown) => _charNote.getCharacterDesc(),
-      setDescriptionMain: (_id: unknown, desc: unknown) => _charNote.setCharacterDesc(desc),
-      getCharacterFirstMessageMain: async (_id: unknown) => {
-        const cid = characterId || (data as { characterId?: string }).characterId;
-        if (!cid) return toStr(firstMessage ?? '');
-        try {
-          return toStr((await api.characters.get(cid)).firstMessage);
-        } catch {
-          return toStr(firstMessage ?? '');
-        }
+      getPersonaName: (_id: unknown) => luaState!.persona?.name ?? data.userName ?? 'user',
+      getPersonaDescription: (_id: unknown) => luaCbs(luaState!.persona?.description ?? ''),
+      getAuthorsNote: (_id: unknown) => {
+        if (luaState!.authorsNote) return luaState!.authorsNote;
+        onVarRead?.('__risu_author_note__', 'chat');
+        return varsCache['$__risu_author_note__'] ?? '';
       },
-      setCharacterFirstMessageMain: async (_id: unknown, value: unknown) => {
-        const cid = characterId || (data as { characterId?: string }).characterId;
-        if (cid) await api.characters.update(cid, { firstMessage: toStr(value) });
+      getBackgroundEmbedding: (_id: unknown) => {
+        if (!luaState!.character || !('backgroundHTML' in luaState!.character)) return unsupported('lua.getBackgroundEmbedding', 'host character state does not expose background HTML');
+        return luaState!.character.backgroundHTML;
       },
-      getPersonaName: (_id: unknown) => toStr((data as { userName?: unknown }).userName || 'user'),
-      getPersonaDescriptionMain: async (_id: unknown) => {
-        const description = await _charNote.getPersonaDesc();
-        const resolver = capturedResolveTemplate;
-        if (!resolver) return description;
-        try {
-          return await resolver(description);
-        } catch {
-          return description;
-        }
+      setBackgroundEmbedding: (_id: unknown, backgroundHTML: unknown) => {
+        if (typeof backgroundHTML !== 'string') return false;
+        if (!luaState!.character || !('backgroundHTML' in luaState!.character)) return unsupported('lua.setBackgroundEmbedding', 'host character state does not expose background HTML');
+        updateLuaCharacter({ backgroundHTML });
+        return true;
       },
-      getAuthorsNoteMain: (_id: unknown) => _charNote.getAuthorNote(),
-      getBackgroundEmbedding: (_id: unknown) => '',
-      setBackgroundEmbedding: (_id: unknown, _data: unknown) => { /* */ },
       // Risu scriptings.ts getCharacterLastMessage falls back to char.firstMessage
       // (the greeting) when chat.message[] has no char-role message.
-      getCharacterLastMessage: (_id: unknown) => getLastCharMessage(toStr(firstMessage ?? '')),
-      getUserLastMessage: (_id: unknown) => getLastUserMessage(''),
+      getCharacterLastMessage: (_id: unknown) => { readMessages(); return getLastCharMessage(luaState!.character?.firstMessage ?? ''); },
+      getUserLastMessage: (_id: unknown) => { readMessages(); return getLastUserMessage(''); },
       // Returns {success,result} JSON. Gated on lowLevelAccess.
       LLMMain: async (_id: unknown, promptStr: unknown, _useMulti: unknown, _optionsStr: unknown): Promise<string> => {
         if (!lowLevelAccess) {
@@ -1294,6 +1316,10 @@ export async function makeRisuTriggerRuntime(
     }
     dirty.value = false;
     await drainChatMutations();
+    const writes = await Promise.allSettled(identityWrites.splice(0));
+    const errors = writes.filter(result => result.status === 'rejected').map(result => result.reason);
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'Lua identity persistence failed');
     flog(`DONE`);
     return wasDirty;
   }

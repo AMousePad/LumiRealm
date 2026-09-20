@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { HostApi } from '../../../src/interpreter/host.js';
 import { makeRisuTriggerRuntime } from '../../../src/interpreter/runtime.js';
 import { makeDispatcherScriptNS } from '../../../src/interpreter/dispatcher.js';
+import { execute } from '../../../src/interpreter/lua-bridge.js';
 import { loadGlobalVars } from '../../../src/interpreter/runtime/chat-state.js';
 import { getRecentFlush, invalidateRecentFlush } from '../../../src/state/recent-flush-cache.js';
 
@@ -13,7 +14,7 @@ test('failed saves preserve pending variables and do not publish a successful ca
     if (fail) throw new Error('Storage unavailable');
     saved = value;
   } } } as unknown as HostApi;
-  const rt = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(), {
+  const rt = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(execute), {
     chatId, preloaded: { varsCache: { $count: '1' }, globalVars: {}, messagesRaw: [], lorebook: { entries: [], primaryBookId: null } },
   });
   try {

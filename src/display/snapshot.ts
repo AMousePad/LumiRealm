@@ -39,6 +39,7 @@ export interface DisplayChatAuthorsNote {
 }
 
 export interface DisplaySnapshot {
+  readonly configVersion?: number;
   readonly chatId: string;
   readonly characterId: string;
   readonly userName: string;
@@ -139,6 +140,13 @@ export function diffSnapshotVars(prev: DisplaySnapshot, next: DisplaySnapshot): 
     }
   }
   return changed;
+}
+
+export function snapshotMessagesChanged(prev: DisplaySnapshot, next: DisplaySnapshot): boolean {
+  return prev.messagesHost.length !== next.messagesHost.length || prev.messagesHost.some((message, index) => {
+    const other = next.messagesHost[index]!;
+    return message.content !== other.content || message.role !== other.role || message.createdAt !== other.createdAt;
+  });
 }
 
 export function isDisplayResolutionReady(chatId: string): boolean {

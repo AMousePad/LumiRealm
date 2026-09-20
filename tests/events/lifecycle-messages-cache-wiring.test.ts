@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createLifecycleEventHandlers, type LifecycleEventHandlerDeps } from "../../src/events/lifecycle.js";
+import { prepareLuaHostState } from "../../src/interpreter/runtime/lua-state.js";
+import { makeSpindleHost } from "../../src/interpreter/spindle-host.js";
 
 interface CallLog {
   refresh: string[];
@@ -78,6 +80,32 @@ beforeEach(() => {
 async function settle() {
   await new Promise((r) => setTimeout(r, 0));
 }
+
+test('identity invalidation reaches the real host adapter before own-write filtering', async () => {
+  const previous = (globalThis as any).spindle;
+  let name = 'Initial';
+  let persona = 'First persona';
+  (globalThis as any).spindle = {
+    characters: { get: async () => ({ id: 'identity-character', name, description: '', first_mes: '' }) },
+    personas: { getActive: async () => ({ id: 'persona', name: persona }) },
+    chats: { get: async () => ({ metadata: {} }) },
+    generate: { raw: async () => { throw Error('Unexpected generation'); } },
+  };
+  try {
+    const host = makeSpindleHost({ userId: 'identity-user', chatId: 'identity-chat', characterId: 'identity-character' });
+    const state = await prepareLuaHostState(host, 'identity-character');
+    expect(state.character?.name).toBe('Initial');
+    name = 'Current';
+    const handlers = createLifecycleEventHandlers({ ...makeDeps(log), consumeOwnCharacterEdit: () => true });
+    await handlers.CHARACTER_EDITED({ id: 'identity-character', character: { name: 'Older payload' } }, 'identity-user');
+    await state.synchronize!();
+    expect(state.character?.name).toBe('Current');
+    persona = 'Selected persona';
+    await handlers.SETTINGS_UPDATED({ keys: ['activePersonaId'] }, 'identity-user');
+    await state.synchronize!();
+    expect(state.persona?.name).toBe('Selected persona');
+  } finally { (globalThis as any).spindle = previous; }
+});
 
 describe("lifecycle — messages-cache wiring", () => {
   test("MESSAGE_SENT triggers refreshMessagesCache(chatId)", async () => {

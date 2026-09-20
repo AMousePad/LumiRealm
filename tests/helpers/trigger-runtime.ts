@@ -2,8 +2,13 @@ import type { HostApi, TriggerRuntimeOpts } from '../../src/interpreter/host.js'
 import type { TriggerEffect, TriggerScript } from '../../src/core/schemas/triggerscript.js';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
 import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
+import { execute } from '../../src/interpreter/lua-bridge.js';
 import { interpretTrigger } from '../../src/interpreter/trigger-interpreter.js';
 import { compileTrigger } from '../../src/core/triggers/compile.js';
+
+export async function runLuaCallback(runtime: Awaited<ReturnType<typeof makeRisuTriggerRuntime>>, body: string) {
+  return runtime.runLua(`onRun = async(function(id)\n${body}\nend)`, { entry: 'onRun' });
+}
 
 export async function runTriggerEffects(
   effects: readonly TriggerEffect[],
@@ -27,7 +32,7 @@ export async function runTriggerEffects(
     },
     characters: { get: async () => ({ id: 'test-character' }), update: unexpected },
   };
-  const runtime = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(), {
+  const runtime = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(execute), {
     templateContext: basicTriggerContext,
     ...opts,
   });

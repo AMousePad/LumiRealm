@@ -6,6 +6,9 @@ import { makeRisuTriggerRuntime } from "./runtime.js";
 import { errMsg } from "../util/coerce.js";
 import { makeSafeLogger } from "../util/safe-log.js";
 import { preloadForListenEditChain } from "./listenedit-preload.js";
+import { LuaChunkError } from './lua-engine.js';
+import { commitInvocation, type TriggerInvocationState } from './runtime/invocation.js';
+import { prepareLuaHostState } from './runtime/lua-state.js';
 
 const log = makeSafeLogger("listenEdit.runChain");
 
@@ -21,13 +24,18 @@ export interface ListenEditTrigger {
 }
 
 export interface ListenEditOpts {
+  readonly luaSignal?: AbortSignal;
   readonly chatId?: string;
   readonly characterId?: string;
   readonly resolveTemplate?: (text: string) => Promise<string>;
+  readonly luaTemplate?: TriggerRuntimeOpts['luaTemplate'];
+  readonly templateContext?: TriggerRuntimeOpts['templateContext'];
   readonly preloaded?: TriggerRuntimePreloaded;
   readonly wasmoonKey?: string;
   readonly onVarRead?: (name: string, scope: 'chat' | 'global') => void;
+  readonly onMessageRead?: () => void;
   readonly luaVariables?: TriggerRuntimeOpts['luaVariables'];
+  readonly luaChat?: TriggerRuntimeOpts['luaChat'];
 }
 
 export async function runListenEditChain<T>(
@@ -43,7 +51,7 @@ export async function runListenEditChain<T>(
   // Risu scriptings.ts: skip non-triggerlua effect kinds.
   const eligible = triggers.filter((t) => {
     const luaTrigger = t.source.effect?.[0]?.type === "triggerlua";
-    return luaTrigger && t.luaCode.length > 0;
+    return luaTrigger;
   });
   if (eligible.length === 0) return value;
 
@@ -67,15 +75,15 @@ export async function runListenEditChain<T>(
   // Reuse preloaded context across the chain; frontend Lua variables use
   // the caller's live accessors instead of that snapshot.
   const tPreload = Date.now();
-  const preloaded = opts.preloaded ?? await preloadForListenEditChain(
+  const snapshot = opts.preloaded ?? await preloadForListenEditChain(
     api,
     opts.chatId,
     opts.characterId ?? null,
   );
+  const preloaded = { ...snapshot, luaState: snapshot.luaState ?? await prepareLuaHostState(api, opts.characterId) };
+  const templateInput = opts.templateContext ? await opts.templateContext() : undefined;
+  const invocationState: TriggerInvocationState = { stopSending: false };
   const preloadMs = Date.now() - tPreload;
-
-  // Risu scriptings.ts uses a generator; character id is stable enough.
-  const accessKey = opts.characterId ?? "edit-trigger";
 
   let current = value;
   // Per-step timing buckets so the post-chain summary attributes wall clock
@@ -101,10 +109,15 @@ export async function runListenEditChain<T>(
           ...(opts.characterId !== undefined ? { characterId: opts.characterId } : {}),
           ...(opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {}),
           ...(opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {}),
+          ...(opts.onMessageRead ? { onMessageRead: opts.onMessageRead } : {}),
           ...(opts.luaVariables !== undefined ? { luaVariables: opts.luaVariables } : {}),
           // Hand the per-chain snapshot to the runtime so it skips its own
           // repeated state fetches (local/global vars, messages, character/lorebook).
           preloaded,
+          ...(opts.luaChat ? { luaChat: opts.luaChat } : { invocationState }),
+          ...(opts.luaSignal ? { luaSignal: opts.luaSignal } : {}),
+          ...(templateInput ? { templateContext: async () => templateInput } : {}),
+          ...(opts.luaTemplate ? { luaTemplate: opts.luaTemplate } : {}),
         },
       );
       const factoryMs = Date.now() - tFactoryStart;
@@ -115,36 +128,21 @@ export async function runListenEditChain<T>(
       const serdeMs = Date.now() - tSerdeStart;
       totalSerdeMs += serdeMs;
       const tRunLuaStart = Date.now();
-      const result = await runtime.runLua(t.luaCode, {
-        entry: "callListenMain",
-        args: [mode, accessKey, valueJson, metaJson],
-        ...(opts.wasmoonKey !== undefined ? { wasmoonKey: opts.wasmoonKey } : {}),
-      });
+      let result: unknown;
+      try {
+        result = await runtime.runLua(t.luaCode, {
+          entry: "callListenMain",
+          args: [mode, undefined, valueJson, metaJson],
+          data: current,
+          ...(opts.wasmoonKey !== undefined ? { wasmoonKey: opts.wasmoonKey } : {}),
+        });
+      } finally {
+        await runtime.flush();
+        if (!opts.luaChat) await commitInvocation(invocationState, opts.chatId);
+      }
       const runLuaMs = Date.now() - tRunLuaStart;
       totalRunLuaMs += runLuaMs;
-      try {
-        await runtime.flush();
-      } catch (err) {
-        log.warn(
-          `trigger[${i}] mode=${mode} flush failed — ${errMsg(err)}; continuing chain`,
-        );
-      }
-      if (typeof result === "string") {
-        try {
-          const parsed = JSON.parse(result) as T;
-          current = parsed;
-        } catch (err) {
-          log.warn(
-            `trigger[${i}] returned non-JSON, keeping prior value — ${errMsg(err)}`,
-          );
-        }
-      } else if (result === undefined) {
-        // No callListenMain defined; skip silently.
-      } else {
-        log.warn(
-          `trigger[${i}] returned unexpected type=${typeof result}; keeping prior value`,
-        );
-      }
+      current = (result ?? current) as T;
       const triggerTotal = Date.now() - tStart;
       // Per-trigger breakdown , when triggerTotal >> (factory+serde+runLua),
       // the gap is JS event loop time spent on concurrently queued Spindle
@@ -158,10 +156,9 @@ export async function runListenEditChain<T>(
           `other=${otherMs}ms (lua_len=${t.luaCode.length})`,
       );
     } catch (err) {
-      // Risu scriptings.ts: on throw, keep prior value and continue.
-      log.warn(
-        `trigger[${i}] mode=${mode} elapsed=${Date.now() - tStart}ms THREW — ${errMsg(err)}; keeping prior value`,
-      );
+      if (!(err instanceof LuaChunkError)) throw err;
+      log.error(`trigger[${i}] mode=${mode} chunk failed: ${errMsg(err)}; restoring original input`);
+      return value;
     }
   }
 

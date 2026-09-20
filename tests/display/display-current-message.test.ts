@@ -207,7 +207,7 @@ describe('frontend display current-message view', () => {
           role: 'assistant',
           dynamicMacros: { chat_index: '24' },
         },
-        async (value) => value,
+        (value) => value,
         () => {},
       );
 
@@ -252,7 +252,7 @@ describe('frontend display current-message view', () => {
           messageIndex: 2,
           role: 'assistant',
         },
-        async (value) => value,
+        (value) => value,
         () => {},
       );
       expect(rendered).toBe(`${raw}|Character inventory`);
@@ -309,7 +309,7 @@ describe('frontend display current-message view', () => {
           messageId: 'latest',
           role: 'assistant',
         },
-        async (value) => value,
+        (value) => value,
         () => {},
       );
 
@@ -355,7 +355,7 @@ describe('frontend display current-message view', () => {
         messageId: 'latest',
         role: 'assistant',
       },
-      async (value) => value,
+      (value) => value,
       () => {},
     );
 
@@ -392,7 +392,7 @@ describe('frontend display current-message view', () => {
       snap,
       value,
       { ...context, characterId: snap.characterId },
-      async (template) => template,
+      (template) => template,
       () => {},
     );
 

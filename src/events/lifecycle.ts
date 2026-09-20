@@ -4,6 +4,7 @@ import type { RisuBinding } from '../interpreter/runtime.js';
 import type { OrphanDetectDeps } from '../state/orphan-detect.js';
 import type { JournalStorage, ImageJournalFile } from '../state/image-journal.js';
 import { invalidateRecentFlush } from '../state/recent-flush-cache.js';
+import { backendLuaStateScope, observeLuaHostState } from '../interpreter/runtime/lua-state.js';
 
 type EventHandler = (raw: unknown, userId: string | undefined) => Promise<void>;
 
@@ -69,6 +70,7 @@ export interface LifecycleEventHandlerDeps {
     chatId: string,
     binding: RisuBinding,
     userId: string | undefined,
+    frontendSessionId?: string,
   ) => Promise<{ stopSending: boolean }>;
   // Risu runVar pass: strip + persist message-text setvar (see message-var-pass.ts).
   readonly runMessageVarPass: (chatId: string, characterId: string, userId: string) => Promise<void>;
@@ -313,6 +315,7 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
   }
 
   function onPersonaChanged(userId: string | undefined, source: string): void {
+    observeLuaHostState(backendLuaStateScope(userId), 'PERSONA_CHANGED', {});
     deps.captureUserId(userId, source);
     if (userId === undefined) return;
     const existing = personaChangedTimers.get(userId);
@@ -409,6 +412,7 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
     },
 
     CHAT_CHANGED: async (raw, userId) => {
+      observeLuaHostState(backendLuaStateScope(userId), 'CHAT_CHANGED', raw);
       deps.captureUserId(userId, 'CHAT_CHANGED');
       const { chatId, characterId } = deps.extractIds(raw);
       if (!chatId) { deps.log.warn('CHAT_CHANGED: missing chatId , aborting'); return; }
@@ -476,7 +480,7 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       const active = await deps.ensureActiveCardForChat(chatId, characterId, userId);
       if (!active) return;
       for (const binding of deps.generationEndedBindings) {
-        await deps.runBinding(active, chatId, binding, userId);
+        await deps.runBinding(active, chatId, binding, userId, (raw as { frontendSessionId?: string }).frontendSessionId);
       }
       // Risu runCurrentChatFunction post-output, catches the new AI message.
       if (userId !== undefined) await deps.runMessageVarPass(chatId, active.card.character_id, userId);
@@ -560,6 +564,7 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
     },
 
     CHAT_DELETED: async (raw, userId) => {
+      observeLuaHostState(backendLuaStateScope(userId), 'CHAT_DELETED', raw);
       deps.captureUserId(userId, 'CHAT_DELETED');
       const p = raw as { id?: string; chatId?: string };
       const chatId = p.chatId ?? p.id ?? null;
@@ -583,6 +588,7 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
     },
 
     CHARACTER_DELETED: async (raw, uid) => {
+      observeLuaHostState(backendLuaStateScope(uid), 'CHARACTER_DELETED', raw);
       deps.captureUserId(uid, 'CHARACTER_DELETED');
       const characterId =
         (raw as { id?: string }).id
@@ -705,6 +711,7 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
     },
 
     CHARACTER_EDITED: async (raw, userId) => {
+      observeLuaHostState(backendLuaStateScope(userId), 'CHARACTER_EDITED', raw);
       deps.captureUserId(userId, 'CHARACTER_EDITED');
       const characterId =
         (raw as { id?: string }).id

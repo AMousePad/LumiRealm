@@ -132,6 +132,7 @@ import { isLogTransportNoise } from './log/transport.js';
 import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
 import { createTriggerDispatcher } from './state/trigger-dispatch.js';
+import { createFrontendLuaBackend, type FrontendLuaHostContract } from './frontend-lua/backend.js';
 import { createRepairOrchestrator } from './state/repair-orchestrator.js';
 import { retranslateCharacterFromCurrentSource } from './state/character-retranslate.js';
 import { installCurrentCharacterRegexScripts } from './state/character-regex-install.js';
@@ -218,12 +219,12 @@ function logUid(): string | null {
 // ALS frame. System events without a userId run unwrapped (currentUserId
 // stays null, so log entries get tagged null = system).
 function userScoped(
-  handler: (raw: unknown, userId: string | undefined) => Promise<void>,
-): (raw: unknown, userId: string | undefined) => Promise<void> {
-  return (raw, userId) =>
+  handler: (raw: unknown, userId: string | undefined, frontendSessionId?: string) => Promise<void>,
+): (raw: unknown, userId: string | undefined, frontendSessionId?: string) => Promise<void> {
+  return (raw, userId, frontendSessionId) =>
     userId
-      ? userIdAls.run(userId, () => handler(raw, userId))
-      : handler(raw, userId);
+      ? userIdAls.run(userId, () => handler(raw, userId, frontendSessionId))
+      : handler(raw, userId, frontendSessionId);
 }
 
 const log = {
@@ -975,6 +976,22 @@ const applySvgRasterIndex = createApplySvgRasterIndex({
 
 const TRANSLATE_TARGET_LANG = 'en';
 
+let runtimeConfigVersion = 0;
+async function assembleRuntimeSnapshot(active: ActiveCard, chatId: string, userId: string, vars: import('./display/snapshot.js').DisplaySnapshot['vars']) {
+  const configVersion = ++runtimeConfigVersion;
+  const snapshot = await assembleDisplaySnapshot({
+    modulesByNamespaceFromCard,
+    legacyMediaFindings: uid => getCachedSettingsSync(uid).legacyMediaFindings,
+    getCompiledLibraries: active => {
+      const id = active.card.character_id;
+      let compiled = compiledByCharacter.get(id);
+      if (!compiled) { compiled = prepareTriggers(active.card.risuPayload, id); compiledByCharacter.set(id, compiled); }
+      return compiled.filter(entry => entry.type === 'library');
+    },
+  }, active, chatId, userId, vars);
+  return { ...snapshot, configVersion };
+}
+
 const variablesTogglesService = createVariablesTogglesService({
   translateLang: TRANSLATE_TARGET_LANG,
   variableState,
@@ -986,29 +1003,7 @@ const variablesTogglesService = createVariablesTogglesService({
   send,
   pushDisplaySnapshot: (active, chatId, userId, vars, opts) => {
     if (!FE_DISPLAY_ENABLED) return;
-    void assembleDisplaySnapshot(
-      {
-        modulesByNamespaceFromCard,
-        legacyMediaFindings: (uid) => getCachedSettingsSync(uid).legacyMediaFindings,
-        getCompiledLibraries: (a) => {
-          const cid = a.card.character_id;
-          let compiled = compiledByCharacter.get(cid);
-          if (!compiled) {
-            try {
-              compiled = prepareTriggers(a.card.risuPayload, cid);
-              compiledByCharacter.set(cid, compiled);
-            } catch {
-              compiled = [];
-            }
-          }
-          return compiled.filter((e) => e.type === 'library');
-        },
-      },
-      active,
-      chatId,
-      userId,
-      vars,
-    )
+    void assembleRuntimeSnapshot(active, chatId, userId, vars)
       .then((snapshot) => {
         send({
           type: 'display_snapshot',
@@ -1026,19 +1021,22 @@ const writeLocalVariable = variablesTogglesService.writeLocalVariable;
 const refreshToggleDefinitions = variablesTogglesService.refreshToggleDefinitions;
 const writeToggleValue = variablesTogglesService.writeToggleValue;
 
+const frontendLua = createFrontendLuaBackend(spindle as typeof spindle & FrontendLuaHostContract, async (chatId, characterId, userId) => {
+  const active = await ensureActiveCardForChat(chatId, characterId, userId);
+  if (!active) throw new Error('The chat has no active Risu runtime');
+  const snapshot = await assembleRuntimeSnapshot(active, chatId, userId, { local: {}, global: {}, chat: {} });
+  return { snapshot, settings: getCachedSettingsSync(userId) };
+});
+spindle.on('FRONTEND_SESSION_CLOSED', userScoped(async (raw, userId) => {
+  const sessionId = (raw as { frontendSessionId?: string })?.frontendSessionId;
+  if (userId && sessionId) frontendLua.disconnect(userId, sessionId);
+}));
+
 const triggerDispatcher = createTriggerDispatcher({
-  prepareTriggerContext: readonlyResolver.prepareTriggerContext,
-  compiledByCharacter,
-  getCachedSettingsSync,
-  makeStateChangedCallback,
-  makeAuxDebugCapture,
-  resolveReadonly,
+  execute: frontendLua.call,
   ensureActiveCardForChat,
   refreshBgHtml,
   refreshVariables,
-  toastFor,
-  log,
-  errMsg,
 });
 const runBinding = triggerDispatcher.runBinding;
 const dispatchManualTrigger = triggerDispatcher.dispatchManualTrigger;
@@ -1047,6 +1045,7 @@ const dispatchButtonClick = triggerDispatcher.dispatchButtonClick;
 const feDisplayShadowOptOut = new Set<string>();
 
 createLumiInterceptors({
+  executeFrontend: frontendLua.call,
   prepareTriggerContext: readonlyResolver.prepareTriggerContext,
   activeCardByChat,
   captureUserId,
@@ -1923,7 +1922,7 @@ const handlerRegistry: HandlerRegistry = {
   },
 };
 
-spindle.onFrontendMessage(userScoped(async (raw, userId) => {
+spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {
   captureUserId(userId, 'frontend-message');
   markFrontendReady(userId);
   const msg = raw as FrontendToBackend;
@@ -1937,7 +1936,8 @@ spindle.onFrontendMessage(userScoped(async (raw, userId) => {
     log.warn(`frontend msg type=${msg.type} dropped: no userId`);
     return;
   }
-  const ctx: HandlerCallCtx = { userId, send, log, errMsg };
+  if (await frontendLua.receive(raw, userId, frontendSessionId)) return;
+  const ctx: HandlerCallCtx = { userId, send, log, errMsg, ...(frontendSessionId ? { frontendSessionId } : {}) };
   try {
     if (isRealmFrontendMessage(msg)) {
       await realmHandle.handle(msg, userId);

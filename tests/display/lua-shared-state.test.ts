@@ -70,7 +70,7 @@ test('Lua CBS and the post-hook parser see the live variable value', async () =>
   expect(result?.content).toBe('changed|changed');
 });
 
-test('a yielded hook observes newer values and never writes unrelated snapshot fields back', async () => {
+test('a hook observes newer values and never writes unrelated snapshot fields back', async () => {
   const snap = snapshot(`listenEdit('editDisplay', function(id, text)
     setChatVar(id, 'state', 'first')
     cbs('pause')
@@ -80,7 +80,7 @@ test('a yielded hook observes newer values and never writes unrelated snapshot f
   end)`);
   setDisplaySnapshot(snap);
   const writes: Record<string, string>[] = [];
-  const result = await runEditDisplayChain(snap, 'input', context(), async () => {
+  const result = await runEditDisplayChain(snap, 'input', context(), () => {
     expect(local().state).toBe('first');
     applyVarDelta(snap.chatId, 'local', { state: 'external', untouched: 'newer' });
     applyVarDelta(snap.chatId, 'global', { theme: 'light' });
@@ -119,6 +119,32 @@ test('concurrent chats keep separate live variables', async () => {
   expect(local('other-display').state).toBe('other-display');
 });
 
+test('identity getters read the latest same-character frontend snapshot without host calls', async () => {
+  const snap = snapshot(`listenEdit('editDisplay', function(id, text)
+    cbs('replace snapshot')
+    return getName(id)..'|'..getPersonaName(id)..'|'..getPersonaDescription(id)..'|'..getAuthorsNote(id)
+  end)`);
+  setDisplaySnapshot(snap);
+  const result = await runEditDisplayChain(snap, 'input', context(), text => {
+    if (text === 'replace snapshot') {
+      setDisplaySnapshot({ ...snap, charName: 'Renamed', userName: 'New user', personaText: 'New persona',
+        chatAuthorsNote: { content: 'New note', depth: 4, role: 'system', position: 0 } });
+    }
+    return text;
+  }, () => {});
+  expect(result).toBe('Renamed|New user|New persona|New note');
+});
+
+test('a replacement character cannot leak its identity into an in-flight display hook', async () => {
+  const snap = snapshot(`listenEdit('editDisplay', function(id, text) cbs('replace'); return getName(id) end)`);
+  setDisplaySnapshot(snap);
+  const result = await runEditDisplayChain(snap, 'input', context(), () => {
+    setDisplaySnapshot({ ...snap, characterId: 'another-character', charName: 'Unrelated' });
+    return '';
+  }, () => {});
+  expect(result).toBe('Character');
+});
+
 test('concurrent initialization runs once and later renders retain committed progress', async () => {
   setDisplaySnapshot(snapshot(`listenEdit('editDisplay', function(id, text)
     if not getState(id, 'initialized') then
@@ -146,7 +172,7 @@ test('a newer deletion supersedes an unflushed write without resurrecting the ke
   end)`);
   setDisplaySnapshot(snap);
   const writes: Record<string, string>[] = [];
-  const result = await runEditDisplayChain(snap, 'input', context(), async () => {
+  const result = await runEditDisplayChain(snap, 'input', context(), () => {
     const current = getDisplaySnapshot(snap.chatId)!;
     const { state: _state, ...rest } = current.vars.local;
     setDisplaySnapshot({ ...current, vars: { ...current.vars, local: rest } });

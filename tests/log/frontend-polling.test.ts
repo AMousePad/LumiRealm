@@ -40,6 +40,8 @@ function makeContext(win: Window, withDisplay = true): {
     setExpression(): void {},
   };
   const ctx = {
+    frontendSessionId: '0123456789abcdef0123456789abcdef',
+    getActiveChat: () => ({ chatId: null, characterId: null }),
     events: { on() { return () => {}; } },
     deferReady(): void { events.push('defer'); },
     ready(): void { events.push('ready'); },

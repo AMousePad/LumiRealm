@@ -3,6 +3,19 @@ import type { VarScope } from '../../core/cbs/index.js';
 
 export type TriggerTemplateContext = () => Promise<BuildEvaluatorCtxInput>;
 
+export function createLuaTemplateParser(
+  input: () => BuildEvaluatorCtxInput,
+  read: (scope: VarScope, name: string) => string,
+): (text: string) => string {
+  return text => {
+    const context = buildEvaluatorContext({
+      ...input(), commit: false, rmVar: false, runVar: false, cbsContext: false,
+      reparseMacroResults: false, currentMessageIndexOverride: -1,
+    });
+    return freshParserContext({ ...context, vars: { ...context.vars, get: read } }).evaluate!(text);
+  };
+}
+
 export function createTriggerTemplateParser(
   input: BuildEvaluatorCtxInput,
   read: (scope: VarScope, name: string) => string,

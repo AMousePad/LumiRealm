@@ -17,8 +17,8 @@ import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
 //   4. Per-trigger isolation — one bad hook doesn't kill siblings.
 //   5. No-op when no listenEdit hooks are registered.
 //
-// Tests run real fengari Lua via the lua-bridge (pure JS, no host
-// dependencies). HostApi is a minimal in-memory mock — listenEdit
+// Tests run upstream Wasmoon via the lua-bridge without host
+// dependencies. HostApi is a minimal in-memory mock; listenEdit
 // hooks generally don't touch chat APIs (lowLevelAccess is hardcoded
 // false at edit-time per Risu scriptings.ts:1390).
 

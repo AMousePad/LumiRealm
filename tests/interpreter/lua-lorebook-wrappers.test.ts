@@ -30,10 +30,10 @@ end
     const calls: unknown[][] = [];
     const result = await luaExecute(
       `
-function probe()
+probe = async(function()
   local books = loadLoreBooks('low-level-id')
   return books[1].role .. '|' .. books[1].data
-end
+end)
 `,
       {
         loadLoreBooksMain: async (...args: unknown[]) => {

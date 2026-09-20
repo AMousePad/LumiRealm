@@ -33,17 +33,20 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
   }
 }
 
+export function parseGlobalVars(raw: unknown): Record<string, string | null> {
+  if (!raw || typeof raw !== 'object') return {};
+  const global = (raw as { global?: unknown }).global;
+  if (!global || typeof global !== 'object') return {};
+  const out: Record<string, string | null> = {};
+  for (const [key, value] of Object.entries(global as Record<string, unknown>)) {
+    if (value !== undefined) out[key] = value === null ? null : toStr(value);
+  }
+  return out;
+}
+
 export async function loadGlobalVars(api: HostApi): Promise<Record<string, string | null>> {
   try {
-    const raw = await api.chat.getMetadata('macro_variables');
-    if (!raw || typeof raw !== 'object') return {};
-    const global = (raw as { global?: unknown }).global;
-    if (!global || typeof global !== 'object') return {};
-    const out: Record<string, string | null> = {};
-    for (const [key, value] of Object.entries(global as Record<string, unknown>)) {
-      if (value !== undefined) out[key] = value === null ? null : toStr(value);
-    }
-    return out;
+    return parseGlobalVars(await api.chat.getMetadata('macro_variables'));
   } catch (cause) {
     throw new VariablePersistenceError('read', 'macro_variables', cause);
   }

@@ -1,50 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createDisplayResolver } from '../../src/display/resolver.js';
 import { runEditDisplayChain } from '../../src/display/lua-runner.js';
-import { clearDisplaySnapshot, setDisplaySnapshot, type DisplaySnapshot } from '../../src/display/snapshot.js';
+import { clearDisplaySnapshot, setDisplaySnapshot, snapshotMessagesChanged, type DisplaySnapshot } from '../../src/display/snapshot.js';
+import { withCurrentDisplayMessage } from '../../src/display/host-shim.js';
 import { type DisplayRuntimeEffect } from '../../src/display/host-shim.js';
 import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
 
 // RisuAI e565563a: src/ts/process/scriptings.ts runScripted and runLuaEditTrigger.
 // Strict mode makes these executable known failures red until their fixes land.
-const divergence = process.env.RISU_PARITY_STRICT === '1' ? test : test.failing;
-const chatId = 'lua-display-parity';
-const context = {
-  chatId, characterId: 'character', messageId: 'user-message',
-  messageIndex: 1, isUser: true, depth: 0,
-};
-
-function snapshot(code: string): DisplaySnapshot {
-  return {
-    chatId, characterId: 'character', userName: 'User', charName: 'Character',
-    personaText: '', personaImage: '', personaImageId: null, chatAuthorsNote: null,
-    character: {
-      description: 'Description', personality: '', scenario: '', exampleDialogue: '',
-      mainPrompt: '', postHistoryInstructions: '', creatorNotes: '', jailbreakPrompt: '',
-      globalNote: '', authorsNote: '', firstMessage: 'Greeting', alternateGreetings: [],
-      selectedAlternateGreetingIndex: -1, additionalAssets: {}, emotionImages: {},
-      image: '', imageId: null,
-    },
-    chat: {
-      messageCount: 2, lastMessage: 'Hello', lastUserMessage: 'Hello',
-      lastCharMessage: 'Greeting', lastMessageId: 1,
-      messages: [{ role: 'user', content: 'Hello', createdAt: 1700000000000 }],
-    },
-    vars: { local: { nested: '{{char}}', x: '2' }, global: {}, chat: {} },
-    scriptstateDefaults: {}, screenWidth: 1280, screenHeight: 720,
-    legacyMediaFindings: false, modulesByNamespace: {}, lorebook: [],
-    hasEditDisplayLua: true, hasEditAtActions: false,
-    luaTriggers: [{
-      source: { type: 'manual', comment: '', conditions: [], effect: [{ type: 'triggerlua' }] },
-      luaCode: code,
-    }],
-    messagesHost: [
-      { id: 'greeting', role: 'assistant', content: 'Greeting' },
-      { id: 'user-message', role: 'user', content: 'Hello', createdAt: 1700000000000 },
-    ],
-    lorebookHost: [], atActions: [], compiledLibraries: [],
-  };
-}
+const divergence = test;
+import { chatId, context, snapshot } from '../helpers/display-lua-fixture.js';
 
 beforeEach(() => setWasmoonEnabled(false));
 afterEach(() => {
@@ -65,6 +30,12 @@ describe('Risu Lua frontend boundaries', () => {
     expect(result?.content).toBe('Hello|0');
   });
 
+  (process.env.RISU_PARITY_STRICT === '1' ? test : test.failing)('Lua CBS omits display role and first-message conditions', async () => {
+    setDisplaySnapshot(snapshot(`listenEdit('editDisplay',function(id,text) return cbs('{{isfirstmsg}}|{{role}}') end)`));
+    const result = await createDisplayResolver().resolveBody({ content: 'Hello', context: { ...context, role: 'user' } });
+    expect(result?.content).toBe('0|null');
+  });
+
   // Risu's getName and getCharacterFirstMessage read the current character without a safe-ID guard.
   divergence('identity getters retain the character name and greeting available in the snapshot', async () => {
     const result = await render(`listenEdit('editDisplay', function(id, text)
@@ -80,7 +51,7 @@ describe('Risu Lua frontend boundaries', () => {
       setChat(id, 0, 'Changed')
       return text
     end)`);
-    const result = await runEditDisplayChain(snap, 'Hello', context, async text => text,
+    const result = await runEditDisplayChain(snap, 'Hello', context, text => text,
       () => {}, effect => { effects.push(effect); });
     expect({ result, effects }).toEqual({ result: 'Hello', effects: [] });
   });
@@ -107,9 +78,30 @@ describe('Risu Lua frontend boundaries', () => {
       setChatVar(id, 'x', '7')
       return getChatVar(id, 'x')
     end)`);
-    const result = await runEditDisplayChain(snap, 'Hello', context, async text => text,
+    const result = await runEditDisplayChain(snap, 'Hello', context, text => text,
       vars => { writes.push(vars); });
     expect(result).toBe('7');
     expect(writes).toEqual([{ x: '7' }]);
+  });
+
+  test('outer render caching remains eligible while every requested resolution executes Lua', async () => {
+    setDisplaySnapshot(snapshot(`n = 0; listenEdit('editDisplay', function(id, text) n = n + 1; return tostring(n) end)`));
+    const resolver = createDisplayResolver();
+    const first = await resolver.resolveBody({ content: 'same', context });
+    const second = await resolver.resolveBody({ content: 'same', context });
+    expect(first?.content).toBe('1');
+    expect(second?.content).toBe('2');
+    expect(first?.cacheable).toBe(true);
+    expect(second?.cacheable).toBe(true);
+  });
+
+  test('Lua message reads record history dependencies and retain timestamps during streaming', async () => {
+    const snap = snapshot(`listenEdit('editDisplay', function(id, text) return tostring(getChat(id, 0).time) end)`);
+    setDisplaySnapshot(snap);
+    const result = await createDisplayResolver().resolveBody({ content: 'Streaming edit', context });
+    expect(result?.content).toBe('1700000000000');
+    expect(result?.touchedVars).toContain('__msg__');
+    expect(snapshotMessagesChanged(snap, withCurrentDisplayMessage(snap, context, 'Streaming edit'))).toBe(true);
+    expect(snapshotMessagesChanged(snap, { ...snap, messagesHost: snap.messagesHost.map(m => ({ ...m })) })).toBe(false);
   });
 });

@@ -1,19 +1,19 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
-import { createDisplayVariableMirror } from './display/variable-mirror.js';
+import { setupFrontendLua } from './frontend-lua/frontend.js';
 import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
   setDisplaySnapshot,
   getDisplaySnapshot,
   applyVarDelta,
   diffSnapshotVars,
+  snapshotMessagesChanged,
   getDisplayResolutionMode,
   setDisplayResolutionMode,
   type DisplayResolutionMode,
 } from './display/snapshot.js';
 import { MSG_DEP_KEY } from './interpreter/evaluator/context.js';
-import { setWasmoonEnabled } from './interpreter/runtime.js';
 import { STYLES } from './ui/styles.js';
 import { createSidebar } from './ui/sidebar.js';
 import { createAuxDebugPanel } from './ui/aux-debug.js';
@@ -112,19 +112,21 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const invalidateActivationVars = (chatId: string, changed: string[]): void => {
     if (activationPatterns.invalidate(chatId, changed)) changed.push(ACTIVATION_INPUT_DEP_KEY);
   };
-  const variableMirror = createDisplayVariableMirror(ctx.events, (chatId, changed) => {
+  let auxCaptureId = 0;
+  const frontendLua = setupFrontendLua(ctx, (chatId, changed, resetScripts) => {
+    if (resetScripts) displayResolver.resetScriptCache();
     invalidateActivationVars(chatId, changed);
     if (isVisibleChat(chatId)) display.invalidate(changed);
+  }, error => flog.error('Frontend Lua failed', error), (chatId, event) => {
+    auxDebug?.handleBackendMessage({ type: 'aux_debug_capture', id: ++auxCaptureId, ts: Date.now(), chatId, ...event });
   });
-  cleanups.push(() => variableMirror.dispose());
-  cleanups.push(display.registerResolver(createDisplayResolver(
+  cleanups.push(() => frontendLua.dispose());
+  const displayResolver = createDisplayResolver(
     (chatId, vars) => {
       // Mirror editDisplay writes into the local snapshot so init-once guards
       // see their guard var set next render. Without it the guard never engages,
       // init re-runs every render, and writeback clobbers committed progress.
-      variableMirror.recordWrite(chatId, vars);
-      applyVarDelta(chatId, 'local', vars);
-      ctx.sendToBackend({ type: 'display_writeback', chatId, vars });
+      frontendLua.writeback(chatId, vars);
     },
     (effect) => {
       if (effect.kind === 'set-expression') {
@@ -143,7 +145,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       });
     },
     activationPatterns,
-  )));
+  );
+  cleanups.push(display.registerResolver(displayResolver));
   // Ownership is per-character: the host reads character.extensions.lumirealm.display_owner
   // (stamped by writeLumirealm + the boot backfill). display_authority is a separate signal
   // telling the backend to short-circuit ('on') or keep resolving ('shadow'/'off').
@@ -164,15 +167,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(() => {
     try { delete (window as unknown as Record<string, unknown>).__lumirealmDisplayMode; } catch { /* */ }
   });
-  (window as unknown as { __lumirealmWasmoon?: (on?: boolean) => void }).__lumirealmWasmoon = (on?: boolean) => {
-    const enabled = on !== false;
-    setWasmoonEnabled(enabled);
-    flog.info(`wasmoon editDisplay engine ${enabled ? 'ENABLED (wasmoon)' : 'DISABLED (fengari fallback)'} — reopen the chat to apply`);
-  };
-  cleanups.push(() => {
-    try { delete (window as unknown as Record<string, unknown>).__lumirealmWasmoon; } catch { /* */ }
-  });
-
   const originalFetch = window.fetch.bind(window);
   const taggedFetch = async (
     input: RequestInfo | URL,
@@ -332,6 +326,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   flog.info('frontend setup: styles injected');
 
   const sendToBackend = (msg: FrontendToBackend): void => {
+    if (msg.type === 'manual_trigger' || msg.type === 'manual_button_click') {
+      void frontendLua.manual(msg.chatId, msg.type === 'manual_trigger'
+        ? { kind: 'manual', name: msg.triggerName } : { kind: 'button', value: msg.btn }).catch(error => flog.error('Frontend Lua action failed', error));
+      return;
+    }
     if (!isLogTransportNoise(msg.type)) flog.trace(`frontend send: ${msg.type}`, msg);
     ctx.sendToBackend(msg);
   };
@@ -433,7 +432,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   // while the DOM only ever shows one. Unknown-yet counts as visible so the
   // first push after load is not dropped.
   const isVisibleChat = (chatId: string): boolean =>
-    activeRisuChatId === null || chatId === activeRisuChatId;
+    ctx.getActiveChat().chatId === chatId;
   const onClickCapture = (e: Event): void => {
     const path = typeof (e as Event & { composedPath?: () => EventTarget[] }).composedPath === 'function'
       ? (e as Event & { composedPath: () => EventTarget[] }).composedPath()
@@ -446,7 +445,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const btn = triggerName ? null : el.getAttribute('risu-btn');
     if (!triggerName && !btn) return;
     const idAttr = el.getAttribute('risu-id') ?? undefined;
-    const chatId = activeRisuChatId;
+    const chatId = ctx.getActiveChat().chatId;
     if (!chatId) {
       const label = triggerName ?? `btn=${btn}`;
       flog.warn(`manual click: active chat isn't a lumirealm chat, ignoring ${label}`);
@@ -550,6 +549,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let ready = false;
 
   const unsub = ctx.onBackendMessage((raw) => {
+    if (frontendLua.receive(raw)) return;
     const msg = raw as BackendToFrontend;
     if (!isLogTransportNoise(msg.type)) flog.trace(`frontend recv: ${msg.type}`, msg);
     if (msg.type === 'log_state_pushed') {
@@ -605,64 +605,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       return;
     }
     if (msg.type === 'display_snapshot') {
-      if (getDisplayResolutionMode() !== 'off') {
-        const prev = getDisplaySnapshot(msg.snapshot.chatId);
-        setDisplaySnapshot(msg.snapshot);
-        const changed = prev ? diffSnapshotVars(prev, msg.snapshot) : [];
-        invalidateActivationVars(msg.snapshot.chatId, changed);
-        // Cache every chat, but only the visible one has DOM to re-resolve.
-        if (!isVisibleChat(msg.snapshot.chatId)) return;
-        // Risu ReloadGUIPointer analog: reloadDisplay/v2UpdateGUI and dirty
-        // trigger flushes repaint everything, independent of the var diff.
+      if (!isVisibleChat(msg.snapshot.chatId) && !frontendLua.owns(msg.snapshot.chatId)) return;
+      void frontendLua.snapshot(msg.snapshot).then(() => {
         if (msg.reason === 'gui-reload') {
-          display.invalidate(['*']);
-          return;
+          displayResolver.resetScriptCache();
+          if (isVisibleChat(msg.snapshot.chatId)) display.invalidate(['*']);
         }
-        if (prev) {
-          // Identity change (persona swap/edit): {{user}}/{{persona}}/persona image
-          // resolve from these fields, and the var diff below cannot see them.
-          const ns = msg.snapshot;
-          if (prev.userName !== ns.userName || prev.charName !== ns.charName
-            || prev.personaText !== ns.personaText || prev.personaImage !== ns.personaImage) {
-            activationPatterns.invalidate(msg.snapshot.chatId);
-            display.invalidate(['*']);
-            return;
-          }
-          const pc = prev.chat, nc = msg.snapshot.chat;
-          if (pc.lastMessageId !== nc.lastMessageId || pc.messageCount !== nc.messageCount
-            || pc.lastMessage !== nc.lastMessage || pc.lastUserMessage !== nc.lastUserMessage
-            || pc.lastCharMessage !== nc.lastCharMessage) {
-            changed.push(MSG_DEP_KEY);
-          }
-          if (changed.length > 0) display.invalidate(changed);
-        } else {
-          // First snapshot for this chat: the host gates resolver use on
-          // ready() (snapshot present), so re-resolve everything now that it is.
-          display.invalidate(['*']);
-        }
-      }
+      }).catch(error => flog.error('Frontend Lua snapshot failed', error));
       return;
     }
-    if (msg.type === 'set_variables') {
-      if (getDisplayResolutionMode() !== 'off' && typeof msg.characterId === 'string') {
-        const snap = getDisplaySnapshot(msg.chatId);
-        const changed: string[] = [];
-        for (const scope of ['local', 'global', 'chat'] as const) {
-          const incoming = msg.scopes[scope] ?? {};
-          const cur = { ...(snap?.vars[scope] ?? {}) };
-          for (const [k, v] of Object.entries(incoming)) {
-            if (cur[k] !== v) changed.push(`${scope}:${k}`);
-          }
-          for (const k of Object.keys(cur)) {
-            if (!(k in incoming)) changed.push(`${scope}:${k}`);
-          }
-          applyVarDelta(msg.chatId, scope, { ...incoming });
-        }
-        invalidateActivationVars(msg.chatId, changed);
-        if (changed.length > 0 && isVisibleChat(msg.chatId)) display.invalidate(changed);
-      }
-      // fall through to sidebar broadcast
-    }
+    if (msg.type === 'settings_pushed') frontendLua.settings(msg.settings);
     if (msg.type === 'cards_updated') {
       if (!ready) {
         flog.info('handshake complete on first cards_updated');
@@ -672,11 +624,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       ready = true;
     }
     if (msg.type === 'set_active_chat') {
+      if (msg.chatId !== ctx.getActiveChat().chatId) return;
       const prevChatId = activeRisuChatId;
       activeRisuChatId = msg.chatId;
       bgRenderer.setActiveChat(msg.chatId);
       sendDisplayAuthority(msg.chatId);
       if (activeRisuChatId !== prevChatId) {
+        displayResolver.resetScriptCache();
         activationPatterns.invalidate();
         if (sidebar) sidebar.setActiveChatId(activeRisuChatId);
         if (getDisplayResolutionMode() !== 'off' && msg.chatId && getDisplaySnapshot(msg.chatId)) {

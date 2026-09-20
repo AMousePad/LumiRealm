@@ -317,7 +317,7 @@ describe('interpreter — manual invocation mode', () => {
     const failure = new Error('setup failed');
     const scriptNS = makeDispatcherScriptNS();
     let calls = 0;
-    scriptNS.registerManual('setup', async () => { calls++; throw failure; });
+    scriptNS.registerManual(async name => { expect(name).toBe('setup'); calls++; throw failure; });
     const runtime = await makeRisuTriggerRuntime(makeMockApi(makeMockState()), {}, scriptNS);
     await expect(runtime.runTrigger('setup')).rejects.toBe(failure);
     expect(calls).toBe(1);
