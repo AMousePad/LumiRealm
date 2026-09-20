@@ -724,9 +724,9 @@
     "writesState": [],
     "lumiverseCollision": null,
     "risuFile": "src/ts/cbs.ts",
-    "risuLine": 1384,
-    "summary": "Emits literal '\\n' (backslash+n). Optional N repeats the sequence.",
-    "notes": ""
+    "risuLine": 1386,
+    "summary": "Emits literal '\\n' (backslash+n) without args. With N, repeats the raw macro payload, preserving its spelling.",
+    "notes": "Risu uses String.repeat with counts below 1 clamped to 1; nonnumeric counts produce empty output."
   },
   {
     "name": "ceil",
