@@ -43,6 +43,7 @@ const _logStateChanged    = makeSafeLogger('runtime.stateChanged');
 const _logMake            = makeSafeLogger('runtime.makeRisuTriggerRuntime');
 const _logTriggercode     = makeSafeLogger('runtime.triggercode');
 const _logRunLua          = makeSafeLogger('runtime.runLua');
+const _logAlert           = makeSafeLogger('runtime.showAlert');
 const _logSetChat         = makeSafeLogger('runtime.setChat');
 const _logSetFullChat     = makeSafeLogger('runtime.setFullChat');
 const _logAddChat         = makeSafeLogger('runtime.addChat');
@@ -631,48 +632,39 @@ export async function makeRisuTriggerRuntime(
   }
 
   async function showAlert(type: unknown, value: unknown, inputVar: string | null): Promise<void> {
-    const t = toStr(type).toLowerCase();
     const v = toStr(value);
-    try {
-      if (t === 'input') {
-        const r = api.ui && api.ui.prompt ? await api.ui.prompt(v, '') : null;
-        if (inputVar) setVar(inputVar, toStr(r ?? ''));
-        return;
-      }
-      if (t === 'ask' || t === 'confirm') {
-        const r = api.ui && api.ui.confirm ? await api.ui.confirm(v, '') : false;
-        if (inputVar) setVar(inputVar, r ? '1' : '0');
-        return;
-      }
-      if (api.ui && api.ui.toast) {
-        const kind = t === 'error' ? 'error' : t === 'warn' || t === 'warning' ? 'warning'
-          : t === 'success' ? 'success' : 'info';
-        api.ui.toast(v, kind);
-      }
-      if (inputVar) setVar(inputVar, '');
-    } catch {
-      if (inputVar) setVar(inputVar, '');
+    switch (type) {
+      case 'normal':
+      case 'error':
+        if (!api.ui?.alert) return unsupported('showAlert', 'requires api.ui.alert');
+        // Risu runTrigger continues while the notice is open.
+        void api.ui.alert(v, type === 'error' ? 'error' : 'info')
+          .catch(error => _logAlert.error(`Alert failed: ${String(error)}`));
+        break;
+      case 'input':
+        setVar(inputVar ?? '', await alertInput(v));
+        break;
+      case 'select':
+        setVar(inputVar ?? '', await alertSelect(undefined, v.split('§')));
+        break;
     }
   }
 
   async function alertInput(display: unknown): Promise<string> {
-    try {
-      if (api.ui && api.ui.prompt) {
-        const r = await api.ui.prompt(toStr(display), '');
-        return toStr(r ?? '');
-      }
-    } catch { /* */ }
-    return '';
+    if (!api.ui?.prompt) return unsupported('alertInput', 'requires api.ui.prompt');
+    return toStr(await api.ui.prompt(toStr(display), '') ?? '');
   }
 
   async function alertSelect(display: unknown, options: unknown): Promise<string> {
     if (api.ui && typeof api.ui.pick === 'function') {
       const opts = Array.isArray(options) ? options.map(toStr) : [];
-      const r = await api.ui.pick(toStr(display), opts);
-      // alertSelect returns the option index as a string, not its label.
-      if (r == null) return '';
-      const idx = opts.indexOf(toStr(r));
-      return idx >= 0 ? String(idx) : '';
+      // Risu alertSelect and AlertComp serialize labels through this delimiter.
+      const message = display === undefined ? opts.join('||') : `__DISPLAY__${toStr(display)}||${opts.join('||')}`;
+      const hasDisplay = message.startsWith('__DISPLAY__');
+      const parts = (hasDisplay ? message.substring(11) : message).split('||');
+      const title = hasDisplay ? parts.shift()! : '';
+      const r = await api.ui.pick(title, parts);
+      return r ?? '';
     }
     return unsupported('alertSelect', 'requires api.ui.pick');
   }
@@ -900,15 +892,7 @@ export async function makeRisuTriggerRuntime(
         return api.ui.prompt(toStr(value), '').then((r) => toStr(r ?? ''));
       },
       alertSelect: (_id: unknown, options: unknown) => {
-        if (api.ui?.pick) {
-          const opts = Array.isArray(options) ? options.map(toStr) : [];
-          return api.ui.pick('', opts).then((r) => {
-            if (r == null) return '';
-            const idx = opts.indexOf(toStr(r));
-            return idx >= 0 ? String(idx) : '';
-          });
-        }
-        return Promise.reject(new Error('risu-compat: lua.alertSelect requires api.ui.pick'));
+        return alertSelect(undefined, options);
       },
       alertConfirm: (_id: unknown, value: unknown) => {
         if (!api.ui?.confirm) return Promise.reject(new Error('risu-compat: lua.alertConfirm requires api.ui.confirm'));

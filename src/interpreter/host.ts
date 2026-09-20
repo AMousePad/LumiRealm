@@ -91,6 +91,7 @@ export interface HostApi {
     alert?: (msg: string, kind?: 'info' | 'error' | 'warning' | 'success') => Promise<void>;
     prompt?: (message: string, defaultValue?: string) => Promise<string | null>;
     confirm?: (message: string, defaultValue?: string) => Promise<boolean>;
+    // Returns the zero-based index as a string, or null on dismissal.
     pick?: (title: string, options: readonly string[]) => Promise<string | null>;
     dom?: {
       inject: (selector: string, html: string, opts?: { id?: string }) => HostDomHandle;
