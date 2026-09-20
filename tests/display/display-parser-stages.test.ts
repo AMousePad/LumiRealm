@@ -32,6 +32,7 @@ const returns = (text: string) => `listenEdit("editDisplay", function(id, data, 
 const identity = 'listenEdit("editDisplay", function(id, data, meta) return data end)';
 type Fixture = {
   name: string; input?: string; hook?: string; expected: string; index?: number;
+  description?: string; native?: boolean;
   rules?: readonly (readonly [string, string, string?])[];
 };
 const fixtures: Fixture[] = [
@@ -57,13 +58,30 @@ const fixtures: Fixture[] = [
   { name: 'each ordinary regex rule contributes one parser pass', rules: [['text', '{{getvar::outer}}'], ['absent', 'unused']], expected: '{{char}}' },
   { name: 'regex-created inactive writes remain literal', rules: [['text', '{{setvar::x::9}}']], expected: '{{setvar::x::9}}' },
   { name: 'unmatched metadata rules do not add a parser pass', input: '{{getvar::outer}}', rules: [['absent', 'unused', 'g<no_end_nl>']], expected: '{{char}}' },
+  { name: 'initial comments remain visible', input: '{{comment::note}}', expected: '<div class="risu-comment x-risu-risu-comment">note</div>' },
+  { name: 'initial files show their names', input: '{{file::note.txt::SGVsbG8=}}', expected: '<br><div class="x-risu-risu-file">note.txt</div><br>' },
+  { name: 'hook comments are hidden', hook: returns('{{comment::note}}'), expected: '' },
+  { name: 'hook files decode their contents', hook: returns('{{file::note.txt::SGVsbG8=}}'), expected: 'Hello' },
+  { name: 'regex comments are hidden', rules: [['text', '{{comment::note}}']], expected: '' },
+  { name: 'regex files decode their contents', rules: [['text', '{{file::note.txt::SGVsbG8=}}']], expected: 'Hello' },
+  { name: 'Lua cbs uses nonvisual comment and file behavior', hook: 'listenEdit("editDisplay", function(id, data) return tostring(cbs("{{comment::note}}") == "") .. "|" .. cbs("{{file::note.txt::SGVsbG8=}}") end)', expected: 'true|Hello' },
+  { name: 'character field reparsing hides comments during the initial pass', input: '{{description}}', description: '{{comment::note}}', expected: '' },
+  { name: 'character field reparsing decodes files during the initial pass', input: '{{description}}', description: '{{file::note.txt::SGVsbG8=}}', expected: 'Hello' },
+  { name: 'function calls retain initial visualization', input: '{{#func visual}}{{comment::note}}{{/func}}{{call::visual}}', expected: '<div class="risu-comment x-risu-risu-comment">note</div>' },
+  { name: 'function calls retain post-hook visualization', hook: returns('{{#func visual}}{{comment::note}}{{/func}}{{call::visual}}'), expected: '' },
+  { name: 'nonvisual post-hook parsing still resolves missing assets', hook: returns('{{source::missing}}'), expected: '' },
+  { name: 'nonvisual regex parsing still resolves missing assets', rules: [['text', '{{source::missing}}']], expected: '' },
+  { name: 'native comment replacements retain their display behavior', native: true, rules: [['text', '{{comment::note}}']], expected: '<div class="risu-comment x-risu-risu-comment">note</div>' },
+  { name: 'native file replacements retain their display behavior', native: true, rules: [['text', '{{file::note.txt::SGVsbG8=}}']], expected: '<br><div class="x-risu-risu-file">note.txt</div><br>' },
 ];
 
 afterEach(async () => { clearDisplaySnapshot('display-stages'); await clearLuaEngines(); });
 
 for (const fixture of fixtures) {
   test(fixture.name, async () => {
-    const snap = snapshot(fixture.hook ?? '');
+    const base = snapshot(fixture.hook ?? '');
+    const snap = fixture.description === undefined ? base
+      : { ...base, character: { ...base.character, description: fixture.description } };
     setDisplaySnapshot(snap);
     const index = fixture.index ?? 3;
     const context = {
@@ -80,7 +98,10 @@ for (const fixture of fixtures) {
       const scripts = mapRegex((fixture.rules ?? []).map(([find, out, flag]) => ({
         in: find, out, flag: flag ?? 'g', ableFlag: true, type: 'editdisplay', comment: '',
       })), { characterId: snap.characterId }).rows;
-      const final = await resolver.applyScripts({ content: body!.content, scripts: [...scripts], context });
+      const final = await resolver.applyScripts({
+        content: body!.content, context,
+        scripts: fixture.native ? scripts.map(script => ({ ...script, metadata: {} })) : [...scripts],
+      });
       expect(final?.content).toBe(fixture.expected);
       expect(snap.vars.local.x).toBe('2');
       expect(writes).toEqual([]);

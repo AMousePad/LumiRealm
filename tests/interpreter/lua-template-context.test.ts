@@ -5,7 +5,7 @@ const parse = createLuaTemplateParser(() => ({
   chatId: 'context', userName: 'User', charName: 'Character', commit: true,
   character: { firstMessage: 'Greeting', additionalAssets: { portrait: { imageIds: ['portrait'], ext: 'png' } } },
   chat: { messageCount: 1 }, variables: {}, currentMessageIndexOverride: 3,
-  currentMessageRoleOverride: 'assistant', rmVar: true, runVar: true,
+  currentMessageRoleOverride: 'assistant', rmVar: true, runVar: true, visualize: true,
 }), () => 'null');
 
 test('Lua cbs starts without caller role, first-message, or write flags', () => {

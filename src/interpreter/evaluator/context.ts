@@ -164,6 +164,7 @@ export interface BuildEvaluatorCtxInput {
   readonly positionPt?: Readonly<Record<string, string>>;
   /** Risu cbs() call context. See RisuRuntimeContext.cbsContext. */
   readonly cbsContext?: boolean;
+  readonly visualize?: boolean;
   /** Risu Chat.svelte display render: setvar family hides without executing. */
   readonly rmVar?: boolean;
   /** Risu runCurrentChatFunction pass: setvar family executes. */
@@ -410,6 +411,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     ...(input.modulesByNamespace ? { modulesByNamespace: input.modulesByNamespace } : {}),
     ...(input.positionPt ? { positionPt: input.positionPt } : {}),
     ...(input.cbsContext ? { cbsContext: true } : {}),
+    ...(input.visualize !== undefined ? { visualize: input.visualize } : {}),
     ...(input.rmVar ? { rmVar: true } : {}),
     ...(input.runVar ? { runVar: true } : {}),
     // The prompt-regex pass (suppressVarPersist) leaves the setvar family literal,
@@ -439,14 +441,15 @@ export function freshParserContext(base: Omit<EvaluatorCtx, 'functions'>): Evalu
     },
   };
   const out: EvaluatorCtx = { ...base, vars, functions: makeFunctionRegistry() };
-  // Late-bound: handlers re-parse field content with the same context.
-  // Lazy require dodges the circular dep through dispatch->handlers.
+  // Risu field/history reparses receive matcherArg.displaying, not visualize.
+  // Lazy require dodges the circular dependency through dispatch and handlers.
   (out as { evaluate?: (text: string) => string }).evaluate = (text: string) => {
     if (typeof text !== "string" || text.length === 0) return "";
     if (text.indexOf("{{") < 0 && text.indexOf("{#") < 0 && text.indexOf("<") < 0) return text;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { evaluate } = require("./scanner.js") as typeof import("./scanner.js");
-    return evaluate(text, out, out.callStack !== undefined ? { callStack: out.callStack } : {});
+    const nested = out.visualize === true ? { ...out, visualize: false } : out;
+    return evaluate(text, nested, out.callStack !== undefined ? { callStack: out.callStack } : {});
   };
   return out;
 }

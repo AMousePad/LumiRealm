@@ -12,6 +12,7 @@ export function parseDisplayCaller(input: RunPipelineInput, recorder: VarReadRec
   const context = buildEvaluatorContext({
     ...input,
     commit: false,
+    visualize: true,
     recorder,
     reparseMacroResults: false,
     resolveLeaf: (name, _args, raw) => raw !== undefined && deferredAssets.has(normalizeMacroName(name))

@@ -72,12 +72,12 @@ register("datetimeformat", (ctx, a) => {
 register("hiddenkey", () => "",
   "A key that activates lorebook entries without being sent to the model.");
 
-// Risu: cbs (displaying=false) and prompt-assembly (commit=true) both return ''. Only the display path renders the div.
 register("comment", (ctx, a) => {
-  if (ctx.commit || ctx.cbsContext) return "";
+  const visualize = ctx.visualize ?? !(ctx.commit || ctx.cbsContext);
+  if (!visualize) return "";
   // Preserve both authored and Risu-prefixed class selectors.
   return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
-}, "Comment macro. Empty at prompt time and in cbs; displays as <div class=\"risu-comment\">…</div> at render time.");
+}, "Comment macro. Shown only when the parser caller enables visualization.");
 
 // `//` inline comment.
 registry.register({

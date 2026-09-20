@@ -35,17 +35,16 @@ register("prefillsupported", (ctx) => {
   return ctx.aiModel.startsWith("claude") ? "1" : "0";
 }, "'1' if the current AI model id starts with 'claude' (Claude supports prefill).");
 
-// cbs and prompt-assembly decode base64. Display path renders HTML.
 register("file", (ctx, a) => {
-  const decode = ctx.cbsContext || ctx.commit;
-  if (!decode) return `<br><div class="x-risu-risu-file">${a[0] ?? ""}</div><br>`;
+  const visualize = ctx.visualize ?? !(ctx.cbsContext || ctx.commit);
+  if (visualize) return `<br><div class="x-risu-risu-file">${a[0] ?? ""}</div><br>`;
   const content = a[1] ?? "";
   try {
     return base64ToUtf8(content);
   } catch {
     return "";
   }
-}, "Decodes base64 file content to UTF-8 (prompt and cbs paths); renders <div class=\"risu-file\">…</div> in display path.");
+}, "Shows the filename when visualization is enabled; otherwise decodes base64 content to UTF-8.");
 
 // cbs.ts.
 register("chardisplayasset", (ctx) => {

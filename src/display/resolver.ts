@@ -102,7 +102,7 @@ function evalTemplate(
   recorder: VarReadRecorder,
 ): string {
   return runPipeline({
-    ...buildInput(snap, text, context), rmVar: false, reparseMacroResults: false,
+    ...buildInput(snap, text, context), visualize: false, rmVar: false, reparseMacroResults: false,
   }, { recorder });
 }
 
@@ -434,7 +434,7 @@ export function createDisplayResolver(
               const { currentMessageRoleOverride: _messageRole, ...input } = buildInput(source, t, args.context);
               return evaluate(t, buildEvaluatorContext({
                 ...input,
-                recorder, commit: false, rmVar: false, runVar: false, cbsContext: true,
+                recorder, commit: false, rmVar: false, runVar: false, cbsContext: true, visualize: false,
                 reparseMacroResults: false, currentMessageIndexOverride: -1,
               }));
             },

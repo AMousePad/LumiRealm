@@ -10,7 +10,7 @@ export function createLuaTemplateParser(
   return text => {
     const { currentMessageRoleOverride: _messageRole, ...parserInput } = input();
     const context = buildEvaluatorContext({
-      ...parserInput, commit: false, rmVar: false, runVar: false, cbsContext: true,
+      ...parserInput, commit: false, rmVar: false, runVar: false, cbsContext: true, visualize: false,
       reparseMacroResults: false, currentMessageIndexOverride: -1,
     });
     return freshParserContext({ ...context, vars: { ...context.vars, get: read } }).evaluate!(text);
