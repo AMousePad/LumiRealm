@@ -187,7 +187,20 @@ export function buildBundle(args: {
 }
 
 export function downloadBundle(bundle: LogBundle): void {
-  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+  const { events, ...metadata } = bundle;
+  const parts: BlobPart[] = [JSON.stringify(metadata, null, 2).slice(0, -1), ',"events":{'];
+  const encoder = new TextEncoder();
+  // Encode each record separately so the export need not fit in one JavaScript string.
+  for (const [index, source] of (['backend', 'frontend'] as const).entries()) {
+    parts.push(`${index ? ',' : ''}"${source}":[`);
+    for (const [i, event] of events[source].entries()) {
+      if (i) parts.push(',');
+      parts.push(encoder.encode(JSON.stringify(event, null, 2)));
+    }
+    parts.push(']');
+  }
+  parts.push('}}');
+  const blob = new Blob(parts, { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const a = document.createElement('a');

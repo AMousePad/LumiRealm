@@ -575,6 +575,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         downloadBundle(bundle);
       } catch (err) {
         flog.error('log_export_pushed: bundle/download failed', err);
+        window.alert(`Log export failed: ${err instanceof Error ? err.message : String(err)}. The captured logs have been kept.`);
+        return;
       }
       // Auto-disable per spec.
       sendToBackend({ type: 'log_set_state', enabled: false, includeChatData: false });
