@@ -73,7 +73,7 @@ function buildInput(
   return {
     template: content,
     phase: 'display',
-    // Risu renders display with rmVar: the setvar family hides, never executes.
+    // Risu's initial display caller removes inactive variable writes.
     rmVar: true,
     chatId: snap.chatId,
     characterId: snap.characterId,
@@ -101,7 +101,9 @@ function evalTemplate(
   context: SpindleDisplayContext,
   recorder: VarReadRecorder,
 ): string {
-  return runPipeline(buildInput(snap, text, context), { recorder });
+  return runPipeline({
+    ...buildInput(snap, text, context), rmVar: false, reparseMacroResults: false,
+  }, { recorder });
 }
 
 async function fetchBackendBody(
@@ -457,7 +459,7 @@ export function createDisplayResolver(
         const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
         body = displayTriggerResult.content;
         if (displayTriggerResult.ran) recorder.volatile = true;
-        body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
+        body = evalTemplate(liveSnap, body, args.context, recorder);
         if (rowlessAtActions.length > 0) {
           for (const action of rowlessAtActions) {
             const dependencies = getRuntimeAtActionDependencies(action);
