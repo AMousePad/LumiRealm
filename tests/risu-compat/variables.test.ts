@@ -18,9 +18,9 @@ const runCtx = (opts: Parameters<typeof makeMockContext>[0] = {}) =>
 describe("setvar family mode model (Risu cbs.ts rmVar/runVar gates)", () => {
   test("no flags (fields, lorebook, cbs()) re-emits literal, no write", () => {
     const ctx = makeMockContext();
-    expect(get("setvar")(ctx, ["x", "1"], "")).toBe("{{setvar::x::1}}");
-    expect(get("addvar")(ctx, ["x", "1"], "")).toBe("{{addvar::x::1}}");
-    expect(get("setdefaultvar")(ctx, ["x", "1"], "")).toBe("{{setdefaultvar::x::1}}");
+    expect(get("setvar")(ctx, ["x", "1"], "setvar::x::1")).toBe("{{setvar::x::1}}");
+    expect(get("addvar")(ctx, ["x", "1"], "addvar::x::1")).toBe("{{addvar::x::1}}");
+    expect(get("setdefaultvar")(ctx, ["x", "1"], "setdefaultvar::x::1")).toBe("{{setdefaultvar::x::1}}");
     expect(ctx.vars.get("local", "x")).toBe("");
   });
   test("rmVar (chat display) hides without executing", () => {

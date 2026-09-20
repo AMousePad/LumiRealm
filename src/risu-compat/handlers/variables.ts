@@ -29,27 +29,27 @@ function leaveVarLiteral(ctx: { commit: boolean; promptRegexLiteralVars?: boolea
 register("getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""),
   "Reads a local chat variable. Empty string if unset.");
 
-register("setvar", (ctx, a) => {
+register("setvar", (ctx, a, raw) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
-  if (mode === "literal") return `{{setvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  if (mode === "literal") return `{{${raw}}}`;
   ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
   return "";
 }, "Sets a local chat variable.");
 
-register("addvar", (ctx, a) => {
+register("addvar", (ctx, a, raw) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
-  if (mode === "literal") return `{{addvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  if (mode === "literal") return `{{${raw}}}`;
   // Risu passes args[1] raw to Number, a missing arg adds NaN.
   ctx.vars.add("local", a[0] ?? "", Number(a[1]));
   return "";
 }, "Adds delta to a local chat variable (coerces current value to number).");
 
-register("setdefaultvar", (ctx, a) => {
+register("setdefaultvar", (ctx, a, raw) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
-  if (mode === "literal") return `{{setdefaultvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  if (mode === "literal") return `{{${raw}}}`;
   // Risu cbs.ts: missing variables read as the literal "null", which
   // setdefaultvar explicitly treats as unset alongside an empty value.
   const name = a[0] ?? "";
