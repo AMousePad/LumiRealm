@@ -93,30 +93,30 @@ register("previouschatlog", (ctx, a) => {
   return msgs[idx]?.content ?? "Out of range";
 }, "Returns message[N].content, or 'Out of range' if index invalid.");
 
-// Risu cbs() with chatID=-1 walks back from chat-end. Outside cbs: from currentMessageIndex-1.
+// Risu uses chatID=-1 for both standalone CBS and greeting display.
 register("previouscharchat", (ctx) => {
   const msgs = ctx.messages.all();
-  const start = ctx.cbsContext
+  const start = ctx.cbsContext || ctx.currentMessageIndex === -1
     ? msgs.length - 1
     : (ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1);
   for (let i = start; i >= 0; i--) {
     const m = msgs[i];
-    if (m && m.role === "assistant") return m.content;
+    if (m!.role === "assistant") return m!.content;
   }
   return selectedGreeting(ctx);
-}, "Last character (assistant) message; cbs walks from chat-end, others from currentMessageIndex-1.");
+}, "Last character message before the current index; index -1 or no index searches from chat-end.");
 
-// Risu cbs() with chatID=-1 returns '' (early exit). Outside cbs: walk from currentMessageIndex-1.
+// Risu's chatID=-1 user lookup returns empty instead of the greeting fallback.
 register("previoususerchat", (ctx) => {
-  if (ctx.cbsContext) return "";
+  if (ctx.cbsContext || ctx.currentMessageIndex === -1) return "";
   if (ctx.currentMessageIndex === null) return "";
   const msgs = ctx.messages.all();
   for (let i = ctx.currentMessageIndex - 1; i >= 0; i--) {
     const m = msgs[i];
-    if (m && m.role === "user") return m.content;
+    if (m!.role === "user") return m!.content;
   }
   return selectedGreeting(ctx);
-}, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
+}, "Last user message before the current index; index -1 or no index returns empty.");
 
 // cbs.ts.
 register("lastmessage", (ctx) => {
@@ -129,16 +129,6 @@ register("lastmessageid", (ctx) => {
   const n = ctx.messages.count();
   return Math.max(-1, n - 1).toString();
 }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");
-
-register("lastusermessage", (ctx) => {
-  const m = ctx.messages.lastOf("user");
-  return m?.content ?? "";
-}, "Alias-style shortcut for the most recent user message. '' if none.");
-
-register("lastcharmessage", (ctx) => {
-  const m = ctx.messages.lastOf("assistant");
-  return m?.content ?? "";
-}, "Alias-style shortcut for the most recent character (assistant) message.");
 
 // cbs.ts.
 register("jbtoggled", (ctx) => ctx.jailbreakToggle ? "1" : "0",

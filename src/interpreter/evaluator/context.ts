@@ -392,7 +392,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     axModel: "",
     isFirstMessage: Number(chat.messageCount ?? 0) <= 1,
     currentMessageIndex: input.currentMessageIndexOverride !== undefined
-      ? Math.max(-1, input.currentMessageIndexOverride)
+      ? input.currentMessageIndexOverride
       : (chat.lastMessageId != null
         ? Math.max(-1, chat.lastMessageId - 1)
         : null),
