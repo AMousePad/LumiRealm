@@ -18,12 +18,12 @@ $env:RISU_PARITY_STRICT = '1'
 try { bun test risu-divergence } finally { Remove-Item Env:RISU_PARITY_STRICT }
 ```
 
-The current result is **82 passing examples and 36 known differences across 118 tests**. Examples share root causes; this is not a count of independent bugs or a compatibility percentage.
+The current result is **83 passing examples and 35 known differences across 118 tests**. Examples share root causes; this is not a count of independent bugs or a compatibility percentage.
 
 | Suite | Tests | Known differences | Passing controls |
 | --- | ---: | ---: | ---: |
 | [CBS](interpreter/cbs-risu-divergence.test.ts) | 39 | 18 | 21 |
-| [Lua APIs](interpreter/lua-api-risu-divergence.test.ts) | 34 | 9 | 25 |
+| [Lua APIs](interpreter/lua-api-risu-divergence.test.ts) | 34 | 8 | 26 |
 | [Hook chains](interpreter/listen-edit-risu-divergence.test.ts) | 11 | 0 | 11 |
 | [Frontend boundaries](display/lua-risu-divergence.test.ts) | 9 | 0 | 9 |
 | [Wasmoon execution](interpreter/lua-engine-risu-divergence.test.ts) | 15 | 0 | 15 |
@@ -43,7 +43,7 @@ The suites isolate host storage, provider responses and VM behavior deliberately
 
 - CBS assertions describe the specified parser pass. Risu later parses display text again: a variable containing `{{char}}` can display identically despite differing intermediate results. Deeper nesting still diverges. Risu asset processing also removes unresolved `source` markers; that parser-stage difference is not a final display defect. Position markers require separate display and prompt checks.
 - Risu's public `loadLoreBooks(id)` does not forward a reserve argument. Its upstream lore activation budget applies, but only a direct `loadLoreBooksMain(id, reserve)` call applies the additional reserve cap. Denied public `loadLoreBooks`, `LLM` and `axLLM` calls raise decoder errors in Risu; their Main callbacks return undefined. The API tests assert the latter boundary.
-- Risu `simpleLLM` returns a JS object exposed as Lua userdata with readable success/result fields. Returned provider failures produce failure objects; thrown request errors can reject in both products. The permanent test checks only the host callback's success object.
+- Risu `simpleLLM` returns a JS object exposed as Lua userdata with readable success/result fields. Tests cover the callback and actual Lua reads, empty/Unicode content, denied access, and thrown requests aborting the callback. Returned provider failure variants remain outside the host's content-only response contract.
 - Async false is a VM return-value test. Risu's [start caller](https://github.com/kwaroran/RisuAI/blob/e565563a288ebe4c65b6099a1645ba477d1c84b4/src/ts/process/index.svelte.ts#L884) consumes stopSending; its input/output/button callers ignore that flag. Real onStart probes confirm the cancellation difference. An onOutput flag difference alone does not demonstrate cancellation.
 
 ## Comparing the actual engines

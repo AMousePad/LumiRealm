@@ -1198,8 +1198,7 @@ export async function makeRisuTriggerRuntime(
           return JSON.stringify({ success: false, result: 'Error: ' + errMsg });
         }
       },
-      // Returns string directly. Empty string when no access (Risu parity).
-      simpleLLM: async (_id: unknown, prompt: unknown): Promise<string> => {
+      simpleLLM: async (_id: unknown, prompt: unknown): Promise<string | { success: true; result: string }> => {
         if (!lowLevelAccess) {
           return '';
         }
@@ -1207,7 +1206,7 @@ export async function makeRisuTriggerRuntime(
           throw new Error('risu-compat: lua.simpleLLM requires api.llm.generate');
         }
         const r = await api.llm.generate({ messages: [{ role: 'user', content: toStr(prompt) }], ...(auxPrefillCompat ? { prefillCompat: true } : {}) });
-        return toStr(r && r.content);
+        return { success: true, result: toStr(r && r.content) };
       },
       hash: (_id: unknown, value: unknown) => {
         if (typeof crypto === 'undefined' || !crypto.subtle) {

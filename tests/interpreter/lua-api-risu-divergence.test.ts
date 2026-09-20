@@ -114,7 +114,7 @@ describe('Lua API Risu divergences', () => {
     expect(await fixture.call('loadLoreBooksMain', 0)).toBeUndefined();
   });
 
-  divergence('simpleLLM host callback returns a success/result object', async () => {
+  test('simpleLLM host callback returns a success/result object', async () => {
     const fixture = await captureLuaRuntime();
     expect(await fixture.call('simpleLLM', 'Prompt')).toEqual({ success: true, result: 'Generated' });
   });
