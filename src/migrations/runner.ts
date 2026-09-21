@@ -378,6 +378,9 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
         characterName,
       }, userId);
     } else if (result.kind === 'failed') {
+      if (result.consentRequired) {
+        toastFor(userId, 'error', result.error, { title: 'Card access requires consent' });
+      }
       log.error(
         `migration failed char=${characterId}: ${result.error} (will retry next boot)`,
       );

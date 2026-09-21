@@ -114,7 +114,7 @@ describe("migrateCharacterIfNeeded — asset_index rebuild", () => {
     expect(result.kind).toBe("migrated");
     if (result.kind !== "migrated") throw new Error("not migrated");
     expect(result.stepsApplied.map((s) => s.version)).toEqual([
-      5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+      5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
     ]);
     const v5Step = result.stepsApplied.find((s) => s.version === 5)!;
     expect(v5Step.notes.join(' ')).toContain('assets=2');
@@ -304,7 +304,7 @@ describe("migrateCharacterIfNeeded — asset_index rebuild", () => {
 });
 
 describe("character migration v21 — regex folders", () => {
-  test("fills only empty CharX and embedded-sidecar folders", async () => {
+  test.each([false, true])("fills only empty active-source folders with embedded module %s", async (embedded) => {
     const script = (comment: string) => ({
       comment, in: "before", out: "after", type: "editdisplay", flag: "g", ableFlag: true,
     });
@@ -319,7 +319,7 @@ describe("character migration v21 — regex folders", () => {
     const module = {
       id: "module-1", name: "Ada Rules", description: "", regex: [script("Module rule")],
     };
-    const envelope = makeEnvelope({ card, module, pathToImageId: {}, storedVersion: 20 });
+    const envelope = makeEnvelope({ card, module: embedded ? module : null, pathToImageId: {}, storedVersion: 20 });
     const patches: Array<Record<string, unknown> | null> = [];
     let patchPass = 0;
     const result = await migrateCharacterIfNeeded(
@@ -336,15 +336,15 @@ describe("character migration v21 — regex folders", () => {
           patches.push(patch(row("", { origin: "module" })));
           patches.push(patch(row("My Folder", { origin: "character" })));
           patches.push(patch(row("", { imported_regex: true })));
-          return { scanned: 4, updated: 2, failed: 0 };
+          return { scanned: 4, updated: 1, failed: 0 };
         },
       }),
     );
 
     expect(result.kind).toBe("migrated");
     expect(patches).toEqual([
-      { folder: "CharX — Ada" },
-      { folder: "CharX — Ada" },
+      embedded ? null : { folder: "CharX — Ada" },
+      embedded ? { folder: "CharX — Ada" } : null,
       null,
       null,
     ]);
@@ -418,7 +418,7 @@ describe("character migration registry — targeted-step contract", () => {
     );
     expect(result.kind).toBe("migrated");
     if (result.kind !== "migrated") throw new Error("not migrated");
-    expect(result.stepsApplied.map((step) => step.version)).toEqual([15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
+    expect(result.stepsApplied.map((step) => step.version)).toEqual([15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]);
     expect(writtenVersion).toBe(CURRENT_CHARACTER_SCHEMA_VERSION);
   });
 

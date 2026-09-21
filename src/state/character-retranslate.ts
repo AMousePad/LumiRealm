@@ -5,6 +5,7 @@ import {
   buildLumirealmData,
   preValidateRequires,
   RisuCompatVersionError,
+  RisuConsentRequiredError,
 } from '../payload/codec.js';
 import { buildAssetIndexes } from '../payload/import.js';
 import { projectCharacterRegexScripts } from '../payload/character-regex-projection.js';
@@ -13,7 +14,7 @@ import type { LumirealmCharacterData, StoredRegexScript } from '../payload/types
 export type CharacterRetranslateResult =
   | { readonly kind: 'retranslated'; readonly data: LumirealmCharacterData }
   | { readonly kind: 'needs_reimport' }
-  | { readonly kind: 'failed'; readonly error: string };
+  | { readonly kind: 'failed'; readonly error: string; readonly consentRequired?: true };
 
 export interface CharacterRetranslateDeps {
   readonly extensionVersion: string;
@@ -81,6 +82,9 @@ export async function retranslateCharacterFromCurrentSource(
       },
     );
     if (!bundle.risuPayload) throw new Error('translator returned no risuPayload');
+    if (bundle.risuPayload.requires.lowLevelAccess && args.envelope.user_overrides.low_level_access_granted !== true) {
+      throw new RisuConsentRequiredError(args.characterName);
+    }
 
     const compatibility = preValidateRequires(bundle.risuPayload.requires);
     if (!compatibility.ok) {
@@ -163,6 +167,7 @@ export async function retranslateCharacterFromCurrentSource(
     return {
       kind: 'failed',
       error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof RisuConsentRequiredError ? { consentRequired: true as const } : {}),
     };
   }
 }

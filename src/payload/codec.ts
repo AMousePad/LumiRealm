@@ -38,6 +38,13 @@ export class RisuConsentDeclinedError extends Error {
   }
 }
 
+export class RisuConsentRequiredError extends Error {
+  override readonly name = 'RisuConsentRequiredError';
+  constructor(characterName: string) {
+    super(`Low-level access consent is required for "${characterName}". Re-import this card to review and grant access.`);
+  }
+}
+
 /** Capabilities this extension version is confirmed to handle faithfully. */
 export const SUPPORTED_HOST_FEATURES = new Set<string>([
   'alertSelect',

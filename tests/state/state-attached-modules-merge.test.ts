@@ -409,6 +409,21 @@ describe('mergeAttachedModulesIntoPayload — backgroundEmbedding concat', () =>
 // permission. We mirror via shallow-clone.
 
 describe('mergeAttachedModulesIntoPayload — lowLevelAccess flag overlay', () => {
+  test('reuses matching trigger permissions and clones only changed permissions', () => {
+    for (const access of [true, false]) {
+      const matching = { lowLevelAccess: access, effect: [] };
+      const changed = { lowLevelAccess: !access, effect: [] };
+      const out = mergeAttachedModulesIntoPayload(basePayload(), {}, [modFixture({
+        triggers: [matching, changed], lua_scripts: ['', ''], low_level_access: access,
+      })]);
+      expect(out.triggers[0]).toBe(matching);
+      expect(out.triggers[1]).not.toBe(changed);
+      expect(out.triggers[1]).toEqual({ lowLevelAccess: access, effect: changed.effect });
+      expect((out.triggers[1] as typeof changed).effect).toBe(changed.effect);
+      expect(changed.lowLevelAccess).toBe(!access);
+    }
+  });
+
   test('module low_level_access=true overlays lowLevelAccess:true on every pushed trigger', () => {
     const m = modFixture({
       id: 'low-level-mod',
@@ -423,17 +438,18 @@ describe('mergeAttachedModulesIntoPayload — lowLevelAccess flag overlay', () =
     expect((out.triggers[1] as { lowLevelAccess?: boolean }).lowLevelAccess).toBe(true);
   });
 
-  test('module low_level_access=false does NOT inject the flag (preserves trigger\'s own value)', () => {
+  test('module low_level_access=false clears a trigger grant without changing its source', () => {
+    const trigger = { kind: 't', existing: 'unrelated', lowLevelAccess: true };
     const m = modFixture({
       id: 'plain-mod',
-      triggers: [{ kind: 't', existing: 'unrelated' }],
+      triggers: [trigger],
       lua_scripts: [''],
       low_level_access: false,
     });
     const out = mergeAttachedModulesIntoPayload(basePayload(), {}, [m]);
     expect(out.triggers).toHaveLength(1);
-    // No lowLevelAccess field added — trigger object is pushed verbatim.
-    expect(out.triggers[0]).toEqual({ kind: 't', existing: 'unrelated' });
+    expect(out.triggers[0]).toEqual({ kind: 't', existing: 'unrelated', lowLevelAccess: false });
+    expect(trigger.lowLevelAccess).toBe(true);
   });
 
   test('overlay is non-destructive: source trigger object is NOT mutated', () => {
