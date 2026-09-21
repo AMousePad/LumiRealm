@@ -39,7 +39,7 @@ Full guide on the **[Wiki](https://github.com/AMousePad/LumiRealm/wiki)**.
 
 ## Installation
 
-This branch requires **Lumiverse 1.2.0 or later**, as declared in [spindle.json](spindle.json). See **Branches** below for development dependencies.
+The baseline requirement is **Lumiverse 1.2.0 or later**, as declared in [spindle.json](spindle.json). The current `staging` branch also requires the host changes described under **Branches** below.
 
 1. Open your Lumiverse instance.
 2. Open **Extensions** in the sidebar and add:
@@ -55,7 +55,7 @@ This branch requires **Lumiverse 1.2.0 or later**, as declared in [spindle.json]
 Pick the branch that matches the Lumiverse you're running.
 
 - **`main`** is the default for released Lumiverse versions.
-- **`staging`** is for development and can require Lumiverse changes that have not shipped yet. Features move to `main` when their host dependencies are released.
+- **`staging`** currently requires the companion Lumiverse frontend runtime changes, including document routing, runtime state, required generation hooks, and display/macro processing contracts. The baseline version alone is insufficient. Features move to `main` when their host dependencies are released.
 
 To switch branches after installing, go to the extensions tab and use the **Branch** button on the LumiRealm entry.
 
