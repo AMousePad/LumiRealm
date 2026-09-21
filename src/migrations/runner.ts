@@ -1,3 +1,4 @@
+import { makeLowLevelAccessConsentMessage } from "../payload/codec.js";
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { LumirealmCharacterData } from '../payload/types.js';
@@ -23,6 +24,7 @@ import { awaitRegexInstall } from './install-coordinator.js';
 import type { ModuleArtifactInstallOptions } from '../state/world-book-ops.js';
 
 export interface MigrationsFactoryDeps {
+  readonly requestCardAccess: (characterName: string, message: string, userId: string) => Promise<{ confirmed: boolean }>;
   readonly extensionVersion: string;
   readonly currentModuleSchemaVersion: number;
   readonly translatorMigrationChecked: Set<string>;
@@ -378,6 +380,27 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
         characterName,
       }, userId);
     } else if (result.kind === 'failed') {
+      if (result.consentRequired && opts?.firePromptOnNeedsReimport === true) {
+        let consent: { confirmed: boolean };
+        try {
+          consent = await deps.requestCardAccess(characterName, makeLowLevelAccessConsentMessage(characterName), userId);
+        } catch (error) {
+          const message = `Could not request card access: ${errMsg(error)}`;
+          toastFor(userId, 'error', message, { title: 'Card access requires consent' });
+          log.error(message);
+          translatorMigrationChecked.delete(characterId);
+          return result.kind;
+        }
+        if (consent.confirmed) {
+          const updated = await deps.updateLumirealm(characterId, userId, current => ({
+            ...current,
+            user_overrides: { ...current.user_overrides, low_level_access_granted: true, consent_acknowledged_at: Date.now() },
+          }));
+          if (!updated) throw new Error('Card was removed while awaiting access consent');
+          return runCharacterMigration(characterId, characterName, userId, updated, { ...opts, firePromptOnNeedsReimport: false });
+        }
+        return result.kind;
+      }
       if (result.consentRequired) {
         toastFor(userId, 'error', result.error, { title: 'Card access requires consent' });
       }

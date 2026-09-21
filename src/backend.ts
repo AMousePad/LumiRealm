@@ -1423,6 +1423,10 @@ const regexImporter = createRegexImporter({
 
 
 const migrationsRunner = createMigrationsRunner({
+  requestCardAccess: (characterName, message, userId) => spindle.modal.confirm({
+    title: `Low-level access: ${characterName}`, message, userId,
+    confirmLabel: 'Grant access', cancelLabel: 'Keep blocked', variant: 'warning',
+  }),
   extensionVersion: EXTENSION_VERSION,
   currentModuleSchemaVersion: CURRENT_MODULE_SCHEMA_VERSION,
   translatorMigrationChecked,

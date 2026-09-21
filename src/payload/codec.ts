@@ -41,7 +41,7 @@ export class RisuConsentDeclinedError extends Error {
 export class RisuConsentRequiredError extends Error {
   override readonly name = 'RisuConsentRequiredError';
   constructor(characterName: string) {
-    super(`Low-level access consent is required for "${characterName}". Re-import this card to review and grant access.`);
+    super(`Low-level access consent is required for "${characterName}". Open this card to review and grant access.`);
   }
 }
 
@@ -145,3 +145,14 @@ export function isLumirealmData(value: unknown): value is LumirealmCharacterData
   return v.schema_version === 1;
 }
 
+
+export function makeLowLevelAccessConsentMessage(characterName: string): string {
+  return (
+    `"${characterName}" requests low-level access. With this granted the card may:\n\n` +
+    `  • Make additional LLM API calls (uses your tokens / billing)\n` +
+    `  • Run helper / classifier prompts in the background\n` +
+    `  • Trigger image generation (if your provider supports it)\n` +
+    `  • Inspect message similarity / embeddings\n\n` +
+    `Only grant access for cards from sources you trust.`
+  );
+}

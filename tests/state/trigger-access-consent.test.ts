@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import * as characterMigration from "../../src/migrations/character.js";
+import { expect, test, spyOn } from 'bun:test';
 import { translateFromStoredSource } from '../../src/core/pipeline/translate.js';
 import { buildLumirealmData } from '../../src/payload/codec.js';
 import { retranslateCharacterFromCurrentSource, type CharacterRetranslateDeps } from '../../src/state/character-retranslate.js';
@@ -80,7 +81,7 @@ test('automatic migration reports consent through an error toast, without the le
   expect(await runner.runCharacterMigration(args.characterId, args.characterName, args.userId, envelope(), { silent: true })).toBe('failed');
   expect(toasts).toHaveLength(1);
   expect(toasts[0]).toMatchObject({ kind: 'error' });
-  expect(toasts[0]!.message).toMatch(/consent.*re-import|re-import.*consent/i);
+  expect(toasts[0]!.message).toMatch(/consent.*open|open.*consent/i);
   expect(sends).toEqual([]);
 });
 
@@ -103,6 +104,42 @@ test('consent failure reaches the existing repair error result instead of report
     applyStaleCharRegex: false, applyStaleModuleRegex: false, applyDeadJournals: false, applyForceRetranslate: true,
   } }, { userId: args.userId, send: (message) => { messages.push(message); }, log, errMsg: String });
   expect(messages).toHaveLength(1);
-  expect(messages[0]).toMatchObject({ type: 'repair_apply_result', error: expect.stringMatching(/consent.*re-import|re-import.*consent/i) });
+  expect(messages[0]).toMatchObject({ type: 'repair_apply_result', error: expect.stringMatching(/consent.*open|open.*consent/i) });
   expect(phases.at(-1)).toBe('error');
+});
+
+test.each([false, true])('opening a blocked card records only explicit consent and retries migration: %s', async (confirmed) => {
+  const input = envelope();
+  const original = structuredClone(input);
+  const migrated: any[] = [], writes: any[] = [], prompts: any[] = [];
+  const migrate = spyOn(characterMigration, 'migrateCharacterIfNeeded').mockImplementation(async (request) => {
+    migrated.push(request);
+    return request.envelope.user_overrides.low_level_access_granted
+      ? { kind: 'migrated', from: 1, to: 2, stepsApplied: [], elapsedMs: 0 } as any
+      : { kind: 'failed', from: 1, to: 2, consentRequired: true, error: 'consent required' };
+  });
+  try {
+    const runner = createMigrationsRunner({
+      extensionVersion: 'current', log, translatorMigrationChecked: new Set(),
+      requestCardAccess: async (...request: any[]) => { prompts.push(request); return { confirmed }; },
+      updateLumirealm: async (characterId: string, userId: string, mutate: any) => {
+        expect([characterId, userId]).toEqual([args.characterId, args.userId]);
+        const updated = mutate(input); writes.push(updated); return updated;
+      },
+      invalidateActiveForCharacter() {}, toastFor() {},
+    } as unknown as MigrationsFactoryDeps);
+    const result = await runner.runCharacterMigration(args.characterId, args.characterName, args.userId, input, { firePromptOnNeedsReimport: true });
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0][0]).toBe(args.characterName);
+    expect(prompts[0][1]).toContain('LLM API calls');
+    expect(prompts[0][2]).toBe(args.userId);
+    expect(writes).toHaveLength(confirmed ? 1 : 0);
+    expect(migrated).toHaveLength(confirmed ? 2 : 1);
+    expect(result).toBe(confirmed ? 'migrated' : 'failed');
+    expect(input).toEqual(original);
+    if (confirmed) {
+      expect(writes[0].user_overrides.low_level_access_granted).toBe(true);
+      expect(writes[0].user_overrides.consent_acknowledged_at).toBeGreaterThan(0);
+    }
+  } finally { migrate.mockRestore(); }
 });
