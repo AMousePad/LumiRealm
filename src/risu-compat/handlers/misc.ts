@@ -14,14 +14,14 @@ register("u", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)),
 register("ue", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)),
   "Alias for {{u}}.");
 
-register("unicodeencode", (_c, a) => (a[0] ?? "").charCodeAt(a[1] ? Number(a[1]) : 0).toString(),
+register("unicodeencode", (_c, a) => a[0]!.charCodeAt(a[1] ? Number(a[1]) : 0).toString(),
   "Returns the Unicode code point of a character at the given index (default 0).");
 register("unicodedecode", (_c, a) => String.fromCharCode(Number(a[0] ?? "0")),
   "Converts a Unicode code point back to a character.");
 
-register("fromhex", (_c, a) => Number.parseInt(a[0] ?? "0", 16).toString(),
+register("fromhex", (_c, a) => Number.parseInt(a[0]!, 16).toString(),
   "Converts a hex string to decimal.");
-register("tohex", (_c, a) => Number.parseInt(a[0] ?? "0").toString(16),
+register("tohex", (_c, a) => Number.parseInt(a[0]!).toString(16),
   "Converts a decimal number to hex.");
 
 register("xor", (_c, a) => {
@@ -39,7 +39,7 @@ register("xordecrypt", (_c, a) => {
 register("crypt", (_c, a) => {
   let shift = a[1] ? Number(a[1]) : 32768;
   if (isNaN(shift)) shift = 32768;
-  const input = a[0] ?? "";
+  const input = a[0]!;
   let result = "";
   for (let i = 0; i < input.length; i++) {
     const code = input.charCodeAt(i);
@@ -148,7 +148,7 @@ register("moduleassetlist", (ctx, a) => {
 // Subset: model fields read from ctx.aiModel, platform fields default to non-native.
 // modelformat/modelprovider/modeltokenizer still error, Lumi exposes no equivalent.
 register("metadata", (ctx, a) => {
-  const key = (a[0] ?? "").toLocaleLowerCase();
+  const key = a[0]!.toLocaleLowerCase();
   switch (key) {
     case "imateapot": return "🫖";
     case "mobile": case "local": case "node": return "0";

@@ -43,7 +43,7 @@ register("average", (_c, a) => {
 
 // cbs.ts (tonumber, pow), cbs.ts (fixnum).
 register("tonumber", (_c, a) => {
-  const s = a[0] ?? "";
+  const s = a[0]!;
   let out = "";
   for (const ch of s) {
     if (!isNaN(Number(ch)) || ch === ".") out += ch;
