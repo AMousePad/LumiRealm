@@ -21,7 +21,7 @@ export function createFrontendLuaBackend(host: SpindleAPI & FrontendLuaHostContr
   const rpc = createFrontendLuaRpc(send);
   return {
     async call<T>(chatId: string, characterId: string, operation: FrontendLuaOperation, userId: string | undefined, sessionId: string | undefined, signal?: AbortSignal): Promise<T> {
-      if (!sessionId || !userId) throw new FrontendLuaUnavailableError('Lua execution requires the originating browser session');
+      if (!sessionId || !userId) throw new FrontendLuaUnavailableError('Lua execution requires an active browser tab');
       return rpc.call(userId, { chatId, characterId, operation, sessionId }, { timeoutMs: 120_000, ...(signal ? { signal } : {}) }) as Promise<T>;
     },
     async receive(raw: unknown, userId: string, sessionId: string | undefined): Promise<boolean> {

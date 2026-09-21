@@ -403,6 +403,7 @@ export function createDisplayResolver(
 ): SpindleDisplayResolver & { resetScriptCache(): void } {
   const scriptCache = new Map<string, SpindleDisplayResolveResult>();
   return {
+    finalizeWithoutScripts: true,
     resetScriptCache() { scriptCache.clear(); },
     ready(chatId: string): boolean {
       return isDisplayResolutionReady(chatId);

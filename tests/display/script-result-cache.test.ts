@@ -260,3 +260,7 @@ test('aborted triggers preserve their writes without issuing a completion GUI re
     expect((await apply(createDisplayResolver(), rule('{{getvar::x}}')))?.content).toBe('3');
   } finally { fixture.runtime.dispose(); }
 });
+
+test('the resolver opts into finalization without display scripts', () => {
+  expect(createDisplayResolver().finalizeWithoutScripts).toBe(true);
+});
