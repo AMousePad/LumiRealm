@@ -3,21 +3,11 @@ import { registry } from "../registry.js";
 import { makeArray } from "../risu-helpers.js";
 import { base64ToUtf8 } from "../../util/base64.js";
 
-// Metadata and declare-style macros. Risu citations inline.
+// Metadata macros. Risu citations inline.
 
 function register(name: string, handler: MacroHandler, description: string): void {
   registry.register({ name, handler, description, category: "Risu / Metadata", scoped: false });
 }
-
-// cbs.ts. Backed via temp scope so {{declared::NAME}} can read it in the same evaluation.
-register("declare", (ctx, a) => {
-  ctx.vars.set("temp", `__declared_${a[0] ?? ""}__`, "1");
-  return "";
-}, "Declares a marker; {{declared::NAME}} reads it. Backed by the temp-scope store.");
-
-register("declared", (ctx, a) => {
-  return ctx.vars.get("temp", `__declared_${a[0] ?? ""}__`) === "1" ? "1" : "0";
-}, "Reads a declaration marker set by {{declare::NAME}}.");
 
 // cbs.ts.
 register("emotionlist", (ctx) => {

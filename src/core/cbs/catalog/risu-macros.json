@@ -958,9 +958,9 @@
     ],
     "lumiverseCollision": null,
     "risuFile": "src/ts/cbs.ts",
-    "risuLine": 2247,
-    "summary": "Sets a __declared_NAME__ marker in the temp scope (writable from later {{declared::NAME}} reads).",
-    "notes": ""
+    "risuLine": 2249,
+    "summary": "Sets a __declared_NAME__ marker in the optional parser caller variable map.",
+    "notes": "Current callers do not supply that map. Risu retains the literal macro when the map is absent; this parser leaves it unhandled."
   },
   {
     "name": "description",
@@ -3456,23 +3456,5 @@
     "risuLine": 1,
     "summary": "Total number of messages in the chat as a string. Frequently synthesized in CBS templates.",
     "notes": "Not registered in Risu's cbs.ts as a named function; many cards use it via script."
-  },
-  {
-    "name": "declared",
-    "aliases": [],
-    "category": "metadata",
-    "argShape": "NAME",
-    "minArgs": 1,
-    "maxArgs": 1,
-    "pure": false,
-    "readsState": [
-      "localVars"
-    ],
-    "writesState": [],
-    "lumiverseCollision": null,
-    "risuFile": "src/ts/cbs.ts",
-    "risuLine": 2247,
-    "summary": "Reads a declaration marker set by {{declare::NAME}}; returns '1' if declared else '0'.",
-    "notes": "Risu implements this implicitly via var checks; we expose it as a dedicated handler for clarity."
   }
 ]
