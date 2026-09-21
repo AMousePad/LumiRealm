@@ -33,8 +33,8 @@ register("not", (_c, a) => a[0] === "1" ? "0" : "1",
   "Boolean NOT of a '1'/'0' value.");
 
 // cbs.ts.
-const bag = (a: readonly string[]): readonly string[] =>
-  a.length > 1 ? a : parseArray(a[0] ?? "").map((v) => String(v));
+const bag = (a: readonly string[]): readonly unknown[] =>
+  a.length > 1 ? a : parseArray(a[0]!);
 register("all", (_c, a) => bag(a).every((f) => f === "1") ? "1" : "0",
   "Returns '1' if every value is the literal string '1'.");
 register("any", (_c, a) => bag(a).some((f) => f === "1") ? "1" : "0",

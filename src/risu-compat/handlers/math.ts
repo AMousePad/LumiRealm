@@ -23,9 +23,9 @@ register("pow", (_c, a) => Math.pow(Number(a[0]), Number(a[1])).toString(),
   "Returns a^b.");
 
 // cbs.ts. Accepts multiple args or a single JSON/§ array.
-const aggSource = (args: readonly string[]): readonly string[] =>
-  args.length > 1 ? args : (parseArray(args[0] ?? "").map((v) => String(v)));
-const toNum = (s: string): number => {
+const aggSource = (args: readonly string[]): readonly unknown[] =>
+  args.length > 1 ? args : parseArray(args[0]!);
+const toNum = (s: unknown): number => {
   const n = Number(s);
   return isNaN(n) ? 0 : n;
 };
