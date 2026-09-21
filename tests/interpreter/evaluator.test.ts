@@ -170,10 +170,10 @@ describe("evaluator: output-buffer rewinds", () => {
   });
 });
 
-describe("evaluator: raw opaque blocks", () => {
-  test("#ignore discards its body", () => {
-    expect(evaluate("a{{#ignore}}{{getvar::x}}hidden{{/ignore}}b", makeCtx()))
-      .toBe("ab");
+describe("evaluator: unknown blocks", () => {
+  test("#ignore retains its delimiters and evaluates its body", () => {
+    expect(evaluate("a{{#ignore}}{{getvar::x}}hidden{{/ignore}}b", makeCtx({ local: { x: "visible" } })))
+      .toBe("a{{#ignore}}visiblehidden{{/ignore}}b");
   });
 });
 

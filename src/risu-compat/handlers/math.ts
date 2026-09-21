@@ -55,7 +55,7 @@ register("fixnum", (_c, a) => Number(a[0]).toFixed(Number(a[1])).toString(),
 
 // cbs.ts.
 register("calc", (ctx, a) => {
-  const expr = a[0] ?? "";
+  const expr = a[0]!;
   const n = calcString(
     expr,
     (name) => ctx.vars.get("local", name),

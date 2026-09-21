@@ -152,7 +152,6 @@ export function blockStartMatcher(input: string, ctx: EvaluatorCtx): BlockMatch 
 
   if (p1 === "#pure") return { type: "pure" };
   if (p1 === "#pure_display" || p1 === "#puredisplay") return { type: "pure-display" };
-  if (p1 === "#ignore") return { type: "ignore" };
   if (p1 === "#code") return { type: "normalize" };
   if (p1.startsWith("#escape")) {
     const t2 = p1.substring(7).trim();
