@@ -18,7 +18,7 @@ $env:RISU_PARITY_STRICT = '1'
 try { bun test risu-divergence } finally { Remove-Item Env:RISU_PARITY_STRICT }
 ```
 
-The current result is **96 passing examples and 22 known differences across 118 tests**. Examples share root causes; this is not a count of independent bugs or a compatibility percentage.
+The current result is **97 passing examples and 21 known differences across 118 tests**. Examples share root causes; this is not a count of independent bugs or a compatibility percentage.
 
 | Suite | Tests | Known differences | Passing controls |
 | --- | ---: | ---: | ---: |
@@ -27,7 +27,7 @@ The current result is **96 passing examples and 22 known differences across 118 
 | [Hook chains](interpreter/listen-edit-risu-divergence.test.ts) | 11 | 0 | 11 |
 | [Frontend boundaries](display/lua-risu-divergence.test.ts) | 9 | 0 | 9 |
 | [Wasmoon execution](interpreter/lua-engine-risu-divergence.test.ts) | 15 | 0 | 15 |
-| [Runtime and adapter boundaries](interpreter/lua-deep-risu-divergence.test.ts) | 10 | 9 | 1 |
+| [Runtime and adapter boundaries](interpreter/lua-deep-risu-divergence.test.ts) | 10 | 8 | 2 |
 
 ## Risu source grounding
 

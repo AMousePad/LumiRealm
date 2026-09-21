@@ -478,28 +478,13 @@ export async function makeRisuTriggerRuntime(
   }
 
   function reconcileFullChat(value: unknown): void {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(toStr(value));
-    } catch (err) {
-      _logSetFullChat.warn(
-        `invalid JSON ignored: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return;
-    }
-    if (!Array.isArray(parsed)) {
-      _logSetFullChat.warn('non-array payload ignored');
-      return;
-    }
+    const parsed = JSON.parse(value as string);
 
     const previous = [...messagesCache];
-    const desired = parsed.map((raw) => {
-      const item = raw && typeof raw === 'object'
-        ? raw as { role?: unknown; data?: unknown }
-        : {};
+    const desired = parsed.map((raw: { role?: unknown; data?: unknown }) => {
       return {
-        role: risuRoleToLumi(toStr(item.role)),
-        content: toStr(item.data),
+        role: risuRoleToLumi(toStr(raw.role)),
+        content: toStr(raw.data),
       };
     });
     const overlap = Math.min(previous.length, desired.length);

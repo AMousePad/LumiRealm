@@ -37,7 +37,7 @@ for (const [name, body, expected] of [
   });
 }
 
-divergence('invalid full-chat JSON aborts the callback', async () => {
+test('invalid full-chat JSON aborts the callback', async () => {
   const rt = await runtime();
   expect(await rt.runLua(`function onStart(id) setFullChatMain(id,'invalid');return 'continued' end`)).toBeUndefined();
 });
