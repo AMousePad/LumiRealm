@@ -41,6 +41,7 @@ import {
 import { buildModuleDisplayPlan } from './module-action-plan.js';
 import { deferDisplayAssets, displayAssetBaseline, finalizeDisplayAssets, parseDisplayCaller } from './caller-parser.js';
 import { evaluate } from '../interpreter/evaluator/scanner.js';
+import { stripDisplayStyleImports } from './style-imports.js';
 const log = makeSafeLogger('display-resolver');
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
@@ -581,7 +582,7 @@ export function createDisplayResolver(
       if (mode === 'shadow') {
         const beContent = await fetchBackendApply(args);
         if (beContent === null) {
-          return { content: feContent, touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
+          return { content: stripDisplayStyleImports(feContent), touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
         }
         if (beContent !== feContent) {
           log.warn(
@@ -593,11 +594,11 @@ export function createDisplayResolver(
         } else {
           log.trace(`[shadow] apply match chat=${chatId} msg=${args.context.messageId ?? '?'} len=${feContent.length}`);
         }
-        return { content: beContent };
+        return { content: stripDisplayStyleImports(beContent) };
       }
 
       return {
-        content: feContent,
+        content: stripDisplayStyleImports(feContent),
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile,
       };

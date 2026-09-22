@@ -17,6 +17,7 @@ function displayRule(overrides: Partial<FeRegexScript> = {}): FeRegexScript {
   };
 }
 
+
 async function applyRules(scripts: readonly FeRegexScript[], content = 'TOKEN') {
   return createDisplayResolver().applyScripts({
     content, scripts: [...scripts],
@@ -940,4 +941,12 @@ describe('frontend display resolver message context', () => {
     }]);
     expect(result?.cacheable).toBe(false);
   });
+});
+
+test.each([false, true])('removes complete CSS imports only after display scripts (with scripts: %s)', async (withScripts) => {
+  setDisplaySnapshot(snapshot());
+  const css = `@import url('https://fonts.example.test/css?wght=400;700&display=swap');\n.panel * { margin: 0; padding: 0; }`;
+  const html = `<style>${css}</style><div class="panel"><img src="/image"></div>`;
+  const result = await applyRules(withScripts ? [displayRule({ replace_string: html })] : [], withScripts ? 'TOKEN' : html);
+  expect(result?.content).toBe('<style>\n.panel * { margin: 0; padding: 0; }</style><div class="panel"><img src="/image"></div>');
 });

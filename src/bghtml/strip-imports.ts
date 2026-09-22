@@ -3,7 +3,7 @@ const IMPORT_RULE_RE = /@import\s+(?:url\(\s*["']?[^)"']*["']?\s*\)|["'][^"']*["
 
 /** Remove every top-level `@import` rule from `css`. Idempotent. */
 export function stripCssImports(css: string): string {
-  if (!css || css.indexOf("@import") < 0) return css;
+  if (!css || !/@import/i.test(css)) return css;
   return css.replace(IMPORT_RULE_RE, "");
 }
 
