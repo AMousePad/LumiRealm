@@ -218,8 +218,6 @@ function blockStartMatcher(input, ctx) {
     return { type: "pure" };
   if (p1 === "#pure_display" || p1 === "#puredisplay")
     return { type: "pure-display" };
-  if (p1 === "#ignore")
-    return { type: "ignore" };
   if (p1 === "#code")
     return { type: "normalize" };
   if (p1.startsWith("#escape")) {
@@ -579,9 +577,7 @@ function parseArray2(s) {
 }
 function parseDict(s) {
   try {
-    const v = JSON.parse(s);
-    if (v && typeof v === "object" && !Array.isArray(v))
-      return v;
+    return JSON.parse(s);
   } catch {}
   return {};
 }
@@ -783,7 +779,7 @@ var init_risu_helpers = __esm(() => {
 function register2(name, handler, description) {
   registry.register({ name, handler, description, category: "Risu / Math", scoped: false });
 }
-var aggSource = (args) => args.length > 1 ? args : parseArray2(args[0] ?? "").map((v) => String(v)), toNum = (s) => {
+var aggSource = (args) => args.length > 1 ? args : parseArray2(args[0]), toNum = (s) => {
   const n = Number(s);
   return isNaN(n) ? 0 : n;
 };
@@ -806,7 +802,7 @@ var init_math = __esm(() => {
     return (src.map(toNum).reduce((x, y) => x + y, 0) / src.length).toString();
   }, "Arithmetic mean of the given values.");
   register2("tonumber", (_c, a) => {
-    const s = a[0] ?? "";
+    const s = a[0];
     let out = "";
     for (const ch of s) {
       if (!isNaN(Number(ch)) || ch === ".")
@@ -816,7 +812,7 @@ var init_math = __esm(() => {
   }, "Extracts digits (and decimal points) from the input string.");
   register2("fixnum", (_c, a) => Number(a[0]).toFixed(Number(a[1])).toString(), "Rounds to N decimal places via toFixed.");
   register2("calc", (ctx, a) => {
-    const expr = a[0] ?? "";
+    const expr = a[0];
     const n = calcString(expr, (name) => ctx.vars.get("local", name), (name) => ctx.vars.get("global", name));
     return n.toString();
   }, "Evaluates a mathematical expression. Supports + - * / ^ % and comparison operators; $x reads local var, @x reads global var.");
@@ -826,7 +822,7 @@ var init_math = __esm(() => {
 function register3(name, handler, description) {
   registry.register({ name, handler, description, category: "Risu / Logic", scoped: false });
 }
-var bag = (a) => a.length > 1 ? a : parseArray2(a[0] ?? "").map((v) => String(v));
+var bag = (a) => a.length > 1 ? a : parseArray2(a[0]);
 var init_logic = __esm(() => {
   init_registry();
   init_risu_helpers();
@@ -841,10 +837,10 @@ var init_logic = __esm(() => {
   register3("not", (_c, a) => a[0] === "1" ? "0" : "1", "Boolean NOT of a '1'/'0' value.");
   register3("all", (_c, a) => bag(a).every((f) => f === "1") ? "1" : "0", "Returns '1' if every value is the literal string '1'.");
   register3("any", (_c, a) => bag(a).some((f) => f === "1") ? "1" : "0", "Returns '1' if any value is '1'.");
-  register3("startswith", (_c, a) => (a[0] ?? "").startsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] starts with args[1].");
-  register3("endswith", (_c, a) => (a[0] ?? "").endsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] ends with args[1].");
-  register3("contains", (_c, a) => (a[0] ?? "").includes(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] contains args[1] anywhere.");
-  register3("iserror", (_c, a) => (a[0] ?? "").toLocaleLowerCase().startsWith("error:") ? "1" : "0", "Returns '1' if the argument begins with 'error:' (case-insensitive).");
+  register3("startswith", (_c, a) => a[0].startsWith(a[1]) ? "1" : "0", "Returns '1' if args[0] starts with args[1].");
+  register3("endswith", (_c, a) => a[0].endsWith(a[1]) ? "1" : "0", "Returns '1' if args[0] ends with args[1].");
+  register3("contains", (_c, a) => a[0].includes(a[1]) ? "1" : "0", "Returns '1' if args[0] contains args[1] anywhere.");
+  register3("iserror", (_c, a) => a[0].toLocaleLowerCase().startsWith("error:") ? "1" : "0", "Returns '1' if the argument begins with 'error:' (case-insensitive).");
 });
 
 // src/risu-compat/handlers/strings.ts
@@ -854,16 +850,16 @@ function register4(name, handler, description) {
 var init_strings = __esm(() => {
   init_registry();
   init_risu_helpers();
-  register4("replace", (_c, a) => (a[0] ?? "").replaceAll(a[1] ?? "", a[2] ?? ""), "Replaces all occurrences of needle with replacement.");
-  register4("split", (_c, a) => makeArray2((a[0] ?? "").split(a[1] ?? "")), "Splits a string on the delimiter and returns a JSON array.");
-  register4("join", (_c, a) => parseArray2(a[0] ?? "").join(a[1] ?? ""), "Joins a JSON array using the given separator.");
-  register4("spread", (_c, a) => parseArray2(a[0] ?? "").join("::"), "Joins a JSON array using :: as the separator.");
-  register4("trim", (_c, a) => (a[0] ?? "").trim(), "Strips leading/trailing whitespace.");
-  register4("length", (_c, a) => (a[0] ?? "").length.toString(), "Returns the character length of a string.");
-  register4("lower", (_c, a) => (a[0] ?? "").toLocaleLowerCase(), "Lowercases using locale-aware conversion.");
-  register4("upper", (_c, a) => (a[0] ?? "").toLocaleUpperCase(), "Uppercases using locale-aware conversion.");
+  register4("replace", (_c, a) => a[0].replaceAll(a[1], a[2]), "Replaces all occurrences of needle with replacement.");
+  register4("split", (_c, a) => makeArray2(a[0].split(a[1])), "Splits a string on the delimiter and returns a JSON array.");
+  register4("join", (_c, a) => parseArray2(a[0]).join(a[1]), "Joins a JSON array using the given separator.");
+  register4("spread", (_c, a) => parseArray2(a[0]).join("::"), "Joins a JSON array using :: as the separator.");
+  register4("trim", (_c, a) => a[0].trim(), "Strips leading/trailing whitespace.");
+  register4("length", (_c, a) => a[0].length.toString(), "Returns the character length of a string.");
+  register4("lower", (_c, a) => a[0].toLocaleLowerCase(), "Lowercases using locale-aware conversion.");
+  register4("upper", (_c, a) => a[0].toLocaleUpperCase(), "Uppercases using locale-aware conversion.");
   register4("capitalize", (_c, a) => {
-    const s = a[0] ?? "";
+    const s = a[0];
     return s.charAt(0).toUpperCase() + s.slice(1);
   }, "Uppercases only the first character.");
   register4("reverse", (_c, a) => [...a[0] ?? ""].reverse().join(""), "Reverses a string (code-point safe via iterator).");
@@ -876,46 +872,46 @@ function register5(name, handler, description) {
 var init_arrays = __esm(() => {
   init_registry();
   init_risu_helpers();
-  register5("arraylength", (_c, a) => parseArray2(a[0] ?? "").length.toString(), "Returns the length of a JSON array.");
+  register5("arraylength", (_c, a) => parseArray2(a[0]).length.toString(), "Returns the length of a JSON array.");
   register5("arrayshift", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     arr.shift();
     return makeArray2(arr);
   }, "Removes and discards the first element.");
   register5("arraypop", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     arr.pop();
     return makeArray2(arr);
   }, "Removes and discards the last element.");
   register5("arraypush", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
-    arr.push(a[1] ?? "");
+    const arr = parseArray2(a[0]);
+    arr.push(a[1]);
     return makeArray2(arr);
   }, "Appends a new element.");
   register5("arraysplice", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
-    arr.splice(Number(a[1]), Number(a[2]), a[3] ?? "");
+    const arr = parseArray2(a[0]);
+    arr.splice(Number(a[1]), Number(a[2]), a[3]);
     return makeArray2(arr);
   }, "Risu-style splice: (array, start, deleteCount, newElement).");
   register5("arrayassert", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     const idx = Number(a[1]);
     if (idx >= arr.length)
-      arr[idx] = a[2] ?? "";
+      arr[idx] = a[2];
     return makeArray2(arr);
   }, "Sets arr[idx] = value if idx is out of bounds; else leaves array unchanged.");
   register5("arrayelement", (_c, a) => {
-    const el = parseArray2(a[0] ?? "").at(Number(a[1])) ?? "null";
+    const el = parseArray2(a[0]).at(Number(a[1])) ?? "null";
     return typeof el === "object" ? JSON.stringify(el) : String(el);
   }, "Returns the element at index (JSON-stringifies if object). 'null' if OOB.");
   register5("dictelement", (_c, a) => {
-    const el = parseDict(a[0] ?? "")[a[1] ?? ""] ?? "null";
+    const el = parseDict(a[0])[a[1]] ?? "null";
     return typeof el === "object" ? JSON.stringify(el) : String(el);
   }, "Returns dict[key] or 'null'.");
   register5("objectassert", (_c, a) => {
-    const d = parseDict(a[0] ?? "");
-    if (!d[a[1] ?? ""])
-      d[a[1] ?? ""] = a[2] ?? "";
+    const d = parseDict(a[0]);
+    if (!d[a[1]])
+      d[a[1]] = a[2];
     return JSON.stringify(d);
   }, "Sets obj[key] = value if missing or falsy; returns JSON.");
   register5("element", (_c, a) => {
@@ -937,13 +933,16 @@ var init_arrays = __esm(() => {
   register5("makearray", (_c, a) => makeArray2(a), "Creates a JSON array from the given arguments.");
   register5("makedict", (_c, a) => {
     const d = {};
-    for (let i = 0;i + 1 < a.length; i += 2) {
-      d[a[i] ?? ""] = a[i + 1] ?? "";
+    for (const pair of a) {
+      const separator = pair.indexOf("=");
+      if (separator === -1)
+        continue;
+      d[pair.slice(0, separator)] = pair.slice(separator + 1);
     }
     return JSON.stringify(d);
-  }, "Creates a JSON object from interleaved key-value arguments.");
+  }, "Creates a JSON object from key=value arguments.");
   register5("range", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     const start = arr.length > 1 ? Number(arr[0]) : 0;
     const end = arr.length > 1 ? Number(arr[1]) : Number(arr[0]);
     const step = arr.length > 2 ? Number(arr[2]) : 1;
@@ -955,7 +954,7 @@ var init_arrays = __esm(() => {
     return makeArray2(out);
   }, "Creates a range. [n] → [0,1,…,n-1]. [a,b] → [a,…,b-1]. [a,b,s] → step s.");
   register5("filter", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     const mode = ["all", "nonempty", "unique"].indexOf(a[1] ?? "all");
     const filterType = mode === -1 ? 0 : mode;
     return makeArray2(arr.filter((f, i) => {
@@ -1084,30 +1083,30 @@ function leaveVarLiteral(ctx) {
 var init_variables = __esm(() => {
   init_registry();
   register7("getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a local chat variable. Empty string if unset.");
-  register7("setvar", (ctx, a) => {
+  register7("setvar", (ctx, a, raw) => {
     const mode = setvarMode(ctx);
     if (mode === "hide")
       return "";
     if (mode === "literal")
-      return `{{setvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+      return `{{${raw}}}`;
     ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
     return "";
   }, "Sets a local chat variable.");
-  register7("addvar", (ctx, a) => {
+  register7("addvar", (ctx, a, raw) => {
     const mode = setvarMode(ctx);
     if (mode === "hide")
       return "";
     if (mode === "literal")
-      return `{{addvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+      return `{{${raw}}}`;
     ctx.vars.add("local", a[0] ?? "", Number(a[1]));
     return "";
   }, "Adds delta to a local chat variable (coerces current value to number).");
-  register7("setdefaultvar", (ctx, a) => {
+  register7("setdefaultvar", (ctx, a, raw) => {
     const mode = setvarMode(ctx);
     if (mode === "hide")
       return "";
     if (mode === "literal")
-      return `{{setdefaultvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+      return `{{${raw}}}`;
     const name = a[0] ?? "";
     const current = ctx.vars.get("local", name);
     if (!current || current === "null") {
@@ -1116,9 +1115,9 @@ var init_variables = __esm(() => {
     return "";
   }, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
   register7("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""), "Reads a global chat variable.");
-  register7("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""), "Reads a temporary variable (per-evaluation scope).");
+  register7("tempvar", (ctx, a) => ctx.tempVars[String(a[0])] ?? "", "Reads a temporary variable (per-evaluation scope).");
   register7("settempvar", (ctx, a) => {
-    ctx.vars.set("temp", a[0] ?? "", a[1] ?? "");
+    ctx.tempVars[String(a[0])] = a[1];
     return "";
   }, "Sets a temporary variable.");
   register7("deletevar", (ctx, a) => {
@@ -1141,8 +1140,8 @@ var init_variables = __esm(() => {
     return "";
   }, "Sets a chat-scoped variable.");
   register7("return", (ctx, a) => {
-    ctx.vars.set("temp", "__force_return__", "1");
-    ctx.vars.set("temp", "__return__", a[0] ?? "");
+    ctx.tempVars.__return__ = a[0];
+    ctx.tempVars.__force_return__ = "1";
     return "";
   }, "Halts further macro resolution, returns the given value as the entire parser output (Risu parity).");
 });
@@ -1213,10 +1212,10 @@ var init_misc = __esm(() => {
   init_base64();
   register8("u", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Returns the character for a hex codepoint.");
   register8("ue", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Alias for {{u}}.");
-  register8("unicodeencode", (_c, a) => (a[0] ?? "").charCodeAt(a[1] ? Number(a[1]) : 0).toString(), "Returns the Unicode code point of a character at the given index (default 0).");
+  register8("unicodeencode", (_c, a) => a[0].charCodeAt(a[1] ? Number(a[1]) : 0).toString(), "Returns the Unicode code point of a character at the given index (default 0).");
   register8("unicodedecode", (_c, a) => String.fromCharCode(Number(a[0] ?? "0")), "Converts a Unicode code point back to a character.");
-  register8("fromhex", (_c, a) => Number.parseInt(a[0] ?? "0", 16).toString(), "Converts a hex string to decimal.");
-  register8("tohex", (_c, a) => Number.parseInt(a[0] ?? "0").toString(16), "Converts a decimal number to hex.");
+  register8("fromhex", (_c, a) => Number.parseInt(a[0], 16).toString(), "Converts a hex string to decimal.");
+  register8("tohex", (_c, a) => Number.parseInt(a[0]).toString(16), "Converts a decimal number to hex.");
   register8("xor", (_c, a) => {
     const bytes = new TextEncoder().encode(a[0] ?? "");
     for (let i = 0;i < bytes.length; i++)
@@ -1233,7 +1232,7 @@ var init_misc = __esm(() => {
     let shift = a[1] ? Number(a[1]) : 32768;
     if (isNaN(shift))
       shift = 32768;
-    const input = a[0] ?? "";
+    const input = a[0];
     let result = "";
     for (let i = 0;i < input.length; i++) {
       const code = input.charCodeAt(i);
@@ -1266,10 +1265,11 @@ var init_misc = __esm(() => {
   }, "Alias of {{date::fmt}}.");
   register8("hiddenkey", () => "", "A key that activates lorebook entries without being sent to the model.");
   register8("comment", (ctx, a) => {
-    if (ctx.commit || ctx.cbsContext)
+    const visualize = ctx.visualize ?? !(ctx.commit || ctx.cbsContext);
+    if (!visualize)
       return "";
     return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
-  }, 'Comment macro. Empty at prompt time and in cbs; displays as <div class="risu-comment">…</div> at render time.');
+  }, "Comment macro. Shown only when the parser caller enables visualization.");
   registry.register({
     name: "//",
     handler: () => "",
@@ -1319,7 +1319,7 @@ var init_misc = __esm(() => {
     return makeArray2(list);
   }, "Returns a JSON array of asset names for the specified module namespace. Returns empty string if namespace not found.");
   register8("metadata", (ctx, a) => {
-    const key = (a[0] ?? "").toLocaleLowerCase();
+    const key = a[0].toLocaleLowerCase();
     switch (key) {
       case "imateapot":
         return "\uD83E\uDED6";
@@ -1416,8 +1416,7 @@ var init_chat_context = __esm(() => {
       const fm = selectedGreeting(ctx);
       const head = [{
         role: "char",
-        data: ctx.evaluate ? ctx.evaluate(fm) : fm,
-        time: 0
+        data: ctx.evaluate ? ctx.evaluate(fm) : fm
       }];
       return makeArray2([
         ...head,
@@ -1437,27 +1436,27 @@ var init_chat_context = __esm(() => {
   }, "Returns message[N].content, or 'Out of range' if index invalid.");
   register9("previouscharchat", (ctx) => {
     const msgs = ctx.messages.all();
-    const start = ctx.cbsContext ? msgs.length - 1 : ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1;
+    const start = ctx.cbsContext || ctx.currentMessageIndex === -1 ? msgs.length - 1 : ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1;
     for (let i = start;i >= 0; i--) {
       const m = msgs[i];
-      if (m && m.role === "assistant")
+      if (m.role === "assistant")
         return m.content;
     }
     return selectedGreeting(ctx);
-  }, "Last character (assistant) message; cbs walks from chat-end, others from currentMessageIndex-1.");
+  }, "Last character message before the current index; index -1 or no index searches from chat-end.");
   register9("previoususerchat", (ctx) => {
-    if (ctx.cbsContext)
+    if (ctx.cbsContext || ctx.currentMessageIndex === -1)
       return "";
     if (ctx.currentMessageIndex === null)
       return "";
     const msgs = ctx.messages.all();
     for (let i = ctx.currentMessageIndex - 1;i >= 0; i--) {
       const m = msgs[i];
-      if (m && m.role === "user")
+      if (m.role === "user")
         return m.content;
     }
     return selectedGreeting(ctx);
-  }, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
+  }, "Last user message before the current index; index -1 or no index returns empty.");
   register9("lastmessage", (ctx) => {
     const last = ctx.messages.last();
     return last?.content ?? "";
@@ -1466,14 +1465,6 @@ var init_chat_context = __esm(() => {
     const n = ctx.messages.count();
     return Math.max(-1, n - 1).toString();
   }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");
-  register9("lastusermessage", (ctx) => {
-    const m = ctx.messages.lastOf("user");
-    return m?.content ?? "";
-  }, "Alias-style shortcut for the most recent user message. '' if none.");
-  register9("lastcharmessage", (ctx) => {
-    const m = ctx.messages.lastOf("assistant");
-    return m?.content ?? "";
-  }, "Alias-style shortcut for the most recent character (assistant) message.");
   register9("jbtoggled", (ctx) => ctx.jailbreakToggle ? "1" : "0", "Returns '1' when the global jailbreak toggle is on.");
   register9("maxcontext", (ctx) => ctx.maxContext.toString(), "Returns the configured max-context length as a string.");
   register9("messagecount", (ctx) => ctx.messages.count().toString(), "Returns the total number of messages in the chat.");
@@ -1496,12 +1487,12 @@ var init_display = __esm(() => {
   register10("displayescapedanglebracketclose", () => "", "Displays as >.");
   register10("displayescapedcolon", () => "", "Displays as : without being parsed as a CBS separator.");
   register10("displayescapedsemicolon", () => "", "Displays as ;.");
-  register10("cbr", (_c, a) => {
+  register10("cbr", (_c, a, raw) => {
     if (a.length === 0)
       return "\\n";
     const n = Math.max(1, Number(a[0] ?? "1"));
-    return "\\n".repeat(n);
-  }, "Returns a literal '\\n'. With numeric arg, repeats that many times.");
+    return raw.repeat(n);
+  }, "Returns a literal '\\n' without args; with a count, repeats the raw macro payload.");
   register10("position", (ctx, args, raw) => {
     if (ctx.cbsContext) {
       const source = raw || `position::${args.join("::")}`;
@@ -1533,13 +1524,6 @@ var init_metadata = __esm(() => {
   init_registry();
   init_risu_helpers();
   init_base64();
-  register11("declare", (ctx, a) => {
-    ctx.vars.set("temp", `__declared_${a[0] ?? ""}__`, "1");
-    return "";
-  }, "Declares a marker; {{declared::NAME}} reads it. Backed by the temp-scope store.");
-  register11("declared", (ctx, a) => {
-    return ctx.vars.get("temp", `__declared_${a[0] ?? ""}__`) === "1" ? "1" : "0";
-  }, "Reads a declaration marker set by {{declare::NAME}}.");
   register11("emotionlist", (ctx) => {
     return makeArray2(ctx.character.emotionImages.map((e) => e.name));
   }, "JSON array of emotion image names for the current character.");
@@ -1552,8 +1536,8 @@ var init_metadata = __esm(() => {
     return ctx.aiModel.startsWith("claude") ? "1" : "0";
   }, "'1' if the current AI model id starts with 'claude' (Claude supports prefill).");
   register11("file", (ctx, a) => {
-    const decode = ctx.cbsContext || ctx.commit;
-    if (!decode)
+    const visualize = ctx.visualize ?? !(ctx.cbsContext || ctx.commit);
+    if (visualize)
       return `<br><div class="x-risu-risu-file">${a[0] ?? ""}</div><br>`;
     const content = a[1] ?? "";
     try {
@@ -1561,7 +1545,7 @@ var init_metadata = __esm(() => {
     } catch {
       return "";
     }
-  }, 'Decodes base64 file content to UTF-8 (prompt and cbs paths); renders <div class="risu-file">…</div> in display path.');
+  }, "Shows the filename when visualization is enabled; otherwise decodes base64 content to UTF-8.");
   register11("chardisplayasset", (ctx) => {
     if (!ctx.character.prebuiltAssetCommand)
       return makeArray2([]);
@@ -1573,7 +1557,13 @@ var init_metadata = __esm(() => {
 
 // src/risu-compat/handlers/assets.ts
 function register12(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Assets", scoped: false });
+  registry.register({
+    name,
+    description,
+    category: "Risu / Assets",
+    scoped: false,
+    handler: (ctx, args, raw) => ctx.cbsContext ? `{{${raw}}}` : handler(ctx, args, raw)
+  });
 }
 function trimAssetKey(s) {
   let out = s;
@@ -1650,9 +1640,6 @@ function videoTag(src, opts) {
   return `<video ${controls}${muted}autoplay loop><source src="${src}" type="video/mp4"></video>
 `;
 }
-function literal(name, args) {
-  return `{{${name}${args.length > 0 ? "::" + args.join("::") : ""}}}`;
-}
 var ASSET_WIDTH_STYLE = "", VIDEO_EXTENSIONS, TRIMMER_EXTS, ASSET_MAX_DIFFERENCE = 4;
 var init_assets = __esm(() => {
   init_registry();
@@ -1674,8 +1661,6 @@ var init_assets = __esm(() => {
     "ogg"
   ];
   register12("path", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("path", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1683,8 +1668,6 @@ var init_assets = __esm(() => {
     return hit?.src ?? "";
   }, "Asset URL by name, plain string (for src=/url()). parser.svelte.ts.");
   register12("img", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("img", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1694,8 +1677,6 @@ var init_assets = __esm(() => {
     return imgTag(hit.src);
   }, "Inline <img> for a named asset. parser.svelte.ts.");
   register12("image", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("image", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1706,8 +1687,6 @@ var init_assets = __esm(() => {
 `;
   }, "Inlay image wrapper. parser.svelte.ts.");
   register12("emotion", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("emotion", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1717,8 +1696,6 @@ var init_assets = __esm(() => {
     return imgTag(hit.src);
   }, "Emotion image by name. parser.svelte.ts.");
   register12("asset", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("asset", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1732,8 +1709,6 @@ var init_assets = __esm(() => {
 `;
   }, "Asset by name — img or video depending on extension. parser.svelte.ts.");
   register12("bg", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("bg", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1743,8 +1718,6 @@ var init_assets = __esm(() => {
     return `<div style="width:100%;height:100%;background: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),url(${hit.src}); background-size: cover;"></div>`;
   }, "Background panel. parser.svelte.ts.");
   register12("video", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("video", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1754,8 +1727,6 @@ var init_assets = __esm(() => {
     return videoTag(hit.src, { controls: true, muted: false });
   }, "Full-featured video. parser.svelte.ts.");
   register12("video-img", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("video-img", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1765,8 +1736,6 @@ var init_assets = __esm(() => {
     return videoTag(hit.src, { controls: false, muted: true });
   }, "Muted autoplay video (image-substitute). parser.svelte.ts.");
   register12("audio", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("audio", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1777,8 +1746,6 @@ var init_assets = __esm(() => {
 `;
   }, "Audio player. parser.svelte.ts.");
   register12("bgm", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("bgm", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1789,16 +1756,12 @@ var init_assets = __esm(() => {
 `;
   }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
   register12("inlay", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlay", args);
     const id = String(args[0] ?? "");
     if (!id)
       return "";
     return `<img src="/api/v1/images/${id}"/>`;
   }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
   register12("inlayed", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlayed", args);
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -1807,8 +1770,6 @@ var init_assets = __esm(() => {
 `;
   }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
   register12("inlayeddata", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlayeddata", args);
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -1817,8 +1778,6 @@ var init_assets = __esm(() => {
 `;
   }, "Wrapped inlay image (data variant). Risu parser.svelte.ts + 688.");
   register12("source", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("source", args);
     const kind = String(args[0] ?? "").toLowerCase();
     if (kind === "char")
       return ctx.character.image;
@@ -6569,9 +6528,9 @@ var init_risu_macros = __esm(() => {
       writesState: [],
       lumiverseCollision: null,
       risuFile: "src/ts/cbs.ts",
-      risuLine: 1384,
-      summary: "Emits literal '\\n' (backslash+n). Optional N repeats the sequence.",
-      notes: ""
+      risuLine: 1386,
+      summary: "Emits literal '\\n' (backslash+n) without args. With N, repeats the raw macro payload, preserving its spelling.",
+      notes: "Risu uses String.repeat with counts below 1 clamped to 1; nonnumeric counts produce empty output."
     },
     {
       name: "ceil",
@@ -6803,9 +6762,9 @@ var init_risu_macros = __esm(() => {
       ],
       lumiverseCollision: null,
       risuFile: "src/ts/cbs.ts",
-      risuLine: 2247,
-      summary: "Sets a __declared_NAME__ marker in the temp scope (writable from later {{declared::NAME}} reads).",
-      notes: ""
+      risuLine: 2249,
+      summary: "Sets a __declared_NAME__ marker in the optional parser caller variable map.",
+      notes: "Current callers do not supply that map. Risu retains the literal macro when the map is absent; this parser leaves it unhandled."
     },
     {
       name: "description",
@@ -7791,7 +7750,7 @@ var init_risu_macros = __esm(() => {
         "o"
       ],
       category: "other",
-      argShape: "K1::V1[::K2::V2…]",
+      argShape: "K1=V1[::K2=V2…]",
       minArgs: 0,
       maxArgs: -1,
       pure: true,
@@ -7800,8 +7759,8 @@ var init_risu_macros = __esm(() => {
       lumiverseCollision: null,
       risuFile: "src/ts/cbs.ts",
       risuLine: 1303,
-      summary: "Creates a JSON object from interleaved key-value arguments. Note: Risu's built-in parses 'key=value' strings; our port accepts separate args — behavior documented.",
-      notes: "Risu's upstream makedict parses each arg as 'key=value'. Our port accepts alternating key/value args (pair-wise), which matches the risu-compat handler."
+      summary: "Creates a JSON object from key=value arguments, splitting each at its first equals sign.",
+      notes: "Arguments without an equals sign are ignored; later duplicate keys replace earlier values."
     },
     {
       name: "max",
@@ -9303,24 +9262,6 @@ content#} form. Returns trimmed content if cond is not the empty string, 0, or -
       risuLine: 1,
       summary: "Total number of messages in the chat as a string. Frequently synthesized in CBS templates.",
       notes: "Not registered in Risu's cbs.ts as a named function; many cards use it via script."
-    },
-    {
-      name: "declared",
-      aliases: [],
-      category: "metadata",
-      argShape: "NAME",
-      minArgs: 1,
-      maxArgs: 1,
-      pure: false,
-      readsState: [
-        "localVars"
-      ],
-      writesState: [],
-      lumiverseCollision: null,
-      risuFile: "src/ts/cbs.ts",
-      risuLine: 2247,
-      summary: "Reads a declaration marker set by {{declare::NAME}}; returns '1' if declared else '0'.",
-      notes: "Risu implements this implicitly via var checks; we expose it as a dedicated handler for clarity."
     }
   ];
 });
@@ -9545,8 +9486,10 @@ function evaluate(template, ctx, opts = {}) {
   if (callStack > CALL_STACK_LIMIT) {
     return "ERROR: Call stack limit reached";
   }
-  const innerCtx = callStack === ctx.callStack ? ctx : Object.assign(Object.create(Object.getPrototypeOf(ctx) ?? null), ctx, {
-    callStack
+  const tempVars = {};
+  const innerCtx = Object.assign(Object.create(Object.getPrototypeOf(ctx) ?? null), ctx, {
+    callStack,
+    tempVars
   });
   let da = template.replace(/<(user|char|bot)>/gi, "{{$1}}");
   let pointer = 0;
@@ -9698,12 +9641,8 @@ function evaluate(template, ctx, opts = {}) {
         } else {
           nested[0] += mc;
         }
-        if (innerCtx.vars.get("temp", "__force_return__") === "1") {
-          const ret = innerCtx.vars.get("temp", "__return__") || "null";
-          innerCtx.vars.delete("temp", "__force_return__");
-          innerCtx.vars.delete("temp", "__return__");
-          return ret;
-        }
+        if (tempVars.__force_return__)
+          return tempVars.__return__ ?? "null";
         break;
       }
       default:
@@ -9725,7119 +9664,6 @@ var CALL_STACK_LIMIT = 20;
 var init_scanner = __esm(() => {
   init_dispatch();
   init_cbs();
-});
-
-// node_modules/fengari-web/dist/fengari-web.bundle.js
-var require_fengari_web_bundle = __commonJS(function(exports, module) {
-  module.exports = function(t) {
-    var e = {};
-    function n(r) {
-      if (e[r])
-        return e[r].exports;
-      var a = e[r] = { i: r, l: false, exports: {} };
-      return t[r].call(a.exports, a, a.exports, n), a.l = true, a.exports;
-    }
-    return n.m = t, n.c = e, n.d = function(t, e, r) {
-      n.o(t, e) || Object.defineProperty(t, e, { enumerable: true, get: r });
-    }, n.r = function(t) {
-      typeof Symbol != "undefined" && Symbol.toStringTag && Object.defineProperty(t, Symbol.toStringTag, { value: "Module" }), Object.defineProperty(t, "__esModule", { value: true });
-    }, n.t = function(t, e) {
-      if (1 & e && (t = n(t)), 8 & e)
-        return t;
-      if (4 & e && typeof t == "object" && t && t.__esModule)
-        return t;
-      var r = Object.create(null);
-      if (n.r(r), Object.defineProperty(r, "default", { enumerable: true, value: t }), 2 & e && typeof t != "string")
-        for (var a in t)
-          n.d(r, a, function(e) {
-            return t[e];
-          }.bind(null, a));
-      return r;
-    }, n.n = function(t) {
-      var e = t && t.__esModule ? function() {
-        return t.default;
-      } : function() {
-        return t;
-      };
-      return n.d(e, "a", e), e;
-    }, n.o = function(t, e) {
-      return Object.prototype.hasOwnProperty.call(t, e);
-    }, n.p = "", n(n.s = 34);
-  }([function(t, e, n) {
-    const r = n(5);
-    t.exports.FENGARI_AUTHORS = r.FENGARI_AUTHORS, t.exports.FENGARI_COPYRIGHT = r.FENGARI_COPYRIGHT, t.exports.FENGARI_RELEASE = r.FENGARI_RELEASE, t.exports.FENGARI_VERSION = r.FENGARI_VERSION, t.exports.FENGARI_VERSION_MAJOR = r.FENGARI_VERSION_MAJOR, t.exports.FENGARI_VERSION_MINOR = r.FENGARI_VERSION_MINOR, t.exports.FENGARI_VERSION_NUM = r.FENGARI_VERSION_NUM, t.exports.FENGARI_VERSION_RELEASE = r.FENGARI_VERSION_RELEASE, t.exports.luastring_eq = r.luastring_eq, t.exports.luastring_indexOf = r.luastring_indexOf, t.exports.luastring_of = r.luastring_of, t.exports.to_jsstring = r.to_jsstring, t.exports.to_luastring = r.to_luastring, t.exports.to_uristring = r.to_uristring;
-    const a = n(3), u = n(2), l = n(7), s = n(17);
-    t.exports.luaconf = a, t.exports.lua = u, t.exports.lauxlib = l, t.exports.lualib = s;
-  }, function(t, e, n) {
-    let r, a, u;
-    if (r = typeof Uint8Array.from == "function" ? Uint8Array.from.bind(Uint8Array) : function(t) {
-      let e = 0, n = t.length, r = new Uint8Array(n);
-      for (;n > e; )
-        r[e] = t[e++];
-      return r;
-    }, typeof new Uint8Array().indexOf == "function")
-      a = function(t, e, n) {
-        return t.indexOf(e, n);
-      };
-    else {
-      let t = [].indexOf;
-      if (t.call(new Uint8Array(1), 0) !== 0)
-        throw Error("missing .indexOf");
-      a = function(e, n, r) {
-        return t.call(e, n, r);
-      };
-    }
-    u = typeof Uint8Array.of == "function" ? Uint8Array.of.bind(Uint8Array) : function() {
-      return r(arguments);
-    };
-    const l = function(t) {
-      return t instanceof Uint8Array;
-    }, s = "cannot convert invalid utf8 to javascript string", o = ";,/?:@&=+$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,-_.!~*'()#".split("").reduce(function(t, e) {
-      return t[e.charCodeAt(0)] = true, t;
-    }, {}), i = {}, c = function(t, e) {
-      if (typeof t != "string")
-        throw new TypeError("to_luastring expects a javascript string");
-      if (e) {
-        let e = i[t];
-        if (l(e))
-          return e;
-      }
-      let n = t.length, a = Array(n), u = 0;
-      for (let e = 0;e < n; ++e) {
-        let r = t.charCodeAt(e);
-        if (r <= 127)
-          a[u++] = r;
-        else if (r <= 2047)
-          a[u++] = 192 | r >> 6, a[u++] = 128 | 63 & r;
-        else {
-          if (r >= 55296 && r <= 56319 && e + 1 < n) {
-            let n = t.charCodeAt(e + 1);
-            n >= 56320 && n <= 57343 && (e++, r = 1024 * (r - 55296) + n + 9216);
-          }
-          r <= 65535 ? (a[u++] = 224 | r >> 12, a[u++] = 128 | r >> 6 & 63, a[u++] = 128 | 63 & r) : (a[u++] = 240 | r >> 18, a[u++] = 128 | r >> 12 & 63, a[u++] = 128 | r >> 6 & 63, a[u++] = 128 | 63 & r);
-        }
-      }
-      return a = r(a), e && (i[t] = a), a;
-    };
-    t.exports.luastring_from = r, t.exports.luastring_indexOf = a, t.exports.luastring_of = u, t.exports.is_luastring = l, t.exports.luastring_eq = function(t, e) {
-      if (t !== e) {
-        let n = t.length;
-        if (n !== e.length)
-          return false;
-        for (let r = 0;r < n; r++)
-          if (t[r] !== e[r])
-            return false;
-      }
-      return true;
-    }, t.exports.to_jsstring = function(t, e, n, r) {
-      if (!l(t))
-        throw new TypeError("to_jsstring expects a Uint8Array");
-      n = n === undefined ? t.length : Math.min(t.length, n);
-      let a = "";
-      for (let u = e !== undefined ? e : 0;u < n; ) {
-        let e = t[u++];
-        if (e < 128)
-          a += String.fromCharCode(e);
-        else if (e < 194 || e > 244) {
-          if (!r)
-            throw RangeError(s);
-          a += "�";
-        } else if (e <= 223) {
-          if (u >= n) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          let l = t[u++];
-          if ((192 & l) != 128) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          a += String.fromCharCode(((31 & e) << 6) + (63 & l));
-        } else if (e <= 239) {
-          if (u + 1 >= n) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          let l = t[u++];
-          if ((192 & l) != 128) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          let o = t[u++];
-          if ((192 & o) != 128) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          let i = ((15 & e) << 12) + ((63 & l) << 6) + (63 & o);
-          if (i <= 65535)
-            a += String.fromCharCode(i);
-          else {
-            let t = 55296 + ((i -= 65536) >> 10), e = i % 1024 + 56320;
-            a += String.fromCharCode(t, e);
-          }
-        } else {
-          if (u + 2 >= n) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          let l = t[u++];
-          if ((192 & l) != 128) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          let o = t[u++];
-          if ((192 & o) != 128) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          let i = t[u++];
-          if ((192 & i) != 128) {
-            if (!r)
-              throw RangeError(s);
-            a += "�";
-            continue;
-          }
-          let c = ((7 & e) << 18) + ((63 & l) << 12) + ((63 & o) << 6) + (63 & i), _ = 55296 + ((c -= 65536) >> 10), f = c % 1024 + 56320;
-          a += String.fromCharCode(_, f);
-        }
-      }
-      return a;
-    }, t.exports.to_uristring = function(t) {
-      if (!l(t))
-        throw new TypeError("to_uristring expects a Uint8Array");
-      let e = "";
-      for (let n = 0;n < t.length; n++) {
-        let r = t[n];
-        o[r] ? e += String.fromCharCode(r) : e += "%" + (r < 16 ? "0" : "") + r.toString(16);
-      }
-      return e;
-    }, t.exports.to_luastring = c, t.exports.from_userstring = function(t) {
-      if (!l(t)) {
-        if (typeof t != "string")
-          throw new TypeError("expects an array of bytes or javascript string");
-        t = c(t);
-      }
-      return t;
-    };
-    const _ = c("\x1BLua");
-    t.exports.LUA_SIGNATURE = _, t.exports.LUA_VERSION_MAJOR = "5", t.exports.LUA_VERSION_MINOR = "3", t.exports.LUA_VERSION_NUM = 503, t.exports.LUA_VERSION_RELEASE = "4", t.exports.LUA_VERSION = "Lua 5.3", t.exports.LUA_RELEASE = "Lua 5.3.4", t.exports.LUA_COPYRIGHT = "Lua 5.3.4  Copyright (C) 1994-2017 Lua.org, PUC-Rio", t.exports.LUA_AUTHORS = "R. Ierusalimschy, L. H. de Figueiredo, W. Celes";
-    const f = { LUA_TNONE: -1, LUA_TNIL: 0, LUA_TBOOLEAN: 1, LUA_TLIGHTUSERDATA: 2, LUA_TNUMBER: 3, LUA_TSTRING: 4, LUA_TTABLE: 5, LUA_TFUNCTION: 6, LUA_TUSERDATA: 7, LUA_TTHREAD: 8, LUA_NUMTAGS: 9 };
-    f.LUA_TSHRSTR = 0 | f.LUA_TSTRING, f.LUA_TLNGSTR = 16 | f.LUA_TSTRING, f.LUA_TNUMFLT = 0 | f.LUA_TNUMBER, f.LUA_TNUMINT = 16 | f.LUA_TNUMBER, f.LUA_TLCL = 0 | f.LUA_TFUNCTION, f.LUA_TLCF = 16 | f.LUA_TFUNCTION, f.LUA_TCCL = 32 | f.LUA_TFUNCTION;
-    const { LUAI_MAXSTACK: p } = n(3), L = -p - 1000;
-    t.exports.LUA_HOOKCALL = 0, t.exports.LUA_HOOKCOUNT = 3, t.exports.LUA_HOOKLINE = 2, t.exports.LUA_HOOKRET = 1, t.exports.LUA_HOOKTAILCALL = 4, t.exports.LUA_MASKCALL = 1, t.exports.LUA_MASKCOUNT = 8, t.exports.LUA_MASKLINE = 4, t.exports.LUA_MASKRET = 2, t.exports.LUA_MINSTACK = 20, t.exports.LUA_MULTRET = -1, t.exports.LUA_OPADD = 0, t.exports.LUA_OPBAND = 7, t.exports.LUA_OPBNOT = 13, t.exports.LUA_OPBOR = 8, t.exports.LUA_OPBXOR = 9, t.exports.LUA_OPDIV = 5, t.exports.LUA_OPEQ = 0, t.exports.LUA_OPIDIV = 6, t.exports.LUA_OPLE = 2, t.exports.LUA_OPLT = 1, t.exports.LUA_OPMOD = 3, t.exports.LUA_OPMUL = 2, t.exports.LUA_OPPOW = 4, t.exports.LUA_OPSHL = 10, t.exports.LUA_OPSHR = 11, t.exports.LUA_OPSUB = 1, t.exports.LUA_OPUNM = 12, t.exports.LUA_REGISTRYINDEX = L, t.exports.LUA_RIDX_GLOBALS = 2, t.exports.LUA_RIDX_LAST = 2, t.exports.LUA_RIDX_MAINTHREAD = 1, t.exports.constant_types = f, t.exports.lua_Debug = class {
-      constructor() {
-        this.event = NaN, this.name = null, this.namewhat = null, this.what = null, this.source = null, this.currentline = NaN, this.linedefined = NaN, this.lastlinedefined = NaN, this.nups = NaN, this.nparams = NaN, this.isvararg = NaN, this.istailcall = NaN, this.short_src = null, this.i_ci = null;
-      }
-    }, t.exports.lua_upvalueindex = function(t) {
-      return L - t;
-    }, t.exports.thread_status = { LUA_OK: 0, LUA_YIELD: 1, LUA_ERRRUN: 2, LUA_ERRSYNTAX: 3, LUA_ERRMEM: 4, LUA_ERRGCMM: 5, LUA_ERRERR: 6 };
-  }, function(t, e, n) {
-    const r = n(1), a = n(18), u = n(11), l = n(8), s = n(12);
-    t.exports.LUA_AUTHORS = r.LUA_AUTHORS, t.exports.LUA_COPYRIGHT = r.LUA_COPYRIGHT, t.exports.LUA_ERRERR = r.thread_status.LUA_ERRERR, t.exports.LUA_ERRGCMM = r.thread_status.LUA_ERRGCMM, t.exports.LUA_ERRMEM = r.thread_status.LUA_ERRMEM, t.exports.LUA_ERRRUN = r.thread_status.LUA_ERRRUN, t.exports.LUA_ERRSYNTAX = r.thread_status.LUA_ERRSYNTAX, t.exports.LUA_HOOKCALL = r.LUA_HOOKCALL, t.exports.LUA_HOOKCOUNT = r.LUA_HOOKCOUNT, t.exports.LUA_HOOKLINE = r.LUA_HOOKLINE, t.exports.LUA_HOOKRET = r.LUA_HOOKRET, t.exports.LUA_HOOKTAILCALL = r.LUA_HOOKTAILCALL, t.exports.LUA_MASKCALL = r.LUA_MASKCALL, t.exports.LUA_MASKCOUNT = r.LUA_MASKCOUNT, t.exports.LUA_MASKLINE = r.LUA_MASKLINE, t.exports.LUA_MASKRET = r.LUA_MASKRET, t.exports.LUA_MINSTACK = r.LUA_MINSTACK, t.exports.LUA_MULTRET = r.LUA_MULTRET, t.exports.LUA_NUMTAGS = r.constant_types.LUA_NUMTAGS, t.exports.LUA_OK = r.thread_status.LUA_OK, t.exports.LUA_OPADD = r.LUA_OPADD, t.exports.LUA_OPBAND = r.LUA_OPBAND, t.exports.LUA_OPBNOT = r.LUA_OPBNOT, t.exports.LUA_OPBOR = r.LUA_OPBOR, t.exports.LUA_OPBXOR = r.LUA_OPBXOR, t.exports.LUA_OPDIV = r.LUA_OPDIV, t.exports.LUA_OPEQ = r.LUA_OPEQ, t.exports.LUA_OPIDIV = r.LUA_OPIDIV, t.exports.LUA_OPLE = r.LUA_OPLE, t.exports.LUA_OPLT = r.LUA_OPLT, t.exports.LUA_OPMOD = r.LUA_OPMOD, t.exports.LUA_OPMUL = r.LUA_OPMUL, t.exports.LUA_OPPOW = r.LUA_OPPOW, t.exports.LUA_OPSHL = r.LUA_OPSHL, t.exports.LUA_OPSHR = r.LUA_OPSHR, t.exports.LUA_OPSUB = r.LUA_OPSUB, t.exports.LUA_OPUNM = r.LUA_OPUNM, t.exports.LUA_REGISTRYINDEX = r.LUA_REGISTRYINDEX, t.exports.LUA_RELEASE = r.LUA_RELEASE, t.exports.LUA_RIDX_GLOBALS = r.LUA_RIDX_GLOBALS, t.exports.LUA_RIDX_LAST = r.LUA_RIDX_LAST, t.exports.LUA_RIDX_MAINTHREAD = r.LUA_RIDX_MAINTHREAD, t.exports.LUA_SIGNATURE = r.LUA_SIGNATURE, t.exports.LUA_TNONE = r.constant_types.LUA_TNONE, t.exports.LUA_TNIL = r.constant_types.LUA_TNIL, t.exports.LUA_TBOOLEAN = r.constant_types.LUA_TBOOLEAN, t.exports.LUA_TLIGHTUSERDATA = r.constant_types.LUA_TLIGHTUSERDATA, t.exports.LUA_TNUMBER = r.constant_types.LUA_TNUMBER, t.exports.LUA_TSTRING = r.constant_types.LUA_TSTRING, t.exports.LUA_TTABLE = r.constant_types.LUA_TTABLE, t.exports.LUA_TFUNCTION = r.constant_types.LUA_TFUNCTION, t.exports.LUA_TUSERDATA = r.constant_types.LUA_TUSERDATA, t.exports.LUA_TTHREAD = r.constant_types.LUA_TTHREAD, t.exports.LUA_VERSION = r.LUA_VERSION, t.exports.LUA_VERSION_MAJOR = r.LUA_VERSION_MAJOR, t.exports.LUA_VERSION_MINOR = r.LUA_VERSION_MINOR, t.exports.LUA_VERSION_NUM = r.LUA_VERSION_NUM, t.exports.LUA_VERSION_RELEASE = r.LUA_VERSION_RELEASE, t.exports.LUA_YIELD = r.thread_status.LUA_YIELD, t.exports.lua_Debug = r.lua_Debug, t.exports.lua_upvalueindex = r.lua_upvalueindex, t.exports.lua_absindex = a.lua_absindex, t.exports.lua_arith = a.lua_arith, t.exports.lua_atpanic = a.lua_atpanic, t.exports.lua_atnativeerror = a.lua_atnativeerror, t.exports.lua_call = a.lua_call, t.exports.lua_callk = a.lua_callk, t.exports.lua_checkstack = a.lua_checkstack, t.exports.lua_close = s.lua_close, t.exports.lua_compare = a.lua_compare, t.exports.lua_concat = a.lua_concat, t.exports.lua_copy = a.lua_copy, t.exports.lua_createtable = a.lua_createtable, t.exports.lua_dump = a.lua_dump, t.exports.lua_error = a.lua_error, t.exports.lua_gc = a.lua_gc, t.exports.lua_getallocf = a.lua_getallocf, t.exports.lua_getextraspace = a.lua_getextraspace, t.exports.lua_getfield = a.lua_getfield, t.exports.lua_getglobal = a.lua_getglobal, t.exports.lua_gethook = u.lua_gethook, t.exports.lua_gethookcount = u.lua_gethookcount, t.exports.lua_gethookmask = u.lua_gethookmask, t.exports.lua_geti = a.lua_geti, t.exports.lua_getinfo = u.lua_getinfo, t.exports.lua_getlocal = u.lua_getlocal, t.exports.lua_getmetatable = a.lua_getmetatable, t.exports.lua_getstack = u.lua_getstack, t.exports.lua_gettable = a.lua_gettable, t.exports.lua_gettop = a.lua_gettop, t.exports.lua_getupvalue = a.lua_getupvalue, t.exports.lua_getuservalue = a.lua_getuservalue, t.exports.lua_insert = a.lua_insert, t.exports.lua_isboolean = a.lua_isboolean, t.exports.lua_iscfunction = a.lua_iscfunction, t.exports.lua_isfunction = a.lua_isfunction, t.exports.lua_isinteger = a.lua_isinteger, t.exports.lua_islightuserdata = a.lua_islightuserdata, t.exports.lua_isnil = a.lua_isnil, t.exports.lua_isnone = a.lua_isnone, t.exports.lua_isnoneornil = a.lua_isnoneornil, t.exports.lua_isnumber = a.lua_isnumber, t.exports.lua_isproxy = a.lua_isproxy, t.exports.lua_isstring = a.lua_isstring, t.exports.lua_istable = a.lua_istable, t.exports.lua_isthread = a.lua_isthread, t.exports.lua_isuserdata = a.lua_isuserdata, t.exports.lua_isyieldable = l.lua_isyieldable, t.exports.lua_len = a.lua_len, t.exports.lua_load = a.lua_load, t.exports.lua_newstate = s.lua_newstate, t.exports.lua_newtable = a.lua_newtable, t.exports.lua_newthread = s.lua_newthread, t.exports.lua_newuserdata = a.lua_newuserdata, t.exports.lua_next = a.lua_next, t.exports.lua_pcall = a.lua_pcall, t.exports.lua_pcallk = a.lua_pcallk, t.exports.lua_pop = a.lua_pop, t.exports.lua_pushboolean = a.lua_pushboolean, t.exports.lua_pushcclosure = a.lua_pushcclosure, t.exports.lua_pushcfunction = a.lua_pushcfunction, t.exports.lua_pushfstring = a.lua_pushfstring, t.exports.lua_pushglobaltable = a.lua_pushglobaltable, t.exports.lua_pushinteger = a.lua_pushinteger, t.exports.lua_pushjsclosure = a.lua_pushjsclosure, t.exports.lua_pushjsfunction = a.lua_pushjsfunction, t.exports.lua_pushlightuserdata = a.lua_pushlightuserdata, t.exports.lua_pushliteral = a.lua_pushliteral, t.exports.lua_pushlstring = a.lua_pushlstring, t.exports.lua_pushnil = a.lua_pushnil, t.exports.lua_pushnumber = a.lua_pushnumber, t.exports.lua_pushstring = a.lua_pushstring, t.exports.lua_pushthread = a.lua_pushthread, t.exports.lua_pushvalue = a.lua_pushvalue, t.exports.lua_pushvfstring = a.lua_pushvfstring, t.exports.lua_rawequal = a.lua_rawequal, t.exports.lua_rawget = a.lua_rawget, t.exports.lua_rawgeti = a.lua_rawgeti, t.exports.lua_rawgetp = a.lua_rawgetp, t.exports.lua_rawlen = a.lua_rawlen, t.exports.lua_rawset = a.lua_rawset, t.exports.lua_rawseti = a.lua_rawseti, t.exports.lua_rawsetp = a.lua_rawsetp, t.exports.lua_register = a.lua_register, t.exports.lua_remove = a.lua_remove, t.exports.lua_replace = a.lua_replace, t.exports.lua_resume = l.lua_resume, t.exports.lua_rotate = a.lua_rotate, t.exports.lua_setallof = l.lua_setallof, t.exports.lua_setfield = a.lua_setfield, t.exports.lua_setglobal = a.lua_setglobal, t.exports.lua_sethook = u.lua_sethook, t.exports.lua_seti = a.lua_seti, t.exports.lua_setlocal = u.lua_setlocal, t.exports.lua_setmetatable = a.lua_setmetatable, t.exports.lua_settable = a.lua_settable, t.exports.lua_settop = a.lua_settop, t.exports.lua_setupvalue = a.lua_setupvalue, t.exports.lua_setuservalue = a.lua_setuservalue, t.exports.lua_status = a.lua_status, t.exports.lua_stringtonumber = a.lua_stringtonumber, t.exports.lua_toboolean = a.lua_toboolean, t.exports.lua_todataview = a.lua_todataview, t.exports.lua_tointeger = a.lua_tointeger, t.exports.lua_tointegerx = a.lua_tointegerx, t.exports.lua_tojsstring = a.lua_tojsstring, t.exports.lua_tolstring = a.lua_tolstring, t.exports.lua_tonumber = a.lua_tonumber, t.exports.lua_tonumberx = a.lua_tonumberx, t.exports.lua_topointer = a.lua_topointer, t.exports.lua_toproxy = a.lua_toproxy, t.exports.lua_tostring = a.lua_tostring, t.exports.lua_tothread = a.lua_tothread, t.exports.lua_touserdata = a.lua_touserdata, t.exports.lua_type = a.lua_type, t.exports.lua_typename = a.lua_typename, t.exports.lua_upvalueid = a.lua_upvalueid, t.exports.lua_upvaluejoin = a.lua_upvaluejoin, t.exports.lua_version = a.lua_version, t.exports.lua_xmove = a.lua_xmove, t.exports.lua_yield = l.lua_yield, t.exports.lua_yieldk = l.lua_yieldk, t.exports.lua_tocfunction = a.lua_tocfunction;
-  }, function(t, e, n) {
-    const r = {}, { LUA_VERSION_MAJOR: a, LUA_VERSION_MINOR: u, to_luastring: l } = n(1);
-    t.exports.LUA_PATH_SEP = ";";
-    t.exports.LUA_PATH_MARK = "?";
-    t.exports.LUA_EXEC_DIR = "!";
-    const s = a + "." + u;
-    t.exports.LUA_VDIR = s;
-    {
-      const e = "/";
-      t.exports.LUA_DIRSEP = e;
-      const n = "./lua/" + s + "/";
-      t.exports.LUA_LDIR = n;
-      const r = n;
-      t.exports.LUA_JSDIR = r;
-      const a = l(n + "?.lua;" + n + "?/init.lua;./?.lua;./?/init.lua");
-      t.exports.LUA_PATH_DEFAULT = a;
-      const u = l(r + "?.js;" + r + "loadall.js;./?.js");
-      t.exports.LUA_JSPATH_DEFAULT = u;
-    }
-    const o = r.LUA_COMPAT_FLOATSTRING || false, i = r.LUAI_MAXSTACK || 1e6, c = r.LUA_IDSIZE || 59, _ = r.LUAL_BUFFERSIZE || 8192, f = function(t, e) {
-      for (var n = Math.min(3, Math.ceil(Math.abs(e) / 1023)), r = t, a = 0;a < n; a++)
-        r *= Math.pow(2, Math.floor((e + a) / n));
-      return r;
-    };
-    t.exports.LUAI_MAXSTACK = i, t.exports.LUA_COMPAT_FLOATSTRING = o, t.exports.LUA_IDSIZE = c, t.exports.LUA_INTEGER_FMT = "%d", t.exports.LUA_INTEGER_FRMLEN = "", t.exports.LUA_MAXINTEGER = 2147483647, t.exports.LUA_MININTEGER = -2147483648, t.exports.LUA_NUMBER_FMT = "%.14g", t.exports.LUA_NUMBER_FRMLEN = "", t.exports.LUAL_BUFFERSIZE = _, t.exports.frexp = function(t) {
-      if (t === 0)
-        return [t, 0];
-      var e = new DataView(new ArrayBuffer(8));
-      e.setFloat64(0, t);
-      var n = e.getUint32(0) >>> 20 & 2047;
-      n === 0 && (e.setFloat64(0, t * Math.pow(2, 64)), n = (e.getUint32(0) >>> 20 & 2047) - 64);
-      var r = n - 1022;
-      return [f(t, -r), r];
-    }, t.exports.ldexp = f, t.exports.lua_getlocaledecpoint = function() {
-      return 46;
-    }, t.exports.lua_integer2str = function(t) {
-      return String(t);
-    }, t.exports.lua_number2str = function(t) {
-      return String(Number(t.toPrecision(14)));
-    }, t.exports.lua_numbertointeger = function(t) {
-      return t >= -2147483648 && t < 2147483648 && t;
-    }, t.exports.luai_apicheck = function(t, e) {
-      if (!e)
-        throw Error(e);
-    };
-  }, function(t, e, n) {
-    const { luai_apicheck: r } = n(3), a = function(t) {
-      if (!t)
-        throw Error("assertion failed");
-    };
-    t.exports.lua_assert = a, t.exports.luai_apicheck = r || function(t, e) {
-      return a(e);
-    };
-    t.exports.api_check = function(t, e, n) {
-      return r(t, e && n);
-    };
-    t.exports.LUAI_MAXCCALLS = 200;
-    t.exports.LUA_MINBUFFER = 32;
-    t.exports.luai_nummod = function(t, e, n) {
-      let r = e % n;
-      return r * n < 0 && (r += n), r;
-    };
-    t.exports.MAX_INT = 2147483647;
-    t.exports.MIN_INT = -2147483648;
-  }, function(t, e, n) {
-    const r = n(1), a = `Fengari 0.1.4  Copyright (C) 2017-2018 B. Giannangeli, Daurnimator
-Based on: ` + r.LUA_COPYRIGHT;
-    t.exports.FENGARI_AUTHORS = "B. Giannangeli, Daurnimator", t.exports.FENGARI_COPYRIGHT = a, t.exports.FENGARI_RELEASE = "Fengari 0.1.4", t.exports.FENGARI_VERSION = "Fengari 0.1", t.exports.FENGARI_VERSION_MAJOR = "0", t.exports.FENGARI_VERSION_MINOR = "1", t.exports.FENGARI_VERSION_NUM = 1, t.exports.FENGARI_VERSION_RELEASE = "4", t.exports.is_luastring = r.is_luastring, t.exports.luastring_eq = r.luastring_eq, t.exports.luastring_from = r.luastring_from, t.exports.luastring_indexOf = r.luastring_indexOf, t.exports.luastring_of = r.luastring_of, t.exports.to_jsstring = r.to_jsstring, t.exports.to_luastring = r.to_luastring, t.exports.to_uristring = r.to_uristring, t.exports.from_userstring = r.from_userstring;
-  }, function(t, e, n) {
-    const { LUA_OPADD: r, LUA_OPBAND: a, LUA_OPBNOT: u, LUA_OPBOR: l, LUA_OPBXOR: s, LUA_OPDIV: o, LUA_OPIDIV: i, LUA_OPMOD: c, LUA_OPMUL: _, LUA_OPPOW: f, LUA_OPSHL: p, LUA_OPSHR: L, LUA_OPSUB: h, LUA_OPUNM: d, constant_types: { LUA_NUMTAGS: A, LUA_TBOOLEAN: g, LUA_TCCL: T, LUA_TFUNCTION: x, LUA_TLCF: b, LUA_TLCL: O, LUA_TLIGHTUSERDATA: k, LUA_TLNGSTR: v, LUA_TNIL: E, LUA_TNUMBER: U, LUA_TNUMFLT: m, LUA_TNUMINT: N, LUA_TSHRSTR: R, LUA_TSTRING: S, LUA_TTABLE: w, LUA_TTHREAD: I, LUA_TUSERDATA: y }, from_userstring: M, luastring_indexOf: P, luastring_of: C, to_jsstring: D, to_luastring: V } = n(1), { lisdigit: B, lisprint: G, lisspace: K, lisxdigit: F } = n(22), j = n(11), H = n(8), X = n(12), { luaS_bless: z, luaS_new: Y } = n(10), J = n(9), { LUA_COMPAT_FLOATSTRING: Z, ldexp: q, lua_integer2str: W, lua_number2str: Q } = n(3), $ = n(15), { MAX_INT: tt, luai_nummod: et, lua_assert: nt } = n(4), rt = n(14), at = A, ut = A + 1;
-
-    class lt {
-      constructor(t, e) {
-        this.type = t, this.value = e;
-      }
-      ttype() {
-        return 63 & this.type;
-      }
-      ttnov() {
-        return 15 & this.type;
-      }
-      checktag(t) {
-        return this.type === t;
-      }
-      checktype(t) {
-        return this.ttnov() === t;
-      }
-      ttisnumber() {
-        return this.checktype(U);
-      }
-      ttisfloat() {
-        return this.checktag(m);
-      }
-      ttisinteger() {
-        return this.checktag(N);
-      }
-      ttisnil() {
-        return this.checktag(E);
-      }
-      ttisboolean() {
-        return this.checktag(g);
-      }
-      ttislightuserdata() {
-        return this.checktag(k);
-      }
-      ttisstring() {
-        return this.checktype(S);
-      }
-      ttisshrstring() {
-        return this.checktag(R);
-      }
-      ttislngstring() {
-        return this.checktag(v);
-      }
-      ttistable() {
-        return this.checktag(w);
-      }
-      ttisfunction() {
-        return this.checktype(x);
-      }
-      ttisclosure() {
-        return (31 & this.type) === x;
-      }
-      ttisCclosure() {
-        return this.checktag(T);
-      }
-      ttisLclosure() {
-        return this.checktag(O);
-      }
-      ttislcf() {
-        return this.checktag(b);
-      }
-      ttisfulluserdata() {
-        return this.checktag(y);
-      }
-      ttisthread() {
-        return this.checktag(I);
-      }
-      ttisdeadkey() {
-        return this.checktag(ut);
-      }
-      l_isfalse() {
-        return this.ttisnil() || this.ttisboolean() && this.value === false;
-      }
-      setfltvalue(t) {
-        this.type = m, this.value = t;
-      }
-      chgfltvalue(t) {
-        nt(this.type == m), this.value = t;
-      }
-      setivalue(t) {
-        this.type = N, this.value = t;
-      }
-      chgivalue(t) {
-        nt(this.type == N), this.value = t;
-      }
-      setnilvalue() {
-        this.type = E, this.value = null;
-      }
-      setfvalue(t) {
-        this.type = b, this.value = t;
-      }
-      setpvalue(t) {
-        this.type = k, this.value = t;
-      }
-      setbvalue(t) {
-        this.type = g, this.value = t;
-      }
-      setsvalue(t) {
-        this.type = v, this.value = t;
-      }
-      setuvalue(t) {
-        this.type = y, this.value = t;
-      }
-      setthvalue(t) {
-        this.type = I, this.value = t;
-      }
-      setclLvalue(t) {
-        this.type = O, this.value = t;
-      }
-      setclCvalue(t) {
-        this.type = T, this.value = t;
-      }
-      sethvalue(t) {
-        this.type = w, this.value = t;
-      }
-      setdeadvalue() {
-        this.type = ut, this.value = null;
-      }
-      setfrom(t) {
-        this.type = t.type, this.value = t.value;
-      }
-      tsvalue() {
-        return nt(this.ttisstring()), this.value;
-      }
-      svalue() {
-        return this.tsvalue().getstr();
-      }
-      vslen() {
-        return this.tsvalue().tsslen();
-      }
-      jsstring(t, e) {
-        return D(this.svalue(), t, e, true);
-      }
-    }
-    const st = function(t, e, n) {
-      t.stack[e].setsvalue(n);
-    }, ot = new lt(E, null);
-    Object.freeze(ot), t.exports.luaO_nilobject = ot;
-
-    class it {
-      constructor(t, e) {
-        this.id = t.l_G.id_counter++, this.p = null, this.nupvalues = e, this.upvals = new Array(e);
-      }
-    }
-
-    class ct {
-      constructor(t, e, n) {
-        for (this.id = t.l_G.id_counter++, this.f = e, this.nupvalues = n, this.upvalue = new Array(n);n--; )
-          this.upvalue[n] = new lt(E, null);
-      }
-    }
-
-    class _t {
-      constructor(t, e) {
-        this.id = t.l_G.id_counter++, this.metatable = null, this.uservalue = new lt(E, null), this.len = e, this.data = Object.create(null);
-      }
-    }
-    const ft = V("..."), pt = V('[string "'), Lt = V('"]'), ht = function(t) {
-      return B(t) ? t - 48 : (223 & t) - 55;
-    }, dt = function(t, e) {
-      let n = 1;
-      if (nt(e <= 1114111), e < 128)
-        t[7] = e;
-      else {
-        let r = 63;
-        do {
-          t[8 - n++] = 128 | 63 & e, e >>= 6, r >>= 1;
-        } while (e > r);
-        t[8 - n] = ~r << 1 | e;
-      }
-      return n;
-    }, At = function(t, e) {
-      let n = e === "x" ? function(t) {
-        let e, n = 0, r = 0, a = 0, u = 0, l = 0, s = false;
-        for (;K(t[n]); )
-          n++;
-        if ((e = t[n] === 45) ? n++ : t[n] === 43 && n++, t[n] !== 48 || t[n + 1] !== 120 && t[n + 1] !== 88)
-          return null;
-        for (n += 2;; n++)
-          if (t[n] === 46) {
-            if (s)
-              break;
-            s = true;
-          } else {
-            if (!F(t[n]))
-              break;
-            a === 0 && t[n] === 48 ? u++ : ++a <= 30 ? r = 16 * r + ht(t[n]) : l++, s && l--;
-          }
-        if (u + a === 0)
-          return null;
-        if (l *= 4, t[n] === 112 || t[n] === 80) {
-          let e, r = 0;
-          if ((e = t[++n] === 45) ? n++ : t[n] === 43 && n++, !B(t[n]))
-            return null;
-          for (;B(t[n]); )
-            r = 10 * r + t[n++] - 48;
-          e && (r = -r), l += r;
-        }
-        return e && (r = -r), { n: q(r, l), i: n };
-      }(t) : function(t) {
-        try {
-          t = D(t);
-        } catch (t) {
-          return null;
-        }
-        let e = /^[\t\v\f \n\r]*[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]*)(?:[eE][+-]?[0-9]+)?/.exec(t);
-        if (!e)
-          return null;
-        let n = parseFloat(e[0]);
-        return isNaN(n) ? null : { n, i: e[0].length };
-      }(t);
-      if (n === null)
-        return null;
-      for (;K(t[n.i]); )
-        n.i++;
-      return n.i === t.length || t[n.i] === 0 ? n : null;
-    }, gt = [46, 120, 88, 110, 78], Tt = { 46: ".", 120: "x", 88: "x", 110: "n", 78: "n" }, xt = Math.floor(tt / 10), bt = tt % 10, Ot = function(t, e) {
-      let n;
-      if (e.ttisinteger())
-        n = V(W(e.value));
-      else {
-        let t = Q(e.value);
-        !Z && /^[-0123456789]+$/.test(t) && (t += ".0"), n = V(t);
-      }
-      e.setsvalue(z(t, n));
-    }, kt = function(t, e) {
-      H.luaD_inctop(t), st(t, t.top - 1, Y(t, e));
-    }, vt = function(t, e, n) {
-      let r, a = 0, u = 0, l = 0;
-      for (;(r = P(e, 37, u)) != -1; ) {
-        switch (kt(t, e.subarray(u, r)), e[r + 1]) {
-          case 115: {
-            let e = n[l++];
-            if (e === null)
-              e = V("(null)", true);
-            else {
-              e = M(e);
-              let t = P(e, 0);
-              t !== -1 && (e = e.subarray(0, t));
-            }
-            kt(t, e);
-            break;
-          }
-          case 99: {
-            let e = n[l++];
-            G(e) ? kt(t, C(e)) : Et(t, V("<\\%d>", true), e);
-            break;
-          }
-          case 100:
-          case 73:
-            H.luaD_inctop(t), t.stack[t.top - 1].setivalue(n[l++]), Ot(t, t.stack[t.top - 1]);
-            break;
-          case 102:
-            H.luaD_inctop(t), t.stack[t.top - 1].setfltvalue(n[l++]), Ot(t, t.stack[t.top - 1]);
-            break;
-          case 112: {
-            let e = n[l++];
-            if (e instanceof X.lua_State || e instanceof J.Table || e instanceof _t || e instanceof it || e instanceof ct)
-              kt(t, V("0x" + e.id.toString(16)));
-            else
-              switch (typeof e) {
-                case "undefined":
-                  kt(t, V("undefined"));
-                  break;
-                case "number":
-                  kt(t, V("Number(" + e + ")"));
-                  break;
-                case "string":
-                  kt(t, V("String(" + JSON.stringify(e) + ")"));
-                  break;
-                case "boolean":
-                  kt(t, V(e ? "Boolean(true)" : "Boolean(false)"));
-                  break;
-                case "object":
-                  if (e === null) {
-                    kt(t, V("null"));
-                    break;
-                  }
-                case "function": {
-                  let n = t.l_G.ids.get(e);
-                  n || (n = t.l_G.id_counter++, t.l_G.ids.set(e, n)), kt(t, V("0x" + n.toString(16)));
-                  break;
-                }
-                default:
-                  kt(t, V("<id NYI>"));
-              }
-            break;
-          }
-          case 85: {
-            let e = new Uint8Array(8), r = dt(e, n[l++]);
-            kt(t, e.subarray(8 - r));
-            break;
-          }
-          case 37:
-            kt(t, V("%", true));
-            break;
-          default:
-            j.luaG_runerror(t, V("invalid option '%%%c' to 'lua_pushfstring'"), e[r + 1]);
-        }
-        a += 2, u = r + 2;
-      }
-      return H.luaD_checkstack(t, 1), kt(t, e.subarray(u)), a > 0 && $.luaV_concat(t, a + 1), t.stack[t.top - 1].svalue();
-    }, Et = function(t, e, ...n) {
-      return vt(t, e, n);
-    }, Ut = function(t, e, n, o) {
-      switch (e) {
-        case r:
-          return n + o | 0;
-        case h:
-          return n - o | 0;
-        case _:
-          return $.luaV_imul(n, o);
-        case c:
-          return $.luaV_mod(t, n, o);
-        case i:
-          return $.luaV_div(t, n, o);
-        case a:
-          return n & o;
-        case l:
-          return n | o;
-        case s:
-          return n ^ o;
-        case p:
-          return $.luaV_shiftl(n, o);
-        case L:
-          return $.luaV_shiftl(n, -o);
-        case d:
-          return 0 - n | 0;
-        case u:
-          return -1 ^ n;
-        default:
-          nt(0);
-      }
-    }, mt = function(t, e, n, a) {
-      switch (e) {
-        case r:
-          return n + a;
-        case h:
-          return n - a;
-        case _:
-          return n * a;
-        case o:
-          return n / a;
-        case f:
-          return Math.pow(n, a);
-        case i:
-          return Math.floor(n / a);
-        case d:
-          return -n;
-        case c:
-          return et(t, n, a);
-        default:
-          nt(0);
-      }
-    };
-    t.exports.CClosure = ct, t.exports.LClosure = it, t.exports.LUA_TDEADKEY = ut, t.exports.LUA_TPROTO = at, t.exports.LocVar = class {
-      constructor() {
-        this.varname = null, this.startpc = NaN, this.endpc = NaN;
-      }
-    }, t.exports.TValue = lt, t.exports.Udata = _t, t.exports.UTF8BUFFSZ = 8, t.exports.luaO_arith = function(t, e, n, i, c) {
-      let _ = typeof c == "number" ? t.stack[c] : c;
-      switch (e) {
-        case a:
-        case l:
-        case s:
-        case p:
-        case L:
-        case u: {
-          let r, a;
-          if ((r = $.tointeger(n)) !== false && (a = $.tointeger(i)) !== false)
-            return void _.setivalue(Ut(t, e, r, a));
-          break;
-        }
-        case o:
-        case f: {
-          let r, a;
-          if ((r = $.tonumber(n)) !== false && (a = $.tonumber(i)) !== false)
-            return void _.setfltvalue(mt(t, e, r, a));
-          break;
-        }
-        default: {
-          let r, a;
-          if (n.ttisinteger() && i.ttisinteger())
-            return void _.setivalue(Ut(t, e, n.value, i.value));
-          if ((r = $.tonumber(n)) !== false && (a = $.tonumber(i)) !== false)
-            return void _.setfltvalue(mt(t, e, r, a));
-          break;
-        }
-      }
-      nt(t !== null), rt.luaT_trybinTM(t, n, i, c, e - r + rt.TMS.TM_ADD);
-    }, t.exports.luaO_chunkid = function(t, e) {
-      let n, r = t.length;
-      if (t[0] === 61)
-        r < e ? (n = new Uint8Array(r - 1)).set(t.subarray(1)) : (n = new Uint8Array(e)).set(t.subarray(1, e + 1));
-      else if (t[0] === 64)
-        r <= e ? (n = new Uint8Array(r - 1)).set(t.subarray(1)) : ((n = new Uint8Array(e)).set(ft), e -= ft.length, n.set(t.subarray(r - e), ft.length));
-      else {
-        n = new Uint8Array(e);
-        let a = P(t, 10);
-        n.set(pt);
-        let u = pt.length;
-        r < (e -= pt.length + ft.length + Lt.length) && a === -1 ? (n.set(t, u), u += t.length) : (a !== -1 && (r = a), r > e && (r = e), n.set(t.subarray(0, r), u), u += r, n.set(ft, u), u += ft.length), n.set(Lt, u), u += Lt.length, n = n.subarray(0, u);
-      }
-      return n;
-    }, t.exports.luaO_hexavalue = ht, t.exports.luaO_int2fb = function(t) {
-      let e = 0;
-      if (t < 8)
-        return t;
-      for (;t >= 128; )
-        t = t + 15 >> 4, e += 4;
-      for (;t >= 16; )
-        t = t + 1 >> 1, e++;
-      return e + 1 << 3 | t - 8;
-    }, t.exports.luaO_pushfstring = Et, t.exports.luaO_pushvfstring = vt, t.exports.luaO_str2num = function(t, e) {
-      let n = function(t) {
-        let e, n = 0, r = 0, a = true;
-        for (;K(t[n]); )
-          n++;
-        if ((e = t[n] === 45) ? n++ : t[n] === 43 && n++, t[n] !== 48 || t[n + 1] !== 120 && t[n + 1] !== 88)
-          for (;n < t.length && B(t[n]); n++) {
-            let u = t[n] - 48;
-            if (r >= xt && (r > xt || u > bt + e))
-              return null;
-            r = 10 * r + u | 0, a = false;
-          }
-        else
-          for (n += 2;n < t.length && F(t[n]); n++)
-            r = 16 * r + ht(t[n]) | 0, a = false;
-        for (;n < t.length && K(t[n]); )
-          n++;
-        return a || n !== t.length && t[n] !== 0 ? null : { n: 0 | (e ? -r : r), i: n };
-      }(t);
-      return n !== null ? (e.setivalue(n.n), n.i + 1) : (n = function(t) {
-        let e = t.length, n = 0;
-        for (let r = 0;r < e; r++) {
-          let e = t[r];
-          if (gt.indexOf(e) !== -1) {
-            n = e;
-            break;
-          }
-        }
-        let r = Tt[n];
-        return r === "n" ? null : At(t, r);
-      }(t)) !== null ? (e.setfltvalue(n.n), n.i + 1) : 0;
-    }, t.exports.luaO_tostring = Ot, t.exports.luaO_utf8esc = dt, t.exports.numarith = mt, t.exports.pushobj2s = function(t, e) {
-      t.stack[t.top++] = new lt(e.type, e.value);
-    }, t.exports.pushsvalue2s = function(t, e) {
-      t.stack[t.top++] = new lt(v, e);
-    }, t.exports.setobjs2s = function(t, e, n) {
-      t.stack[e].setfrom(t.stack[n]);
-    }, t.exports.setobj2s = function(t, e, n) {
-      t.stack[e].setfrom(n);
-    }, t.exports.setsvalue2s = st;
-  }, function(t, e, n) {
-    const { LUAL_BUFFERSIZE: r } = n(3), { LUA_ERRERR: a, LUA_MULTRET: u, LUA_REGISTRYINDEX: l, LUA_SIGNATURE: s, LUA_TBOOLEAN: o, LUA_TLIGHTUSERDATA: i, LUA_TNIL: c, LUA_TNONE: _, LUA_TNUMBER: f, LUA_TSTRING: p, LUA_TTABLE: L, LUA_VERSION_NUM: h, lua_Debug: d, lua_absindex: A, lua_atpanic: g, lua_call: T, lua_checkstack: x, lua_concat: b, lua_copy: O, lua_createtable: k, lua_error: v, lua_getfield: E, lua_getinfo: U, lua_getmetatable: m, lua_getstack: N, lua_gettop: R, lua_insert: S, lua_isinteger: w, lua_isnil: I, lua_isnumber: y, lua_isstring: M, lua_istable: P, lua_len: C, lua_load: D, lua_newstate: V, lua_newtable: B, lua_next: G, lua_pcall: K, lua_pop: F, lua_pushboolean: j, lua_pushcclosure: H, lua_pushcfunction: X, lua_pushfstring: z, lua_pushinteger: Y, lua_pushliteral: J, lua_pushlstring: Z, lua_pushnil: q, lua_pushstring: W, lua_pushvalue: Q, lua_pushvfstring: $, lua_rawequal: tt, lua_rawget: et, lua_rawgeti: nt, lua_rawlen: rt, lua_rawseti: at, lua_remove: ut, lua_setfield: lt, lua_setglobal: st, lua_setmetatable: ot, lua_settop: it, lua_toboolean: ct, lua_tointeger: _t, lua_tointegerx: ft, lua_tojsstring: pt, lua_tolstring: Lt, lua_tonumber: ht, lua_tonumberx: dt, lua_topointer: At, lua_tostring: gt, lua_touserdata: Tt, lua_type: xt, lua_typename: bt, lua_version: Ot } = n(2), { from_userstring: kt, luastring_eq: vt, to_luastring: Et, to_uristring: Ut } = n(5), mt = a + 1, Nt = Et("_LOADED"), Rt = Et("_PRELOAD"), St = Et("FILE*"), wt = Et("__name"), It = Et("__tostring"), yt = new Uint8Array(0);
-
-    class Mt {
-      constructor() {
-        this.L = null, this.b = yt, this.n = 0;
-      }
-    }
-    const Pt = function(t, e, n) {
-      if (n === 0 || !P(t, -1))
-        return 0;
-      for (q(t);G(t, -2); ) {
-        if (xt(t, -2) === p) {
-          if (tt(t, e, -1))
-            return F(t, 1), 1;
-          if (Pt(t, e, n - 1))
-            return ut(t, -2), J(t, "."), S(t, -2), b(t, 3), 1;
-        }
-        F(t, 1);
-      }
-      return 0;
-    }, Ct = function(t, e) {
-      let n = R(t);
-      if (U(t, Et("f"), e), E(t, l, Nt), Pt(t, n + 1, 2)) {
-        let e = gt(t, -1);
-        return e[0] === 95 && e[1] === 71 && e[2] === 46 && (W(t, e.subarray(3)), ut(t, -2)), O(t, -1, n + 1), F(t, 2), 1;
-      }
-      return it(t, n), 0;
-    }, Dt = function(t, e) {
-      Ct(t, e) ? (z(t, Et("function '%s'"), gt(t, -1)), ut(t, -2)) : e.namewhat.length !== 0 ? z(t, Et("%s '%s'"), e.namewhat, e.name) : e.what && e.what[0] === 109 ? J(t, "main chunk") : e.what && e.what[0] === 76 ? z(t, Et("function <%s:%d>"), e.short_src, e.linedefined) : J(t, "?");
-    }, Vt = function(t) {
-      let e = "PANIC: unprotected error in call to Lua API (" + pt(t, -1) + ")";
-      throw new Error(e);
-    }, Bt = function(t, e, n) {
-      let r = new d;
-      return N(t, 0, r) ? (U(t, Et("n"), r), vt(r.namewhat, Et("method")) && --e === 0 ? Ft(t, Et("calling '%s' on bad self (%s)"), r.name, n) : (r.name === null && (r.name = Ct(t, r) ? gt(t, -1) : Et("?")), Ft(t, Et("bad argument #%d to '%s' (%s)"), e, r.name, n))) : Ft(t, Et("bad argument #%d (%s)"), e, n);
-    }, Gt = function(t, e, n) {
-      let r;
-      r = _e(t, e, wt) === p ? gt(t, -1) : xt(t, e) === i ? Et("light userdata", true) : Yt(t, e);
-      let a = z(t, Et("%s expected, got %s"), n, r);
-      return Bt(t, e, a);
-    }, Kt = function(t, e) {
-      let n = new d;
-      N(t, e, n) && (U(t, Et("Sl", true), n), n.currentline > 0) ? z(t, Et("%s:%d: "), n.short_src, n.currentline) : W(t, Et(""));
-    }, Ft = function(t, e, ...n) {
-      return Kt(t, 1), $(t, e, n), b(t, 2), v(t);
-    }, jt = function(t, e, n, r) {
-      if (e)
-        return j(t, 1), 1;
-      {
-        let e, a;
-        return q(t), r ? (e = r.message, a = -r.errno) : (e = "Success", a = 0), n ? z(t, Et("%s: %s"), n, Et(e)) : W(t, Et(e)), Y(t, a), 3;
-      }
-    }, Ht = function(t, e) {
-      return E(t, l, e);
-    }, Xt = function(t, e, n) {
-      let r = Tt(t, e);
-      return r !== null && m(t, e) ? (Ht(t, n), tt(t, -1, -2) || (r = null), F(t, 2), r) : null;
-    }, zt = function(t, e, n) {
-      Gt(t, e, bt(t, n));
-    }, Yt = function(t, e) {
-      return bt(t, xt(t, e));
-    }, Jt = function(t, e) {
-      let n = Lt(t, e);
-      return n !== null && n !== undefined || zt(t, e, p), n;
-    }, Zt = Jt, qt = function(t, e, n) {
-      return xt(t, e) <= 0 ? n === null ? null : kt(n) : Jt(t, e);
-    }, Wt = qt, Qt = function(t, e) {
-      let n = dt(t, e);
-      return n === false && zt(t, e, f), n;
-    }, $t = function(t, e) {
-      let n = ft(t, e);
-      return n === false && function(t, e) {
-        y(t, e) ? Bt(t, e, Et("number has no integer representation", true)) : zt(t, e, f);
-      }(t, e), n;
-    }, te = function(t, e) {
-      let n = t.n + e;
-      if (t.b.length < n) {
-        let e = Math.max(2 * t.b.length, n), r = new Uint8Array(e);
-        r.set(t.b), t.b = r;
-      }
-      return t.b.subarray(t.n, n);
-    }, ee = function(t, e) {
-      e.L = t, e.b = yt;
-    }, ne = function(t, e, n) {
-      if (n > 0) {
-        e = kt(e), te(t, n).set(e.subarray(0, n)), ue(t, n);
-      }
-    }, re = function(t, e) {
-      e = kt(e), ne(t, e, e.length);
-    }, ae = function(t) {
-      Z(t.L, t.b, t.n), t.n = 0, t.b = yt;
-    }, ue = function(t, e) {
-      t.n += e;
-    }, le = function(t, e, n, r) {
-      return xt(t, n) <= 0 ? r : e(t, n);
-    }, se = function(t, e) {
-      let n = e.string;
-      return e.string = null, n;
-    }, oe = function(t, e, n, r, a) {
-      return D(t, se, { string: e }, r, a);
-    }, ie = function(t, e, n, r) {
-      return oe(t, e, 0, r, null);
-    }, ce = function(t, e) {
-      return ie(t, e, e.length, e);
-    }, _e = function(t, e, n) {
-      if (m(t, e)) {
-        W(t, n);
-        let e = et(t, -2);
-        return e === c ? F(t, 2) : ut(t, -2), e;
-      }
-      return c;
-    }, fe = function(t, e, n) {
-      return e = A(t, e), _e(t, e, n) !== c && (Q(t, e), T(t, 1, 1), true);
-    }, pe = Et("%I"), Le = Et("%f"), he = function(t, e, n) {
-      var r = n >>> 0, a = e.length, u = t.length + 1 - a;
-      t:
-        for (;r < u; r++) {
-          for (let n = 0;n < a; n++)
-            if (t[r + n] !== e[n])
-              continue t;
-          return r;
-        }
-      return -1;
-    }, de = function(t, e, n) {
-      return E(t, e, n) === L || (F(t, 1), e = A(t, e), B(t), Q(t, -1), lt(t, e, n), false);
-    }, Ae = function(t, e, n) {
-      ge(t, n, Et("too many upvalues", true));
-      for (let r in e) {
-        for (let e = 0;e < n; e++)
-          Q(t, -n);
-        H(t, e[r], n), lt(t, -(n + 2), Et(r));
-      }
-      F(t, n);
-    }, ge = function(t, e, n) {
-      x(t, e) || (n ? Ft(t, Et("stack overflow (%s)"), n) : Ft(t, Et("stack overflow", true)));
-    }, Te = function(t, e, n, r) {
-      let a = r.message, u = gt(t, n).subarray(1);
-      return z(t, Et("cannot %s %s: %s"), Et(e), u, Et(a)), ut(t, n), mt;
-    };
-    let xe;
-    const be = [239, 187, 191], Oe = function(t) {
-      let e = function(t) {
-        let e;
-        t.n = 0;
-        let n = 0;
-        do {
-          if ((e = xe(t)) === null || e !== be[n])
-            return e;
-          n++, t.buff[t.n++] = e;
-        } while (n < be.length);
-        return t.n = 0, xe(t);
-      }(t);
-      if (e === 35) {
-        do {
-          e = xe(t);
-        } while (e && e !== 10);
-        return { skipped: true, c: xe(t) };
-      }
-      return { skipped: false, c: e };
-    };
-    let ke;
-    {
-
-      class t {
-        constructor() {
-          this.n = NaN, this.f = null, this.buff = new Uint8Array(1024), this.pos = 0, this.err = undefined;
-        }
-      }
-      const e = function(t, e) {
-        let n = e;
-        if (n.f !== null && n.n > 0) {
-          let t = n.n;
-          return n.n = 0, n.f = n.f.subarray(n.pos), n.buff.subarray(0, t);
-        }
-        let r = n.f;
-        return n.f = null, r;
-      };
-      xe = function(t) {
-        return t.pos < t.f.length ? t.f[t.pos++] : null;
-      }, ke = function(n, r, a) {
-        let u = new t, l = R(n) + 1;
-        if (r === null)
-          throw new Error("Can't read stdin in the browser");
-        {
-          z(n, Et("@%s"), r);
-          let t = Ut(r), e = new XMLHttpRequest;
-          if (e.open("GET", t, false), typeof window == "undefined" && (e.responseType = "arraybuffer"), e.send(), !(e.status >= 200 && e.status <= 299))
-            return u.err = e.status, Te(n, "open", l, { message: `${e.status}: ${e.statusText}` });
-          typeof e.response == "string" ? u.f = Et(e.response) : u.f = new Uint8Array(e.response);
-        }
-        let o = Oe(u);
-        o.c === s[0] && r || o.skipped && (u.buff[u.n++] = 10), o.c !== null && (u.buff[u.n++] = o.c);
-        let i = D(n, e, u, gt(n, -1), a), c = u.err;
-        return c ? (it(n, l), Te(n, "read", l, c)) : (ut(n, l), i);
-      };
-    }
-    const ve = function(t, e) {
-      return ke(t, e, null);
-    }, Ee = function(t, e, n) {
-      let r = Ot(t);
-      n != 72 && Ft(t, Et("core and library have incompatible numeric types")), r != Ot(null) ? Ft(t, Et("multiple Lua VMs detected")) : r !== e && Ft(t, Et("version mismatch: app. needs %f, Lua core provides %f"), e, r);
-    };
-    t.exports.LUA_ERRFILE = mt, t.exports.LUA_FILEHANDLE = St, t.exports.LUA_LOADED_TABLE = Nt, t.exports.LUA_NOREF = -2, t.exports.LUA_PRELOAD_TABLE = Rt, t.exports.LUA_REFNIL = -1, t.exports.luaL_Buffer = Mt, t.exports.luaL_addchar = function(t, e) {
-      te(t, 1), t.b[t.n++] = e;
-    }, t.exports.luaL_addlstring = ne, t.exports.luaL_addsize = ue, t.exports.luaL_addstring = re, t.exports.luaL_addvalue = function(t) {
-      let e = t.L, n = gt(e, -1);
-      ne(t, n, n.length), F(e, 1);
-    }, t.exports.luaL_argcheck = function(t, e, n, r) {
-      e || Bt(t, n, r);
-    }, t.exports.luaL_argerror = Bt, t.exports.luaL_buffinit = ee, t.exports.luaL_buffinitsize = function(t, e, n) {
-      return ee(t, e), te(e, n);
-    }, t.exports.luaL_callmeta = fe, t.exports.luaL_checkany = function(t, e) {
-      xt(t, e) === _ && Bt(t, e, Et("value expected", true));
-    }, t.exports.luaL_checkinteger = $t, t.exports.luaL_checklstring = Jt, t.exports.luaL_checknumber = Qt, t.exports.luaL_checkoption = function(t, e, n, r) {
-      let a = n !== null ? Wt(t, e, n) : Zt(t, e);
-      for (let t = 0;r[t]; t++)
-        if (vt(r[t], a))
-          return t;
-      return Bt(t, e, z(t, Et("invalid option '%s'"), a));
-    }, t.exports.luaL_checkstack = ge, t.exports.luaL_checkstring = Zt, t.exports.luaL_checktype = function(t, e, n) {
-      xt(t, e) !== n && zt(t, e, n);
-    }, t.exports.luaL_checkudata = function(t, e, n) {
-      let r = Xt(t, e, n);
-      return r === null && Gt(t, e, n), r;
-    }, t.exports.luaL_checkversion = function(t) {
-      Ee(t, h, 72);
-    }, t.exports.luaL_checkversion_ = Ee, t.exports.luaL_dofile = function(t, e) {
-      return ve(t, e) || K(t, 0, u, 0);
-    }, t.exports.luaL_dostring = function(t, e) {
-      return ce(t, e) || K(t, 0, u, 0);
-    }, t.exports.luaL_error = Ft, t.exports.luaL_execresult = function(t, e) {
-      let n, r;
-      if (e === null)
-        return j(t, 1), J(t, "exit"), Y(t, 0), 3;
-      if (e.status)
-        n = "exit", r = e.status;
-      else {
-        if (!e.signal)
-          return jt(t, 0, null, e);
-        n = "signal", r = e.signal;
-      }
-      return q(t), J(t, n), Y(t, r), 3;
-    }, t.exports.luaL_fileresult = jt, t.exports.luaL_getmetafield = _e, t.exports.luaL_getmetatable = Ht, t.exports.luaL_getsubtable = de, t.exports.luaL_gsub = function(t, e, n, r) {
-      let a, u = new Mt;
-      for (ee(t, u);(a = he(e, n)) >= 0; )
-        ne(u, e, a), re(u, r), e = e.subarray(a + n.length);
-      return re(u, e), ae(u), gt(t, -1);
-    }, t.exports.luaL_len = function(t, e) {
-      C(t, e);
-      let n = ft(t, -1);
-      return n === false && Ft(t, Et("object length is not an integer", true)), F(t, 1), n;
-    }, t.exports.luaL_loadbuffer = ie, t.exports.luaL_loadbufferx = oe, t.exports.luaL_loadfile = ve, t.exports.luaL_loadfilex = ke, t.exports.luaL_loadstring = ce, t.exports.luaL_newlib = function(t, e) {
-      k(t), Ae(t, e, 0);
-    }, t.exports.luaL_newlibtable = function(t) {
-      k(t);
-    }, t.exports.luaL_newmetatable = function(t, e) {
-      return Ht(t, e) !== c ? 0 : (F(t, 1), k(t, 0, 2), W(t, e), lt(t, -2, wt), Q(t, -1), lt(t, l, e), 1);
-    }, t.exports.luaL_newstate = function() {
-      let t = V();
-      return t && g(t, Vt), t;
-    }, t.exports.luaL_opt = le, t.exports.luaL_optinteger = function(t, e, n) {
-      return le(t, $t, e, n);
-    }, t.exports.luaL_optlstring = qt, t.exports.luaL_optnumber = function(t, e, n) {
-      return le(t, Qt, e, n);
-    }, t.exports.luaL_optstring = Wt, t.exports.luaL_prepbuffer = function(t) {
-      return te(t, r);
-    }, t.exports.luaL_prepbuffsize = te, t.exports.luaL_pushresult = ae, t.exports.luaL_pushresultsize = function(t, e) {
-      ue(t, e), ae(t);
-    }, t.exports.luaL_ref = function(t, e) {
-      let n;
-      return I(t, -1) ? (F(t, 1), -1) : (e = A(t, e), nt(t, e, 0), n = _t(t, -1), F(t, 1), n !== 0 ? (nt(t, e, n), at(t, e, 0)) : n = rt(t, e) + 1, at(t, e, n), n);
-    }, t.exports.luaL_requiref = function(t, e, n, r) {
-      de(t, l, Nt), E(t, -1, e), ct(t, -1) || (F(t, 1), X(t, n), W(t, e), T(t, 1, 1), Q(t, -1), lt(t, -3, e)), ut(t, -2), r && (Q(t, -1), st(t, e));
-    }, t.exports.luaL_setfuncs = Ae, t.exports.luaL_setmetatable = function(t, e) {
-      Ht(t, e), ot(t, -2);
-    }, t.exports.luaL_testudata = Xt, t.exports.luaL_tolstring = function(t, e) {
-      if (fe(t, e, It))
-        M(t, -1) || Ft(t, Et("'__tostring' must return a string"));
-      else
-        switch (xt(t, e)) {
-          case f:
-            w(t, e) ? z(t, pe, _t(t, e)) : z(t, Le, ht(t, e));
-            break;
-          case p:
-            Q(t, e);
-            break;
-          case o:
-            J(t, ct(t, e) ? "true" : "false");
-            break;
-          case c:
-            J(t, "nil");
-            break;
-          default: {
-            let n = _e(t, e, wt), r = n === p ? gt(t, -1) : Yt(t, e);
-            z(t, Et("%s: %p"), r, At(t, e)), n !== c && ut(t, -2);
-            break;
-          }
-        }
-      return Lt(t, -1);
-    }, t.exports.luaL_traceback = function(t, e, n, r) {
-      let a = new d, u = R(t), l = function(t) {
-        let e = new d, n = 1, r = 1;
-        for (;N(t, r, e); )
-          n = r, r *= 2;
-        for (;n < r; ) {
-          let a = Math.floor((n + r) / 2);
-          N(t, a, e) ? n = a + 1 : r = a;
-        }
-        return r - 1;
-      }(e), s = l - r > 21 ? 10 : -1;
-      for (n && z(t, Et(`%s
-`), n), ge(t, 10, null), J(t, "stack traceback:");N(e, r++, a); )
-        s-- == 0 ? (J(t, `
-	...`), r = l - 11 + 1) : (U(e, Et("Slnt", true), a), z(t, Et(`
-	%s:`), a.short_src), a.currentline > 0 && J(t, `${a.currentline}:`), J(t, " in "), Dt(t, a), a.istailcall && J(t, `
-	(...tail calls..)`), b(t, R(t) - u));
-      b(t, R(t) - u);
-    }, t.exports.luaL_typename = Yt, t.exports.luaL_unref = function(t, e, n) {
-      n >= 0 && (e = A(t, e), nt(t, e, 0), at(t, e, n), Y(t, n), at(t, e, 0));
-    }, t.exports.luaL_where = Kt, t.exports.lua_writestringerror = function() {
-      for (let t = 0;t < arguments.length; t++) {
-        let e = arguments[t];
-        do {
-          let t = /([^\n]*)\n?([\d\D]*)/.exec(e);
-          console.error(t[1]), e = t[2];
-        } while (e !== "");
-      }
-    };
-  }, function(t, e, n) {
-    const { LUA_HOOKCALL: r, LUA_HOOKRET: a, LUA_HOOKTAILCALL: u, LUA_MASKCALL: l, LUA_MASKLINE: s, LUA_MASKRET: o, LUA_MINSTACK: i, LUA_MULTRET: c, LUA_SIGNATURE: _, constant_types: { LUA_TCCL: f, LUA_TLCF: p, LUA_TLCL: L, LUA_TNIL: h }, thread_status: { LUA_ERRMEM: d, LUA_ERRERR: A, LUA_ERRRUN: g, LUA_ERRSYNTAX: T, LUA_OK: x, LUA_YIELD: b }, lua_Debug: O, luastring_indexOf: k, to_luastring: v } = n(1), E = n(18), U = n(11), m = n(13), { api_check: N, lua_assert: R, LUAI_MAXCCALLS: S } = n(4), w = n(6), I = n(16), y = n(23), M = n(12), { luaS_newliteral: P } = n(10), C = n(14), { LUAI_MAXSTACK: D } = n(3), V = n(36), B = n(15), { MBuffer: G } = n(19), K = function(t, e) {
-      if (t.top < e)
-        for (;t.top < e; )
-          t.stack[t.top++] = new w.TValue(h, null);
-      else
-        for (;t.top > e; )
-          delete t.stack[--t.top];
-    }, F = function(t, e, n) {
-      let r = t.top;
-      for (;t.top < n + 1; )
-        t.stack[t.top++] = new w.TValue(h, null);
-      switch (e) {
-        case d:
-          w.setsvalue2s(t, n, P(t, "not enough memory"));
-          break;
-        case A:
-          w.setsvalue2s(t, n, P(t, "error in error handling"));
-          break;
-        default:
-          w.setobjs2s(t, n, r - 1);
-      }
-      for (;t.top > n + 1; )
-        delete t.stack[--t.top];
-    }, j = D + 200, H = function(t, e) {
-      R(e <= D || e == j), R(t.stack_last == t.stack.length - M.EXTRA_STACK), t.stack.length = e, t.stack_last = e - M.EXTRA_STACK;
-    }, X = function(t, e) {
-      let n = t.stack.length;
-      if (n > D)
-        nt(t, A);
-      else {
-        let r = t.top + e + M.EXTRA_STACK, a = 2 * n;
-        a > D && (a = D), a < r && (a = r), a > D ? (H(t, j), U.luaG_runerror(t, v("stack overflow", true))) : H(t, a);
-      }
-    }, z = function(t, e) {
-      t.stack_last - t.top <= e && X(t, e);
-    }, Y = function(t) {
-      let e = function(t) {
-        let e = t.top;
-        for (let n = t.ci;n !== null; n = n.previous)
-          e < n.top && (e = n.top);
-        return R(e <= t.stack_last), e + 1;
-      }(t), n = e + Math.floor(e / 8) + 2 * M.EXTRA_STACK;
-      n > D && (n = D), t.stack.length > D && M.luaE_freeCI(t), e <= D - M.EXTRA_STACK && n < t.stack.length && H(t, n);
-    }, J = function(t, e, n) {
-      let a = t.stack[e];
-      switch (a.type) {
-        case f:
-        case p: {
-          let u = a.type === f ? a.value.f : a.value;
-          z(t, i);
-          let s = M.luaE_extendCI(t);
-          s.funcOff = e, s.nresults = n, s.func = a, s.top = t.top + i, R(s.top <= t.stack_last), s.callstatus = 0, t.hookmask & l && W(t, r, -1);
-          let o = u(t);
-          if (typeof o != "number" || o < 0 || (0 | o) !== o)
-            throw Error("invalid return value from JS function (expected integer)");
-          return E.api_checknelems(t, o), Z(t, s, t.top - o, o), true;
-        }
-        case L: {
-          let r, u = a.value.p, s = t.top - e - 1, o = u.maxstacksize;
-          if (z(t, o), u.is_vararg)
-            r = $(t, u, s);
-          else {
-            for (;s < u.numparams; s++)
-              t.stack[t.top++] = new w.TValue(h, null);
-            r = e + 1;
-          }
-          let i = M.luaE_extendCI(t);
-          return i.funcOff = e, i.nresults = n, i.func = a, i.l_base = r, i.top = r + o, K(t, i.top), i.l_code = u.code, i.l_savedpc = 0, i.callstatus = M.CIST_LUA, t.hookmask & l && Q(t, i), false;
-        }
-        default:
-          return z(t, 1), tt(t, e, a), J(t, e, n);
-      }
-    }, Z = function(t, e, n, r) {
-      let u = e.nresults;
-      t.hookmask & (o | s) && (t.hookmask & o && W(t, a, -1), t.oldpc = e.previous.l_savedpc);
-      let l = e.funcOff;
-      return t.ci = e.previous, t.ci.next = null, q(t, n, l, r, u);
-    }, q = function(t, e, n, r, a) {
-      switch (a) {
-        case 0:
-          break;
-        case 1:
-          r === 0 ? t.stack[n].setnilvalue() : w.setobjs2s(t, n, e);
-          break;
-        case c:
-          for (let a = 0;a < r; a++)
-            w.setobjs2s(t, n + a, e + a);
-          for (let e = t.top;e >= n + r; e--)
-            delete t.stack[e];
-          return t.top = n + r, false;
-        default: {
-          let u;
-          if (a <= r)
-            for (u = 0;u < a; u++)
-              w.setobjs2s(t, n + u, e + u);
-          else {
-            for (u = 0;u < r; u++)
-              w.setobjs2s(t, n + u, e + u);
-            for (;u < a; u++)
-              n + u >= t.top ? t.stack[n + u] = new w.TValue(h, null) : t.stack[n + u].setnilvalue();
-          }
-          break;
-        }
-      }
-      let u = n + a;
-      for (let e = t.top;e >= u; e--)
-        delete t.stack[e];
-      return t.top = u, true;
-    }, W = function(t, e, n) {
-      let r = t.hook;
-      if (r && t.allowhook) {
-        let { ci: a, top: u } = t, l = a.top, s = new O;
-        s.event = e, s.currentline = n, s.i_ci = a, z(t, i), a.top = t.top + i, R(a.top <= t.stack_last), t.allowhook = 0, a.callstatus |= M.CIST_HOOKED, r(t, s), R(!t.allowhook), t.allowhook = 1, a.top = l, K(t, u), a.callstatus &= ~M.CIST_HOOKED;
-      }
-    }, Q = function(t, e) {
-      let n = r;
-      e.l_savedpc++, e.previous.callstatus & M.CIST_LUA && e.previous.l_code[e.previous.l_savedpc - 1].opcode == I.OpCodesI.OP_TAILCALL && (e.callstatus |= M.CIST_TAIL, n = u), W(t, n, -1), e.l_savedpc--;
-    }, $ = function(t, e, n) {
-      let r, a = e.numparams, u = t.top - n, l = t.top;
-      for (r = 0;r < a && r < n; r++)
-        w.pushobj2s(t, t.stack[u + r]), t.stack[u + r].setnilvalue();
-      for (;r < a; r++)
-        t.stack[t.top++] = new w.TValue(h, null);
-      return l;
-    }, tt = function(t, e, n) {
-      let r = C.luaT_gettmbyobj(t, n, C.TMS.TM_CALL);
-      r.ttisfunction(r) || U.luaG_typeerror(t, n, v("call", true)), w.pushobj2s(t, t.stack[t.top - 1]);
-      for (let n = t.top - 2;n > e; n--)
-        w.setobjs2s(t, n, n - 1);
-      w.setobj2s(t, e, r);
-    }, et = function(t, e, n) {
-      ++t.nCcalls >= S && function(t) {
-        t.nCcalls === S ? U.luaG_runerror(t, v("JS stack overflow", true)) : t.nCcalls >= S + (S >> 3) && nt(t, A);
-      }(t), J(t, e, n) || B.luaV_execute(t), t.nCcalls--;
-    }, nt = function(t, e) {
-      if (t.errorJmp)
-        throw t.errorJmp.status = e, t.errorJmp;
-      {
-        let n = t.l_G;
-        if (t.status = e, !n.mainthread.errorJmp) {
-          let r = n.panic;
-          throw r && (F(t, e, t.top), t.ci.top < t.top && (t.ci.top = t.top), r(t)), new Error(`Aborted ${e}`);
-        }
-        n.mainthread.stack[n.mainthread.top++] = t.stack[t.top - 1], nt(n.mainthread, e);
-      }
-    }, rt = function(t, e, n) {
-      let r = t.nCcalls, a = { status: x, previous: t.errorJmp };
-      t.errorJmp = a;
-      try {
-        e(t, n);
-      } catch (e) {
-        if (a.status === x) {
-          let n = t.l_G.atnativeerror;
-          if (n)
-            try {
-              if (a.status = x, E.lua_pushcfunction(t, n), E.lua_pushlightuserdata(t, e), _t(t, t.top - 2, 1), t.errfunc !== 0) {
-                let e = t.errfunc;
-                w.pushobj2s(t, t.stack[t.top - 1]), w.setobjs2s(t, t.top - 2, e), _t(t, t.top - 2, 1);
-              }
-              a.status = g;
-            } catch (t) {
-              a.status === x && (a.status = -1);
-            }
-          else
-            a.status = -1;
-        }
-      }
-      return t.errorJmp = a.previous, t.nCcalls = r, a.status;
-    }, at = function(t, e) {
-      let n = t.ci;
-      R(n.c_k !== null && t.nny === 0), R(n.callstatus & M.CIST_YPCALL || e === b), n.callstatus & M.CIST_YPCALL && (n.callstatus &= ~M.CIST_YPCALL, t.errfunc = n.c_old_errfunc), n.nresults === c && t.ci.top < t.top && (t.ci.top = t.top);
-      let r = (0, n.c_k)(t, e, n.c_ctx);
-      E.api_checknelems(t, r), Z(t, n, t.top - r, r);
-    }, ut = function(t, e) {
-      for (e !== null && at(t, e);t.ci !== t.base_ci; )
-        t.ci.callstatus & M.CIST_LUA ? (B.luaV_finishOp(t), B.luaV_execute(t)) : at(t, b);
-    }, lt = function(t, e) {
-      let n = function(t) {
-        for (let e = t.ci;e !== null; e = e.previous)
-          if (e.callstatus & M.CIST_YPCALL)
-            return e;
-        return null;
-      }(t);
-      if (n === null)
-        return 0;
-      let r = n.extra;
-      return m.luaF_close(t, r), F(t, e, r), t.ci = n, t.allowhook = n.callstatus & M.CIST_OAH, t.nny = 0, Y(t), t.errfunc = n.c_old_errfunc, 1;
-    }, st = function(t, e, n) {
-      let r = P(t, e);
-      if (n === 0)
-        w.pushsvalue2s(t, r), N(t, t.top <= t.ci.top, "stack overflow");
-      else {
-        for (let e = 1;e < n; e++)
-          delete t.stack[--t.top];
-        w.setsvalue2s(t, t.top - 1, r);
-      }
-      return g;
-    }, ot = function(t, e) {
-      let n = t.top - e, r = t.ci;
-      t.status === x ? J(t, n - 1, c) || B.luaV_execute(t) : (R(t.status === b), t.status = x, r.funcOff = r.extra, r.func = t.stack[r.funcOff], r.callstatus & M.CIST_LUA ? B.luaV_execute(t) : (r.c_k !== null && (e = r.c_k(t, b, r.c_ctx), E.api_checknelems(t, e), n = t.top - e), Z(t, r, n, e)), ut(t, null));
-    }, it = function(t, e, n, r) {
-      let a = t.ci;
-      return E.api_checknelems(t, e), t.nny > 0 && (t !== t.l_G.mainthread ? U.luaG_runerror(t, v("attempt to yield across a JS-call boundary", true)) : U.luaG_runerror(t, v("attempt to yield from outside a coroutine", true))), t.status = b, a.extra = a.funcOff, a.callstatus & M.CIST_LUA ? N(t, r === null, "hooks cannot continue after yielding") : (a.c_k = r, r !== null && (a.c_ctx = n), a.funcOff = t.top - e - 1, a.func = t.stack[a.funcOff], nt(t, b)), R(a.callstatus & M.CIST_HOOKED), 0;
-    }, ct = function(t, e, n, r, a) {
-      let { ci: u, allowhook: l, nny: s, errfunc: o } = t;
-      t.errfunc = a;
-      let i = rt(t, e, n);
-      return i !== x && (m.luaF_close(t, r), F(t, i, r), t.ci = u, t.allowhook = l, t.nny = s, Y(t)), t.errfunc = o, i;
-    }, _t = function(t, e, n) {
-      t.nny++, et(t, e, n), t.nny--;
-    };
-    const ft = function(t, e, n) {
-      e && k(e, n[0]) === -1 && (w.luaO_pushfstring(t, v("attempt to load a %s chunk (mode is '%s')"), n, e), nt(t, T));
-    }, pt = function(t, e) {
-      let n, r = e.z.zgetc();
-      r === _[0] ? (ft(t, e.mode, v("binary", true)), n = V.luaU_undump(t, e.z, e.name)) : (ft(t, e.mode, v("text", true)), n = y.luaY_parser(t, e.z, e.buff, e.dyd, e.name, r)), R(n.nupvalues === n.p.upvalues.length), m.luaF_initupvals(t, n);
-    };
-    t.exports.adjust_top = K, t.exports.luaD_call = et, t.exports.luaD_callnoyield = _t, t.exports.luaD_checkstack = z, t.exports.luaD_growstack = X, t.exports.luaD_hook = W, t.exports.luaD_inctop = function(t) {
-      z(t, 1), t.stack[t.top++] = new w.TValue(h, null);
-    }, t.exports.luaD_pcall = ct, t.exports.luaD_poscall = Z, t.exports.luaD_precall = J, t.exports.luaD_protectedparser = function(t, e, n, r) {
-      let a = new class {
-        constructor(t, e, n) {
-          this.z = t, this.buff = new G, this.dyd = new y.Dyndata, this.mode = n, this.name = e;
-        }
-      }(e, n, r);
-      t.nny++;
-      let u = ct(t, pt, a, t.top, t.errfunc);
-      return t.nny--, u;
-    }, t.exports.luaD_rawrunprotected = rt, t.exports.luaD_reallocstack = H, t.exports.luaD_throw = nt, t.exports.lua_isyieldable = function(t) {
-      return t.nny === 0;
-    }, t.exports.lua_resume = function(t, e, n) {
-      let r = t.nny;
-      if (t.status === x) {
-        if (t.ci !== t.base_ci)
-          return st(t, "cannot resume non-suspended coroutine", n);
-      } else if (t.status !== b)
-        return st(t, "cannot resume dead coroutine", n);
-      if (t.nCcalls = e ? e.nCcalls + 1 : 1, t.nCcalls >= S)
-        return st(t, "JS stack overflow", n);
-      t.nny = 0, E.api_checknelems(t, t.status === x ? n + 1 : n);
-      let a = rt(t, ot, n);
-      if (a === -1)
-        a = g;
-      else {
-        for (;a > b && lt(t, a); )
-          a = rt(t, ut, a);
-        a > b ? (t.status = a, F(t, a, t.top), t.ci.top = t.top) : R(a === t.status);
-      }
-      return t.nny = r, t.nCcalls--, R(t.nCcalls === (e ? e.nCcalls : 0)), a;
-    }, t.exports.lua_yield = function(t, e) {
-      it(t, e, 0, null);
-    }, t.exports.lua_yieldk = it;
-  }, function(t, e, n) {
-    const { constant_types: { LUA_TBOOLEAN: r, LUA_TCCL: a, LUA_TLCF: u, LUA_TLCL: l, LUA_TLIGHTUSERDATA: s, LUA_TLNGSTR: o, LUA_TNIL: i, LUA_TNUMFLT: c, LUA_TNUMINT: _, LUA_TSHRSTR: f, LUA_TTABLE: p, LUA_TTHREAD: L, LUA_TUSERDATA: h }, to_luastring: d } = n(1), { lua_assert: A } = n(4), g = n(11), T = n(6), { luaS_hashlongstr: x, TString: b } = n(10), O = n(12);
-    let k = new WeakMap;
-    const v = function(t) {
-      let e = k.get(t);
-      return e || (e = {}, k.set(t, e)), e;
-    }, E = function(t, e) {
-      switch (e.type) {
-        case i:
-          return g.luaG_runerror(t, d("table index is nil", true));
-        case c:
-          if (isNaN(e.value))
-            return g.luaG_runerror(t, d("table index is NaN", true));
-        case _:
-        case r:
-        case p:
-        case l:
-        case u:
-        case a:
-        case h:
-        case L:
-          return e.value;
-        case f:
-        case o:
-          return x(e.tsvalue());
-        case s: {
-          let n = e.value;
-          switch (typeof n) {
-            case "string":
-              return "*" + n;
-            case "number":
-              return "#" + n;
-            case "boolean":
-              return n ? "?true" : "?false";
-            case "function":
-              return v(n);
-            case "object":
-              if (n instanceof O.lua_State && n.l_G === t.l_G || n instanceof U || n instanceof T.Udata || n instanceof T.LClosure || n instanceof T.CClosure)
-                return v(n);
-            default:
-              return n;
-          }
-        }
-        default:
-          throw new Error("unknown key type: " + e.type);
-      }
-    };
-
-    class U {
-      constructor(t) {
-        this.id = t.l_G.id_counter++, this.strong = new Map, this.dead_strong = new Map, this.dead_weak = undefined, this.f = undefined, this.l = undefined, this.metatable = null, this.flags = -1;
-      }
-    }
-    const m = function(t, e, n, r) {
-      t.dead_strong.clear(), t.dead_weak = undefined;
-      let a = null, u = { key: n, value: r, p: a = t.l, n: undefined };
-      t.f || (t.f = u), a && (a.n = u), t.strong.set(e, u), t.l = u;
-    }, N = function(t, e) {
-      let n = t.strong.get(e);
-      if (n) {
-        n.key.setdeadvalue(), n.value = undefined;
-        let { n: r, p: a } = n;
-        n.p = undefined, a && (a.n = r), r && (r.p = a), t.f === n && (t.f = r), t.l === n && (t.l = a), t.strong.delete(e), !function(t) {
-          return typeof t == "object" ? t !== null : typeof t == "function";
-        }(e) ? t.dead_strong.set(e, n) : (t.dead_weak || (t.dead_weak = new WeakMap), t.dead_weak.set(e, n));
-      }
-    }, R = function(t, e) {
-      let n = t.strong.get(e);
-      return n ? n.value : T.luaO_nilobject;
-    }, S = function(t, e) {
-      return A(typeof e == "number" && (0 | e) === e), R(t, e);
-    };
-    t.exports.invalidateTMcache = function(t) {
-      t.flags = 0;
-    }, t.exports.luaH_get = function(t, e, n) {
-      return A(n instanceof T.TValue), n.ttisnil() || n.ttisfloat() && isNaN(n.value) ? T.luaO_nilobject : R(e, E(t, n));
-    }, t.exports.luaH_getint = S, t.exports.luaH_getn = function(t) {
-      let e = 0, n = t.strong.size + 1;
-      for (;n - e > 1; ) {
-        let r = Math.floor((e + n) / 2);
-        S(t, r).ttisnil() ? n = r : e = r;
-      }
-      return e;
-    }, t.exports.luaH_getstr = function(t, e) {
-      return A(e instanceof b), R(t, x(e));
-    }, t.exports.luaH_setfrom = function(t, e, n, r) {
-      A(n instanceof T.TValue);
-      let a = E(t, n);
-      if (r.ttisnil())
-        return void N(e, a);
-      let u = e.strong.get(a);
-      if (u)
-        u.value.setfrom(r);
-      else {
-        let t, u = n.value;
-        t = n.ttisfloat() && (0 | u) === u ? new T.TValue(_, u) : new T.TValue(n.type, u);
-        let l = new T.TValue(r.type, r.value);
-        m(e, a, t, l);
-      }
-    }, t.exports.luaH_setint = function(t, e, n) {
-      A(typeof e == "number" && (0 | e) === e && n instanceof T.TValue);
-      let r = e;
-      if (n.ttisnil())
-        return void N(t, r);
-      let a = t.strong.get(r);
-      if (a)
-        a.value.setfrom(n);
-      else {
-        let a = new T.TValue(_, e), u = new T.TValue(n.type, n.value);
-        m(t, r, a, u);
-      }
-    }, t.exports.luaH_new = function(t) {
-      return new U(t);
-    }, t.exports.luaH_next = function(t, e, n) {
-      let r, a = t.stack[n];
-      if (a.type === i) {
-        if (!(r = e.f))
-          return false;
-      } else {
-        let n = E(t, a);
-        if (r = e.strong.get(n)) {
-          if (!(r = r.n))
-            return false;
-        } else {
-          if (!(r = e.dead_weak && e.dead_weak.get(n) || e.dead_strong.get(n)))
-            return g.luaG_runerror(t, d("invalid key to 'next'"));
-          do {
-            if (!(r = r.n))
-              return false;
-          } while (r.key.ttisdeadkey());
-        }
-      }
-      return T.setobj2s(t, n, r.key), T.setobj2s(t, n + 1, r.value), true;
-    }, t.exports.Table = U;
-  }, function(t, e, n) {
-    const { is_luastring: r, luastring_eq: a, luastring_from: u, to_luastring: l } = n(1), { lua_assert: s } = n(4);
-
-    class o {
-      constructor(t, e) {
-        this.hash = null, this.realstring = e;
-      }
-      getstr() {
-        return this.realstring;
-      }
-      tsslen() {
-        return this.realstring.length;
-      }
-    }
-    const i = function(t) {
-      s(r(t));
-      let e = t.length, n = "|";
-      for (let r = 0;r < e; r++)
-        n += t[r].toString(16);
-      return n;
-    }, c = function(t, e) {
-      return s(e instanceof Uint8Array), new o(t, e);
-    };
-    t.exports.luaS_eqlngstr = function(t, e) {
-      return s(t instanceof o), s(e instanceof o), t == e || a(t.realstring, e.realstring);
-    }, t.exports.luaS_hash = i, t.exports.luaS_hashlongstr = function(t) {
-      return s(t instanceof o), t.hash === null && (t.hash = i(t.getstr())), t.hash;
-    }, t.exports.luaS_bless = c, t.exports.luaS_new = function(t, e) {
-      return c(t, u(e));
-    }, t.exports.luaS_newliteral = function(t, e) {
-      return c(t, l(e));
-    }, t.exports.TString = o;
-  }, function(t, e, n) {
-    const { LUA_HOOKCOUNT: r, LUA_HOOKLINE: a, LUA_MASKCOUNT: u, LUA_MASKLINE: l, constant_types: { LUA_TBOOLEAN: s, LUA_TNIL: o, LUA_TTABLE: i }, thread_status: { LUA_ERRRUN: c, LUA_YIELD: _ }, from_userstring: f, luastring_eq: p, luastring_indexOf: L, to_luastring: h } = n(1), { api_check: d, lua_assert: A } = n(4), { LUA_IDSIZE: g } = n(3), T = n(18), x = n(8), b = n(13), O = n(20), k = n(6), v = n(16), E = n(12), U = n(9), m = n(14), N = n(15), R = function(t) {
-      return A(t.callstatus & E.CIST_LUA), t.l_savedpc - 1;
-    }, S = function(t) {
-      return t.func.value.p.lineinfo.length !== 0 ? t.func.value.p.lineinfo[R(t)] : -1;
-    }, w = function(t) {
-      if (t.status === _) {
-        let e = t.ci, n = e.funcOff;
-        e.func = t.stack[e.extra], e.funcOff = e.extra, e.extra = n;
-      }
-    }, I = function(t, e) {
-      A(e < t.upvalues.length);
-      let n = t.upvalues[e].name;
-      return n === null ? h("?", true) : n.getstr();
-    }, y = function(t, e, n) {
-      let r, a = null;
-      if (e.callstatus & E.CIST_LUA) {
-        if (n < 0)
-          return function(t, e) {
-            let n = t.func.value.p.numparams;
-            return e >= t.l_base - t.funcOff - n ? null : { pos: t.funcOff + n + e, name: h("(*vararg)", true) };
-          }(e, -n);
-        r = e.l_base, a = b.luaF_getlocalname(e.func.value.p, n, R(e));
-      } else
-        r = e.funcOff + 1;
-      if (a === null) {
-        if (!((e === t.ci ? t.top : e.next.funcOff) - r >= n && n > 0))
-          return null;
-        a = h("(*temporary)", true);
-      }
-      return { pos: r + (n - 1), name: a };
-    }, M = function(t, e) {
-      if (e === null || e instanceof k.CClosure)
-        t.source = h("=[JS]", true), t.linedefined = -1, t.lastlinedefined = -1, t.what = h("J", true);
-      else {
-        let n = e.p;
-        t.source = n.source ? n.source.getstr() : h("=?", true), t.linedefined = n.linedefined, t.lastlinedefined = n.lastlinedefined, t.what = t.linedefined === 0 ? h("main", true) : h("Lua", true);
-      }
-      t.short_src = k.luaO_chunkid(t.source, g);
-    }, P = function(t, e) {
-      let n = { name: null, funcname: null };
-      return e === null ? null : e.callstatus & E.CIST_FIN ? (n.name = h("__gc", true), n.funcname = h("metamethod", true), n) : !(e.callstatus & E.CIST_TAIL) && e.previous.callstatus & E.CIST_LUA ? B(t, e.previous) : null;
-    }, C = function(t, e, n) {
-      let r = { name: null, funcname: null };
-      if (v.ISK(n)) {
-        let e = t.k[v.INDEXK(n)];
-        if (e.ttisstring())
-          return r.name = e.svalue(), r;
-      } else {
-        let r = V(t, e, n);
-        if (r && r.funcname[0] === 99)
-          return r;
-      }
-      return r.name = h("?", true), r;
-    }, D = function(t, e) {
-      return t < e ? -1 : t;
-    }, V = function(t, e, n) {
-      let r = { name: b.luaF_getlocalname(t, n + 1, e), funcname: null };
-      if (r.name)
-        return r.funcname = h("local", true), r;
-      let a = function(t, e, n) {
-        let r = -1, a = 0, u = v.OpCodesI;
-        for (let l = 0;l < e; l++) {
-          let s = t.code[l], o = s.A;
-          switch (s.opcode) {
-            case u.OP_LOADNIL: {
-              let t = s.B;
-              o <= n && n <= o + t && (r = D(l, a));
-              break;
-            }
-            case u.OP_TFORCALL:
-              n >= o + 2 && (r = D(l, a));
-              break;
-            case u.OP_CALL:
-            case u.OP_TAILCALL:
-              n >= o && (r = D(l, a));
-              break;
-            case u.OP_JMP: {
-              let t = l + 1 + s.sBx;
-              l < t && t <= e && t > a && (a = t);
-              break;
-            }
-            default:
-              v.testAMode(s.opcode) && n === o && (r = D(l, a));
-          }
-        }
-        return r;
-      }(t, e, n), u = v.OpCodesI;
-      if (a !== -1) {
-        let e = t.code[a];
-        switch (e.opcode) {
-          case u.OP_MOVE: {
-            let n = e.B;
-            if (n < e.A)
-              return V(t, a, n);
-            break;
-          }
-          case u.OP_GETTABUP:
-          case u.OP_GETTABLE: {
-            let { C: n, B: l } = e, s = e.opcode === u.OP_GETTABLE ? b.luaF_getlocalname(t, l + 1, a) : I(t, l);
-            return r.name = C(t, a, n).name, r.funcname = s && p(s, O.LUA_ENV) ? h("global", true) : h("field", true), r;
-          }
-          case u.OP_GETUPVAL:
-            return r.name = I(t, e.B), r.funcname = h("upvalue", true), r;
-          case u.OP_LOADK:
-          case u.OP_LOADKX: {
-            let n = e.opcode === u.OP_LOADK ? e.Bx : t.code[a + 1].Ax;
-            if (t.k[n].ttisstring())
-              return r.name = t.k[n].svalue(), r.funcname = h("constant", true), r;
-            break;
-          }
-          case u.OP_SELF: {
-            let n = e.C;
-            return r.name = C(t, a, n).name, r.funcname = h("method", true), r;
-          }
-        }
-      }
-      return null;
-    }, B = function(t, e) {
-      let n = { name: null, funcname: null }, r = 0, a = e.func.value.p, u = R(e), l = a.code[u], s = v.OpCodesI;
-      if (e.callstatus & E.CIST_HOOKED)
-        return n.name = h("?", true), n.funcname = h("hook", true), n;
-      switch (l.opcode) {
-        case s.OP_CALL:
-        case s.OP_TAILCALL:
-          return V(a, u, l.A);
-        case s.OP_TFORCALL:
-          return n.name = h("for iterator", true), n.funcname = h("for iterator", true), n;
-        case s.OP_SELF:
-        case s.OP_GETTABUP:
-        case s.OP_GETTABLE:
-          r = m.TMS.TM_INDEX;
-          break;
-        case s.OP_SETTABUP:
-        case s.OP_SETTABLE:
-          r = m.TMS.TM_NEWINDEX;
-          break;
-        case s.OP_ADD:
-          r = m.TMS.TM_ADD;
-          break;
-        case s.OP_SUB:
-          r = m.TMS.TM_SUB;
-          break;
-        case s.OP_MUL:
-          r = m.TMS.TM_MUL;
-          break;
-        case s.OP_MOD:
-          r = m.TMS.TM_MOD;
-          break;
-        case s.OP_POW:
-          r = m.TMS.TM_POW;
-          break;
-        case s.OP_DIV:
-          r = m.TMS.TM_DIV;
-          break;
-        case s.OP_IDIV:
-          r = m.TMS.TM_IDIV;
-          break;
-        case s.OP_BAND:
-          r = m.TMS.TM_BAND;
-          break;
-        case s.OP_BOR:
-          r = m.TMS.TM_BOR;
-          break;
-        case s.OP_BXOR:
-          r = m.TMS.TM_BXOR;
-          break;
-        case s.OP_SHL:
-          r = m.TMS.TM_SHL;
-          break;
-        case s.OP_SHR:
-          r = m.TMS.TM_SHR;
-          break;
-        case s.OP_UNM:
-          r = m.TMS.TM_UNM;
-          break;
-        case s.OP_BNOT:
-          r = m.TMS.TM_BNOT;
-          break;
-        case s.OP_LEN:
-          r = m.TMS.TM_LEN;
-          break;
-        case s.OP_CONCAT:
-          r = m.TMS.TM_CONCAT;
-          break;
-        case s.OP_EQ:
-          r = m.TMS.TM_EQ;
-          break;
-        case s.OP_LT:
-          r = m.TMS.TM_LT;
-          break;
-        case s.OP_LE:
-          r = m.TMS.TM_LE;
-          break;
-        default:
-          return null;
-      }
-      return n.name = t.l_G.tmname[r].getstr(), n.funcname = h("metamethod", true), n;
-    }, G = function(t, e) {
-      let n = t.ci, r = null;
-      if (n.callstatus & E.CIST_LUA) {
-        r = function(t, e, n) {
-          let r = e.func.value;
-          for (let t = 0;t < r.nupvalues; t++)
-            if (r.upvals[t] === n)
-              return { name: I(r.p, t), funcname: h("upvalue", true) };
-          return null;
-        }(0, n, e);
-        let a = function(t, e, n) {
-          for (let r = e.l_base;r < e.top; r++)
-            if (t.stack[r] === n)
-              return r;
-          return false;
-        }(t, n, e);
-        !r && a && (r = V(n.func.value.p, R(n), a - n.l_base));
-      }
-      return r ? k.luaO_pushfstring(t, h(" (%s '%s')", true), r.funcname, r.name) : h("", true);
-    }, K = function(t, e, n) {
-      let r = m.luaT_objtypename(t, e);
-      j(t, h("attempt to %s a %s value%s", true), n, r, G(t, e));
-    }, F = function(t, e, n, r) {
-      let a;
-      return a = n ? k.luaO_chunkid(n.getstr(), g) : h("?", true), k.luaO_pushfstring(t, h("%s:%d: %s", true), a, r, e);
-    }, j = function(t, e, ...n) {
-      let r = t.ci, a = k.luaO_pushvfstring(t, e, n);
-      r.callstatus & E.CIST_LUA && F(t, a, r.func.value.p.source, S(r)), H(t);
-    }, H = function(t) {
-      if (t.errfunc !== 0) {
-        let e = t.errfunc;
-        k.pushobj2s(t, t.stack[t.top - 1]), k.setobjs2s(t, t.top - 2, e), x.luaD_callnoyield(t, t.top - 2, 1);
-      }
-      x.luaD_throw(t, c);
-    };
-    t.exports.luaG_addinfo = F, t.exports.luaG_concaterror = function(t, e, n) {
-      (e.ttisstring() || N.cvt2str(e)) && (e = n), K(t, e, h("concatenate", true));
-    }, t.exports.luaG_errormsg = H, t.exports.luaG_opinterror = function(t, e, n, r) {
-      N.tonumber(e) === false && (n = e), K(t, n, r);
-    }, t.exports.luaG_ordererror = function(t, e, n) {
-      let r = m.luaT_objtypename(t, e), a = m.luaT_objtypename(t, n);
-      p(r, a) ? j(t, h("attempt to compare two %s values", true), r) : j(t, h("attempt to compare %s with %s", true), r, a);
-    }, t.exports.luaG_runerror = j, t.exports.luaG_tointerror = function(t, e, n) {
-      N.tointeger(e) === false && (n = e), j(t, h("number%s has no integer representation", true), G(t, n));
-    }, t.exports.luaG_traceexec = function(t) {
-      let { ci: e, hookmask: n } = t, s = --t.hookcount == 0 && n & u;
-      if (s)
-        t.hookcount = t.basehookcount;
-      else if (!(n & l))
-        return;
-      if (e.callstatus & E.CIST_HOOKYIELD)
-        e.callstatus &= ~E.CIST_HOOKYIELD;
-      else {
-        if (s && x.luaD_hook(t, r, -1), n & l) {
-          let n = e.func.value.p, r = e.l_savedpc - 1, u = n.lineinfo.length !== 0 ? n.lineinfo[r] : -1;
-          (r === 0 || e.l_savedpc <= t.oldpc || u !== (n.lineinfo.length !== 0 ? n.lineinfo[t.oldpc - 1] : -1)) && x.luaD_hook(t, a, u);
-        }
-        t.oldpc = e.l_savedpc, t.status === _ && (s && (t.hookcount = 1), e.l_savedpc--, e.callstatus |= E.CIST_HOOKYIELD, e.funcOff = t.top - 1, e.func = t.stack[e.funcOff], x.luaD_throw(t, _));
-      }
-    }, t.exports.luaG_typeerror = K, t.exports.lua_gethook = function(t) {
-      return t.hook;
-    }, t.exports.lua_gethookcount = function(t) {
-      return t.basehookcount;
-    }, t.exports.lua_gethookmask = function(t) {
-      return t.hookmask;
-    }, t.exports.lua_getinfo = function(t, e, n) {
-      let r, a, u, l;
-      return e = f(e), w(t), e[0] === 62 ? (u = null, l = t.stack[t.top - 1], d(t, l.ttisfunction(), "function expected"), e = e.subarray(1), t.top--) : (l = (u = n.i_ci).func, A(u.func.ttisfunction())), r = function(t, e, n, r, a) {
-        let u = 1;
-        for (;e.length > 0; e = e.subarray(1))
-          switch (e[0]) {
-            case 83:
-              M(n, r);
-              break;
-            case 108:
-              n.currentline = a && a.callstatus & E.CIST_LUA ? S(a) : -1;
-              break;
-            case 117:
-              n.nups = r === null ? 0 : r.nupvalues, r === null || r instanceof k.CClosure ? (n.isvararg = true, n.nparams = 0) : (n.isvararg = r.p.is_vararg, n.nparams = r.p.numparams);
-              break;
-            case 116:
-              n.istailcall = a ? a.callstatus & E.CIST_TAIL : 0;
-              break;
-            case 110: {
-              let e = P(t, a);
-              e === null ? (n.namewhat = h("", true), n.name = null) : (n.namewhat = e.funcname, n.name = e.name);
-              break;
-            }
-            case 76:
-            case 102:
-              break;
-            default:
-              u = 0;
-          }
-        return u;
-      }(t, e, n, a = l.ttisclosure() ? l.value : null, u), L(e, 102) >= 0 && (k.pushobj2s(t, l), d(t, t.top <= t.ci.top, "stack overflow")), w(t), L(e, 76) >= 0 && function(t, e) {
-        if (e === null || e instanceof k.CClosure)
-          t.stack[t.top] = new k.TValue(o, null), T.api_incr_top(t);
-        else {
-          let n = e.p.lineinfo, r = U.luaH_new(t);
-          t.stack[t.top] = new k.TValue(i, r), T.api_incr_top(t);
-          let a = new k.TValue(s, true);
-          for (let t = 0;t < n.length; t++)
-            U.luaH_setint(r, n[t], a);
-        }
-      }(t, a), r;
-    }, t.exports.lua_getlocal = function(t, e, n) {
-      let r;
-      if (w(t), e === null)
-        r = t.stack[t.top - 1].ttisLclosure() ? b.luaF_getlocalname(t.stack[t.top - 1].value.p, n, 0) : null;
-      else {
-        let a = y(t, e.i_ci, n);
-        a ? (r = a.name, k.pushobj2s(t, t.stack[a.pos]), d(t, t.top <= t.ci.top, "stack overflow")) : r = null;
-      }
-      return w(t), r;
-    }, t.exports.lua_getstack = function(t, e, n) {
-      let r, a;
-      if (e < 0)
-        return 0;
-      for (r = t.ci;e > 0 && r !== t.base_ci; r = r.previous)
-        e--;
-      return e === 0 && r !== t.base_ci ? (a = 1, n.i_ci = r) : a = 0, a;
-    }, t.exports.lua_sethook = function(t, e, n, r) {
-      e !== null && n !== 0 || (n = 0, e = null), t.ci.callstatus & E.CIST_LUA && (t.oldpc = t.ci.l_savedpc), t.hook = e, t.basehookcount = r, t.hookcount = t.basehookcount, t.hookmask = n;
-    }, t.exports.lua_setlocal = function(t, e, n) {
-      let r;
-      w(t);
-      let a = y(t, e.i_ci, n);
-      return a ? (r = a.name, k.setobjs2s(t, a.pos, t.top - 1), delete t.stack[--t.top]) : r = null, w(t), r;
-    };
-  }, function(t, e, n) {
-    const { LUA_MINSTACK: r, LUA_RIDX_GLOBALS: a, LUA_RIDX_MAINTHREAD: u, constant_types: { LUA_NUMTAGS: l, LUA_TNIL: s, LUA_TTABLE: o, LUA_TTHREAD: i }, thread_status: { LUA_OK: c } } = n(1), _ = n(6), f = n(8), p = n(18), L = n(9), h = n(14), d = 2 * r;
-
-    class A {
-      constructor() {
-        this.func = null, this.funcOff = NaN, this.top = NaN, this.previous = null, this.next = null, this.l_base = NaN, this.l_code = null, this.l_savedpc = NaN, this.c_k = null, this.c_old_errfunc = null, this.c_ctx = null, this.nresults = NaN, this.callstatus = NaN;
-      }
-    }
-
-    class g {
-      constructor(t) {
-        this.id = t.id_counter++, this.base_ci = new A, this.top = NaN, this.stack_last = NaN, this.oldpc = NaN, this.l_G = t, this.stack = null, this.ci = null, this.errorJmp = null, this.nCcalls = 0, this.hook = null, this.hookmask = 0, this.basehookcount = 0, this.allowhook = 1, this.hookcount = this.basehookcount, this.nny = 1, this.status = c, this.errfunc = 0;
-      }
-    }
-    const T = function(t) {
-      t.ci.next = null;
-    }, x = function(t, e) {
-      t.stack = new Array(d), t.top = 0, t.stack_last = d - 5;
-      let n = t.base_ci;
-      n.next = n.previous = null, n.callstatus = 0, n.funcOff = t.top, n.func = t.stack[t.top], t.stack[t.top++] = new _.TValue(s, null), n.top = t.top + r, t.ci = n;
-    }, b = function(t) {
-      t.ci = t.base_ci, T(t), t.stack = null;
-    }, O = function(t) {
-      let e = t.l_G;
-      x(t), function(t, e) {
-        let n = L.luaH_new(t);
-        e.l_registry.sethvalue(n), L.luaH_setint(n, u, new _.TValue(i, t)), L.luaH_setint(n, a, new _.TValue(o, L.luaH_new(t)));
-      }(t, e), h.luaT_init(t), e.version = p.lua_version(null);
-    };
-    t.exports.lua_State = g, t.exports.CallInfo = A, t.exports.CIST_OAH = 1, t.exports.CIST_LUA = 2, t.exports.CIST_HOOKED = 4, t.exports.CIST_FRESH = 8, t.exports.CIST_YPCALL = 16, t.exports.CIST_TAIL = 32, t.exports.CIST_HOOKYIELD = 64, t.exports.CIST_LEQ = 128, t.exports.CIST_FIN = 256, t.exports.EXTRA_STACK = 5, t.exports.lua_close = function(t) {
-      (function(t) {
-        b(t);
-      })(t = t.l_G.mainthread);
-    }, t.exports.lua_newstate = function() {
-      let t = new class {
-        constructor() {
-          this.id_counter = 1, this.ids = new WeakMap, this.mainthread = null, this.l_registry = new _.TValue(s, null), this.panic = null, this.atnativeerror = null, this.version = null, this.tmname = new Array(h.TMS.TM_N), this.mt = new Array(l);
-        }
-      }, e = new g(t);
-      return t.mainthread = e, f.luaD_rawrunprotected(e, O, null) !== c && (e = null), e;
-    }, t.exports.lua_newthread = function(t) {
-      let e = t.l_G, n = new g(e);
-      return t.stack[t.top] = new _.TValue(i, n), p.api_incr_top(t), n.hookmask = t.hookmask, n.basehookcount = t.basehookcount, n.hook = t.hook, n.hookcount = n.basehookcount, x(n), n;
-    }, t.exports.luaE_extendCI = function(t) {
-      let e = new A;
-      return t.ci.next = e, e.previous = t.ci, e.next = null, t.ci = e, e;
-    }, t.exports.luaE_freeCI = T, t.exports.luaE_freethread = function(t, e) {
-      b(e);
-    };
-  }, function(t, e, n) {
-    const { constant_types: { LUA_TNIL: r } } = n(1), a = n(6);
-    t.exports.MAXUPVAL = 255, t.exports.Proto = class {
-      constructor(t) {
-        this.id = t.l_G.id_counter++, this.k = [], this.p = [], this.code = [], this.cache = null, this.lineinfo = [], this.upvalues = [], this.numparams = 0, this.is_vararg = false, this.maxstacksize = 0, this.locvars = [], this.linedefined = 0, this.lastlinedefined = 0, this.source = null;
-      }
-    }, t.exports.luaF_findupval = function(t, e) {
-      return t.stack[e];
-    }, t.exports.luaF_close = function(t, e) {
-      for (let n = e;n < t.top; n++) {
-        let e = t.stack[n];
-        t.stack[n] = new a.TValue(e.type, e.value);
-      }
-    }, t.exports.luaF_getlocalname = function(t, e, n) {
-      for (let r = 0;r < t.locvars.length && t.locvars[r].startpc <= n; r++)
-        if (n < t.locvars[r].endpc && --e == 0)
-          return t.locvars[r].varname.getstr();
-      return null;
-    }, t.exports.luaF_initupvals = function(t, e) {
-      for (let t = 0;t < e.nupvalues; t++)
-        e.upvals[t] = new a.TValue(r, null);
-    }, t.exports.luaF_newLclosure = function(t, e) {
-      return new a.LClosure(t, e);
-    };
-  }, function(t, e, n) {
-    const { constant_types: { LUA_TTABLE: r, LUA_TUSERDATA: a }, to_luastring: u } = n(1), { lua_assert: l } = n(4), s = n(6), o = n(8), i = n(12), { luaS_bless: c, luaS_new: _ } = n(10), f = n(9), p = n(11), L = n(15), h = ["no value", "nil", "boolean", "userdata", "number", "string", "table", "function", "userdata", "thread", "proto"].map((t) => u(t)), d = function(t) {
-      return h[t + 1];
-    }, A = { TM_INDEX: 0, TM_NEWINDEX: 1, TM_GC: 2, TM_MODE: 3, TM_LEN: 4, TM_EQ: 5, TM_ADD: 6, TM_SUB: 7, TM_MUL: 8, TM_MOD: 9, TM_POW: 10, TM_DIV: 11, TM_IDIV: 12, TM_BAND: 13, TM_BOR: 14, TM_BXOR: 15, TM_SHL: 16, TM_SHR: 17, TM_UNM: 18, TM_BNOT: 19, TM_LT: 20, TM_LE: 21, TM_CONCAT: 22, TM_CALL: 23, TM_N: 24 }, g = u("__name", true), T = function(t, e, n, r, a, u) {
-      let l = t.top;
-      if (s.pushobj2s(t, e), s.pushobj2s(t, n), s.pushobj2s(t, r), u || s.pushobj2s(t, a), t.ci.callstatus & i.CIST_LUA ? o.luaD_call(t, l, u) : o.luaD_callnoyield(t, l, u), u) {
-        let e = t.stack[t.top - 1];
-        delete t.stack[--t.top], a.setfrom(e);
-      }
-    }, x = function(t, e, n, r, a) {
-      let u = O(t, e, a);
-      return u.ttisnil() && (u = O(t, n, a)), !u.ttisnil() && (T(t, u, e, n, r, 1), true);
-    }, b = function(t, e, n) {
-      const r = f.luaH_getstr(t, n);
-      return l(e <= A.TM_EQ), r.ttisnil() ? (t.flags |= 1 << e, null) : r;
-    }, O = function(t, e, n) {
-      let u;
-      switch (e.ttnov()) {
-        case r:
-        case a:
-          u = e.value.metatable;
-          break;
-        default:
-          u = t.l_G.mt[e.ttnov()];
-      }
-      return u ? f.luaH_getstr(u, t.l_G.tmname[n]) : s.luaO_nilobject;
-    };
-    t.exports.fasttm = function(t, e, n) {
-      return e === null ? null : e.flags & 1 << n ? null : b(e, n, t.l_G.tmname[n]);
-    }, t.exports.TMS = A, t.exports.luaT_callTM = T, t.exports.luaT_callbinTM = x, t.exports.luaT_trybinTM = function(t, e, n, r, a) {
-      if (!x(t, e, n, r, a))
-        switch (a) {
-          case A.TM_CONCAT:
-            return p.luaG_concaterror(t, e, n);
-          case A.TM_BAND:
-          case A.TM_BOR:
-          case A.TM_BXOR:
-          case A.TM_SHL:
-          case A.TM_SHR:
-          case A.TM_BNOT: {
-            let r = L.tonumber(e), a = L.tonumber(n);
-            return r !== false && a !== false ? p.luaG_tointerror(t, e, n) : p.luaG_opinterror(t, e, n, u("perform bitwise operation on", true));
-          }
-          default:
-            return p.luaG_opinterror(t, e, n, u("perform arithmetic on", true));
-        }
-    }, t.exports.luaT_callorderTM = function(t, e, n, r) {
-      let a = new s.TValue;
-      return x(t, e, n, a, r) ? !a.l_isfalse() : null;
-    }, t.exports.luaT_gettm = b, t.exports.luaT_gettmbyobj = O, t.exports.luaT_init = function(t) {
-      t.l_G.tmname[A.TM_INDEX] = new _(t, u("__index", true)), t.l_G.tmname[A.TM_NEWINDEX] = new _(t, u("__newindex", true)), t.l_G.tmname[A.TM_GC] = new _(t, u("__gc", true)), t.l_G.tmname[A.TM_MODE] = new _(t, u("__mode", true)), t.l_G.tmname[A.TM_LEN] = new _(t, u("__len", true)), t.l_G.tmname[A.TM_EQ] = new _(t, u("__eq", true)), t.l_G.tmname[A.TM_ADD] = new _(t, u("__add", true)), t.l_G.tmname[A.TM_SUB] = new _(t, u("__sub", true)), t.l_G.tmname[A.TM_MUL] = new _(t, u("__mul", true)), t.l_G.tmname[A.TM_MOD] = new _(t, u("__mod", true)), t.l_G.tmname[A.TM_POW] = new _(t, u("__pow", true)), t.l_G.tmname[A.TM_DIV] = new _(t, u("__div", true)), t.l_G.tmname[A.TM_IDIV] = new _(t, u("__idiv", true)), t.l_G.tmname[A.TM_BAND] = new _(t, u("__band", true)), t.l_G.tmname[A.TM_BOR] = new _(t, u("__bor", true)), t.l_G.tmname[A.TM_BXOR] = new _(t, u("__bxor", true)), t.l_G.tmname[A.TM_SHL] = new _(t, u("__shl", true)), t.l_G.tmname[A.TM_SHR] = new _(t, u("__shr", true)), t.l_G.tmname[A.TM_UNM] = new _(t, u("__unm", true)), t.l_G.tmname[A.TM_BNOT] = new _(t, u("__bnot", true)), t.l_G.tmname[A.TM_LT] = new _(t, u("__lt", true)), t.l_G.tmname[A.TM_LE] = new _(t, u("__le", true)), t.l_G.tmname[A.TM_CONCAT] = new _(t, u("__concat", true)), t.l_G.tmname[A.TM_CALL] = new _(t, u("__call", true));
-    }, t.exports.luaT_objtypename = function(t, e) {
-      let n;
-      if (e.ttistable() && (n = e.value.metatable) !== null || e.ttisfulluserdata() && (n = e.value.metatable) !== null) {
-        let e = f.luaH_getstr(n, c(t, g));
-        if (e.ttisstring())
-          return e.svalue();
-      }
-      return d(e.ttnov());
-    }, t.exports.ttypename = d;
-  }, function(t, e, n) {
-    const { LUA_MASKLINE: r, LUA_MASKCOUNT: a, LUA_MULTRET: u, constant_types: { LUA_TBOOLEAN: l, LUA_TLCF: s, LUA_TLIGHTUSERDATA: o, LUA_TLNGSTR: i, LUA_TNIL: c, LUA_TNUMBER: _, LUA_TNUMFLT: f, LUA_TNUMINT: p, LUA_TSHRSTR: L, LUA_TTABLE: h, LUA_TUSERDATA: d }, to_luastring: A } = n(1), { INDEXK: g, ISK: T, LFIELDS_PER_FLUSH: x, OpCodesI: { OP_ADD: b, OP_BAND: O, OP_BNOT: k, OP_BOR: v, OP_BXOR: E, OP_CALL: U, OP_CLOSURE: m, OP_CONCAT: N, OP_DIV: R, OP_EQ: S, OP_EXTRAARG: w, OP_FORLOOP: I, OP_FORPREP: y, OP_GETTABLE: M, OP_GETTABUP: P, OP_GETUPVAL: C, OP_IDIV: D, OP_JMP: V, OP_LE: B, OP_LEN: G, OP_LOADBOOL: K, OP_LOADK: F, OP_LOADKX: j, OP_LOADNIL: H, OP_LT: X, OP_MOD: z, OP_MOVE: Y, OP_MUL: J, OP_NEWTABLE: Z, OP_NOT: q, OP_POW: W, OP_RETURN: Q, OP_SELF: $, OP_SETLIST: tt, OP_SETTABLE: et, OP_SETTABUP: nt, OP_SETUPVAL: rt, OP_SHL: at, OP_SHR: ut, OP_SUB: lt, OP_TAILCALL: st, OP_TEST: ot, OP_TESTSET: it, OP_TFORCALL: ct, OP_TFORLOOP: _t, OP_UNM: ft, OP_VARARG: pt } } = n(16), { LUA_MAXINTEGER: Lt, LUA_MININTEGER: ht, lua_numbertointeger: dt } = n(3), { lua_assert: At, luai_nummod: gt } = n(4), Tt = n(6), xt = n(13), bt = n(12), { luaS_bless: Ot, luaS_eqlngstr: kt, luaS_hashlongstr: vt } = n(10), Et = n(8), Ut = n(14), mt = n(9), Nt = n(11), Rt = function(t, e, n) {
-      return e + n.A;
-    }, St = function(t, e, n) {
-      return e + n.B;
-    }, wt = function(t, e, n, r) {
-      return T(r.B) ? n[g(r.B)] : t.stack[e + r.B];
-    }, It = function(t, e, n, r) {
-      return T(r.C) ? n[g(r.C)] : t.stack[e + r.C];
-    }, yt = function(t, e, n, r) {
-      let a = n.A;
-      a !== 0 && xt.luaF_close(t, e.l_base + a - 1), e.l_savedpc += n.sBx + r;
-    }, Mt = function(t, e) {
-      yt(t, e, e.l_code[e.l_savedpc], 1);
-    }, Pt = function(t, e, n) {
-      if (e.ttisnumber() && n.ttisnumber())
-        return Ft(e, n) ? 1 : 0;
-      if (e.ttisstring() && n.ttisstring())
-        return Ht(e.tsvalue(), n.tsvalue()) < 0 ? 1 : 0;
-      {
-        let r = Ut.luaT_callorderTM(t, e, n, Ut.TMS.TM_LT);
-        return r === null && Nt.luaG_ordererror(t, e, n), r ? 1 : 0;
-      }
-    }, Ct = function(t, e, n) {
-      let r;
-      return e.ttisnumber() && n.ttisnumber() ? jt(e, n) ? 1 : 0 : e.ttisstring() && n.ttisstring() ? Ht(e.tsvalue(), n.tsvalue()) <= 0 ? 1 : 0 : (r = Ut.luaT_callorderTM(t, e, n, Ut.TMS.TM_LE)) !== null ? r ? 1 : 0 : (t.ci.callstatus |= bt.CIST_LEQ, r = Ut.luaT_callorderTM(t, n, e, Ut.TMS.TM_LT), t.ci.callstatus ^= bt.CIST_LEQ, r === null && Nt.luaG_ordererror(t, e, n), r ? 0 : 1);
-    }, Dt = function(t, e, n) {
-      if (e.ttype() !== n.ttype())
-        return e.ttnov() !== n.ttnov() || e.ttnov() !== _ ? 0 : e.value === n.value ? 1 : 0;
-      let r;
-      switch (e.ttype()) {
-        case c:
-          return 1;
-        case l:
-          return e.value == n.value ? 1 : 0;
-        case o:
-        case p:
-        case f:
-        case s:
-          return e.value === n.value ? 1 : 0;
-        case L:
-        case i:
-          return kt(e.tsvalue(), n.tsvalue()) ? 1 : 0;
-        case d:
-        case h:
-          if (e.value === n.value)
-            return 1;
-          if (t === null)
-            return 0;
-          (r = Ut.fasttm(t, e.value.metatable, Ut.TMS.TM_EQ)) === null && (r = Ut.fasttm(t, n.value.metatable, Ut.TMS.TM_EQ));
-          break;
-        default:
-          return e.value === n.value ? 1 : 0;
-      }
-      if (r === null)
-        return 0;
-      let a = new Tt.TValue;
-      return Ut.luaT_callTM(t, r, e, n, a, 1), a.l_isfalse() ? 0 : 1;
-    }, Vt = function(t, e) {
-      let n = false, r = Bt(t, e < 0 ? 2 : 1);
-      if (r === false) {
-        let a = Kt(t);
-        if (a === false)
-          return false;
-        0 < a ? (r = Lt, e < 0 && (n = true)) : (r = ht, e >= 0 && (n = true));
-      }
-      return { stopnow: n, ilimit: r };
-    }, Bt = function(t, e) {
-      if (t.ttisfloat()) {
-        let n = t.value, r = Math.floor(n);
-        if (n !== r) {
-          if (e === 0)
-            return false;
-          e > 1 && (r += 1);
-        }
-        return dt(r);
-      }
-      if (t.ttisinteger())
-        return t.value;
-      if ($t(t)) {
-        let n = new Tt.TValue;
-        if (Tt.luaO_str2num(t.svalue(), n) === t.vslen() + 1)
-          return Bt(n, e);
-      }
-      return false;
-    }, Gt = function(t) {
-      return t.ttisinteger() ? t.value : Bt(t, 0);
-    }, Kt = function(t) {
-      if (t.ttnov() === _)
-        return t.value;
-      if ($t(t)) {
-        let e = new Tt.TValue;
-        if (Tt.luaO_str2num(t.svalue(), e) === t.vslen() + 1)
-          return e.value;
-      }
-      return false;
-    }, Ft = function(t, e) {
-      return t.value < e.value;
-    }, jt = function(t, e) {
-      return t.value <= e.value;
-    }, Ht = function(t, e) {
-      let n = vt(t), r = vt(e);
-      return n === r ? 0 : n < r ? -1 : 1;
-    }, Xt = function(t, e, n) {
-      let r;
-      switch (n.ttype()) {
-        case h: {
-          let a = n.value;
-          if ((r = Ut.fasttm(t, a.metatable, Ut.TMS.TM_LEN)) !== null)
-            break;
-          return void e.setivalue(mt.luaH_getn(a));
-        }
-        case L:
-        case i:
-          return void e.setivalue(n.vslen());
-        default:
-          (r = Ut.luaT_gettmbyobj(t, n, Ut.TMS.TM_LEN)).ttisnil() && Nt.luaG_typeerror(t, n, A("get length of", true));
-      }
-      Ut.luaT_callTM(t, r, n, n, e, 1);
-    }, zt = Math.imul || function(t, e) {
-      let n = 65535 & t, r = 65535 & e;
-      return n * r + ((t >>> 16 & 65535) * r + n * (e >>> 16 & 65535) << 16 >>> 0) | 0;
-    }, Yt = function(t, e, n) {
-      return n === 0 && Nt.luaG_runerror(t, A("attempt to divide by zero")), 0 | Math.floor(e / n);
-    }, Jt = function(t, e, n) {
-      return n === 0 && Nt.luaG_runerror(t, A("attempt to perform 'n%%0'")), e - Math.floor(e / n) * n | 0;
-    }, Zt = function(t, e) {
-      return e < 0 ? e <= -32 ? 0 : t >>> -e : e >= 32 ? 0 : t << e;
-    }, qt = function(t, e, n, r) {
-      let a = t.cache;
-      if (a !== null) {
-        let u = t.upvalues, l = u.length;
-        for (let t = 0;t < l; t++) {
-          let l = u[t].instack ? n[r + u[t].idx] : e[u[t].idx];
-          if (a.upvals[t] !== l)
-            return null;
-        }
-      }
-      return a;
-    }, Wt = function(t, e, n, r, a) {
-      let u = e.upvalues.length, l = e.upvalues, s = new Tt.LClosure(t, u);
-      s.p = e, t.stack[a].setclLvalue(s);
-      for (let e = 0;e < u; e++)
-        l[e].instack ? s.upvals[e] = xt.luaF_findupval(t, r + l[e].idx) : s.upvals[e] = n[l[e].idx];
-      e.cache = s;
-    }, Qt = function(t) {
-      return t.ttisnumber();
-    }, $t = function(t) {
-      return t.ttisstring();
-    }, te = function(t, e) {
-      let n = t.stack[e];
-      return !!n.ttisstring() || !!Qt(n) && (Tt.luaO_tostring(t, n), true);
-    }, ee = function(t) {
-      return t.ttisstring() && t.vslen() === 0;
-    }, ne = function(t, e, n, r) {
-      let a = 0;
-      do {
-        let u = t.stack[e - n], l = u.vslen(), s = u.svalue();
-        r.set(s, a), a += l;
-      } while (--n > 0);
-    }, re = function(t, e) {
-      At(e >= 2);
-      do {
-        let n = t.top, r = 2;
-        if ((t.stack[n - 2].ttisstring() || Qt(t.stack[n - 2])) && te(t, n - 1))
-          if (ee(t.stack[n - 1]))
-            te(t, n - 2);
-          else if (ee(t.stack[n - 2]))
-            Tt.setobjs2s(t, n - 2, n - 1);
-          else {
-            let a = t.stack[n - 1].vslen();
-            for (r = 1;r < e && te(t, n - r - 1); r++) {
-              a += t.stack[n - r - 1].vslen();
-            }
-            let u = new Uint8Array(a);
-            ne(t, n, r, u);
-            let l = Ot(t, u);
-            Tt.setsvalue2s(t, n - r, l);
-          }
-        else
-          Ut.luaT_trybinTM(t, t.stack[n - 2], t.stack[n - 1], t.stack[n - 2], Ut.TMS.TM_CONCAT);
-        for (e -= r - 1;t.top > n - (r - 1); )
-          delete t.stack[--t.top];
-      } while (e > 1);
-    }, ae = function(t, e, n, r) {
-      for (let a = 0;a < 2000; a++) {
-        let a;
-        if (e.ttistable()) {
-          let u = mt.luaH_get(t, e.value, n);
-          if (!u.ttisnil())
-            return void Tt.setobj2s(t, r, u);
-          if ((a = Ut.fasttm(t, e.value.metatable, Ut.TMS.TM_INDEX)) === null)
-            return void t.stack[r].setnilvalue();
-        } else
-          (a = Ut.luaT_gettmbyobj(t, e, Ut.TMS.TM_INDEX)).ttisnil() && Nt.luaG_typeerror(t, e, A("index", true));
-        if (a.ttisfunction())
-          return void Ut.luaT_callTM(t, a, e, n, t.stack[r], 1);
-        e = a;
-      }
-      Nt.luaG_runerror(t, A("'__index' chain too long; possible loop", true));
-    }, ue = function(t, e, n, r) {
-      for (let a = 0;a < 2000; a++) {
-        let a;
-        if (e.ttistable()) {
-          let u = e.value;
-          if (!mt.luaH_get(t, u, n).ttisnil() || (a = Ut.fasttm(t, u.metatable, Ut.TMS.TM_NEWINDEX)) === null)
-            return mt.luaH_setfrom(t, u, n, r), void mt.invalidateTMcache(u);
-        } else
-          (a = Ut.luaT_gettmbyobj(t, e, Ut.TMS.TM_NEWINDEX)).ttisnil() && Nt.luaG_typeerror(t, e, A("index", true));
-        if (a.ttisfunction())
-          return void Ut.luaT_callTM(t, a, e, n, r, 0);
-        e = a;
-      }
-      Nt.luaG_runerror(t, A("'__newindex' chain too long; possible loop", true));
-    };
-    t.exports.cvt2str = Qt, t.exports.cvt2num = $t, t.exports.luaV_gettable = ae, t.exports.luaV_concat = re, t.exports.luaV_div = Yt, t.exports.luaV_equalobj = Dt, t.exports.luaV_execute = function(t) {
-      let e = t.ci;
-      e.callstatus |= bt.CIST_FRESH;
-      t:
-        for (;; ) {
-          At(e === t.ci);
-          let n = e.func.value, l = n.p.k, s = e.l_base, o = e.l_code[e.l_savedpc++];
-          t.hookmask & (r | a) && Nt.luaG_traceexec(t);
-          let i = Rt(0, s, o);
-          switch (o.opcode) {
-            case Y:
-              Tt.setobjs2s(t, i, St(0, s, o));
-              break;
-            case F: {
-              let e = l[o.Bx];
-              Tt.setobj2s(t, i, e);
-              break;
-            }
-            case j: {
-              At(e.l_code[e.l_savedpc].opcode === w);
-              let n = l[e.l_code[e.l_savedpc++].Ax];
-              Tt.setobj2s(t, i, n);
-              break;
-            }
-            case K:
-              t.stack[i].setbvalue(o.B !== 0), o.C !== 0 && e.l_savedpc++;
-              break;
-            case H:
-              for (let e = 0;e <= o.B; e++)
-                t.stack[i + e].setnilvalue();
-              break;
-            case C: {
-              let e = o.B;
-              Tt.setobj2s(t, i, n.upvals[e]);
-              break;
-            }
-            case P: {
-              let e = n.upvals[o.B], r = It(t, s, l, o);
-              ae(t, e, r, i);
-              break;
-            }
-            case M: {
-              let e = t.stack[St(0, s, o)], n = It(t, s, l, o);
-              ae(t, e, n, i);
-              break;
-            }
-            case nt: {
-              let e = n.upvals[o.A], r = wt(t, s, l, o), a = It(t, s, l, o);
-              ue(t, e, r, a);
-              break;
-            }
-            case rt:
-              n.upvals[o.B].setfrom(t.stack[i]);
-              break;
-            case et: {
-              let e = t.stack[i], n = wt(t, s, l, o), r = It(t, s, l, o);
-              ue(t, e, n, r);
-              break;
-            }
-            case Z:
-              t.stack[i].sethvalue(mt.luaH_new(t));
-              break;
-            case $: {
-              let e = St(0, s, o), n = It(t, s, l, o);
-              Tt.setobjs2s(t, i + 1, e), ae(t, t.stack[e], n, i);
-              break;
-            }
-            case b: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              r.ttisinteger() && a.ttisinteger() ? t.stack[i].setivalue(r.value + a.value | 0) : (e = Kt(r)) !== false && (n = Kt(a)) !== false ? t.stack[i].setfltvalue(e + n) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_ADD);
-              break;
-            }
-            case lt: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              r.ttisinteger() && a.ttisinteger() ? t.stack[i].setivalue(r.value - a.value | 0) : (e = Kt(r)) !== false && (n = Kt(a)) !== false ? t.stack[i].setfltvalue(e - n) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_SUB);
-              break;
-            }
-            case J: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              r.ttisinteger() && a.ttisinteger() ? t.stack[i].setivalue(zt(r.value, a.value)) : (e = Kt(r)) !== false && (n = Kt(a)) !== false ? t.stack[i].setfltvalue(e * n) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_MUL);
-              break;
-            }
-            case z: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              r.ttisinteger() && a.ttisinteger() ? t.stack[i].setivalue(Jt(t, r.value, a.value)) : (e = Kt(r)) !== false && (n = Kt(a)) !== false ? t.stack[i].setfltvalue(gt(t, e, n)) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_MOD);
-              break;
-            }
-            case W: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              (e = Kt(r)) !== false && (n = Kt(a)) !== false ? t.stack[i].setfltvalue(Math.pow(e, n)) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_POW);
-              break;
-            }
-            case R: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              (e = Kt(r)) !== false && (n = Kt(a)) !== false ? t.stack[i].setfltvalue(e / n) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_DIV);
-              break;
-            }
-            case D: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              r.ttisinteger() && a.ttisinteger() ? t.stack[i].setivalue(Yt(t, r.value, a.value)) : (e = Kt(r)) !== false && (n = Kt(a)) !== false ? t.stack[i].setfltvalue(Math.floor(e / n)) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_IDIV);
-              break;
-            }
-            case O: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              (e = Gt(r)) !== false && (n = Gt(a)) !== false ? t.stack[i].setivalue(e & n) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_BAND);
-              break;
-            }
-            case v: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              (e = Gt(r)) !== false && (n = Gt(a)) !== false ? t.stack[i].setivalue(e | n) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_BOR);
-              break;
-            }
-            case E: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              (e = Gt(r)) !== false && (n = Gt(a)) !== false ? t.stack[i].setivalue(e ^ n) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_BXOR);
-              break;
-            }
-            case at: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              (e = Gt(r)) !== false && (n = Gt(a)) !== false ? t.stack[i].setivalue(Zt(e, n)) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_SHL);
-              break;
-            }
-            case ut: {
-              let e, n, r = wt(t, s, l, o), a = It(t, s, l, o);
-              (e = Gt(r)) !== false && (n = Gt(a)) !== false ? t.stack[i].setivalue(Zt(e, -n)) : Ut.luaT_trybinTM(t, r, a, t.stack[i], Ut.TMS.TM_SHR);
-              break;
-            }
-            case ft: {
-              let e, n = t.stack[St(0, s, o)];
-              n.ttisinteger() ? t.stack[i].setivalue(0 | -n.value) : (e = Kt(n)) !== false ? t.stack[i].setfltvalue(-e) : Ut.luaT_trybinTM(t, n, n, t.stack[i], Ut.TMS.TM_UNM);
-              break;
-            }
-            case k: {
-              let e = t.stack[St(0, s, o)];
-              e.ttisinteger() ? t.stack[i].setivalue(~e.value) : Ut.luaT_trybinTM(t, e, e, t.stack[i], Ut.TMS.TM_BNOT);
-              break;
-            }
-            case q: {
-              let e = t.stack[St(0, s, o)];
-              t.stack[i].setbvalue(e.l_isfalse());
-              break;
-            }
-            case G:
-              Xt(t, t.stack[i], t.stack[St(0, s, o)]);
-              break;
-            case N: {
-              let n = o.B, r = o.C;
-              t.top = s + r + 1, re(t, r - n + 1);
-              let a = s + n;
-              Tt.setobjs2s(t, i, a), Et.adjust_top(t, e.top);
-              break;
-            }
-            case V:
-              yt(t, e, o, 0);
-              break;
-            case S:
-              Dt(t, wt(t, s, l, o), It(t, s, l, o)) !== o.A ? e.l_savedpc++ : Mt(t, e);
-              break;
-            case X:
-              Pt(t, wt(t, s, l, o), It(t, s, l, o)) !== o.A ? e.l_savedpc++ : Mt(t, e);
-              break;
-            case B:
-              Ct(t, wt(t, s, l, o), It(t, s, l, o)) !== o.A ? e.l_savedpc++ : Mt(t, e);
-              break;
-            case ot:
-              (o.C ? t.stack[i].l_isfalse() : !t.stack[i].l_isfalse()) ? e.l_savedpc++ : Mt(t, e);
-              break;
-            case it: {
-              let n = St(0, s, o), r = t.stack[n];
-              (o.C ? r.l_isfalse() : !r.l_isfalse()) ? e.l_savedpc++ : (Tt.setobjs2s(t, i, n), Mt(t, e));
-              break;
-            }
-            case U: {
-              let n = o.B, r = o.C - 1;
-              if (n !== 0 && Et.adjust_top(t, i + n), !Et.luaD_precall(t, i, r)) {
-                e = t.ci;
-                continue t;
-              }
-              r >= 0 && Et.adjust_top(t, e.top);
-              break;
-            }
-            case st: {
-              let r = o.B;
-              if (r !== 0 && Et.adjust_top(t, i + r), !Et.luaD_precall(t, i, u)) {
-                let r = t.ci, { previous: a, func: u, funcOff: l } = r, s = a.funcOff, o = r.l_base + u.value.p.numparams;
-                n.p.p.length > 0 && xt.luaF_close(t, a.l_base);
-                for (let e = 0;l + e < o; e++)
-                  Tt.setobjs2s(t, s + e, l + e);
-                a.l_base = s + (r.l_base - l), a.top = s + (t.top - l), Et.adjust_top(t, a.top), a.l_code = r.l_code, a.l_savedpc = r.l_savedpc, a.callstatus |= bt.CIST_TAIL, a.next = null, e = t.ci = a, At(t.top === a.l_base + t.stack[s].value.p.maxstacksize);
-                continue t;
-              }
-              break;
-            }
-            case Q: {
-              n.p.p.length > 0 && xt.luaF_close(t, s);
-              let r = Et.luaD_poscall(t, e, i, o.B !== 0 ? o.B - 1 : t.top - i);
-              if (e.callstatus & bt.CIST_FRESH)
-                return;
-              e = t.ci, r && Et.adjust_top(t, e.top), At(e.callstatus & bt.CIST_LUA), At(e.l_code[e.l_savedpc - 1].opcode === U);
-              continue t;
-            }
-            case I:
-              if (t.stack[i].ttisinteger()) {
-                let n = t.stack[i + 2].value, r = t.stack[i].value + n | 0, a = t.stack[i + 1].value;
-                (0 < n ? r <= a : a <= r) && (e.l_savedpc += o.sBx, t.stack[i].chgivalue(r), t.stack[i + 3].setivalue(r));
-              } else {
-                let n = t.stack[i + 2].value, r = t.stack[i].value + n, a = t.stack[i + 1].value;
-                (0 < n ? r <= a : a <= r) && (e.l_savedpc += o.sBx, t.stack[i].chgfltvalue(r), t.stack[i + 3].setfltvalue(r));
-              }
-              break;
-            case y: {
-              let n, r = t.stack[i], a = t.stack[i + 1], u = t.stack[i + 2];
-              if (r.ttisinteger() && u.ttisinteger() && (n = Vt(a, u.value))) {
-                let t = n.stopnow ? 0 : r.value;
-                a.value = n.ilimit, r.value = t - u.value | 0;
-              } else {
-                let e, n, l;
-                (e = Kt(a)) === false && Nt.luaG_runerror(t, A("'for' limit must be a number", true)), t.stack[i + 1].setfltvalue(e), (n = Kt(u)) === false && Nt.luaG_runerror(t, A("'for' step must be a number", true)), t.stack[i + 2].setfltvalue(n), (l = Kt(r)) === false && Nt.luaG_runerror(t, A("'for' initial value must be a number", true)), t.stack[i].setfltvalue(l - n);
-              }
-              e.l_savedpc += o.sBx;
-              break;
-            }
-            case ct: {
-              let n = i + 3;
-              Tt.setobjs2s(t, n + 2, i + 2), Tt.setobjs2s(t, n + 1, i + 1), Tt.setobjs2s(t, n, i), Et.adjust_top(t, n + 3), Et.luaD_call(t, n, o.C), Et.adjust_top(t, e.top), o = e.l_code[e.l_savedpc++], i = Rt(0, s, o), At(o.opcode === _t);
-            }
-            case _t:
-              t.stack[i + 1].ttisnil() || (Tt.setobjs2s(t, i, i + 1), e.l_savedpc += o.sBx);
-              break;
-            case tt: {
-              let n = o.B, r = o.C;
-              n === 0 && (n = t.top - i - 1), r === 0 && (At(e.l_code[e.l_savedpc].opcode === w), r = e.l_code[e.l_savedpc++].Ax);
-              let a = t.stack[i].value, u = (r - 1) * x + n;
-              for (;n > 0; n--)
-                mt.luaH_setint(a, u--, t.stack[i + n]);
-              Et.adjust_top(t, e.top);
-              break;
-            }
-            case m: {
-              let e = n.p.p[o.Bx], r = qt(e, n.upvals, t.stack, s);
-              r === null ? Wt(t, e, n.upvals, s, i) : t.stack[i].setclLvalue(r);
-              break;
-            }
-            case pt: {
-              let r, a = o.B - 1, u = s - e.funcOff - n.p.numparams - 1;
-              for (u < 0 && (u = 0), a < 0 && (a = u, Et.luaD_checkstack(t, u), Et.adjust_top(t, i + u)), r = 0;r < a && r < u; r++)
-                Tt.setobjs2s(t, i + r, s - u + r);
-              for (;r < a; r++)
-                t.stack[i + r].setnilvalue();
-              break;
-            }
-            case w:
-              throw Error("invalid opcode");
-          }
-        }
-    }, t.exports.luaV_finishOp = function(t) {
-      let e = t.ci, n = e.l_base, r = e.l_code[e.l_savedpc - 1], a = r.opcode;
-      switch (a) {
-        case b:
-        case lt:
-        case J:
-        case R:
-        case D:
-        case O:
-        case v:
-        case E:
-        case at:
-        case ut:
-        case z:
-        case W:
-        case ft:
-        case k:
-        case G:
-        case P:
-        case M:
-        case $:
-          Tt.setobjs2s(t, n + r.A, t.top - 1), delete t.stack[--t.top];
-          break;
-        case B:
-        case X:
-        case S: {
-          let n = !t.stack[t.top - 1].l_isfalse();
-          delete t.stack[--t.top], e.callstatus & bt.CIST_LEQ && (At(a === B), e.callstatus ^= bt.CIST_LEQ, n = !n), At(e.l_code[e.l_savedpc].opcode === V), n !== !!r.A && e.l_savedpc++;
-          break;
-        }
-        case N: {
-          let a = t.top - 1, u = a - 1 - (n + r.B);
-          Tt.setobjs2s(t, a - 2, a), u > 1 && (t.top = a - 1, re(t, u)), Tt.setobjs2s(t, e.l_base + r.A, t.top - 1), Et.adjust_top(t, e.top);
-          break;
-        }
-        case ct:
-          At(e.l_code[e.l_savedpc].opcode === _t), Et.adjust_top(t, e.top);
-          break;
-        case U:
-          r.C - 1 >= 0 && Et.adjust_top(t, e.top);
-      }
-    }, t.exports.luaV_imul = zt, t.exports.luaV_lessequal = Ct, t.exports.luaV_lessthan = Pt, t.exports.luaV_mod = Jt, t.exports.luaV_objlen = Xt, t.exports.luaV_rawequalobj = function(t, e) {
-      return Dt(null, t, e);
-    }, t.exports.luaV_shiftl = Zt, t.exports.luaV_tointeger = Bt, t.exports.settable = ue, t.exports.tointeger = Gt, t.exports.tonumber = Kt;
-  }, function(t, e, n) {
-    const r = [96, 113, 65, 84, 80, 80, 92, 108, 60, 16, 60, 84, 108, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 124, 96, 96, 96, 96, 104, 34, 188, 188, 188, 132, 228, 84, 84, 16, 98, 98, 4, 98, 20, 81, 80, 23], a = function(t, e) {
-      return ~(-1 << t) << e;
-    }, u = function(t, e) {
-      return ~a(t, e);
-    }, l = function(t, e, n, r) {
-      return t.code = t.code & u(r, n) | e << n & a(r, n), o(t);
-    }, s = function(t, e) {
-      return l(t, e, 14, 18);
-    }, o = function(t) {
-      if (typeof t == "number")
-        return { code: t, opcode: t >> 0 & a(6, 0), A: t >> 6 & a(8, 0), B: t >> 23 & a(9, 0), C: t >> 14 & a(9, 0), Bx: t >> 14 & a(18, 0), Ax: t >> 6 & a(26, 0), sBx: (t >> 14 & a(18, 0)) - 131071 };
-      {
-        let e = t.code;
-        return t.opcode = e >> 0 & a(6, 0), t.A = e >> 6 & a(8, 0), t.B = e >> 23 & a(9, 0), t.C = e >> 14 & a(9, 0), t.Bx = e >> 14 & a(18, 0), t.Ax = e >> 6 & a(26, 0), t.sBx = (e >> 14 & a(18, 0)) - 131071, t;
-      }
-    };
-    t.exports.BITRK = 256, t.exports.CREATE_ABC = function(t, e, n, r) {
-      return o(t << 0 | e << 6 | n << 23 | r << 14);
-    }, t.exports.CREATE_ABx = function(t, e, n) {
-      return o(t << 0 | e << 6 | n << 14);
-    }, t.exports.CREATE_Ax = function(t, e) {
-      return o(t << 0 | e << 6);
-    }, t.exports.GET_OPCODE = function(t) {
-      return t.opcode;
-    }, t.exports.GETARG_A = function(t) {
-      return t.A;
-    }, t.exports.GETARG_B = function(t) {
-      return t.B;
-    }, t.exports.GETARG_C = function(t) {
-      return t.C;
-    }, t.exports.GETARG_Bx = function(t) {
-      return t.Bx;
-    }, t.exports.GETARG_Ax = function(t) {
-      return t.Ax;
-    }, t.exports.GETARG_sBx = function(t) {
-      return t.sBx;
-    }, t.exports.INDEXK = function(t) {
-      return -257 & t;
-    }, t.exports.ISK = function(t) {
-      return 256 & t;
-    }, t.exports.LFIELDS_PER_FLUSH = 50, t.exports.MAXARG_A = 255, t.exports.MAXARG_Ax = 67108863, t.exports.MAXARG_B = 511, t.exports.MAXARG_Bx = 262143, t.exports.MAXARG_C = 511, t.exports.MAXARG_sBx = 131071, t.exports.MAXINDEXRK = 255, t.exports.NO_REG = 255, t.exports.OpArgK = 3, t.exports.OpArgN = 0, t.exports.OpArgR = 2, t.exports.OpArgU = 1, t.exports.OpCodes = ["MOVE", "LOADK", "LOADKX", "LOADBOOL", "LOADNIL", "GETUPVAL", "GETTABUP", "GETTABLE", "SETTABUP", "SETUPVAL", "SETTABLE", "NEWTABLE", "SELF", "ADD", "SUB", "MUL", "MOD", "POW", "DIV", "IDIV", "BAND", "BOR", "BXOR", "SHL", "SHR", "UNM", "BNOT", "NOT", "LEN", "CONCAT", "JMP", "EQ", "LT", "LE", "TEST", "TESTSET", "CALL", "TAILCALL", "RETURN", "FORLOOP", "FORPREP", "TFORCALL", "TFORLOOP", "SETLIST", "CLOSURE", "VARARG", "EXTRAARG"], t.exports.OpCodesI = { OP_MOVE: 0, OP_LOADK: 1, OP_LOADKX: 2, OP_LOADBOOL: 3, OP_LOADNIL: 4, OP_GETUPVAL: 5, OP_GETTABUP: 6, OP_GETTABLE: 7, OP_SETTABUP: 8, OP_SETUPVAL: 9, OP_SETTABLE: 10, OP_NEWTABLE: 11, OP_SELF: 12, OP_ADD: 13, OP_SUB: 14, OP_MUL: 15, OP_MOD: 16, OP_POW: 17, OP_DIV: 18, OP_IDIV: 19, OP_BAND: 20, OP_BOR: 21, OP_BXOR: 22, OP_SHL: 23, OP_SHR: 24, OP_UNM: 25, OP_BNOT: 26, OP_NOT: 27, OP_LEN: 28, OP_CONCAT: 29, OP_JMP: 30, OP_EQ: 31, OP_LT: 32, OP_LE: 33, OP_TEST: 34, OP_TESTSET: 35, OP_CALL: 36, OP_TAILCALL: 37, OP_RETURN: 38, OP_FORLOOP: 39, OP_FORPREP: 40, OP_TFORCALL: 41, OP_TFORLOOP: 42, OP_SETLIST: 43, OP_CLOSURE: 44, OP_VARARG: 45, OP_EXTRAARG: 46 }, t.exports.POS_A = 6, t.exports.POS_Ax = 6, t.exports.POS_B = 23, t.exports.POS_Bx = 14, t.exports.POS_C = 14, t.exports.POS_OP = 0, t.exports.RKASK = function(t) {
-      return 256 | t;
-    }, t.exports.SETARG_A = function(t, e) {
-      return l(t, e, 6, 8);
-    }, t.exports.SETARG_Ax = function(t, e) {
-      return l(t, e, 6, 26);
-    }, t.exports.SETARG_B = function(t, e) {
-      return l(t, e, 23, 9);
-    }, t.exports.SETARG_Bx = s, t.exports.SETARG_C = function(t, e) {
-      return l(t, e, 14, 9);
-    }, t.exports.SETARG_sBx = function(t, e) {
-      return s(t, e + 131071);
-    }, t.exports.SET_OPCODE = function(t, e) {
-      return t.code = t.code & u(6, 0) | e << 0 & a(6, 0), o(t);
-    }, t.exports.SIZE_A = 8, t.exports.SIZE_Ax = 26, t.exports.SIZE_B = 9, t.exports.SIZE_Bx = 18, t.exports.SIZE_C = 9, t.exports.SIZE_OP = 6, t.exports.fullins = o, t.exports.getBMode = function(t) {
-      return r[t] >> 4 & 3;
-    }, t.exports.getCMode = function(t) {
-      return r[t] >> 2 & 3;
-    }, t.exports.getOpMode = function(t) {
-      return 3 & r[t];
-    }, t.exports.iABC = 0, t.exports.iABx = 1, t.exports.iAsBx = 2, t.exports.iAx = 3, t.exports.testAMode = function(t) {
-      return 64 & r[t];
-    }, t.exports.testTMode = function(t) {
-      return 128 & r[t];
-    };
-  }, function(t, e, n) {
-    const { LUA_VERSION_MAJOR: r, LUA_VERSION_MINOR: a } = n(2), u = "_" + r + "_" + a;
-    t.exports.LUA_VERSUFFIX = u, t.exports.lua_assert = function(t) {}, t.exports.luaopen_base = n(24).luaopen_base;
-    t.exports.LUA_COLIBNAME = "coroutine", t.exports.luaopen_coroutine = n(25).luaopen_coroutine;
-    t.exports.LUA_TABLIBNAME = "table", t.exports.luaopen_table = n(26).luaopen_table;
-    t.exports.LUA_OSLIBNAME = "os", t.exports.luaopen_os = n(27).luaopen_os;
-    t.exports.LUA_STRLIBNAME = "string", t.exports.luaopen_string = n(28).luaopen_string;
-    t.exports.LUA_UTF8LIBNAME = "utf8", t.exports.luaopen_utf8 = n(29).luaopen_utf8;
-    t.exports.LUA_BITLIBNAME = "bit32";
-    t.exports.LUA_MATHLIBNAME = "math", t.exports.luaopen_math = n(30).luaopen_math;
-    t.exports.LUA_DBLIBNAME = "debug", t.exports.luaopen_debug = n(31).luaopen_debug;
-    t.exports.LUA_LOADLIBNAME = "package", t.exports.luaopen_package = n(32).luaopen_package;
-    t.exports.LUA_FENGARILIBNAME = "fengari", t.exports.luaopen_fengari = n(33).luaopen_fengari;
-    const l = n(39);
-    t.exports.luaL_openlibs = l.luaL_openlibs;
-  }, function(t, e, n) {
-    const { LUA_MULTRET: r, LUA_OPBNOT: a, LUA_OPEQ: u, LUA_OPLE: l, LUA_OPLT: s, LUA_OPUNM: o, LUA_REGISTRYINDEX: i, LUA_RIDX_GLOBALS: c, LUA_VERSION_NUM: _, constant_types: { LUA_NUMTAGS: f, LUA_TBOOLEAN: p, LUA_TCCL: L, LUA_TFUNCTION: h, LUA_TLCF: d, LUA_TLCL: A, LUA_TLIGHTUSERDATA: g, LUA_TLNGSTR: T, LUA_TNIL: x, LUA_TNONE: b, LUA_TNUMFLT: O, LUA_TNUMINT: k, LUA_TSHRSTR: v, LUA_TTABLE: E, LUA_TTHREAD: U, LUA_TUSERDATA: m }, thread_status: { LUA_OK: N }, from_userstring: R, to_luastring: S } = n(1), { api_check: w } = n(4), I = n(11), y = n(8), { luaU_dump: M } = n(37), P = n(13), C = n(6), D = n(12), { luaS_bless: V, luaS_new: B, luaS_newliteral: G } = n(10), K = n(14), { LUAI_MAXSTACK: F } = n(3), j = n(15), H = n(9), { ZIO: X } = n(19), { TValue: z, CClosure: Y } = C, J = function(t) {
-      t.top++, w(t, t.top <= t.ci.top, "stack overflow");
-    }, Z = function(t, e) {
-      w(t, e < t.top - t.ci.funcOff, "not enough elements in the stack");
-    }, q = function(t) {
-      if (!t)
-        throw TypeError("invalid argument");
-    }, W = function(t) {
-      q(typeof t == "number" && (0 | t) === t);
-    }, Q = function(t) {
-      return t !== C.luaO_nilobject;
-    }, $ = function(t, e) {
-      let n = t.ci;
-      if (e > 0) {
-        let r = n.funcOff + e;
-        return w(t, e <= n.top - (n.funcOff + 1), "unacceptable index"), r >= t.top ? C.luaO_nilobject : t.stack[r];
-      }
-      return e > i ? (w(t, e !== 0 && -e <= t.top, "invalid index"), t.stack[t.top + e]) : e === i ? t.l_G.l_registry : (w(t, (e = i - e) <= P.MAXUPVAL + 1, "upvalue index too large"), n.func.ttislcf() ? C.luaO_nilobject : e <= n.func.value.nupvalues ? n.func.value.upvalue[e - 1] : C.luaO_nilobject);
-    }, tt = function(t, e) {
-      let n = t.ci;
-      if (e > 0) {
-        let r = n.funcOff + e;
-        return w(t, e <= n.top - (n.funcOff + 1), "unacceptable index"), r >= t.top ? null : r;
-      }
-      if (e > i)
-        return w(t, e !== 0 && -e <= t.top, "invalid index"), t.top + e;
-      throw Error("attempt to use pseudo-index");
-    }, et = function(t, e) {
-      let n, r = t.ci.funcOff;
-      e >= 0 ? (w(t, e <= t.stack_last - (r + 1), "new top too large"), n = r + 1 + e) : (w(t, -(e + 1) <= t.top - (r + 1), "invalid new top"), n = t.top + e + 1), y.adjust_top(t, n);
-    }, nt = function(t, e) {
-      et(t, -e - 1);
-    }, rt = function(t, e, n) {
-      for (;e < n; e++, n--) {
-        let r = t.stack[e], a = new z(r.type, r.value);
-        C.setobjs2s(t, e, n), C.setobj2s(t, n, a);
-      }
-    }, at = function(t, e, n) {
-      let r = t.top - 1, a = tt(t, e), u = t.stack[a];
-      w(t, Q(u) && e > i, "index not in the stack"), w(t, (n >= 0 ? n : -n) <= r - a + 1, "invalid 'n'");
-      let l = n >= 0 ? r - n : a - n - 1;
-      rt(t, a, l), rt(t, l + 1, t.top - 1), rt(t, a, t.top - 1);
-    }, ut = function(t, e, n) {
-      let r = $(t, e);
-      $(t, n).setfrom(r);
-    }, lt = function(t, e, n) {
-      if (q(typeof e == "function"), W(n), n === 0)
-        t.stack[t.top] = new z(d, e);
-      else {
-        Z(t, n), w(t, n <= P.MAXUPVAL, "upvalue index too large");
-        let r = new Y(t, e, n);
-        for (let e = 0;e < n; e++)
-          r.upvalue[e].setfrom(t.stack[t.top - n + e]);
-        for (let e = 1;e < n; e++)
-          delete t.stack[--t.top];
-        n > 0 && --t.top, t.stack[t.top].setclCvalue(r);
-      }
-      J(t);
-    }, st = lt, ot = function(t, e) {
-      lt(t, e, 0);
-    }, it = ot, ct = function(t, e, n) {
-      let r = B(t, R(n));
-      Z(t, 1), C.pushsvalue2s(t, r), w(t, t.top <= t.ci.top, "stack overflow"), j.settable(t, e, t.stack[t.top - 1], t.stack[t.top - 2]), delete t.stack[--t.top], delete t.stack[--t.top];
-    }, _t = function(t, e) {
-      ct(t, H.luaH_getint(t.l_G.l_registry.value, c), e);
-    }, ft = function(t, e, n) {
-      let r = B(t, R(n));
-      return C.pushsvalue2s(t, r), w(t, t.top <= t.ci.top, "stack overflow"), j.luaV_gettable(t, e, t.stack[t.top - 1], t.top - 1), t.stack[t.top - 1].ttnov();
-    }, pt = function(t, e, n) {
-      let r = $(t, e);
-      return W(n), w(t, r.ttistable(), "table expected"), C.pushobj2s(t, H.luaH_getint(r.value, n)), w(t, t.top <= t.ci.top, "stack overflow"), t.stack[t.top - 1].ttnov();
-    }, Lt = function(t, e, n) {
-      let r = new C.TValue(E, H.luaH_new(t));
-      t.stack[t.top] = r, J(t);
-    }, ht = function(t, e, n) {
-      switch (W(n), e.ttype()) {
-        case L: {
-          let t = e.value;
-          return 1 <= n && n <= t.nupvalues ? { name: S("", true), val: t.upvalue[n - 1] } : null;
-        }
-        case A: {
-          let t = e.value, r = t.p;
-          if (!(1 <= n && n <= r.upvalues.length))
-            return null;
-          let a = r.upvalues[n - 1].name;
-          return { name: a ? a.getstr() : S("(*no name)", true), val: t.upvals[n - 1] };
-        }
-        default:
-          return null;
-      }
-    }, dt = function(t, e) {
-      let n = $(t, e);
-      if (!n.ttisstring()) {
-        if (!j.cvt2str(n))
-          return null;
-        C.luaO_tostring(t, n);
-      }
-      return n.svalue();
-    }, At = dt, gt = function(t, e) {
-      return j.tointeger($(t, e));
-    }, Tt = function(t, e) {
-      return j.tonumber($(t, e));
-    }, xt = new WeakMap, bt = function(t, e) {
-      y.luaD_callnoyield(t, e.funcOff, e.nresults);
-    }, Ot = function(t, e) {
-      let n = $(t, e);
-      return Q(n) ? n.ttnov() : b;
-    }, kt = S("?"), vt = function(t, e, n) {
-      w(t, n === r || t.ci.top - t.top >= n - e, "results from function overflow current stack size");
-    }, Et = function(t, e, n, a, u) {
-      w(t, u === null || !(t.ci.callstatus & D.CIST_LUA), "cannot use continuations inside hooks"), Z(t, e + 1), w(t, t.status === N, "cannot do calls on non-normal thread"), vt(t, e, n);
-      let l = t.top - (e + 1);
-      u !== null && t.nny === 0 ? (t.ci.c_k = u, t.ci.c_ctx = a, y.luaD_call(t, l, n)) : y.luaD_callnoyield(t, l, n), n === r && t.ci.top < t.top && (t.ci.top = t.top);
-    }, Ut = function(t, e, n, a, u, l) {
-      let s, o;
-      w(t, l === null || !(t.ci.callstatus & D.CIST_LUA), "cannot use continuations inside hooks"), Z(t, e + 1), w(t, t.status === N, "cannot do calls on non-normal thread"), vt(t, e, n), o = a === 0 ? 0 : tt(t, a);
-      let i = t.top - (e + 1);
-      if (l === null || t.nny > 0) {
-        let e = { funcOff: i, nresults: n };
-        s = y.luaD_pcall(t, bt, e, i, o);
-      } else {
-        let e = t.ci;
-        e.c_k = l, e.c_ctx = u, e.extra = i, e.c_old_errfunc = t.errfunc, t.errfunc = o, e.callstatus &= ~D.CIST_OAH | t.allowhook, e.callstatus |= D.CIST_YPCALL, y.luaD_call(t, i, n), e.callstatus &= ~D.CIST_YPCALL, t.errfunc = e.c_old_errfunc, s = N;
-      }
-      return n === r && t.ci.top < t.top && (t.ci.top = t.top), s;
-    }, mt = function(t, e, n) {
-      let r = $(t, e);
-      w(t, r.ttisLclosure(), "Lua function expected");
-      let a = r.value;
-      return W(n), w(t, 1 <= n && n <= a.p.upvalues.length, "invalid upvalue index"), { f: a, i: n - 1 };
-    };
-    t.exports.api_incr_top = J, t.exports.api_checknelems = Z, t.exports.lua_absindex = function(t, e) {
-      return e > 0 || e <= i ? e : t.top - t.ci.funcOff + e;
-    }, t.exports.lua_arith = function(t, e) {
-      e !== o && e !== a ? Z(t, 2) : (Z(t, 1), C.pushobj2s(t, t.stack[t.top - 1]), w(t, t.top <= t.ci.top, "stack overflow")), C.luaO_arith(t, e, t.stack[t.top - 2], t.stack[t.top - 1], t.stack[t.top - 2]), delete t.stack[--t.top];
-    }, t.exports.lua_atpanic = function(t, e) {
-      let n = t.l_G.panic;
-      return t.l_G.panic = e, n;
-    }, t.exports.lua_atnativeerror = function(t, e) {
-      let n = t.l_G.atnativeerror;
-      return t.l_G.atnativeerror = e, n;
-    }, t.exports.lua_call = function(t, e, n) {
-      Et(t, e, n, 0, null);
-    }, t.exports.lua_callk = Et, t.exports.lua_checkstack = function(t, e) {
-      let n, r = t.ci;
-      w(t, e >= 0, "negative 'n'"), t.stack_last - t.top > e ? n = true : t.top + D.EXTRA_STACK > F - e ? n = false : (y.luaD_growstack(t, e), n = true);
-      return n && r.top < t.top + e && (r.top = t.top + e), n;
-    }, t.exports.lua_compare = function(t, e, n, r) {
-      let a = $(t, e), o = $(t, n), i = 0;
-      if (Q(a) && Q(o))
-        switch (r) {
-          case u:
-            i = j.luaV_equalobj(t, a, o);
-            break;
-          case s:
-            i = j.luaV_lessthan(t, a, o);
-            break;
-          case l:
-            i = j.luaV_lessequal(t, a, o);
-            break;
-          default:
-            w(t, false, "invalid option");
-        }
-      return i;
-    }, t.exports.lua_concat = function(t, e) {
-      Z(t, e), e >= 2 ? j.luaV_concat(t, e) : e === 0 && (C.pushsvalue2s(t, V(t, S("", true))), w(t, t.top <= t.ci.top, "stack overflow"));
-    }, t.exports.lua_copy = ut, t.exports.lua_createtable = Lt, t.exports.lua_dump = function(t, e, n, r) {
-      Z(t, 1);
-      let a = t.stack[t.top - 1];
-      return a.ttisLclosure() ? M(t, a.value.p, e, n, r) : 1;
-    }, t.exports.lua_error = function(t) {
-      Z(t, 1), I.luaG_errormsg(t);
-    }, t.exports.lua_gc = function() {}, t.exports.lua_getallocf = function() {
-      return console.warn("lua_getallocf is not available"), 0;
-    }, t.exports.lua_getextraspace = function() {
-      return console.warn("lua_getextraspace is not available"), 0;
-    }, t.exports.lua_getfield = function(t, e, n) {
-      return ft(t, $(t, e), n);
-    }, t.exports.lua_getglobal = function(t, e) {
-      return ft(t, H.luaH_getint(t.l_G.l_registry.value, c), e);
-    }, t.exports.lua_geti = function(t, e, n) {
-      let r = $(t, e);
-      return W(n), t.stack[t.top] = new z(k, n), J(t), j.luaV_gettable(t, r, t.stack[t.top - 1], t.top - 1), t.stack[t.top - 1].ttnov();
-    }, t.exports.lua_getmetatable = function(t, e) {
-      let n, r = $(t, e), a = false;
-      switch (r.ttnov()) {
-        case E:
-        case m:
-          n = r.value.metatable;
-          break;
-        default:
-          n = t.l_G.mt[r.ttnov()];
-      }
-      return n !== null && n !== undefined && (t.stack[t.top] = new z(E, n), J(t), a = true), a;
-    }, t.exports.lua_gettable = function(t, e) {
-      let n = $(t, e);
-      return j.luaV_gettable(t, n, t.stack[t.top - 1], t.top - 1), t.stack[t.top - 1].ttnov();
-    }, t.exports.lua_gettop = function(t) {
-      return t.top - (t.ci.funcOff + 1);
-    }, t.exports.lua_getupvalue = function(t, e, n) {
-      let r = ht(0, $(t, e), n);
-      if (r) {
-        let { name: e, val: n } = r;
-        return C.pushobj2s(t, n), w(t, t.top <= t.ci.top, "stack overflow"), e;
-      }
-      return null;
-    }, t.exports.lua_getuservalue = function(t, e) {
-      let n = $(t, e);
-      w(t, n.ttisfulluserdata(), "full userdata expected");
-      let r = n.value.uservalue;
-      return t.stack[t.top] = new z(r.type, r.value), J(t), t.stack[t.top - 1].ttnov();
-    }, t.exports.lua_insert = function(t, e) {
-      at(t, e, 1);
-    }, t.exports.lua_isboolean = function(t, e) {
-      return Ot(t, e) === p;
-    }, t.exports.lua_iscfunction = function(t, e) {
-      let n = $(t, e);
-      return n.ttislcf(n) || n.ttisCclosure();
-    }, t.exports.lua_isfunction = function(t, e) {
-      return Ot(t, e) === h;
-    }, t.exports.lua_isinteger = function(t, e) {
-      return $(t, e).ttisinteger();
-    }, t.exports.lua_islightuserdata = function(t, e) {
-      return Ot(t, e) === g;
-    }, t.exports.lua_isnil = function(t, e) {
-      return Ot(t, e) === x;
-    }, t.exports.lua_isnone = function(t, e) {
-      return Ot(t, e) === b;
-    }, t.exports.lua_isnoneornil = function(t, e) {
-      return Ot(t, e) <= 0;
-    }, t.exports.lua_isnumber = function(t, e) {
-      return j.tonumber($(t, e)) !== false;
-    }, t.exports.lua_isproxy = function(t, e) {
-      let n = xt.get(t);
-      return !!n && (e === null || e.l_G === n);
-    }, t.exports.lua_isstring = function(t, e) {
-      let n = $(t, e);
-      return n.ttisstring() || j.cvt2str(n);
-    }, t.exports.lua_istable = function(t, e) {
-      return $(t, e).ttistable();
-    }, t.exports.lua_isthread = function(t, e) {
-      return Ot(t, e) === U;
-    }, t.exports.lua_isuserdata = function(t, e) {
-      let n = $(t, e);
-      return n.ttisfulluserdata(n) || n.ttislightuserdata();
-    }, t.exports.lua_len = function(t, e) {
-      let n = $(t, e), r = new z;
-      j.luaV_objlen(t, r, n), t.stack[t.top] = r, J(t);
-    }, t.exports.lua_load = function(t, e, n, r, a) {
-      r = r ? R(r) : kt, a !== null && (a = R(a));
-      let u = new X(t, e, n), l = y.luaD_protectedparser(t, u, r, a);
-      if (l === N) {
-        let e = t.stack[t.top - 1].value;
-        if (e.nupvalues >= 1) {
-          let n = H.luaH_getint(t.l_G.l_registry.value, c);
-          e.upvals[0].setfrom(n);
-        }
-      }
-      return l;
-    }, t.exports.lua_newtable = function(t) {
-      Lt(t);
-    }, t.exports.lua_newuserdata = function(t, e) {
-      let n = function(t, e) {
-        return new C.Udata(t, e);
-      }(t, e);
-      return t.stack[t.top] = new C.TValue(m, n), J(t), n.data;
-    }, t.exports.lua_next = function(t, e) {
-      let n = $(t, e);
-      return w(t, n.ttistable(), "table expected"), t.stack[t.top] = new z, H.luaH_next(t, n.value, t.top - 1) ? (J(t), 1) : (delete t.stack[t.top], delete t.stack[--t.top], 0);
-    }, t.exports.lua_pcall = function(t, e, n, r) {
-      return Ut(t, e, n, r, 0, null);
-    }, t.exports.lua_pcallk = Ut, t.exports.lua_pop = nt, t.exports.lua_pushboolean = function(t, e) {
-      t.stack[t.top] = new z(p, !!e), J(t);
-    }, t.exports.lua_pushcclosure = lt, t.exports.lua_pushcfunction = ot, t.exports.lua_pushfstring = function(t, e, ...n) {
-      return e = R(e), C.luaO_pushvfstring(t, e, n);
-    }, t.exports.lua_pushglobaltable = function(t) {
-      pt(t, i, c);
-    }, t.exports.lua_pushinteger = function(t, e) {
-      W(e), t.stack[t.top] = new z(k, e), J(t);
-    }, t.exports.lua_pushjsclosure = st, t.exports.lua_pushjsfunction = it, t.exports.lua_pushlightuserdata = function(t, e) {
-      t.stack[t.top] = new z(g, e), J(t);
-    }, t.exports.lua_pushliteral = function(t, e) {
-      if (e === undefined || e === null)
-        t.stack[t.top] = new z(x, null), t.top++;
-      else {
-        q(typeof e == "string");
-        let n = G(t, e);
-        C.pushsvalue2s(t, n), e = n.getstr();
-      }
-      return w(t, t.top <= t.ci.top, "stack overflow"), e;
-    }, t.exports.lua_pushlstring = function(t, e, n) {
-      let r;
-      return W(n), n === 0 ? (e = S("", true), r = V(t, e)) : (e = R(e), w(t, e.length >= n, "invalid length to lua_pushlstring"), r = B(t, e.subarray(0, n))), C.pushsvalue2s(t, r), w(t, t.top <= t.ci.top, "stack overflow"), r.value;
-    }, t.exports.lua_pushnil = function(t) {
-      t.stack[t.top] = new z(x, null), J(t);
-    }, t.exports.lua_pushnumber = function(t, e) {
-      q(typeof e == "number"), t.stack[t.top] = new z(O, e), J(t);
-    }, t.exports.lua_pushstring = function(t, e) {
-      if (e === undefined || e === null)
-        t.stack[t.top] = new z(x, null), t.top++;
-      else {
-        let n = B(t, R(e));
-        C.pushsvalue2s(t, n), e = n.getstr();
-      }
-      return w(t, t.top <= t.ci.top, "stack overflow"), e;
-    }, t.exports.lua_pushthread = function(t) {
-      return t.stack[t.top] = new z(U, t), J(t), t.l_G.mainthread === t;
-    }, t.exports.lua_pushvalue = function(t, e) {
-      C.pushobj2s(t, $(t, e)), w(t, t.top <= t.ci.top, "stack overflow");
-    }, t.exports.lua_pushvfstring = function(t, e, n) {
-      return e = R(e), C.luaO_pushvfstring(t, e, n);
-    }, t.exports.lua_rawequal = function(t, e, n) {
-      let r = $(t, e), a = $(t, n);
-      return Q(r) && Q(a) ? j.luaV_equalobj(null, r, a) : 0;
-    }, t.exports.lua_rawget = function(t, e) {
-      let n = $(t, e);
-      return w(t, n.ttistable(n), "table expected"), C.setobj2s(t, t.top - 1, H.luaH_get(t, n.value, t.stack[t.top - 1])), t.stack[t.top - 1].ttnov();
-    }, t.exports.lua_rawgeti = pt, t.exports.lua_rawgetp = function(t, e, n) {
-      let r = $(t, e);
-      w(t, r.ttistable(), "table expected");
-      let a = new z(g, n);
-      return C.pushobj2s(t, H.luaH_get(t, r.value, a)), w(t, t.top <= t.ci.top, "stack overflow"), t.stack[t.top - 1].ttnov();
-    }, t.exports.lua_rawlen = function(t, e) {
-      let n = $(t, e);
-      switch (n.ttype()) {
-        case v:
-        case T:
-          return n.vslen();
-        case m:
-          return n.value.len;
-        case E:
-          return H.luaH_getn(n.value);
-        default:
-          return 0;
-      }
-    }, t.exports.lua_rawset = function(t, e) {
-      Z(t, 2);
-      let n = $(t, e);
-      w(t, n.ttistable(), "table expected");
-      let r = t.stack[t.top - 2], a = t.stack[t.top - 1];
-      H.luaH_setfrom(t, n.value, r, a), H.invalidateTMcache(n.value), delete t.stack[--t.top], delete t.stack[--t.top];
-    }, t.exports.lua_rawseti = function(t, e, n) {
-      W(n), Z(t, 1);
-      let r = $(t, e);
-      w(t, r.ttistable(), "table expected"), H.luaH_setint(r.value, n, t.stack[t.top - 1]), delete t.stack[--t.top];
-    }, t.exports.lua_rawsetp = function(t, e, n) {
-      Z(t, 1);
-      let r = $(t, e);
-      w(t, r.ttistable(), "table expected");
-      let a = new z(g, n), u = t.stack[t.top - 1];
-      H.luaH_setfrom(t, r.value, a, u), delete t.stack[--t.top];
-    }, t.exports.lua_register = function(t, e, n) {
-      ot(t, n), _t(t, e);
-    }, t.exports.lua_remove = function(t, e) {
-      at(t, e, -1), nt(t, 1);
-    }, t.exports.lua_replace = function(t, e) {
-      ut(t, -1, e), nt(t, 1);
-    }, t.exports.lua_rotate = at, t.exports.lua_setallocf = function() {
-      return console.warn("lua_setallocf is not available"), 0;
-    }, t.exports.lua_setfield = function(t, e, n) {
-      ct(t, $(t, e), n);
-    }, t.exports.lua_setglobal = _t, t.exports.lua_seti = function(t, e, n) {
-      W(n), Z(t, 1);
-      let r = $(t, e);
-      t.stack[t.top] = new z(k, n), J(t), j.settable(t, r, t.stack[t.top - 1], t.stack[t.top - 2]), delete t.stack[--t.top], delete t.stack[--t.top];
-    }, t.exports.lua_setmetatable = function(t, e) {
-      let n;
-      Z(t, 1);
-      let r = $(t, e);
-      switch (t.stack[t.top - 1].ttisnil() ? n = null : (w(t, t.stack[t.top - 1].ttistable(), "table expected"), n = t.stack[t.top - 1].value), r.ttnov()) {
-        case m:
-        case E:
-          r.value.metatable = n;
-          break;
-        default:
-          t.l_G.mt[r.ttnov()] = n;
-      }
-      return delete t.stack[--t.top], true;
-    }, t.exports.lua_settable = function(t, e) {
-      Z(t, 2);
-      let n = $(t, e);
-      j.settable(t, n, t.stack[t.top - 2], t.stack[t.top - 1]), delete t.stack[--t.top], delete t.stack[--t.top];
-    }, t.exports.lua_settop = et, t.exports.lua_setupvalue = function(t, e, n) {
-      let r = $(t, e);
-      Z(t, 1);
-      let a = ht(0, r, n);
-      if (a) {
-        let e = a.name;
-        return a.val.setfrom(t.stack[t.top - 1]), delete t.stack[--t.top], e;
-      }
-      return null;
-    }, t.exports.lua_setuservalue = function(t, e) {
-      Z(t, 1);
-      let n = $(t, e);
-      w(t, n.ttisfulluserdata(), "full userdata expected"), n.value.uservalue.setfrom(t.stack[t.top - 1]), delete t.stack[--t.top];
-    }, t.exports.lua_status = function(t) {
-      return t.status;
-    }, t.exports.lua_stringtonumber = function(t, e) {
-      let n = new z, r = C.luaO_str2num(e, n);
-      return r !== 0 && (t.stack[t.top] = n, J(t)), r;
-    }, t.exports.lua_toboolean = function(t, e) {
-      return !$(t, e).l_isfalse();
-    }, t.exports.lua_tocfunction = function(t, e) {
-      let n = $(t, e);
-      return n.ttislcf() || n.ttisCclosure() ? n.value : null;
-    }, t.exports.lua_todataview = function(t, e) {
-      let n = dt(t, e);
-      return new DataView(n.buffer, n.byteOffset, n.byteLength);
-    }, t.exports.lua_tointeger = function(t, e) {
-      let n = gt(t, e);
-      return n === false ? 0 : n;
-    }, t.exports.lua_tointegerx = gt, t.exports.lua_tojsstring = function(t, e) {
-      let n = $(t, e);
-      if (!n.ttisstring()) {
-        if (!j.cvt2str(n))
-          return null;
-        C.luaO_tostring(t, n);
-      }
-      return n.jsstring();
-    }, t.exports.lua_tolstring = dt, t.exports.lua_tonumber = function(t, e) {
-      let n = Tt(t, e);
-      return n === false ? 0 : n;
-    }, t.exports.lua_tonumberx = Tt, t.exports.lua_topointer = function(t, e) {
-      let n = $(t, e);
-      switch (n.ttype()) {
-        case E:
-        case A:
-        case L:
-        case d:
-        case U:
-        case m:
-        case g:
-          return n.value;
-        default:
-          return null;
-      }
-    }, t.exports.lua_toproxy = function(t, e) {
-      let n = $(t, e);
-      return function(t, e, n) {
-        let r = function(r) {
-          w(r, r instanceof D.lua_State && t === r.l_G, "must be from same global state"), r.stack[r.top] = new z(e, n), J(r);
-        };
-        return xt.set(r, t), r;
-      }(t.l_G, n.type, n.value);
-    }, t.exports.lua_tostring = At, t.exports.lua_tothread = function(t, e) {
-      let n = $(t, e);
-      return n.ttisthread() ? n.value : null;
-    }, t.exports.lua_touserdata = function(t, e) {
-      let n = $(t, e);
-      switch (n.ttnov()) {
-        case m:
-          return n.value.data;
-        case g:
-          return n.value;
-        default:
-          return null;
-      }
-    }, t.exports.lua_type = Ot, t.exports.lua_typename = function(t, e) {
-      return w(t, b <= e && e < f, "invalid tag"), K.ttypename(e);
-    }, t.exports.lua_upvalueid = function(t, e, n) {
-      let r = $(t, e);
-      switch (r.ttype()) {
-        case A: {
-          let r = mt(t, e, n);
-          return r.f.upvals[r.i];
-        }
-        case L: {
-          let e = r.value;
-          return w(t, (0 | n) === n && n > 0 && n <= e.nupvalues, "invalid upvalue index"), e.upvalue[n - 1];
-        }
-        default:
-          return w(t, false, "closure expected"), null;
-      }
-    }, t.exports.lua_upvaluejoin = function(t, e, n, r, a) {
-      let u = mt(t, e, n), l = mt(t, r, a), s = l.f.upvals[l.i];
-      u.f.upvals[u.i] = s;
-    }, t.exports.lua_version = function(t) {
-      return t === null ? _ : t.l_G.version;
-    }, t.exports.lua_xmove = function(t, e, n) {
-      if (t !== e) {
-        Z(t, n), w(t, t.l_G === e.l_G, "moving among independent states"), w(t, e.ci.top - e.top >= n, "stack overflow"), t.top -= n;
-        for (let r = 0;r < n; r++)
-          e.stack[e.top] = new C.TValue, C.setobj2s(e, e.top, t.stack[t.top + r]), delete t.stack[t.top + r], e.top++;
-      }
-    };
-  }, function(t, e, n) {
-    const { lua_assert: r } = n(4);
-    const a = function(t) {
-      let e = t.reader(t.L, t.data);
-      if (e === null)
-        return -1;
-      r(e instanceof Uint8Array, "Should only load binary of array of bytes");
-      let n = e.length;
-      return n === 0 ? -1 : (t.buffer = e, t.off = 0, t.n = n - 1, t.buffer[t.off++]);
-    };
-    t.exports.EOZ = -1, t.exports.luaZ_buffer = function(t) {
-      return t.buffer.subarray(0, t.n);
-    }, t.exports.luaZ_buffremove = function(t, e) {
-      t.n -= e;
-    }, t.exports.luaZ_fill = a, t.exports.luaZ_read = function(t, e, n, r) {
-      for (;r; ) {
-        if (t.n === 0) {
-          if (a(t) === -1)
-            return r;
-          t.n++, t.off--;
-        }
-        let u = r <= t.n ? r : t.n;
-        for (let r = 0;r < u; r++)
-          e[n++] = t.buffer[t.off++];
-        t.n -= u, t.n === 0 && (t.buffer = null), r -= u;
-      }
-      return 0;
-    }, t.exports.luaZ_resetbuffer = function(t) {
-      t.n = 0;
-    }, t.exports.luaZ_resizebuffer = function(t, e, n) {
-      let r = new Uint8Array(n);
-      e.buffer && r.set(e.buffer), e.buffer = r;
-    }, t.exports.MBuffer = class {
-      constructor() {
-        this.buffer = null, this.n = 0;
-      }
-    }, t.exports.ZIO = class {
-      constructor(t, e, n) {
-        this.L = t, r(typeof e == "function", "ZIO requires a reader"), this.reader = e, this.data = n, this.n = 0, this.buffer = null, this.off = 0;
-      }
-      zgetc() {
-        return this.n-- > 0 ? this.buffer[this.off++] : a(this);
-      }
-    };
-  }, function(t, e, n) {
-    const { constant_types: { LUA_TBOOLEAN: r, LUA_TLNGSTR: a }, thread_status: { LUA_ERRSYNTAX: u }, to_luastring: l } = n(1), { LUA_MINBUFFER: s, MAX_INT: o, lua_assert: i } = n(4), c = n(11), _ = n(8), { lisdigit: f, lislalnum: p, lislalpha: L, lisspace: h, lisxdigit: d } = n(22), A = n(6), { luaS_bless: g, luaS_hash: T, luaS_hashlongstr: x, luaS_new: b } = n(10), O = n(9), { EOZ: k, luaZ_buffer: v, luaZ_buffremove: E, luaZ_resetbuffer: U, luaZ_resizebuffer: m } = n(19), N = l("_ENV", true), R = { TK_AND: 257, TK_BREAK: 258, TK_DO: 259, TK_ELSE: 260, TK_ELSEIF: 261, TK_END: 262, TK_FALSE: 263, TK_FOR: 264, TK_FUNCTION: 265, TK_GOTO: 266, TK_IF: 267, TK_IN: 268, TK_LOCAL: 269, TK_NIL: 270, TK_NOT: 271, TK_OR: 272, TK_REPEAT: 273, TK_RETURN: 274, TK_THEN: 275, TK_TRUE: 276, TK_UNTIL: 277, TK_WHILE: 278, TK_IDIV: 279, TK_CONCAT: 280, TK_DOTS: 281, TK_EQ: 282, TK_GE: 283, TK_LE: 284, TK_NE: 285, TK_SHL: 286, TK_SHR: 287, TK_DBCOLON: 288, TK_EOS: 289, TK_FLT: 290, TK_INT: 291, TK_NAME: 292, TK_STRING: 293 }, S = ["and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while", "//", "..", "...", "==", ">=", "<=", "~=", "<<", ">>", "::", "<eof>", "<number>", "<integer>", "<name>", "<string>"].map((t, e) => l(t));
-
-    class w {
-      constructor() {
-        this.r = NaN, this.i = NaN, this.ts = null;
-      }
-    }
-
-    class I {
-      constructor() {
-        this.token = NaN, this.seminfo = new w;
-      }
-    }
-    const y = function(t, e) {
-      let n = t.buff;
-      if (n.n + 1 > n.buffer.length) {
-        n.buffer.length >= o / 2 && H(t, l("lexical element too long", true), 0);
-        let e = 2 * n.buffer.length;
-        m(t.L, n, e);
-      }
-      n.buffer[n.n++] = e < 0 ? 255 + e + 1 : e;
-    }, M = function(t, e) {
-      if (e < 257)
-        return A.luaO_pushfstring(t.L, l("'%c'", true), e);
-      {
-        let n = S[e - 257];
-        return e < 289 ? A.luaO_pushfstring(t.L, l("'%s'", true), n) : n;
-      }
-    }, P = function(t) {
-      return t.current === 10 || t.current === 13;
-    }, C = function(t) {
-      t.current = t.z.zgetc();
-    }, D = function(t) {
-      y(t, t.current), C(t);
-    }, V = new A.TValue(r, true), B = function(t, e) {
-      let n = t.L, r = b(n, e), u = t.h.strong.get(x(r));
-      if (u)
-        r = u.key.tsvalue();
-      else {
-        let e = new A.TValue(a, r);
-        O.luaH_setfrom(n, t.h, e, V);
-      }
-      return r;
-    }, G = function(t) {
-      let e = t.current;
-      i(P(t)), C(t), P(t) && t.current !== e && C(t), ++t.linenumber >= o && H(t, l("chunk has too many lines", true), 0);
-    }, K = function(t, e) {
-      return t.current === e && (C(t), true);
-    }, F = function(t, e) {
-      return (t.current === e[0].charCodeAt(0) || t.current === e[1].charCodeAt(0)) && (D(t), true);
-    }, j = function(t, e) {
-      let n = "Ee", r = t.current;
-      for (i(f(t.current)), D(t), r === 48 && F(t, "xX") && (n = "Pp");; )
-        if (F(t, n) && F(t, "-+"), d(t.current))
-          D(t);
-        else {
-          if (t.current !== 46)
-            break;
-          D(t);
-        }
-      let a = new A.TValue;
-      return A.luaO_str2num(v(t.buff), a) === 0 && H(t, l("malformed number", true), 290), a.ttisinteger() ? (e.i = a.value, 291) : (i(a.ttisfloat()), e.r = a.value, 290);
-    }, H = function(t, e, n) {
-      e = c.luaG_addinfo(t.L, e, t.source, t.linenumber), n && A.luaO_pushfstring(t.L, l("%s near %s"), e, function(t, e) {
-        switch (e) {
-          case 292:
-          case 293:
-          case 290:
-          case 291:
-            return A.luaO_pushfstring(t.L, l("'%s'", true), v(t.buff));
-          default:
-            return M(t, e);
-        }
-      }(t, n)), _.luaD_throw(t.L, u);
-    }, X = function(t) {
-      let e = 0, n = t.current;
-      for (i(n === 91 || n === 93), D(t);t.current === 61; )
-        D(t), e++;
-      return t.current === n ? e : -e - 1;
-    }, z = function(t, e, n) {
-      let r = t.linenumber;
-      D(t), P(t) && G(t);
-      let a = false;
-      for (;!a; )
-        switch (t.current) {
-          case k:
-            H(t, l(`unfinished long ${e ? "string" : "comment"} (starting at line ${r})`), 289);
-            break;
-          case 93:
-            X(t) === n && (D(t), a = true);
-            break;
-          case 10:
-          case 13:
-            y(t, 10), G(t), e || U(t.buff);
-            break;
-          default:
-            e ? D(t) : C(t);
-        }
-      e && (e.ts = B(t, t.buff.buffer.subarray(2 + n, t.buff.n - (2 + n))));
-    }, Y = function(t, e, n) {
-      e || (t.current !== k && D(t), H(t, n, 293));
-    }, J = function(t) {
-      return D(t), Y(t, d(t.current), l("hexadecimal digit expected", true)), A.luaO_hexavalue(t.current);
-    }, Z = function(t) {
-      let e = J(t);
-      return e = (e << 4) + J(t), E(t.buff, 2), e;
-    }, q = function(t) {
-      let e = new Uint8Array(A.UTF8BUFFSZ), n = A.luaO_utf8esc(e, function(t) {
-        let e = 4;
-        D(t), Y(t, t.current === 123, l("missing '{'", true));
-        let n = J(t);
-        for (D(t);d(t.current); )
-          e++, n = (n << 4) + A.luaO_hexavalue(t.current), Y(t, n <= 1114111, l("UTF-8 value too large", true)), D(t);
-        return Y(t, t.current === 125, l("missing '}'", true)), C(t), E(t.buff, e), n;
-      }(t));
-      for (;n > 0; n--)
-        y(t, e[A.UTF8BUFFSZ - n]);
-    }, W = function(t) {
-      let e, n = 0;
-      for (e = 0;e < 3 && f(t.current); e++)
-        n = 10 * n + t.current - 48, D(t);
-      return Y(t, n <= 255, l("decimal escape too large", true)), E(t.buff, e), n;
-    }, Q = function(t, e, n) {
-      for (D(t);t.current !== e; )
-        switch (t.current) {
-          case k:
-            H(t, l("unfinished string", true), 289);
-            break;
-          case 10:
-          case 13:
-            H(t, l("unfinished string", true), 293);
-            break;
-          case 92: {
-            let e, n;
-            switch (D(t), t.current) {
-              case 97:
-                n = 7, e = "read_save";
-                break;
-              case 98:
-                n = 8, e = "read_save";
-                break;
-              case 102:
-                n = 12, e = "read_save";
-                break;
-              case 110:
-                n = 10, e = "read_save";
-                break;
-              case 114:
-                n = 13, e = "read_save";
-                break;
-              case 116:
-                n = 9, e = "read_save";
-                break;
-              case 118:
-                n = 11, e = "read_save";
-                break;
-              case 120:
-                n = Z(t), e = "read_save";
-                break;
-              case 117:
-                q(t), e = "no_save";
-                break;
-              case 10:
-              case 13:
-                G(t), n = 10, e = "only_save";
-                break;
-              case 92:
-              case 34:
-              case 39:
-                n = t.current, e = "read_save";
-                break;
-              case k:
-                e = "no_save";
-                break;
-              case 122:
-                for (E(t.buff, 1), C(t);h(t.current); )
-                  P(t) ? G(t) : C(t);
-                e = "no_save";
-                break;
-              default:
-                Y(t, f(t.current), l("invalid escape sequence", true)), n = W(t), e = "only_save";
-            }
-            e === "read_save" && C(t), e !== "read_save" && e !== "only_save" || (E(t.buff, 1), y(t, n));
-            break;
-          }
-          default:
-            D(t);
-        }
-      D(t), n.ts = B(t, t.buff.buffer.subarray(1, t.buff.n - 1));
-    }, $ = Object.create(null);
-    S.forEach((t, e) => $[T(t)] = e);
-    const tt = function(t, e) {
-      for (U(t.buff);; )
-        switch (i(typeof t.current == "number"), t.current) {
-          case 10:
-          case 13:
-            G(t);
-            break;
-          case 32:
-          case 12:
-          case 9:
-          case 11:
-            C(t);
-            break;
-          case 45:
-            if (C(t), t.current !== 45)
-              return 45;
-            if (C(t), t.current === 91) {
-              let e = X(t);
-              if (U(t.buff), e >= 0) {
-                z(t, null, e), U(t.buff);
-                break;
-              }
-            }
-            for (;!P(t) && t.current !== k; )
-              C(t);
-            break;
-          case 91: {
-            let n = X(t);
-            return n >= 0 ? (z(t, e, n), 293) : (n !== -1 && H(t, l("invalid long string delimiter", true), 293), 91);
-          }
-          case 61:
-            return C(t), K(t, 61) ? 282 : 61;
-          case 60:
-            return C(t), K(t, 61) ? 284 : K(t, 60) ? 286 : 60;
-          case 62:
-            return C(t), K(t, 61) ? 283 : K(t, 62) ? 287 : 62;
-          case 47:
-            return C(t), K(t, 47) ? 279 : 47;
-          case 126:
-            return C(t), K(t, 61) ? 285 : 126;
-          case 58:
-            return C(t), K(t, 58) ? 288 : 58;
-          case 34:
-          case 39:
-            return Q(t, t.current, e), 293;
-          case 46:
-            return D(t), K(t, 46) ? K(t, 46) ? 281 : 280 : f(t.current) ? j(t, e) : 46;
-          case 48:
-          case 49:
-          case 50:
-          case 51:
-          case 52:
-          case 53:
-          case 54:
-          case 55:
-          case 56:
-          case 57:
-            return j(t, e);
-          case k:
-            return 289;
-          default:
-            if (L(t.current)) {
-              do {
-                D(t);
-              } while (p(t.current));
-              let n = B(t, v(t.buff));
-              e.ts = n;
-              let r = $[x(n)];
-              return r !== undefined && r <= 22 ? r + 257 : 292;
-            }
-            {
-              let e = t.current;
-              return C(t), e;
-            }
-        }
-    };
-    t.exports.FIRST_RESERVED = 257, t.exports.LUA_ENV = N, t.exports.LexState = class {
-      constructor() {
-        this.current = NaN, this.linenumber = NaN, this.lastline = NaN, this.t = new I, this.lookahead = new I, this.fs = null, this.L = null, this.z = null, this.buff = null, this.h = null, this.dyd = null, this.source = null, this.envn = null;
-      }
-    }, t.exports.RESERVED = R, t.exports.isreserved = function(t) {
-      let e = $[x(t)];
-      return e !== undefined && e <= 22;
-    }, t.exports.luaX_lookahead = function(t) {
-      return i(t.lookahead.token === 289), t.lookahead.token = tt(t, t.lookahead.seminfo), t.lookahead.token;
-    }, t.exports.luaX_newstring = B, t.exports.luaX_next = function(t) {
-      t.lastline = t.linenumber, t.lookahead.token !== 289 ? (t.t.token = t.lookahead.token, t.t.seminfo.i = t.lookahead.seminfo.i, t.t.seminfo.r = t.lookahead.seminfo.r, t.t.seminfo.ts = t.lookahead.seminfo.ts, t.lookahead.token = 289) : t.t.token = tt(t, t.t.seminfo);
-    }, t.exports.luaX_setinput = function(t, e, n, r, a) {
-      e.t = { token: 0, seminfo: new w }, e.L = t, e.current = a, e.lookahead = { token: 289, seminfo: new w }, e.z = n, e.fs = null, e.linenumber = 1, e.lastline = 1, e.source = r, e.envn = g(t, N), m(t, e.buff, s);
-    }, t.exports.luaX_syntaxerror = function(t, e) {
-      H(t, e, t.t.token);
-    }, t.exports.luaX_token2str = M, t.exports.luaX_tokens = S;
-  }, function(t, e, n) {
-    const { lua: r, lauxlib: a, lualib: u, to_luastring: l } = n(0), { LUA_MULTRET: s, LUA_OK: o, LUA_REGISTRYINDEX: i, LUA_RIDX_MAINTHREAD: c, LUA_TBOOLEAN: _, LUA_TFUNCTION: f, LUA_TLIGHTUSERDATA: p, LUA_TNIL: L, LUA_TNONE: h, LUA_TNUMBER: d, LUA_TSTRING: A, LUA_TTABLE: g, LUA_TTHREAD: T, LUA_TUSERDATA: x, lua_atnativeerror: b, lua_call: O, lua_getfield: k, lua_gettable: v, lua_gettop: E, lua_isnil: U, lua_isproxy: m, lua_newuserdata: N, lua_pcall: R, lua_pop: S, lua_pushboolean: w, lua_pushcfunction: I, lua_pushinteger: y, lua_pushlightuserdata: M, lua_pushliteral: P, lua_pushnil: C, lua_pushnumber: D, lua_pushstring: V, lua_pushvalue: B, lua_rawgeti: G, lua_rawgetp: K, lua_rawsetp: F, lua_rotate: j, lua_setfield: H, lua_settable: X, lua_settop: z, lua_toboolean: Y, lua_tojsstring: J, lua_tonumber: Z, lua_toproxy: q, lua_tothread: W, lua_touserdata: Q, lua_type: $ } = r, { luaL_argerror: tt, luaL_checkany: et, luaL_checkoption: nt, luaL_checkstack: rt, luaL_checkudata: at, luaL_error: ut, luaL_getmetafield: lt, luaL_newlib: st, luaL_newmetatable: ot, luaL_requiref: it, luaL_setfuncs: ct, luaL_setmetatable: _t, luaL_testudata: ft, luaL_tolstring: pt } = a, { luaopen_base: Lt } = u;
-    const ht = typeof window != "undefined" ? window : typeof WorkerGlobalScope != "undefined" && self instanceof WorkerGlobalScope ? self : (0, eval)("this");
-    let dt, At, gt;
-    if (typeof Reflect != "undefined")
-      dt = Reflect.apply, At = Reflect.construct, gt = Reflect.deleteProperty;
-    else {
-      const { apply: t, bind: e } = Function;
-      dt = function(e, n, r) {
-        return t.call(e, n, r);
-      }, At = function(t, n) {
-        switch (n.length) {
-          case 0:
-            return new t;
-          case 1:
-            return new t(n[0]);
-          case 2:
-            return new t(n[0], n[1]);
-          case 3:
-            return new t(n[0], n[1], n[2]);
-          case 4:
-            return new t(n[0], n[1], n[2], n[3]);
-        }
-        let r = [null];
-        return r.push.apply(r, n), new (e.apply(t, r));
-      }, gt = Function("t", "k", "delete t[k]");
-    }
-    const Tt = String.prototype.concat.bind(""), xt = function(t) {
-      return typeof t == "object" ? t !== null : typeof t == "function";
-    }, bt = l("js object"), Ot = function(t, e) {
-      let n = ft(t, e, bt);
-      return n ? n.data : undefined;
-    }, kt = function(t, e) {
-      return at(t, e, bt).data;
-    }, vt = function(t, e) {
-      N(t).data = e, _t(t, bt);
-    }, Et = function(t) {
-      G(t, i, c);
-      let e = W(t, -1);
-      return S(t, 1), e;
-    }, Ut = new WeakMap, mt = function(t, e) {
-      switch (typeof e) {
-        case "undefined":
-          C(t);
-          break;
-        case "number":
-          D(t, e);
-          break;
-        case "string":
-          V(t, l(e));
-          break;
-        case "boolean":
-          w(t, e);
-          break;
-        case "symbol":
-          M(t, e);
-          break;
-        case "function":
-          if (m(e, t)) {
-            e(t);
-            break;
-          }
-        case "object":
-          if (e === null) {
-            if (K(t, i, null) !== x)
-              throw Error("js library not loaded into lua_State");
-            break;
-          }
-        default: {
-          let n = Ut.get(Et(t));
-          if (!n)
-            throw Error("js library not loaded into lua_State");
-          let r = n.get(e);
-          r ? r(t) : (vt(t, e), r = q(t, -1), n.set(e, r));
-        }
-      }
-    }, Nt = function(t) {
-      let e = Q(t, 1);
-      return mt(t, e), 1;
-    }, Rt = function(t, e) {
-      switch ($(t, e)) {
-        case h:
-        case L:
-          return;
-        case _:
-          return Y(t, e);
-        case p:
-          return Q(t, e);
-        case d:
-          return Z(t, e);
-        case A:
-          return J(t, e);
-        case x: {
-          let n = Ot(t, e);
-          if (n !== undefined)
-            return n;
-        }
-        case g:
-        case f:
-        case T:
-        default:
-          return Bt(t, q(t, e));
-      }
-    }, St = function(t, e) {
-      let n = R(t, e, 1, 0), r = Rt(t, -1);
-      switch (S(t, 1), n) {
-        case o:
-          return r;
-        default:
-          throw r;
-      }
-    }, wt = function(t, e, n, r, a) {
-      if (!xt(r))
-        throw new TypeError("`args` argument must be an object");
-      let u = +r.length;
-      u >= 0 || (u = 0), rt(t, 2 + u, null);
-      let l = E(t);
-      e(t), mt(t, n);
-      for (let e = 0;e < u; e++)
-        mt(t, r[e]);
-      switch (R(t, 1 + u, a, 0)) {
-        case o: {
-          let e = E(t) - l, n = new Array(e);
-          for (let r = 0;r < e; r++)
-            n[r] = Rt(t, l + r + 1);
-          return z(t, l), n;
-        }
-        default: {
-          let e = Rt(t, -1);
-          throw z(t, l), e;
-        }
-      }
-    }, It = function(t) {
-      return v(t, 1), 1;
-    }, yt = function(t, e, n) {
-      return rt(t, 3, null), I(t, It), e(t), mt(t, n), St(t, 2);
-    }, Mt = function(t, e, n) {
-      switch (rt(t, 3, null), I(t, It), e(t), mt(t, n), R(t, 2, 1, 0)) {
-        case o: {
-          let e = U(t, -1);
-          return S(t, 1), !e;
-        }
-        default: {
-          let e = Rt(t, -1);
-          throw S(t, 1), e;
-        }
-      }
-    }, Pt = function(t, e, n, r) {
-      switch (rt(t, 4, null), I(t, function(t) {
-        return X(t, 1), 0;
-      }), e(t), mt(t, n), mt(t, r), R(t, 3, 0, 0)) {
-        case o:
-          return;
-        default: {
-          let e = Rt(t, -1);
-          throw S(t, 1), e;
-        }
-      }
-    }, Ct = function(t, e, n) {
-      switch (rt(t, 4, null), I(t, function(t) {
-        return X(t, 1), 0;
-      }), e(t), mt(t, n), C(t), R(t, 3, 0, 0)) {
-        case o:
-          return;
-        default: {
-          let e = Rt(t, -1);
-          throw S(t, 1), e;
-        }
-      }
-    }, Dt = function(t, e) {
-      return rt(t, 2, null), I(t, function(t) {
-        return pt(t, 1), 1;
-      }), e(t), St(t, 1);
-    }, Vt = function() {
-      let t = this.L;
-      rt(t, 3, null);
-      let e = E(t);
-      switch (this.iter(t), this.state(t), this.last(t), R(t, 2, s, 0)) {
-        case o: {
-          let n;
-          if (this.last = q(t, e + 1), U(t, -1))
-            n = { done: true, value: undefined };
-          else {
-            let r = E(t) - e, a = new Array(r);
-            for (let n = 0;n < r; n++)
-              a[n] = Rt(t, e + n + 1);
-            n = { done: false, value: a };
-          }
-          return z(t, e), n;
-        }
-        default: {
-          let e = Rt(t, -1);
-          throw S(t, 1), e;
-        }
-      }
-    }, Bt = function(t, e) {
-      const n = Et(t);
-      let r = function() {
-        return wt(n, e, this, arguments, 1)[0];
-      };
-      r.apply = function(t, r) {
-        return wt(n, e, t, r, 1)[0];
-      }, r.invoke = function(t, r) {
-        return wt(n, e, t, r, s);
-      }, r.get = function(t) {
-        return yt(n, e, t);
-      }, r.has = function(t) {
-        return Mt(n, e, t);
-      }, r.set = function(t, r) {
-        return Pt(n, e, t, r);
-      }, r.delete = function(t) {
-        return Ct(n, e, t);
-      }, r.toString = function() {
-        return Dt(n, e);
-      }, typeof Symbol == "function" && (r[Symbol.toStringTag] = "Fengari object", r[Symbol.iterator] = function() {
-        return function(t, e) {
-          switch (rt(t, 1, null), I(t, function(t) {
-            return it(t, l("_G"), Lt, 0), k(t, -1, l("pairs")), e(t), O(t, 1, 3), 3;
-          }), R(t, 0, 3, 0)) {
-            case o: {
-              let e = q(t, -3), n = q(t, -2), r = q(t, -1);
-              return S(t, 3), { L: t, iter: e, state: n, last: r, next: Vt };
-            }
-            default: {
-              let e = Rt(t, -1);
-              throw S(t, 1), e;
-            }
-          }
-        }(n, e);
-      }, Symbol.toPrimitive && (r[Symbol.toPrimitive] = function(t) {
-        if (t === "string")
-          return Dt(n, e);
-      }));
-      let a = Ut.get(n);
-      if (!a)
-        throw Error("js library not loaded into lua_State");
-      return a.set(r, e), r;
-    }, Gt = { new: function(t) {
-      let e = Rt(t, 1), n = E(t) - 1, r = new Array(n);
-      for (let e = 0;e < n; e++)
-        r[e] = Rt(t, e + 2);
-      return mt(t, At(e, r)), 1;
-    }, tonumber: function(t) {
-      let e = Rt(t, 1);
-      return D(t, +e), 1;
-    }, tostring: function(t) {
-      let e = Rt(t, 1);
-      return P(t, Tt(e)), 1;
-    }, instanceof: function(t) {
-      let e = Rt(t, 1), n = Rt(t, 2);
-      return w(t, e instanceof n), 1;
-    }, typeof: function(t) {
-      let e = Rt(t, 1);
-      return P(t, typeof e), 1;
-    } };
-    if (typeof Symbol == "function" && Symbol.iterator) {
-      const t = function(t, e) {
-        let n = kt(t, e), r = n[Symbol.iterator];
-        r || tt(t, e, l("object not iterable"));
-        let a = dt(r, n, []);
-        return xt(a) || tt(t, e, l("Result of the Symbol.iterator method is not an object")), a;
-      }, e = function(t) {
-        let e = Rt(t, 1).next();
-        return e.done ? 0 : (mt(t, e.value), 1);
-      };
-      Gt.of = function(n) {
-        let r = t(n, 1);
-        return I(n, e), mt(n, r), 2;
-      };
-    }
-    if (typeof Proxy == "function" && typeof Symbol == "function") {
-      const t = Symbol("lua_State"), e = Symbol("fengari-proxy"), n = { apply: function(n, r, a) {
-        return wt(n[t], n[e], r, a, 1)[0];
-      }, construct: function(n, r) {
-        let a = n[t], u = n[e], s = r.length;
-        rt(a, 2 + s, null), u(a);
-        let o = E(a);
-        if (lt(a, o, l("construct")) === L)
-          throw S(a, 1), new TypeError("not a constructor");
-        j(a, o, 1);
-        for (let t = 0;t < s; t++)
-          mt(a, r[t]);
-        return St(a, 1 + s);
-      }, defineProperty: function(n, r, a) {
-        let u = n[t], s = n[e];
-        return rt(u, 4, null), s(u), lt(u, -1, l("defineProperty")) === L ? (S(u, 1), false) : (j(u, -2, 1), mt(u, r), mt(u, a), St(u, 3));
-      }, deleteProperty: function(n, r) {
-        return Ct(n[t], n[e], r);
-      }, get: function(n, r) {
-        return yt(n[t], n[e], r);
-      }, getOwnPropertyDescriptor: function(n, r) {
-        let a = n[t], u = n[e];
-        if (rt(a, 3, null), u(a), lt(a, -1, l("getOwnPropertyDescriptor")) !== L)
-          return j(a, -2, 1), mt(a, r), St(a, 2);
-        S(a, 1);
-      }, getPrototypeOf: function(n) {
-        let r = n[t], a = n[e];
-        return rt(r, 2, null), a(r), lt(r, -1, l("getPrototypeOf")) === L ? (S(r, 1), null) : (j(r, -2, 1), St(r, 1));
-      }, has: function(n, r) {
-        return Mt(n[t], n[e], r);
-      }, ownKeys: function(n) {
-        let r = n[t], a = n[e];
-        if (rt(r, 2, null), a(r), lt(r, -1, l("ownKeys")) === L)
-          throw S(r, 1), Error("ownKeys unknown for fengari object");
-        return j(r, -2, 1), St(r, 1);
-      }, set: function(n, r, a) {
-        return Pt(n[t], n[e], r, a), true;
-      }, setPrototypeOf: function(n, r) {
-        let a = n[t], u = n[e];
-        return rt(a, 3, null), u(a), lt(a, -1, l("setPrototypeOf")) === L ? (S(a, 1), false) : (j(a, -2, 1), mt(a, r), St(a, 2));
-      } }, r = function() {
-        let t = function() {}.bind();
-        return delete t.length, delete t.name, t;
-      }, a = Function("return ()=>void 0;"), u = function() {
-        let t = a();
-        return delete t.length, delete t.name, t;
-      }, s = function(a, l, s) {
-        const o = Et(a);
-        let i;
-        switch (s) {
-          case "function":
-            i = r();
-            break;
-          case "arrow_function":
-            i = u();
-            break;
-          case "object":
-            i = {};
-            break;
-          default:
-            throw TypeError("invalid type to createproxy");
-        }
-        return i[e] = l, i[t] = o, new Proxy(i, n);
-      }, o = ["function", "arrow_function", "object"], i = o.map((t) => l(t));
-      Gt.createproxy = function(t) {
-        et(t, 1);
-        let e = o[nt(t, 2, i[0], i)], n = s(t, q(t, 1), e);
-        return mt(t, n), 1;
-      };
-    }
-    let Kt = { __index: function(t) {
-      let e = kt(t, 1), n = Rt(t, 2);
-      return mt(t, e[n]), 1;
-    }, __newindex: function(t) {
-      let e = kt(t, 1), n = Rt(t, 2), r = Rt(t, 3);
-      return r === undefined ? gt(e, n) : e[n] = r, 0;
-    }, __tostring: function(t) {
-      let e = kt(t, 1), n = Tt(e);
-      return V(t, l(n)), 1;
-    }, __call: function(t) {
-      let e, n = kt(t, 1), r = E(t) - 1, a = new Array(Math.max(0, r - 1));
-      if (r > 0 && (e = Rt(t, 2), r-- > 0))
-        for (let e = 0;e < r; e++)
-          a[e] = Rt(t, e + 3);
-      return mt(t, dt(n, e, a)), 1;
-    }, __pairs: function(t) {
-      let e, n, r, a, u = kt(t, 1);
-      if (typeof Symbol != "function" || (e = u[Symbol.for("__pairs")]) === undefined)
-        n = function(t) {
-          if (this.index >= this.keys.length)
-            return;
-          let e = this.keys[this.index++];
-          return [e, this.object[e]];
-        }, r = { object: u, keys: Object.keys(u), index: 0 };
-      else {
-        let s = dt(e, u, []);
-        s === undefined && ut(t, l("bad '__pairs' result (object with keys 'iter', 'state', 'first' expected)")), (n = s.iter) === undefined && ut(t, l("bad '__pairs' result (object.iter is missing)")), r = s.state, a = s.first;
-      }
-      return I(t, function() {
-        let e = Rt(t, 1), r = Rt(t, 2), a = dt(n, e, [r]);
-        if (a === undefined)
-          return 0;
-        Array.isArray(a) || ut(t, l("bad iterator result (Array or undefined expected)")), rt(t, a.length, null);
-        for (let e = 0;e < a.length; e++)
-          mt(t, a[e]);
-        return a.length;
-      }), mt(t, r), mt(t, a), 3;
-    }, __len: function(t) {
-      let e, n, r = kt(t, 1);
-      return n = typeof Symbol != "function" || (e = r[Symbol.for("__len")]) === undefined ? r.length : dt(e, r, []), mt(t, n), 1;
-    } };
-    t.exports.FENGARI_INTEROP_VERSION = "0.1", t.exports.FENGARI_INTEROP_VERSION_NUM = 1, t.exports.FENGARI_INTEROP_RELEASE = "0.1.2", t.exports.checkjs = kt, t.exports.testjs = Ot, t.exports.pushjs = vt, t.exports.push = mt, t.exports.tojs = Rt, t.exports.luaopen_js = function(t) {
-      return Ut.set(Et(t), new WeakMap), b(t, Nt), st(t, Gt), P(t, "0.1"), H(t, -2, l("_VERSION")), y(t, 1), H(t, -2, l("_VERSION_NUM")), P(t, "0.1.2"), H(t, -2, l("_RELEASE")), ot(t, bt), ct(t, Kt, 0), S(t, 1), vt(t, null), B(t, -1), F(t, i, null), H(t, -2, l("null")), mt(t, ht), H(t, -2, l("global")), 1;
-    };
-  }, function(t, e, n) {
-    const { luastring_of: r } = n(1), a = r(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 4, 4, 4, 4, 4, 4, 4, 21, 21, 21, 21, 21, 21, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 4, 4, 4, 4, 5, 4, 21, 21, 21, 21, 21, 21, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-    t.exports.lisdigit = function(t) {
-      return (2 & a[t + 1]) != 0;
-    }, t.exports.lislalnum = function(t) {
-      return (3 & a[t + 1]) != 0;
-    }, t.exports.lislalpha = function(t) {
-      return (1 & a[t + 1]) != 0;
-    }, t.exports.lisprint = function(t) {
-      return (4 & a[t + 1]) != 0;
-    }, t.exports.lisspace = function(t) {
-      return (8 & a[t + 1]) != 0;
-    }, t.exports.lisxdigit = function(t) {
-      return (16 & a[t + 1]) != 0;
-    };
-  }, function(t, e, n) {
-    const { LUA_MULTRET: r, to_luastring: a } = n(1), { BinOpr: { OPR_ADD: u, OPR_AND: l, OPR_BAND: s, OPR_BOR: o, OPR_BXOR: i, OPR_CONCAT: c, OPR_DIV: _, OPR_EQ: f, OPR_GE: p, OPR_GT: L, OPR_IDIV: h, OPR_LE: d, OPR_LT: A, OPR_MOD: g, OPR_MUL: T, OPR_NE: x, OPR_NOBINOPR: b, OPR_OR: O, OPR_POW: k, OPR_SHL: v, OPR_SHR: E, OPR_SUB: U }, UnOpr: { OPR_BNOT: m, OPR_LEN: N, OPR_MINUS: R, OPR_NOT: S, OPR_NOUNOPR: w }, NO_JUMP: I, getinstruction: y, luaK_checkstack: M, luaK_codeABC: P, luaK_codeABx: C, luaK_codeAsBx: D, luaK_codek: V, luaK_concat: B, luaK_dischargevars: G, luaK_exp2RK: K, luaK_exp2anyreg: F, luaK_exp2anyregup: j, luaK_exp2nextreg: H, luaK_exp2val: X, luaK_fixline: z, luaK_getlabel: Y, luaK_goiffalse: J, luaK_goiftrue: Z, luaK_indexed: q, luaK_infix: W, luaK_intK: Q, luaK_jump: $, luaK_jumpto: tt, luaK_nil: et, luaK_patchclose: nt, luaK_patchlist: rt, luaK_patchtohere: at, luaK_posfix: ut, luaK_prefix: lt, luaK_reserveregs: st, luaK_ret: ot, luaK_self: it, luaK_setlist: ct, luaK_setmultret: _t, luaK_setoneret: ft, luaK_setreturns: pt, luaK_storevar: Lt, luaK_stringK: ht } = n(35), dt = n(8), At = n(13), gt = n(20), { LUAI_MAXCCALLS: Tt, MAX_INT: xt, lua_assert: bt } = n(4), Ot = n(6), { OpCodesI: { OP_CALL: kt, OP_CLOSURE: vt, OP_FORLOOP: Et, OP_FORPREP: Ut, OP_GETUPVAL: mt, OP_MOVE: Nt, OP_NEWTABLE: Rt, OP_SETTABLE: St, OP_TAILCALL: wt, OP_TFORCALL: It, OP_TFORLOOP: yt, OP_VARARG: Mt }, LFIELDS_PER_FLUSH: Pt, SETARG_B: Ct, SETARG_C: Dt, SET_OPCODE: Vt } = n(16), { luaS_eqlngstr: Bt, luaS_new: Gt, luaS_newliteral: Kt } = n(10), Ft = n(9), jt = At.Proto, Ht = gt.RESERVED, Xt = function(t) {
-      return t === Jt.VCALL || t === Jt.VVARARG;
-    }, zt = function(t, e) {
-      return Bt(t, e);
-    };
-
-    class Yt {
-      constructor() {
-        this.previous = null, this.firstlabel = NaN, this.firstgoto = NaN, this.nactvar = NaN, this.upval = NaN, this.isloop = NaN;
-      }
-    }
-    const Jt = { VVOID: 0, VNIL: 1, VTRUE: 2, VFALSE: 3, VK: 4, VKFLT: 5, VKINT: 6, VNONRELOC: 7, VLOCAL: 8, VUPVAL: 9, VINDEXED: 10, VJMP: 11, VRELOCABLE: 12, VCALL: 13, VVARARG: 14 };
-
-    class Zt {
-      constructor() {
-        this.k = NaN, this.u = { ival: NaN, nval: NaN, info: NaN, ind: { idx: NaN, t: NaN, vt: NaN } }, this.t = NaN, this.f = NaN;
-      }
-      to(t) {
-        this.k = t.k, this.u = t.u, this.t = t.t, this.f = t.f;
-      }
-    }
-
-    class qt {
-      constructor() {
-        this.f = null, this.prev = null, this.ls = null, this.bl = null, this.pc = NaN, this.lasttarget = NaN, this.jpc = NaN, this.nk = NaN, this.np = NaN, this.firstlocal = NaN, this.nlocvars = NaN, this.nactvar = NaN, this.nups = NaN, this.freereg = NaN;
-      }
-    }
-
-    class Wt {
-      constructor() {
-        this.arr = [], this.n = NaN, this.size = NaN;
-      }
-    }
-    const Qt = function(t, e) {
-      t.t.token = 0, gt.luaX_syntaxerror(t, e);
-    }, $t = function(t, e) {
-      gt.luaX_syntaxerror(t, Ot.luaO_pushfstring(t.L, a("%s expected", true), gt.luaX_token2str(t, e)));
-    }, te = function(t, e, n, r) {
-      e > n && function(t, e, n) {
-        let r = t.ls.L, u = t.f.linedefined, l = u === 0 ? a("main function", true) : Ot.luaO_pushfstring(r, a("function at line %d", true), u), s = Ot.luaO_pushfstring(r, a("too many %s (limit is %d) in %s", true), n, e, l);
-        gt.luaX_syntaxerror(t.ls, s);
-      }(t, n, r);
-    }, ee = function(t, e) {
-      return t.t.token === e && (gt.luaX_next(t), true);
-    }, ne = function(t, e) {
-      t.t.token !== e && $t(t, e);
-    }, re = function(t, e) {
-      ne(t, e), gt.luaX_next(t);
-    }, ae = function(t, e, n) {
-      e || gt.luaX_syntaxerror(t, n);
-    }, ue = function(t, e, n, r) {
-      ee(t, e) || (r === t.linenumber ? $t(t, e) : gt.luaX_syntaxerror(t, Ot.luaO_pushfstring(t.L, a("%s expected (to close %s at line %d)"), gt.luaX_token2str(t, e), gt.luaX_token2str(t, n), r)));
-    }, le = function(t) {
-      ne(t, Ht.TK_NAME);
-      let e = t.t.seminfo.ts;
-      return gt.luaX_next(t), e;
-    }, se = function(t, e, n) {
-      t.f = t.t = I, t.k = e, t.u.info = n;
-    }, oe = function(t, e, n) {
-      se(e, Jt.VK, ht(t.fs, n));
-    }, ie = function(t, e) {
-      oe(t, e, le(t));
-    }, ce = function(t, e) {
-      let { fs: n, dyd: r } = t, u = function(t, e) {
-        let n = t.fs, r = n.f;
-        return r.locvars[n.nlocvars] = new Ot.LocVar, r.locvars[n.nlocvars].varname = e, n.nlocvars++;
-      }(t, e);
-      te(n, r.actvar.n + 1 - n.firstlocal, 200, a("local variables", true)), r.actvar.arr[r.actvar.n] = new class {
-        constructor() {
-          this.idx = NaN;
-        }
-      }, r.actvar.arr[r.actvar.n].idx = u, r.actvar.n++;
-    }, _e = function(t, e) {
-      ce(t, gt.luaX_newstring(t, a(e, true)));
-    }, fe = function(t, e) {
-      let n = t.ls.dyd.actvar.arr[t.firstlocal + e].idx;
-      return bt(n < t.nlocvars), t.f.locvars[n];
-    }, pe = function(t, e) {
-      let n = t.fs;
-      for (n.nactvar = n.nactvar + e;e; e--)
-        fe(n, n.nactvar - e).startpc = n.pc;
-    }, Le = function(t, e, n) {
-      let r = t.f;
-      return te(t, t.nups + 1, At.MAXUPVAL, a("upvalues", true)), r.upvalues[t.nups] = { instack: n.k === Jt.VLOCAL, idx: n.u.info, name: e }, t.nups++;
-    }, he = function(t, e, n, r) {
-      if (t === null)
-        se(n, Jt.VVOID, 0);
-      else {
-        let a = function(t, e) {
-          for (let n = t.nactvar - 1;n >= 0; n--)
-            if (zt(e, fe(t, n).varname))
-              return n;
-          return -1;
-        }(t, e);
-        if (a >= 0)
-          se(n, Jt.VLOCAL, a), r || function(t, e) {
-            let n = t.bl;
-            for (;n.nactvar > e; )
-              n = n.previous;
-            n.upval = 1;
-          }(t, a);
-        else {
-          let r = function(t, e) {
-            let n = t.f.upvalues;
-            for (let r = 0;r < t.nups; r++)
-              if (zt(n[r].name, e))
-                return r;
-            return -1;
-          }(t, e);
-          if (r < 0) {
-            if (he(t.prev, e, n, 0), n.k === Jt.VVOID)
-              return;
-            r = Le(t, e, n);
-          }
-          se(n, Jt.VUPVAL, r);
-        }
-      }
-    }, de = function(t, e) {
-      let n = le(t), r = t.fs;
-      if (he(r, n, e, 1), e.k === Jt.VVOID) {
-        let a = new Zt;
-        he(r, t.envn, e, 1), bt(e.k !== Jt.VVOID), oe(t, a, n), q(r, e, a);
-      }
-    }, Ae = function(t, e, n, r) {
-      let a = t.fs, u = e - n;
-      if (Xt(r.k))
-        ++u < 0 && (u = 0), pt(a, r, u), u > 1 && st(a, u - 1);
-      else if (r.k !== Jt.VVOID && H(a, r), u > 0) {
-        let t = a.freereg;
-        st(a, u), et(a, t, u);
-      }
-      n > e && (t.fs.freereg -= n - e);
-    }, ge = function(t) {
-      let e = t.L;
-      ++e.nCcalls, te(t.fs, e.nCcalls, Tt, a("JS levels", true));
-    }, Te = function(t) {
-      return t.L.nCcalls--;
-    }, xe = function(t, e, n) {
-      let r = t.fs, u = t.dyd.gt, l = u.arr[e];
-      if (bt(zt(l.name, n.name)), l.nactvar < n.nactvar) {
-        let e = fe(r, l.nactvar).varname, n = Ot.luaO_pushfstring(t.L, a("<goto %s> at line %d jumps into the scope of local '%s'"), l.name.getstr(), l.line, e.getstr());
-        Qt(t, n);
-      }
-      rt(r, l.pc, n.pc);
-      for (let t = e;t < u.n - 1; t++)
-        u.arr[t] = u.arr[t + 1];
-      u.n--;
-    }, be = function(t, e) {
-      let n = t.fs.bl, r = t.dyd, a = r.gt.arr[e];
-      for (let u = n.firstlabel;u < r.label.n; u++) {
-        let l = r.label.arr[u];
-        if (zt(l.name, a.name))
-          return a.nactvar > l.nactvar && (n.upval || r.label.n > n.firstlabel) && nt(t.fs, a.pc, l.nactvar), xe(t, e, l), true;
-      }
-      return false;
-    }, Oe = function(t, e, n, r, a) {
-      let u = e.n;
-      return e.arr[u] = new class {
-        constructor() {
-          this.name = null, this.pc = NaN, this.line = NaN, this.nactvar = NaN;
-        }
-      }, e.arr[u].name = n, e.arr[u].line = r, e.arr[u].nactvar = t.fs.nactvar, e.arr[u].pc = a, e.n = u + 1, u;
-    }, ke = function(t, e) {
-      let n = t.dyd.gt, r = t.fs.bl.firstgoto;
-      for (;r < n.n; )
-        zt(n.arr[r].name, e.name) ? xe(t, r, e) : r++;
-    }, ve = function(t, e, n) {
-      e.isloop = n, e.nactvar = t.nactvar, e.firstlabel = t.ls.dyd.label.n, e.firstgoto = t.ls.dyd.gt.n, e.upval = 0, e.previous = t.bl, t.bl = e, bt(t.freereg === t.nactvar);
-    }, Ee = function(t, e, n) {
-      e.prev = t.fs, e.ls = t, t.fs = e, e.pc = 0, e.lasttarget = 0, e.jpc = I, e.freereg = 0, e.nk = 0, e.np = 0, e.nups = 0, e.nlocvars = 0, e.nactvar = 0, e.firstlocal = t.dyd.actvar.n, e.bl = null;
-      let r = e.f;
-      r.source = t.source, r.maxstacksize = 2, ve(e, n, false);
-    }, Ue = function(t) {
-      let { bl: e, ls: n } = t;
-      if (e.previous && e.upval) {
-        let n = $(t);
-        nt(t, n, e.nactvar), at(t, n);
-      }
-      e.isloop && function(t) {
-        let e = Kt(t.L, "break"), n = Oe(t, t.dyd.label, e, 0, t.fs.pc);
-        ke(t, t.dyd.label.arr[n]);
-      }(n), t.bl = e.previous, function(t, e) {
-        for (t.ls.dyd.actvar.n -= t.nactvar - e;t.nactvar > e; )
-          fe(t, --t.nactvar).endpc = t.pc;
-      }(t, e.nactvar), bt(e.nactvar === t.nactvar), t.freereg = t.nactvar, n.dyd.label.n = e.firstlabel, e.previous ? function(t, e) {
-        let n = e.firstgoto, r = t.ls.dyd.gt;
-        for (;n < r.n; ) {
-          let a = r.arr[n];
-          a.nactvar > e.nactvar && (e.upval && nt(t, a.pc, e.nactvar), a.nactvar = e.nactvar), be(t.ls, n) || n++;
-        }
-      }(t, e) : e.firstgoto < n.dyd.gt.n && function(t, e) {
-        let n = gt.isreserved(e.name) ? "<%s> at line %d not inside a loop" : "no visible label '%s' for <goto> at line %d";
-        n = Ot.luaO_pushfstring(t.L, a(n), e.name.getstr(), e.line), Qt(t, n);
-      }(n, n.dyd.gt.arr[e.firstgoto]);
-    }, me = function(t) {
-      let e = t.fs;
-      ot(e, 0, 0), Ue(e), bt(e.bl === null), t.fs = e.prev;
-    }, Ne = function(t, e) {
-      switch (t.t.token) {
-        case Ht.TK_ELSE:
-        case Ht.TK_ELSEIF:
-        case Ht.TK_END:
-        case Ht.TK_EOS:
-          return true;
-        case Ht.TK_UNTIL:
-          return e;
-        default:
-          return false;
-      }
-    }, Re = function(t) {
-      for (;!Ne(t, 1); ) {
-        if (t.t.token === Ht.TK_RETURN)
-          return void en(t);
-        en(t);
-      }
-    }, Se = function(t, e) {
-      let n = t.fs, r = new Zt;
-      j(n, e), gt.luaX_next(t), ie(t, r), q(n, e, r);
-    }, we = function(t, e) {
-      gt.luaX_next(t), je(t, e), X(t.fs, e), re(t, 93);
-    };
-    const Ie = function(t, e) {
-      let n = t.fs, r = t.fs.freereg, u = new Zt, l = new Zt;
-      t.t.token === Ht.TK_NAME ? (te(n, e.nh, xt, a("items in a constructor", true)), ie(t, u)) : we(t, u), e.nh++, re(t, 61);
-      let s = K(n, u);
-      je(t, l), P(n, St, e.t.u.info, s, K(n, l)), n.freereg = r;
-    }, ye = function(t, e) {
-      e.v.k !== Jt.VVOID && (H(t, e.v), e.v.k = Jt.VVOID, e.tostore === Pt && (ct(t, e.t.u.info, e.na, e.tostore), e.tostore = 0));
-    }, Me = function(t, e) {
-      je(t, e.v), te(t.fs, e.na, xt, a("items in a constructor", true)), e.na++, e.tostore++;
-    }, Pe = function(t, e) {
-      switch (t.t.token) {
-        case Ht.TK_NAME:
-          gt.luaX_lookahead(t) !== 61 ? Me(t, e) : Ie(t, e);
-          break;
-        case 91:
-          Ie(t, e);
-          break;
-        default:
-          Me(t, e);
-      }
-    }, Ce = function(t, e) {
-      let { fs: n, linenumber: a } = t, u = P(n, Rt, 0, 0, 0), l = new class {
-        constructor() {
-          this.v = new Zt, this.t = new Zt, this.nh = NaN, this.na = NaN, this.tostore = NaN;
-        }
-      };
-      l.na = l.nh = l.tostore = 0, l.t = e, se(e, Jt.VRELOCABLE, u), se(l.v, Jt.VVOID, 0), H(t.fs, e), re(t, 123);
-      do {
-        if (bt(l.v.k === Jt.VVOID || l.tostore > 0), t.t.token === 125)
-          break;
-        ye(n, l), Pe(t, l);
-      } while (ee(t, 44) || ee(t, 59));
-      ue(t, 125, 123, a), function(t, e) {
-        e.tostore !== 0 && (Xt(e.v.k) ? (_t(t, e.v), ct(t, e.t.u.info, e.na, r), e.na--) : (e.v.k !== Jt.VVOID && H(t, e.v), ct(t, e.t.u.info, e.na, e.tostore)));
-      }(n, l), Ct(n.f.code[u], Ot.luaO_int2fb(l.na)), Dt(n.f.code[u], Ot.luaO_int2fb(l.nh));
-    }, De = function(t, e, n, r) {
-      let u = new qt, l = new Yt;
-      u.f = function(t) {
-        let e = t.L, n = new jt(e), r = t.fs;
-        return r.f.p[r.np++] = n, n;
-      }(t), u.f.linedefined = r, Ee(t, u, l), re(t, 40), n && (_e(t, "self"), pe(t, 1)), function(t) {
-        let e = t.fs, n = e.f, r = 0;
-        if (n.is_vararg = false, t.t.token !== 41)
-          do {
-            switch (t.t.token) {
-              case Ht.TK_NAME:
-                ce(t, le(t)), r++;
-                break;
-              case Ht.TK_DOTS:
-                gt.luaX_next(t), n.is_vararg = true;
-                break;
-              default:
-                gt.luaX_syntaxerror(t, a("<name> or '...' expected", true));
-            }
-          } while (!n.is_vararg && ee(t, 44));
-        pe(t, r), n.numparams = e.nactvar, st(e, e.nactvar);
-      }(t), re(t, 41), Re(t), u.f.lastlinedefined = t.linenumber, ue(t, Ht.TK_END, Ht.TK_FUNCTION, r), function(t, e) {
-        let n = t.fs.prev;
-        se(e, Jt.VRELOCABLE, C(n, vt, 0, n.np - 1)), H(n, e);
-      }(t, e), me(t);
-    }, Ve = function(t, e) {
-      let n = 1;
-      for (je(t, e);ee(t, 44); )
-        H(t.fs, e), je(t, e), n++;
-      return n;
-    }, Be = function(t, e, n) {
-      let u, l = t.fs, s = new Zt;
-      switch (t.t.token) {
-        case 40:
-          gt.luaX_next(t), t.t.token === 41 ? s.k = Jt.VVOID : (Ve(t, s), _t(l, s)), ue(t, 41, 40, n);
-          break;
-        case 123:
-          Ce(t, s);
-          break;
-        case Ht.TK_STRING:
-          oe(t, s, t.t.seminfo.ts), gt.luaX_next(t);
-          break;
-        default:
-          gt.luaX_syntaxerror(t, a("function arguments expected", true));
-      }
-      bt(e.k === Jt.VNONRELOC);
-      let o = e.u.info;
-      Xt(s.k) ? u = r : (s.k !== Jt.VVOID && H(l, s), u = l.freereg - (o + 1)), se(e, Jt.VCALL, P(l, kt, o, u + 1, 2)), z(l, n), l.freereg = o + 1;
-    }, Ge = function(t, e) {
-      let { fs: n, linenumber: r } = t;
-      for (!function(t, e) {
-        switch (t.t.token) {
-          case 40: {
-            let n = t.linenumber;
-            return gt.luaX_next(t), je(t, e), ue(t, 41, 40, n), void G(t.fs, e);
-          }
-          case Ht.TK_NAME:
-            return void de(t, e);
-          default:
-            gt.luaX_syntaxerror(t, a("unexpected symbol", true));
-        }
-      }(t, e);; )
-        switch (t.t.token) {
-          case 46:
-            Se(t, e);
-            break;
-          case 91: {
-            let r = new Zt;
-            j(n, e), we(t, r), q(n, e, r);
-            break;
-          }
-          case 58: {
-            let a = new Zt;
-            gt.luaX_next(t), ie(t, a), it(n, e, a), Be(t, e, r);
-            break;
-          }
-          case 40:
-          case Ht.TK_STRING:
-          case 123:
-            H(n, e), Be(t, e, r);
-            break;
-          default:
-            return;
-        }
-    }, Ke = [{ left: 10, right: 10 }, { left: 10, right: 10 }, { left: 11, right: 11 }, { left: 11, right: 11 }, { left: 14, right: 13 }, { left: 11, right: 11 }, { left: 11, right: 11 }, { left: 6, right: 6 }, { left: 4, right: 4 }, { left: 5, right: 5 }, { left: 7, right: 7 }, { left: 7, right: 7 }, { left: 9, right: 8 }, { left: 3, right: 3 }, { left: 3, right: 3 }, { left: 3, right: 3 }, { left: 3, right: 3 }, { left: 3, right: 3 }, { left: 3, right: 3 }, { left: 2, right: 2 }, { left: 1, right: 1 }], Fe = function(t, e, n) {
-      ge(t);
-      let r = function(t) {
-        switch (t) {
-          case Ht.TK_NOT:
-            return S;
-          case 45:
-            return R;
-          case 126:
-            return m;
-          case 35:
-            return N;
-          default:
-            return w;
-        }
-      }(t.t.token);
-      if (r !== w) {
-        let n = t.linenumber;
-        gt.luaX_next(t), Fe(t, e, 12), lt(t.fs, r, e, n);
-      } else
-        (function(t, e) {
-          switch (t.t.token) {
-            case Ht.TK_FLT:
-              se(e, Jt.VKFLT, 0), e.u.nval = t.t.seminfo.r;
-              break;
-            case Ht.TK_INT:
-              se(e, Jt.VKINT, 0), e.u.ival = t.t.seminfo.i;
-              break;
-            case Ht.TK_STRING:
-              oe(t, e, t.t.seminfo.ts);
-              break;
-            case Ht.TK_NIL:
-              se(e, Jt.VNIL, 0);
-              break;
-            case Ht.TK_TRUE:
-              se(e, Jt.VTRUE, 0);
-              break;
-            case Ht.TK_FALSE:
-              se(e, Jt.VFALSE, 0);
-              break;
-            case Ht.TK_DOTS: {
-              let n = t.fs;
-              ae(t, n.f.is_vararg, a("cannot use '...' outside a vararg function", true)), se(e, Jt.VVARARG, P(n, Mt, 0, 1, 0));
-              break;
-            }
-            case 123:
-              return void Ce(t, e);
-            case Ht.TK_FUNCTION:
-              return gt.luaX_next(t), void De(t, e, 0, t.linenumber);
-            default:
-              return void Ge(t, e);
-          }
-          gt.luaX_next(t);
-        })(t, e);
-      let I = function(t) {
-        switch (t) {
-          case 43:
-            return u;
-          case 45:
-            return U;
-          case 42:
-            return T;
-          case 37:
-            return g;
-          case 94:
-            return k;
-          case 47:
-            return _;
-          case Ht.TK_IDIV:
-            return h;
-          case 38:
-            return s;
-          case 124:
-            return o;
-          case 126:
-            return i;
-          case Ht.TK_SHL:
-            return v;
-          case Ht.TK_SHR:
-            return E;
-          case Ht.TK_CONCAT:
-            return c;
-          case Ht.TK_NE:
-            return x;
-          case Ht.TK_EQ:
-            return f;
-          case 60:
-            return A;
-          case Ht.TK_LE:
-            return d;
-          case 62:
-            return L;
-          case Ht.TK_GE:
-            return p;
-          case Ht.TK_AND:
-            return l;
-          case Ht.TK_OR:
-            return O;
-          default:
-            return b;
-        }
-      }(t.t.token);
-      for (;I !== b && Ke[I].left > n; ) {
-        let n = new Zt, r = t.linenumber;
-        gt.luaX_next(t), W(t.fs, I, e);
-        let a = Fe(t, n, Ke[I].right);
-        ut(t.fs, I, e, n, r), I = a;
-      }
-      return Te(t), I;
-    }, je = function(t, e) {
-      Fe(t, e, 0);
-    }, He = function(t) {
-      let e = t.fs, n = new Yt;
-      ve(e, n, 0), Re(t), Ue(e);
-    };
-
-    class Xe {
-      constructor() {
-        this.prev = null, this.v = new Zt;
-      }
-    }
-    const ze = function(t, e, n) {
-      let r = new Zt;
-      if (ae(t, function(t) {
-        return Jt.VLOCAL <= t && t <= Jt.VINDEXED;
-      }(e.v.k), a("syntax error", true)), ee(t, 44)) {
-        let r = new Xe;
-        r.prev = e, Ge(t, r.v), r.v.k !== Jt.VINDEXED && function(t, e, n) {
-          let r = t.fs, a = r.freereg, u = false;
-          for (;e; e = e.prev)
-            e.v.k === Jt.VINDEXED && (e.v.u.ind.vt === n.k && e.v.u.ind.t === n.u.info && (u = true, e.v.u.ind.vt = Jt.VLOCAL, e.v.u.ind.t = a), n.k === Jt.VLOCAL && e.v.u.ind.idx === n.u.info && (u = true, e.v.u.ind.idx = a));
-          if (u) {
-            let t = n.k === Jt.VLOCAL ? Nt : mt;
-            P(r, t, a, n.u.info, 0), st(r, 1);
-          }
-        }(t, e, r.v), te(t.fs, n + t.L.nCcalls, Tt, a("JS levels", true)), ze(t, r, n + 1);
-      } else {
-        re(t, 61);
-        let a = Ve(t, r);
-        if (a === n)
-          return ft(t.fs, r), void Lt(t.fs, e.v, r);
-        Ae(t, n, a, r);
-      }
-      se(r, Jt.VNONRELOC, t.fs.freereg - 1), Lt(t.fs, e.v, r);
-    }, Ye = function(t) {
-      let e = new Zt;
-      return je(t, e), e.k === Jt.VNIL && (e.k = Jt.VFALSE), Z(t.fs, e), e.f;
-    }, Je = function(t, e) {
-      let n, r = t.linenumber;
-      ee(t, Ht.TK_GOTO) ? n = le(t) : (gt.luaX_next(t), n = Kt(t.L, "break"));
-      let a = Oe(t, t.dyd.gt, n, r, e);
-      be(t, a);
-    }, Ze = function(t, e, n) {
-      let r, u = t.fs, l = t.dyd.label;
-      (function(t, e, n) {
-        for (let r = t.bl.firstlabel;r < e.n; r++)
-          if (zt(n, e.arr[r].name)) {
-            let u = Ot.luaO_pushfstring(t.ls.L, a("label '%s' already defined on line %d", true), n.getstr(), e.arr[r].line);
-            Qt(t.ls, u);
-          }
-      })(u, l, e), re(t, Ht.TK_DBCOLON), r = Oe(t, l, e, n, Y(u)), function(t) {
-        for (;t.t.token === 59 || t.t.token === Ht.TK_DBCOLON; )
-          en(t);
-      }(t), Ne(t, 0) && (l.arr[r].nactvar = u.bl.nactvar), ke(t, l.arr[r]);
-    }, qe = function(t) {
-      let e = new Zt;
-      return je(t, e), H(t.fs, e), bt(e.k === Jt.VNONRELOC), e.u.info;
-    }, We = function(t, e, n, r, a) {
-      let u, l = new Yt, s = t.fs;
-      pe(t, 3), re(t, Ht.TK_DO);
-      let o = a ? D(s, Ut, e, I) : $(s);
-      ve(s, l, 0), pe(t, r), st(s, r), He(t), Ue(s), at(s, o), a ? u = D(s, Et, e, I) : (P(s, It, e, 0, r), z(s, n), u = D(s, yt, e + 2, I)), rt(s, u, o + 1), z(s, n);
-    }, Qe = function(t, e) {
-      let n = t.fs, r = new Yt;
-      ve(n, r, 1), gt.luaX_next(t);
-      let u = le(t);
-      switch (t.t.token) {
-        case 61:
-          (function(t, e, n) {
-            let r = t.fs, a = r.freereg;
-            _e(t, "(for index)"), _e(t, "(for limit)"), _e(t, "(for step)"), ce(t, e), re(t, 61), qe(t), re(t, 44), qe(t), ee(t, 44) ? qe(t) : (V(r, r.freereg, Q(r, 1)), st(r, 1)), We(t, a, n, 1, 1);
-          })(t, u, e);
-          break;
-        case 44:
-        case Ht.TK_IN:
-          (function(t, e) {
-            let n = t.fs, r = new Zt, a = 4, u = n.freereg;
-            for (_e(t, "(for generator)"), _e(t, "(for state)"), _e(t, "(for control)"), ce(t, e);ee(t, 44); )
-              ce(t, le(t)), a++;
-            re(t, Ht.TK_IN);
-            let l = t.linenumber;
-            Ae(t, 3, Ve(t, r), r), M(n, 3), We(t, u, l, a - 3, 0);
-          })(t, u);
-          break;
-        default:
-          gt.luaX_syntaxerror(t, a("'=' or 'in' expected", true));
-      }
-      ue(t, Ht.TK_END, Ht.TK_FOR, e), Ue(n);
-    }, $e = function(t, e) {
-      let n, r = new Yt, a = t.fs, u = new Zt;
-      if (gt.luaX_next(t), je(t, u), re(t, Ht.TK_THEN), t.t.token === Ht.TK_GOTO || t.t.token === Ht.TK_BREAK) {
-        for (J(t.fs, u), ve(a, r, false), Je(t, u.t);ee(t, 59); )
-          ;
-        if (Ne(t, 0))
-          return Ue(a), e;
-        n = $(a);
-      } else
-        Z(t.fs, u), ve(a, r, false), n = u.f;
-      return Re(t), Ue(a), t.t.token !== Ht.TK_ELSE && t.t.token !== Ht.TK_ELSEIF || (e = B(a, e, $(a))), at(a, n), e;
-    }, tn = function(t, e) {
-      let n = new Zt, r = new Zt;
-      gt.luaX_next(t);
-      let a = function(t, e) {
-        let n = 0;
-        for (de(t, e);t.t.token === 46; )
-          Se(t, e);
-        return t.t.token === 58 && (n = 1, Se(t, e)), n;
-      }(t, n);
-      De(t, r, a, e), Lt(t.fs, n, r), z(t.fs, e);
-    }, en = function(t) {
-      let e = t.linenumber;
-      switch (ge(t), t.t.token) {
-        case 59:
-          gt.luaX_next(t);
-          break;
-        case Ht.TK_IF:
-          (function(t, e) {
-            let n = t.fs, r = I;
-            for (r = $e(t, r);t.t.token === Ht.TK_ELSEIF; )
-              r = $e(t, r);
-            ee(t, Ht.TK_ELSE) && He(t), ue(t, Ht.TK_END, Ht.TK_IF, e), at(n, r);
-          })(t, e);
-          break;
-        case Ht.TK_WHILE:
-          (function(t, e) {
-            let n = t.fs, r = new Yt;
-            gt.luaX_next(t);
-            let a = Y(n), u = Ye(t);
-            ve(n, r, 1), re(t, Ht.TK_DO), He(t), tt(n, a), ue(t, Ht.TK_END, Ht.TK_WHILE, e), Ue(n), at(n, u);
-          })(t, e);
-          break;
-        case Ht.TK_DO:
-          gt.luaX_next(t), He(t), ue(t, Ht.TK_END, Ht.TK_DO, e);
-          break;
-        case Ht.TK_FOR:
-          Qe(t, e);
-          break;
-        case Ht.TK_REPEAT:
-          (function(t, e) {
-            let n = t.fs, r = Y(n), a = new Yt, u = new Yt;
-            ve(n, a, 1), ve(n, u, 0), gt.luaX_next(t), Re(t), ue(t, Ht.TK_UNTIL, Ht.TK_REPEAT, e);
-            let l = Ye(t);
-            u.upval && nt(n, l, u.nactvar), Ue(n), rt(n, l, r), Ue(n);
-          })(t, e);
-          break;
-        case Ht.TK_FUNCTION:
-          tn(t, e);
-          break;
-        case Ht.TK_LOCAL:
-          gt.luaX_next(t), ee(t, Ht.TK_FUNCTION) ? function(t) {
-            let e = new Zt, n = t.fs;
-            ce(t, le(t)), pe(t, 1), De(t, e, 0, t.linenumber), fe(n, e.u.info).startpc = n.pc;
-          }(t) : function(t) {
-            let e, n = 0, r = new Zt;
-            do {
-              ce(t, le(t)), n++;
-            } while (ee(t, 44));
-            ee(t, 61) ? e = Ve(t, r) : (r.k = Jt.VVOID, e = 0), Ae(t, n, e, r), pe(t, n);
-          }(t);
-          break;
-        case Ht.TK_DBCOLON:
-          gt.luaX_next(t), Ze(t, le(t), e);
-          break;
-        case Ht.TK_RETURN:
-          gt.luaX_next(t), function(t) {
-            let e, n, a = t.fs, u = new Zt;
-            Ne(t, 1) || t.t.token === 59 ? e = n = 0 : (n = Ve(t, u), Xt(u.k) ? (_t(a, u), u.k === Jt.VCALL && n === 1 && (Vt(y(a, u), wt), bt(y(a, u).A === a.nactvar)), e = a.nactvar, n = r) : n === 1 ? e = F(a, u) : (H(a, u), e = a.nactvar, bt(n === a.freereg - e))), ot(a, e, n), ee(t, 59);
-          }(t);
-          break;
-        case Ht.TK_BREAK:
-        case Ht.TK_GOTO:
-          Je(t, $(t.fs));
-          break;
-        default:
-          (function(t) {
-            let e = t.fs, n = new Xe;
-            Ge(t, n.v), t.t.token === 61 || t.t.token === 44 ? (n.prev = null, ze(t, n, 1)) : (ae(t, n.v.k === Jt.VCALL, a("syntax error", true)), Dt(y(e, n.v), 1));
-          })(t);
-      }
-      bt(t.fs.f.maxstacksize >= t.fs.freereg && t.fs.freereg >= t.fs.nactvar), t.fs.freereg = t.fs.nactvar, Te(t);
-    };
-    t.exports.Dyndata = class {
-      constructor() {
-        this.actvar = { arr: [], n: NaN, size: NaN }, this.gt = new Wt, this.label = new Wt;
-      }
-    }, t.exports.expkind = Jt, t.exports.expdesc = Zt, t.exports.luaY_parser = function(t, e, n, r, a, u) {
-      let l = new gt.LexState, s = new qt, o = At.luaF_newLclosure(t, 1);
-      return dt.luaD_inctop(t), t.stack[t.top - 1].setclLvalue(o), l.h = Ft.luaH_new(t), dt.luaD_inctop(t), t.stack[t.top - 1].sethvalue(l.h), s.f = o.p = new jt(t), s.f.source = Gt(t, a), l.buff = n, l.dyd = r, r.actvar.n = r.gt.n = r.label.n = 0, gt.luaX_setinput(t, l, e, s.f.source, u), function(t, e) {
-        let n = new Yt, r = new Zt;
-        Ee(t, e, n), e.f.is_vararg = true, se(r, Jt.VLOCAL, 0), Le(e, t.envn, r), gt.luaX_next(t), Re(t), ne(t, Ht.TK_EOS), me(t);
-      }(l, s), bt(!s.prev && s.nups === 1 && !l.fs), bt(r.actvar.n === 0 && r.gt.n === 0 && r.label.n === 0), delete t.stack[--t.top], o;
-    }, t.exports.vkisinreg = function(t) {
-      return t === Jt.VNONRELOC || t === Jt.VLOCAL;
-    };
-  }, function(t, e, n) {
-    const { LUA_MULTRET: r, LUA_OK: a, LUA_TFUNCTION: u, LUA_TNIL: l, LUA_TNONE: s, LUA_TNUMBER: o, LUA_TSTRING: i, LUA_TTABLE: c, LUA_VERSION: _, LUA_YIELD: f, lua_call: p, lua_callk: L, lua_concat: h, lua_error: d, lua_getglobal: A, lua_geti: g, lua_getmetatable: T, lua_gettop: x, lua_insert: b, lua_isnil: O, lua_isnone: k, lua_isstring: v, lua_load: E, lua_next: U, lua_pcallk: m, lua_pop: N, lua_pushboolean: R, lua_pushcfunction: S, lua_pushglobaltable: w, lua_pushinteger: I, lua_pushliteral: y, lua_pushnil: M, lua_pushstring: P, lua_pushvalue: C, lua_rawequal: D, lua_rawget: V, lua_rawlen: B, lua_rawset: G, lua_remove: K, lua_replace: F, lua_rotate: j, lua_setfield: H, lua_setmetatable: X, lua_settop: z, lua_setupvalue: Y, lua_stringtonumber: J, lua_toboolean: Z, lua_tolstring: q, lua_tostring: W, lua_type: Q, lua_typename: $ } = n(2), { luaL_argcheck: tt, luaL_checkany: et, luaL_checkinteger: nt, luaL_checkoption: rt, luaL_checkstack: at, luaL_checktype: ut, luaL_error: lt, luaL_getmetafield: st, luaL_loadbufferx: ot, luaL_loadfile: it, luaL_loadfilex: ct, luaL_optinteger: _t, luaL_optstring: ft, luaL_setfuncs: pt, luaL_tolstring: Lt, luaL_where: ht } = n(7), { to_jsstring: dt, to_luastring: At } = n(5);
-    let gt, Tt;
-    if (typeof TextDecoder == "function") {
-      let t = "", e = new TextDecoder("utf-8");
-      gt = function(n) {
-        t += e.decode(n, { stream: true });
-      };
-      let n = new Uint8Array(0);
-      Tt = function() {
-        t += e.decode(n), console.log(t), t = "";
-      };
-    } else {
-      let t = [];
-      gt = function(e) {
-        try {
-          e = dt(e);
-        } catch (t) {
-          let n = new Uint8Array(e.length);
-          n.set(e), e = n;
-        }
-        t.push(e);
-      }, Tt = function() {
-        console.log.apply(console.log, t), t = [];
-      };
-    }
-    const xt = ["stop", "restart", "collect", "count", "step", "setpause", "setstepmul", "isrunning"].map((t) => At(t)), bt = function(t) {
-      return ut(t, 1, c), z(t, 2), U(t, 1) ? 2 : (M(t), 1);
-    }, Ot = function(t) {
-      let e = nt(t, 2) + 1;
-      return I(t, e), g(t, 1, e) === l ? 1 : 2;
-    }, kt = function(t) {
-      let e = _t(t, 2, 1);
-      return z(t, 1), Q(t, 1) === i && e > 0 && (ht(t, e), C(t, 1), h(t, 2)), d(t);
-    }, vt = function(t, e, n) {
-      return e !== a && e !== f ? (R(t, 0), C(t, -2), 2) : x(t) - n;
-    }, Et = function(t, e, n) {
-      return e === a ? (n !== 0 && (C(t, n), Y(t, -2, 1) || N(t, 1)), 1) : (M(t), b(t, -2), 2);
-    }, Ut = function(t, e) {
-      return at(t, 2, "too many nested functions"), C(t, 1), p(t, 0, 1), O(t, -1) ? (N(t, 1), null) : (v(t, -1) || lt(t, At("reader function must return a string")), F(t, 5), W(t, 5));
-    }, mt = function(t, e, n) {
-      return x(t) - 1;
-    }, Nt = { assert: function(t) {
-      return Z(t, 1) ? x(t) : (et(t, 1), K(t, 1), y(t, "assertion failed!"), z(t, 1), kt(t));
-    }, collectgarbage: function(t) {
-      rt(t, 1, "collect", xt), _t(t, 2, 0), lt(t, At("lua_gc not implemented"));
-    }, dofile: function(t) {
-      let e = ft(t, 1, null);
-      return z(t, 1), it(t, e) !== a ? d(t) : (L(t, 0, r, 0, mt), mt(t));
-    }, error: kt, getmetatable: function(t) {
-      return et(t, 1), T(t, 1) ? (st(t, 1, At("__metatable", true)), 1) : (M(t), 1);
-    }, ipairs: function(t) {
-      return et(t, 1), S(t, Ot), C(t, 1), I(t, 0), 3;
-    }, load: function(t) {
-      let e, n = W(t, 1), r = ft(t, 3, "bt"), a = k(t, 4) ? 0 : 4;
-      if (n !== null) {
-        let a = ft(t, 2, n);
-        e = ot(t, n, n.length, a, r);
-      } else {
-        let n = ft(t, 2, "=(load)");
-        ut(t, 1, u), z(t, 5), e = E(t, Ut, null, n, r);
-      }
-      return Et(t, e, a);
-    }, loadfile: function(t) {
-      let e = ft(t, 1, null), n = ft(t, 2, null), r = k(t, 3) ? 0 : 3, a = ct(t, e, n);
-      return Et(t, a, r);
-    }, next: bt, pairs: function(t) {
-      return function(t, e, n, r) {
-        return et(t, 1), st(t, 1, e) === l ? (S(t, r), C(t, 1), n ? I(t, 0) : M(t)) : (C(t, 1), p(t, 1, 3)), 3;
-      }(t, At("__pairs", true), 0, bt);
-    }, pcall: function(t) {
-      et(t, 1), R(t, 1), b(t, 1);
-      let e = m(t, x(t) - 2, r, 0, 0, vt);
-      return vt(t, e, 0);
-    }, print: function(t) {
-      let e = x(t);
-      A(t, At("tostring", true));
-      for (let n = 1;n <= e; n++) {
-        C(t, -1), C(t, n), p(t, 1, 1);
-        let e = q(t, -1);
-        if (e === null)
-          return lt(t, At("'tostring' must return a string to 'print'"));
-        n > 1 && gt(At("\t")), gt(e), N(t, 1);
-      }
-      return Tt(), 0;
-    }, rawequal: function(t) {
-      return et(t, 1), et(t, 2), R(t, D(t, 1, 2)), 1;
-    }, rawget: function(t) {
-      return ut(t, 1, c), et(t, 2), z(t, 2), V(t, 1), 1;
-    }, rawlen: function(t) {
-      let e = Q(t, 1);
-      return tt(t, e === c || e === i, 1, "table or string expected"), I(t, B(t, 1)), 1;
-    }, rawset: function(t) {
-      return ut(t, 1, c), et(t, 2), et(t, 3), z(t, 3), G(t, 1), 1;
-    }, select: function(t) {
-      let e = x(t);
-      if (Q(t, 1) === i && W(t, 1)[0] === 35)
-        return I(t, e - 1), 1;
-      {
-        let n = nt(t, 1);
-        return n < 0 ? n = e + n : n > e && (n = e), tt(t, 1 <= n, 1, "index out of range"), e - n;
-      }
-    }, setmetatable: function(t) {
-      let e = Q(t, 2);
-      return ut(t, 1, c), tt(t, e === l || e === c, 2, "nil or table expected"), st(t, 1, At("__metatable", true)) !== l ? lt(t, At("cannot change a protected metatable")) : (z(t, 2), X(t, 1), 1);
-    }, tonumber: function(t) {
-      if (Q(t, 2) <= 0) {
-        if (et(t, 1), Q(t, 1) === o)
-          return z(t, 1), 1;
-        {
-          let e = W(t, 1);
-          if (e !== null && J(t, e) === e.length + 1)
-            return 1;
-        }
-      } else {
-        let e = nt(t, 2);
-        ut(t, 1, i);
-        let n = W(t, 1);
-        tt(t, 2 <= e && e <= 36, 2, "base out of range");
-        let r = function(t, e) {
-          try {
-            t = dt(t);
-          } catch (t) {
-            return null;
-          }
-          let n = /^[\t\v\f \n\r]*([+-]?)0*([0-9A-Za-z]+)[\t\v\f \n\r]*$/.exec(t);
-          if (!n)
-            return null;
-          let r = parseInt(n[1] + n[2], e);
-          return isNaN(r) ? null : 0 | r;
-        }(n, e);
-        if (r !== null)
-          return I(t, r), 1;
-      }
-      return M(t), 1;
-    }, tostring: function(t) {
-      return et(t, 1), Lt(t, 1), 1;
-    }, type: function(t) {
-      let e = Q(t, 1);
-      return tt(t, e !== s, 1, "value expected"), P(t, $(t, e)), 1;
-    }, xpcall: function(t) {
-      let e = x(t);
-      ut(t, 2, u), R(t, 1), C(t, 1), j(t, 3, 2);
-      let n = m(t, e - 2, r, 2, 2, vt);
-      return vt(t, n, 2);
-    } };
-    t.exports.luaopen_base = function(t) {
-      return w(t), pt(t, Nt, 0), C(t, -1), H(t, -2, At("_G")), y(t, _), H(t, -2, At("_VERSION")), 1;
-    };
-  }, function(t, e, n) {
-    const { LUA_OK: r, LUA_TFUNCTION: a, LUA_TSTRING: u, LUA_YIELD: l, lua_Debug: s, lua_checkstack: o, lua_concat: i, lua_error: c, lua_getstack: _, lua_gettop: f, lua_insert: p, lua_isyieldable: L, lua_newthread: h, lua_pop: d, lua_pushboolean: A, lua_pushcclosure: g, lua_pushliteral: T, lua_pushthread: x, lua_pushvalue: b, lua_resume: O, lua_status: k, lua_tothread: v, lua_type: E, lua_upvalueindex: U, lua_xmove: m, lua_yield: N } = n(2), { luaL_argcheck: R, luaL_checktype: S, luaL_newlib: w, luaL_where: I } = n(7), y = function(t) {
-      let e = v(t, 1);
-      return R(t, e, 1, "thread expected"), e;
-    }, M = function(t, e, n) {
-      if (!o(e, n))
-        return T(t, "too many arguments to resume"), -1;
-      if (k(e) === r && f(e) === 0)
-        return T(t, "cannot resume dead coroutine"), -1;
-      m(t, e, n);
-      let a = O(e, t, n);
-      if (a === r || a === l) {
-        let n = f(e);
-        return o(t, n + 1) ? (m(e, t, n), n) : (d(e, n), T(t, "too many results to resume"), -1);
-      }
-      return m(e, t, 1), -1;
-    }, P = function(t) {
-      let e = v(t, U(1)), n = M(t, e, f(t));
-      return n < 0 ? (E(t, -1) === u && (I(t, 1), p(t, -2), i(t, 2)), c(t)) : n;
-    }, C = function(t) {
-      S(t, 1, a);
-      let e = h(t);
-      return b(t, 1), m(t, e, 1), 1;
-    }, D = { create: C, isyieldable: function(t) {
-      return A(t, L(t)), 1;
-    }, resume: function(t) {
-      let e = y(t), n = M(t, e, f(t) - 1);
-      return n < 0 ? (A(t, 0), p(t, -2), 2) : (A(t, 1), p(t, -(n + 1)), n + 1);
-    }, running: function(t) {
-      return A(t, x(t)), 2;
-    }, status: function(t) {
-      let e = y(t);
-      if (t === e)
-        T(t, "running");
-      else
-        switch (k(e)) {
-          case l:
-            T(t, "suspended");
-            break;
-          case r: {
-            let n = new s;
-            _(e, 0, n) > 0 ? T(t, "normal") : f(e) === 0 ? T(t, "dead") : T(t, "suspended");
-            break;
-          }
-          default:
-            T(t, "dead");
-        }
-      return 1;
-    }, wrap: function(t) {
-      return C(t), g(t, P, 1), 1;
-    }, yield: function(t) {
-      return N(t, f(t));
-    } };
-    t.exports.luaopen_coroutine = function(t) {
-      return w(t, D), 1;
-    };
-  }, function(t, e, n) {
-    const { LUA_MAXINTEGER: r } = n(3), { LUA_OPEQ: a, LUA_OPLT: u, LUA_TFUNCTION: l, LUA_TNIL: s, LUA_TTABLE: o, lua_call: i, lua_checkstack: c, lua_compare: _, lua_createtable: f, lua_geti: p, lua_getmetatable: L, lua_gettop: h, lua_insert: d, lua_isnil: A, lua_isnoneornil: g, lua_isstring: T, lua_pop: x, lua_pushinteger: b, lua_pushnil: O, lua_pushstring: k, lua_pushvalue: v, lua_rawget: E, lua_setfield: U, lua_seti: m, lua_settop: N, lua_toboolean: R, lua_type: S } = n(2), { luaL_Buffer: w, luaL_addlstring: I, luaL_addvalue: y, luaL_argcheck: M, luaL_buffinit: P, luaL_checkinteger: C, luaL_checktype: D, luaL_error: V, luaL_len: B, luaL_newlib: G, luaL_opt: K, luaL_optinteger: F, luaL_optlstring: j, luaL_pushresult: H, luaL_typename: X } = n(7), z = n(17), { to_luastring: Y } = n(5), J = function(t, e, n) {
-      return k(t, e), E(t, -n) !== s;
-    }, Z = function(t, e, n) {
-      if (S(t, e) !== o) {
-        let r = 1;
-        !L(t, e) || 1 & n && !J(t, Y("__index", true), ++r) || 2 & n && !J(t, Y("__newindex", true), ++r) || 4 & n && !J(t, Y("__len", true), ++r) ? D(t, e, o) : x(t, r);
-      }
-    }, q = function(t, e, n) {
-      return Z(t, e, 4 | n), B(t, e);
-    }, W = function(t, e, n) {
-      p(t, 1, n), T(t, -1) || V(t, Y("invalid value (%s) at index %d in table for 'concat'"), X(t, -1), n), y(e);
-    }, Q = function(t, e, n) {
-      m(t, 1, e), m(t, 1, n);
-    }, $ = function(t, e, n) {
-      if (A(t, 2))
-        return _(t, e, n, u);
-      {
-        v(t, 2), v(t, e - 1), v(t, n - 2), i(t, 2, 1);
-        let r = R(t, -1);
-        return x(t, 1), r;
-      }
-    }, tt = function(t, e, n) {
-      let r = e, a = n - 1;
-      for (;; ) {
-        for (;p(t, 1, ++r), $(t, -1, -2); )
-          r == n - 1 && V(t, Y("invalid order function for sorting")), x(t, 1);
-        for (;p(t, 1, --a), $(t, -3, -1); )
-          a < r && V(t, Y("invalid order function for sorting")), x(t, 1);
-        if (a < r)
-          return x(t, 1), Q(t, n - 1, r), r;
-        Q(t, r, a);
-      }
-    }, et = function(t, e, n) {
-      let r = Math.floor((e - t) / 4), a = n % (2 * r) + (t + r);
-      return z.lua_assert(t + r <= a && a <= e - r), a;
-    }, nt = function(t, e, n, r) {
-      for (;e < n; ) {
-        if (p(t, 1, e), p(t, 1, n), $(t, -1, -2) ? Q(t, e, n) : x(t, 2), n - e == 1)
-          return;
-        let a, u;
-        if (a = n - e < 100 || r === 0 ? Math.floor((e + n) / 2) : et(e, n, r), p(t, 1, a), p(t, 1, e), $(t, -2, -1) ? Q(t, a, e) : (x(t, 1), p(t, 1, n), $(t, -1, -2) ? Q(t, a, n) : x(t, 2)), n - e == 2)
-          return;
-        p(t, 1, a), v(t, -1), p(t, 1, n - 1), Q(t, a, n - 1), (a = tt(t, e, n)) - e < n - a ? (nt(t, e, a - 1, r), u = a - e, e = a + 1) : (nt(t, a + 1, n, r), u = n - a, n = a - 1), (n - e) / 128 > u && (r = Math.floor(4294967296 * Math.random()));
-      }
-    }, rt = { concat: function(t) {
-      let e = q(t, 1, 1), n = j(t, 2, ""), r = n.length, a = F(t, 3, 1);
-      e = F(t, 4, e);
-      let u = new w;
-      for (P(t, u);a < e; a++)
-        W(t, u, a), I(u, n, r);
-      return a === e && W(t, u, a), H(u), 1;
-    }, insert: function(t) {
-      let e, n = q(t, 1, 3) + 1;
-      switch (h(t)) {
-        case 2:
-          e = n;
-          break;
-        case 3:
-          e = C(t, 2), M(t, 1 <= e && e <= n, 2, "position out of bounds");
-          for (let r = n;r > e; r--)
-            p(t, 1, r - 1), m(t, 1, r);
-          break;
-        default:
-          return V(t, "wrong number of arguments to 'insert'");
-      }
-      return m(t, 1, e), 0;
-    }, move: function(t) {
-      let e = C(t, 2), n = C(t, 3), u = C(t, 4), l = g(t, 5) ? 1 : 5;
-      if (Z(t, 1, 1), Z(t, l, 2), n >= e) {
-        M(t, e > 0 || n < r + e, 3, "too many elements to move");
-        let s = n - e + 1;
-        if (M(t, u <= r - s + 1, 4, "destination wrap around"), u > n || u <= e || l !== 1 && _(t, 1, l, a) !== 1)
-          for (let n = 0;n < s; n++)
-            p(t, 1, e + n), m(t, l, u + n);
-        else
-          for (let n = s - 1;n >= 0; n--)
-            p(t, 1, e + n), m(t, l, u + n);
-      }
-      return v(t, l), 1;
-    }, pack: function(t) {
-      let e = h(t);
-      f(t, e, 1), d(t, 1);
-      for (let n = e;n >= 1; n--)
-        m(t, 1, n);
-      return b(t, e), U(t, 1, Y("n")), 1;
-    }, remove: function(t) {
-      let e = q(t, 1, 3), n = F(t, 2, e);
-      for (n !== e && M(t, 1 <= n && n <= e + 1, 1, "position out of bounds"), p(t, 1, n);n < e; n++)
-        p(t, 1, n + 1), m(t, 1, n);
-      return O(t), m(t, 1, n), 1;
-    }, sort: function(t) {
-      let e = q(t, 1, 3);
-      return e > 1 && (M(t, e < r, 1, "array too big"), g(t, 2) || D(t, 2, l), N(t, 2), nt(t, 1, e, 0)), 0;
-    }, unpack: function(t) {
-      let e = F(t, 2, 1), n = K(t, C, 3, B(t, 1));
-      if (e > n)
-        return 0;
-      let r = n - e;
-      if (r >= Number.MAX_SAFE_INTEGER || !c(t, ++r))
-        return V(t, Y("too many results to unpack"));
-      for (;e < n; e++)
-        p(t, 1, e);
-      return p(t, 1, n), r;
-    } };
-    t.exports.luaopen_table = function(t) {
-      return G(t, rt), 1;
-    };
-  }, function(t, e, n) {
-    const { LUA_TNIL: r, LUA_TTABLE: a, lua_close: u, lua_createtable: l, lua_getfield: s, lua_isboolean: o, lua_isnoneornil: i, lua_pop: c, lua_pushboolean: _, lua_pushfstring: f, lua_pushinteger: p, lua_pushliteral: L, lua_pushnil: h, lua_pushnumber: d, lua_pushstring: A, lua_setfield: g, lua_settop: T, lua_toboolean: x, lua_tointegerx: b } = n(2), { luaL_Buffer: O, luaL_addchar: k, luaL_addstring: v, luaL_argerror: E, luaL_buffinit: U, luaL_checkinteger: m, luaL_checkstring: N, luaL_checktype: R, luaL_error: S, luaL_execresult: w, luaL_fileresult: I, luaL_newlib: y, luaL_optinteger: M, luaL_optlstring: P, luaL_optstring: C, luaL_pushresult: D } = n(7), { luastring_eq: V, to_jsstring: B, to_luastring: G } = n(5), K = G("aAbBcCdDeFhHIjklmMnpPrRStTuUwWxXyYzZ%"), F = function(t, e, n) {
-      p(t, n), g(t, -2, G(e, true));
-    }, j = function(t, e, n) {
-      F(t, "sec", n ? e.getUTCSeconds() : e.getSeconds()), F(t, "min", n ? e.getUTCMinutes() : e.getMinutes()), F(t, "hour", n ? e.getUTCHours() : e.getHours()), F(t, "day", n ? e.getUTCDate() : e.getDate()), F(t, "month", (n ? e.getUTCMonth() : e.getMonth()) + 1), F(t, "year", n ? e.getUTCFullYear() : e.getFullYear()), F(t, "wday", (n ? e.getUTCDay() : e.getDay()) + 1), F(t, "yday", Math.floor((e - new Date(e.getFullYear(), 0, 0)) / 86400000));
-    }, H = Number.MAX_SAFE_INTEGER / 2, X = function(t, e, n, a) {
-      let u = s(t, -1, G(e, true)), l = b(t, -1);
-      if (l === false) {
-        if (u !== r)
-          return S(t, G("field '%s' is not an integer"), e);
-        if (n < 0)
-          return S(t, G("field '%s' missing in date table"), e);
-        l = n;
-      } else {
-        if (!(-H <= l && l <= H))
-          return S(t, G("field '%s' is out-of-bound"), e);
-        l -= a;
-      }
-      return c(t, 1), l;
-    }, z = { days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((t) => G(t)), shortDays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((t) => G(t)), months: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((t) => G(t)), shortMonths: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((t) => G(t)), AM: G("AM"), PM: G("PM"), am: G("am"), pm: G("pm"), formats: { c: G("%a %b %e %H:%M:%S %Y"), D: G("%m/%d/%y"), F: G("%Y-%m-%d"), R: G("%H:%M"), r: G("%I:%M:%S %p"), T: G("%H:%M:%S"), X: G("%T"), x: G("%D") } }, Y = function(t, e) {
-      let n = t.getDay();
-      e === "monday" && (n === 0 ? n = 6 : n--);
-      let r = (t - new Date(t.getFullYear(), 0, 1)) / 86400000;
-      return Math.floor((r + 7 - n) / 7);
-    }, J = function(t, e, n) {
-      e < 10 && k(t, n), v(t, G(String(e)));
-    }, Z = function(t, e, n, r) {
-      let a = 0;
-      for (;a < n.length; )
-        if (n[a] !== 37)
-          k(e, n[a++]);
-        else {
-          let u = q(t, n, ++a);
-          switch (n[a]) {
-            case 37:
-              k(e, 37);
-              break;
-            case 65:
-              v(e, z.days[r.getDay()]);
-              break;
-            case 66:
-              v(e, z.months[r.getMonth()]);
-              break;
-            case 67:
-              J(e, Math.floor(r.getFullYear() / 100), 48);
-              break;
-            case 68:
-              Z(t, e, z.formats.D, r);
-              break;
-            case 70:
-              Z(t, e, z.formats.F, r);
-              break;
-            case 72:
-              J(e, r.getHours(), 48);
-              break;
-            case 73:
-              J(e, (r.getHours() + 11) % 12 + 1, 48);
-              break;
-            case 77:
-              J(e, r.getMinutes(), 48);
-              break;
-            case 80:
-              v(e, r.getHours() < 12 ? z.am : z.pm);
-              break;
-            case 82:
-              Z(t, e, z.formats.R, r);
-              break;
-            case 83:
-              J(e, r.getSeconds(), 48);
-              break;
-            case 84:
-              Z(t, e, z.formats.T, r);
-              break;
-            case 85:
-              J(e, Y(r, "sunday"), 48);
-              break;
-            case 87:
-              J(e, Y(r, "monday"), 48);
-              break;
-            case 88:
-              Z(t, e, z.formats.X, r);
-              break;
-            case 89:
-              v(e, G(String(r.getFullYear())));
-              break;
-            case 90: {
-              let t = r.toString().match(/\(([\w\s]+)\)/);
-              t && v(e, G(t[1]));
-              break;
-            }
-            case 97:
-              v(e, z.shortDays[r.getDay()]);
-              break;
-            case 98:
-            case 104:
-              v(e, z.shortMonths[r.getMonth()]);
-              break;
-            case 99:
-              Z(t, e, z.formats.c, r);
-              break;
-            case 100:
-              J(e, r.getDate(), 48);
-              break;
-            case 101:
-              J(e, r.getDate(), 32);
-              break;
-            case 106: {
-              let t = Math.floor((r - new Date(r.getFullYear(), 0, 1)) / 86400000);
-              t < 100 && (t < 10 && k(e, 48), k(e, 48)), v(e, G(String(t)));
-              break;
-            }
-            case 107:
-              J(e, r.getHours(), 32);
-              break;
-            case 108:
-              J(e, (r.getHours() + 11) % 12 + 1, 32);
-              break;
-            case 109:
-              J(e, r.getMonth() + 1, 48);
-              break;
-            case 110:
-              k(e, 10);
-              break;
-            case 112:
-              v(e, r.getHours() < 12 ? z.AM : z.PM);
-              break;
-            case 114:
-              Z(t, e, z.formats.r, r);
-              break;
-            case 115:
-              v(e, G(String(Math.floor(r / 1000))));
-              break;
-            case 116:
-              k(e, 8);
-              break;
-            case 117: {
-              let t = r.getDay();
-              v(e, G(String(t === 0 ? 7 : t)));
-              break;
-            }
-            case 119:
-              v(e, G(String(r.getDay())));
-              break;
-            case 120:
-              Z(t, e, z.formats.x, r);
-              break;
-            case 121:
-              J(e, r.getFullYear() % 100, 48);
-              break;
-            case 122: {
-              let t = r.getTimezoneOffset();
-              t > 0 ? k(e, 45) : (t = -t, k(e, 43)), J(e, Math.floor(t / 60), 48), J(e, t % 60, 48);
-              break;
-            }
-          }
-          a += u;
-        }
-    }, q = function(t, e, n) {
-      let r = K, a = 0, u = 1;
-      for (;a < r.length && u <= e.length - n; a += u)
-        if (r[a] === 124)
-          u++;
-        else if (V(e.subarray(n, n + u), r.subarray(a, a + u)))
-          return u;
-      E(t, 1, f(t, G("invalid conversion specifier '%%%s'"), e));
-    }, W = function(t, e) {
-      return m(t, e);
-    }, Q = { date: function(t) {
-      let e = P(t, 1, "%c"), n = i(t, 2) ? new Date : new Date(1000 * W(t, 2)), r = false, a = 0;
-      if (e[a] === 33 && (r = true, a++), e[a] === 42 && e[a + 1] === 116)
-        l(t, 0, 9), j(t, n, r);
-      else {
-        new Uint8Array(4)[0] = 37;
-        let r = new O;
-        U(t, r), Z(t, r, e, n), D(r);
-      }
-      return 1;
-    }, difftime: function(t) {
-      let e = W(t, 1), n = W(t, 2);
-      return d(t, e - n), 1;
-    }, time: function(t) {
-      let e;
-      return i(t, 1) ? e = new Date : (R(t, 1, a), T(t, 1), e = new Date(X(t, "year", -1, 0), X(t, "month", -1, 1), X(t, "day", -1, 0), X(t, "hour", 12, 0), X(t, "min", 0, 0), X(t, "sec", 0, 0)), j(t, e)), p(t, Math.floor(e / 1000)), 1;
-    }, clock: function(t) {
-      return d(t, performance.now() / 1000), 1;
-    } };
-    t.exports.luaopen_os = function(t) {
-      return y(t, Q), 1;
-    };
-  }, function(t, e, n) {
-    const { sprintf: r } = n(38), { LUA_INTEGER_FMT: a, LUA_INTEGER_FRMLEN: u, LUA_MININTEGER: l, LUA_NUMBER_FMT: s, LUA_NUMBER_FRMLEN: o, frexp: i, lua_getlocaledecpoint: c } = n(3), { LUA_TBOOLEAN: _, LUA_TFUNCTION: f, LUA_TNIL: p, LUA_TNUMBER: L, LUA_TSTRING: h, LUA_TTABLE: d, lua_call: A, lua_createtable: g, lua_dump: T, lua_gettable: x, lua_gettop: b, lua_isinteger: O, lua_isstring: k, lua_pop: v, lua_pushcclosure: E, lua_pushinteger: U, lua_pushlightuserdata: m, lua_pushliteral: N, lua_pushlstring: R, lua_pushnil: S, lua_pushnumber: w, lua_pushstring: I, lua_pushvalue: y, lua_remove: M, lua_setfield: P, lua_setmetatable: C, lua_settop: D, lua_toboolean: V, lua_tointeger: B, lua_tonumber: G, lua_tostring: K, lua_touserdata: F, lua_type: j, lua_upvalueindex: H } = n(2), { luaL_Buffer: X, luaL_addchar: z, luaL_addlstring: Y, luaL_addsize: J, luaL_addstring: Z, luaL_addvalue: q, luaL_argcheck: W, luaL_argerror: Q, luaL_buffinit: $, luaL_buffinitsize: tt, luaL_checkinteger: et, luaL_checknumber: nt, luaL_checkstack: rt, luaL_checkstring: at, luaL_checktype: ut, luaL_error: lt, luaL_newlib: st, luaL_optinteger: ot, luaL_optstring: it, luaL_prepbuffsize: ct, luaL_pushresult: _t, luaL_pushresultsize: ft, luaL_tolstring: pt, luaL_typename: Lt } = n(7), ht = n(17), { luastring_eq: dt, luastring_indexOf: At, to_jsstring: gt, to_luastring: Tt } = n(5), xt = 37, bt = function(t) {
-      let e = At(t, 0);
-      return e > -1 ? e : t.length;
-    }, Ot = function(t, e) {
-      return t >= 0 ? t : 0 - t > e ? 0 : e + t + 1;
-    }, kt = function(t, e, n, r) {
-      return Y(r, e, n), 0;
-    }, vt = o.length + 1, Et = function(t, e, n) {
-      let a = function(t) {
-        if (Object.is(t, 1 / 0))
-          return Tt("inf");
-        if (Object.is(t, -1 / 0))
-          return Tt("-inf");
-        if (Number.isNaN(t))
-          return Tt("nan");
-        if (t === 0) {
-          let e = r(s + "x0p+0", t);
-          return Object.is(t, -0) && (e = "-" + e), Tt(e);
-        }
-        {
-          let e = "", n = i(t), a = n[0], u = n[1];
-          return a < 0 && (e += "-", a = -a), e += "0x", e += (2 * a).toString(16), e += r("p%+d", u -= 1), Tt(e);
-        }
-      }(n);
-      if (e[vt] === 65)
-        for (let t = 0;t < a.length; t++) {
-          let e = a[t];
-          e >= 97 && (a[t] = 223 & e);
-        }
-      else
-        e[vt] !== 97 && lt(t, Tt("modifiers for format '%%a'/'%%A' not implemented"));
-      return a;
-    }, Ut = Tt("-+ #0"), mt = (t) => 97 <= t && t <= 122 || 65 <= t && t <= 90, Nt = (t) => 48 <= t && t <= 57, Rt = (t) => 0 <= t && t <= 31 || t === 127, St = (t) => 33 <= t && t <= 126, wt = (t) => 97 <= t && t <= 122, It = (t) => 65 <= t && t <= 90, yt = (t) => 97 <= t && t <= 122 || 65 <= t && t <= 90 || 48 <= t && t <= 57, Mt = (t) => St(t) && !yt(t), Pt = (t) => t === 32 || t >= 9 && t <= 13, Ct = (t) => 48 <= t && t <= 57 || 65 <= t && t <= 70 || 97 <= t && t <= 102, Dt = function(t, e, n) {
-      switch (j(t, n)) {
-        case h: {
-          let r = K(t, n);
-          (function(t, e, n) {
-            z(t, 34);
-            let r = 0;
-            for (;n--; ) {
-              if (e[r] === 34 || e[r] === 92 || e[r] === 10)
-                z(t, 92), z(t, e[r]);
-              else if (Rt(e[r])) {
-                let n = "" + e[r];
-                Nt(e[r + 1]) && (n = "0".repeat(3 - n.length) + n), Z(t, Tt("\\" + n));
-              } else
-                z(t, e[r]);
-              r++;
-            }
-            z(t, 34);
-          })(e, r, r.length);
-          break;
-        }
-        case L: {
-          let s;
-          if (O(t, n)) {
-            let e = B(t, n);
-            s = Tt(r(e === l ? "0x%" + u + "x" : a, e));
-          } else {
-            let e = G(t, n);
-            (function(t) {
-              if (At(t, 46) < 0) {
-                let e = c(), n = At(t, e);
-                n && (t[n] = 46);
-              }
-            })(s = Et(t, Tt(`%${u}a`), e));
-          }
-          Z(e, s);
-          break;
-        }
-        case p:
-        case _:
-          pt(t, n), q(e);
-          break;
-        default:
-          Q(t, n, Tt("value has no literal form"));
-      }
-    }, Vt = function(t, e, n, r) {
-      let a = n;
-      for (;e[a] !== 0 && At(Ut, e[a]) >= 0; )
-        a++;
-      a - n >= Ut.length && lt(t, Tt("invalid format (repeated flags)")), Nt(e[a]) && a++, Nt(e[a]) && a++, e[a] === 46 && (Nt(e[++a]) && a++, Nt(e[a]) && a++), Nt(e[a]) && lt(t, Tt("invalid format (width or precision too long)")), r[0] = 37;
-      for (let t = 0;t < a - n + 1; t++)
-        r[t + 1] = e[n + t];
-      return a;
-    }, Bt = function(t, e) {
-      let n = t.length, r = e.length, a = t[n - 1];
-      for (let a = 0;a < r; a++)
-        t[a + n - 1] = e[a];
-      t[n + r - 1] = a;
-    };
-
-    class Gt {
-      constructor(t) {
-        this.L = t, this.islittle = true, this.maxalign = 1;
-      }
-    }
-    const Kt = Nt, Ft = function(t, e) {
-      if (t.off >= t.s.length || !Kt(t.s[t.off]))
-        return e;
-      {
-        let e = 0;
-        do {
-          e = 10 * e + (t.s[t.off++] - 48);
-        } while (t.off < t.s.length && Kt(t.s[t.off]) && e <= 214748363.8);
-        return e;
-      }
-    }, jt = function(t, e, n) {
-      let r = Ft(e, n);
-      return (r > 16 || r <= 0) && lt(t.L, Tt("integral size (%d) out of limits [1,%d]"), r, 16), r;
-    }, Ht = function(t, e) {
-      let n = { opt: e.s[e.off++], size: 0 };
-      switch (n.opt) {
-        case 98:
-          return n.size = 1, n.opt = 0, n;
-        case 66:
-          return n.size = 1, n.opt = 1, n;
-        case 104:
-          return n.size = 2, n.opt = 0, n;
-        case 72:
-          return n.size = 2, n.opt = 1, n;
-        case 108:
-          return n.size = 4, n.opt = 0, n;
-        case 76:
-          return n.size = 4, n.opt = 1, n;
-        case 106:
-          return n.size = 4, n.opt = 0, n;
-        case 74:
-        case 84:
-          return n.size = 4, n.opt = 1, n;
-        case 102:
-          return n.size = 4, n.opt = 2, n;
-        case 100:
-        case 110:
-          return n.size = 8, n.opt = 2, n;
-        case 105:
-          return n.size = jt(t, e, 4), n.opt = 0, n;
-        case 73:
-          return n.size = jt(t, e, 4), n.opt = 1, n;
-        case 115:
-          return n.size = jt(t, e, 4), n.opt = 4, n;
-        case 99:
-          return n.size = Ft(e, -1), n.size === -1 && lt(t.L, Tt("missing size for format option 'c'")), n.opt = 3, n;
-        case 122:
-          return n.opt = 5, n;
-        case 120:
-          return n.size = 1, n.opt = 6, n;
-        case 88:
-          return n.opt = 7, n;
-        case 32:
-          break;
-        case 60:
-          t.islittle = true;
-          break;
-        case 62:
-          t.islittle = false;
-          break;
-        case 61:
-          t.islittle = true;
-          break;
-        case 33:
-          t.maxalign = jt(t, e, 8);
-          break;
-        default:
-          lt(t.L, Tt("invalid format option '%c'"), n.opt);
-      }
-      return n.opt = 8, n;
-    }, Xt = function(t, e, n) {
-      let r = { opt: NaN, size: NaN, ntoalign: NaN }, a = Ht(t, n);
-      r.size = a.size, r.opt = a.opt;
-      let u = r.size;
-      if (r.opt === 7)
-        if (n.off >= n.s.length || n.s[n.off] === 0)
-          Q(t.L, 1, Tt("invalid next option for option 'X'"));
-        else {
-          let e = Ht(t, n);
-          u = e.size, (e = e.opt) !== 3 && u !== 0 || Q(t.L, 1, Tt("invalid next option for option 'X'"));
-        }
-      return u <= 1 || r.opt === 3 ? r.ntoalign = 0 : (u > t.maxalign && (u = t.maxalign), (u & u - 1) != 0 && Q(t.L, 1, Tt("format asks for alignment not power of 2")), r.ntoalign = u - (e & u - 1) & u - 1), r;
-    }, zt = function(t, e, n, r, a) {
-      let u = ct(t, r);
-      u[n ? 0 : r - 1] = 255 & e;
-      for (let t = 1;t < r; t++)
-        e >>= 8, u[n ? t : r - 1 - t] = 255 & e;
-      if (a && r > 4)
-        for (let t = 4;t < r; t++)
-          u[n ? t : r - 1 - t] = 255;
-      J(t, r);
-    }, Yt = function(t, e, n, r, a) {
-      let u = 0, l = r <= 4 ? r : 4;
-      for (let t = l - 1;t >= 0; t--)
-        u <<= 8, u |= e[n ? t : r - 1 - t];
-      if (r < 4) {
-        if (a) {
-          let t = 1 << 8 * r - 1;
-          u = (u ^ t) - t;
-        }
-      } else if (r > 4) {
-        let s = !a || u >= 0 ? 0 : 255;
-        for (let a = l;a < r; a++)
-          e[n ? a : r - 1 - a] !== s && lt(t, Tt("%d-byte integer does not fit into Lua Integer"), r);
-      }
-      return u;
-    }, Jt = function(t, e, n, r) {
-      ht.lua_assert(e.length >= r);
-      let a = new DataView(new ArrayBuffer(r));
-      for (let t = 0;t < r; t++)
-        a.setUint8(t, e[t], n);
-      return r == 4 ? a.getFloat32(0, n) : a.getFloat64(0, n);
-    }, Zt = Tt("^$*+?.([%-");
-
-    class qt {
-      constructor(t) {
-        this.src = null, this.src_init = null, this.src_end = null, this.p = null, this.p_end = null, this.L = t, this.matchdepth = NaN, this.level = NaN, this.capture = [];
-      }
-    }
-    const Wt = function(t, e) {
-      switch (t.p[e++]) {
-        case xt:
-          return e === t.p_end && lt(t.L, Tt("malformed pattern (ends with '%%')")), e + 1;
-        case 91:
-          t.p[e] === 94 && e++;
-          do {
-            e === t.p_end && lt(t.L, Tt("malformed pattern (missing ']')")), t.p[e++] === xt && e < t.p_end && e++;
-          } while (t.p[e] !== 93);
-          return e + 1;
-        default:
-          return e;
-      }
-    }, Qt = function(t, e) {
-      switch (e) {
-        case 97:
-          return mt(t);
-        case 65:
-          return !mt(t);
-        case 99:
-          return Rt(t);
-        case 67:
-          return !Rt(t);
-        case 100:
-          return Nt(t);
-        case 68:
-          return !Nt(t);
-        case 103:
-          return St(t);
-        case 71:
-          return !St(t);
-        case 108:
-          return wt(t);
-        case 76:
-          return !wt(t);
-        case 112:
-          return Mt(t);
-        case 80:
-          return !Mt(t);
-        case 115:
-          return Pt(t);
-        case 83:
-          return !Pt(t);
-        case 117:
-          return It(t);
-        case 85:
-          return !It(t);
-        case 119:
-          return yt(t);
-        case 87:
-          return !yt(t);
-        case 120:
-          return Ct(t);
-        case 88:
-          return !Ct(t);
-        case 122:
-          return t === 0;
-        case 90:
-          return t !== 0;
-        default:
-          return e === t;
-      }
-    }, $t = function(t, e, n, r) {
-      let a = true;
-      for (t.p[n + 1] === 94 && (a = false, n++);++n < r; )
-        if (t.p[n] === xt) {
-          if (n++, Qt(e, t.p[n]))
-            return a;
-        } else if (t.p[n + 1] === 45 && n + 2 < r) {
-          if (n += 2, t.p[n - 2] <= e && e <= t.p[n])
-            return a;
-        } else if (t.p[n] === e)
-          return a;
-      return !a;
-    }, te = function(t, e, n, r) {
-      if (e >= t.src_end)
-        return false;
-      {
-        let a = t.src[e];
-        switch (t.p[n]) {
-          case 46:
-            return true;
-          case xt:
-            return Qt(a, t.p[n + 1]);
-          case 91:
-            return $t(t, a, n, r - 1);
-          default:
-            return t.p[n] === a;
-        }
-      }
-    }, ee = function(t, e, n) {
-      if (n >= t.p_end - 1 && lt(t.L, Tt("malformed pattern (missing arguments to '%%b'")), t.src[e] !== t.p[n])
-        return null;
-      {
-        let r = t.p[n], a = t.p[n + 1], u = 1;
-        for (;++e < t.src_end; )
-          if (t.src[e] === a) {
-            if (--u == 0)
-              return e + 1;
-          } else
-            t.src[e] === r && u++;
-      }
-      return null;
-    }, ne = function(t, e, n, r) {
-      let a = 0;
-      for (;te(t, e + a, n, r); )
-        a++;
-      for (;a >= 0; ) {
-        let n = se(t, e + a, r + 1);
-        if (n)
-          return n;
-        a--;
-      }
-      return null;
-    }, re = function(t, e, n, r) {
-      for (;; ) {
-        let a = se(t, e, r + 1);
-        if (a !== null)
-          return a;
-        if (!te(t, e, n, r))
-          return null;
-        e++;
-      }
-    }, ae = function(t, e, n, r) {
-      let a, u = t.level;
-      return u >= 32 && lt(t.L, Tt("too many captures")), t.capture[u] = t.capture[u] ? t.capture[u] : {}, t.capture[u].init = e, t.capture[u].len = r, t.level = u + 1, (a = se(t, e, n)) === null && t.level--, a;
-    }, ue = function(t, e, n) {
-      let r, a = function(t) {
-        let e = t.level;
-        for (e--;e >= 0; e--)
-          if (t.capture[e].len === -1)
-            return e;
-        return lt(t.L, Tt("invalid pattern capture"));
-      }(t);
-      return t.capture[a].len = e - t.capture[a].init, (r = se(t, e, n)) === null && (t.capture[a].len = -1), r;
-    }, le = function(t, e, n) {
-      n = function(t, e) {
-        return (e -= 49) < 0 || e >= t.level || t.capture[e].len === -1 ? lt(t.L, Tt("invalid capture index %%%d"), e + 1) : e;
-      }(t, n);
-      let r = t.capture[n].len;
-      return t.src_end - e >= r && function(t, e, n, r, a) {
-        return dt(t.subarray(e, e + a), n.subarray(r, r + a));
-      }(t.src, t.capture[n].init, t.src, e, r) ? e + r : null;
-    }, se = function(t, e, n) {
-      let r = false, a = true;
-      for (t.matchdepth-- == 0 && lt(t.L, Tt("pattern too complex"));a || r; )
-        if (a = false, n !== t.p_end)
-          switch (r ? undefined : t.p[n]) {
-            case 40:
-              e = t.p[n + 1] === 41 ? ae(t, e, n + 2, -2) : ae(t, e, n + 1, -1);
-              break;
-            case 41:
-              e = ue(t, e, n + 1);
-              break;
-            case 36:
-              if (n + 1 !== t.p_end) {
-                r = true;
-                break;
-              }
-              e = t.src.length - e == 0 ? e : null;
-              break;
-            case xt:
-              switch (t.p[n + 1]) {
-                case 98:
-                  (e = ee(t, e, n + 2)) !== null && (n += 4, a = true);
-                  break;
-                case 102: {
-                  n += 2, t.p[n] !== 91 && lt(t.L, Tt("missing '[' after '%%f' in pattern"));
-                  let r = Wt(t, n), u = e === t.src_init ? 0 : t.src[e - 1];
-                  if (!$t(t, u, n, r - 1) && $t(t, e === t.src_end ? 0 : t.src[e], n, r - 1)) {
-                    n = r, a = true;
-                    break;
-                  }
-                  e = null;
-                  break;
-                }
-                case 48:
-                case 49:
-                case 50:
-                case 51:
-                case 52:
-                case 53:
-                case 54:
-                case 55:
-                case 56:
-                case 57:
-                  (e = le(t, e, t.p[n + 1])) !== null && (n += 2, a = true);
-                  break;
-                default:
-                  r = true;
-              }
-              break;
-            default: {
-              r = false;
-              let u = Wt(t, n);
-              if (te(t, e, n, u))
-                switch (t.p[u]) {
-                  case 63: {
-                    let r;
-                    (r = se(t, e + 1, u + 1)) !== null ? e = r : (n = u + 1, a = true);
-                    break;
-                  }
-                  case 43:
-                    e++;
-                  case 42:
-                    e = ne(t, e, n, u);
-                    break;
-                  case 45:
-                    e = re(t, e, n, u);
-                    break;
-                  default:
-                    e++, n = u, a = true;
-                }
-              else {
-                if (t.p[u] === 42 || t.p[u] === 63 || t.p[u] === 45) {
-                  n = u + 1, a = true;
-                  break;
-                }
-                e = null;
-              }
-              break;
-            }
-          }
-      return t.matchdepth++, e;
-    }, oe = function(t, e, n, r) {
-      if (e >= t.level)
-        e === 0 ? R(t.L, t.src.subarray(n, r), r - n) : lt(t.L, Tt("invalid capture index %%%d"), e + 1);
-      else {
-        let n = t.capture[e].len;
-        n === -1 && lt(t.L, Tt("unfinished capture")), n === -2 ? U(t.L, t.capture[e].init - t.src_init + 1) : R(t.L, t.src.subarray(t.capture[e].init), n);
-      }
-    }, ie = function(t, e, n) {
-      let r = t.level === 0 && t.src.subarray(e) ? 1 : t.level;
-      rt(t.L, r, "too many captures");
-      for (let a = 0;a < r; a++)
-        oe(t, a, e, n);
-      return r;
-    }, ce = function(t, e, n, r, a, u) {
-      t.L = e, t.matchdepth = 200, t.src = n, t.src_init = 0, t.src_end = r, t.p = a, t.p_end = u;
-    }, _e = function(t) {
-      t.level = 0, ht.lua_assert(t.matchdepth === 200);
-    }, fe = function(t, e) {
-      let n = at(t, 1), r = at(t, 2), a = n.length, u = r.length, l = Ot(ot(t, 3, 1), a);
-      if (l < 1)
-        l = 1;
-      else if (l > a + 1)
-        return S(t), 1;
-      if (e && (V(t, 4) || function(t, e) {
-        for (let n = 0;n < e; n++)
-          if (At(Zt, t[n]) !== -1)
-            return false;
-        return true;
-      }(r, u))) {
-        let e = function(t, e, n) {
-          var r = n >>> 0, a = e.length;
-          if (a === 0)
-            return r;
-          for (;(r = t.indexOf(e[0], r)) !== -1; r++)
-            if (dt(t.subarray(r, r + a), e))
-              return r;
-          return -1;
-        }(n.subarray(l - 1), r, 0);
-        if (e > -1)
-          return U(t, l + e), U(t, l + e + u - 1), 2;
-      } else {
-        let s = new qt(t), o = l - 1, i = r[0] === 94;
-        i && (r = r.subarray(1), u--), ce(s, t, n, a, r, u);
-        do {
-          let n;
-          if (_e(s), (n = se(s, o, 0)) !== null)
-            return e ? (U(t, o + 1), U(t, n), ie(s, null, 0) + 2) : ie(s, o, n);
-        } while (o++ < s.src_end && !i);
-      }
-      return S(t), 1;
-    };
-    const pe = function(t) {
-      let e = F(t, H(3));
-      e.ms.L = t;
-      for (let t = e.src;t <= e.ms.src_end; t++) {
-        let n;
-        if (_e(e.ms), (n = se(e.ms, t, e.p)) !== null && n !== e.lastmatch)
-          return e.src = e.lastmatch = n, ie(e.ms, t, n);
-      }
-      return 0;
-    }, Le = function(t, e, n, r, a) {
-      let u = t.L;
-      switch (a) {
-        case f: {
-          y(u, 3);
-          let e = ie(t, n, r);
-          A(u, e, 1);
-          break;
-        }
-        case d:
-          oe(t, 0, n, r), x(u, 3);
-          break;
-        default:
-          return void function(t, e, n, r) {
-            let a = t.L, u = K(a, 3), l = u.length;
-            for (let s = 0;s < l; s++)
-              u[s] !== xt ? z(e, u[s]) : Nt(u[++s]) ? u[s] === 48 ? Y(e, t.src.subarray(n, r), r - n) : (oe(t, u[s] - 49, n, r), pt(a, -1), M(a, -2), q(e)) : (u[s] !== xt && lt(a, Tt("invalid use of '%c' in replacement string"), xt), z(e, u[s]));
-          }(t, e, n, r);
-      }
-      V(u, -1) ? k(u, -1) || lt(u, Tt("invalid replacement value (a %s)"), Lt(u, -1)) : (v(u, 1), R(u, t.src.subarray(n, r), r - n)), q(e);
-    }, he = { byte: function(t) {
-      let e = at(t, 1), n = e.length, r = Ot(ot(t, 2, 1), n), a = Ot(ot(t, 3, r), n);
-      if (r < 1 && (r = 1), a > n && (a = n), r > a)
-        return 0;
-      if (a - r >= Number.MAX_SAFE_INTEGER)
-        return lt(t, "string slice too long");
-      let u = a - r + 1;
-      rt(t, u, "string slice too long");
-      for (let n = 0;n < u; n++)
-        U(t, e[r + n - 1]);
-      return u;
-    }, char: function(t) {
-      let e = b(t), n = new X, r = tt(t, n, e);
-      for (let n = 1;n <= e; n++) {
-        let e = et(t, n);
-        W(t, e >= 0 && e <= 255, "value out of range"), r[n - 1] = e;
-      }
-      return ft(n, e), 1;
-    }, dump: function(t) {
-      let e = new X, n = V(t, 2);
-      return ut(t, 1, f), D(t, 1), $(t, e), T(t, kt, e, n) !== 0 ? lt(t, Tt("unable to dump given function")) : (_t(e), 1);
-    }, find: function(t) {
-      return fe(t, 1);
-    }, format: function(t) {
-      let e = b(t), n = 1, a = at(t, n), l = 0, s = new X;
-      for ($(t, s);l < a.length; )
-        if (a[l] !== xt)
-          z(s, a[l++]);
-        else if (a[++l] === xt)
-          z(s, a[l++]);
-        else {
-          let o = [];
-          switch (++n > e && Q(t, n, Tt("no value")), l = Vt(t, a, l, o), String.fromCharCode(a[l++])) {
-            case "c":
-              z(s, et(t, n));
-              break;
-            case "d":
-            case "i":
-            case "o":
-            case "u":
-            case "x":
-            case "X": {
-              let e = et(t, n);
-              Bt(o, Tt(u, true)), Z(s, Tt(r(String.fromCharCode(...o), e)));
-              break;
-            }
-            case "a":
-            case "A":
-              Bt(o, Tt(u, true)), Z(s, Et(t, o, nt(t, n)));
-              break;
-            case "e":
-            case "E":
-            case "f":
-            case "g":
-            case "G": {
-              let e = nt(t, n);
-              Bt(o, Tt(u, true)), Z(s, Tt(r(String.fromCharCode(...o), e)));
-              break;
-            }
-            case "q":
-              Dt(t, s, n);
-              break;
-            case "s": {
-              let e = pt(t, n);
-              o.length <= 2 || o[2] === 0 ? q(s) : (W(t, e.length === bt(e), n, "string contains zeros"), At(o, 46) < 0 && e.length >= 100 ? q(s) : (Z(s, Tt(r(String.fromCharCode(...o), gt(e)))), v(t, 1)));
-              break;
-            }
-            default:
-              return lt(t, Tt("invalid option '%%%c' to 'format'"), a[l - 1]);
-          }
-        }
-      return _t(s), 1;
-    }, gmatch: function(t) {
-      let e = at(t, 1), n = at(t, 2), r = e.length, a = n.length;
-      D(t, 2);
-      let u = new class {
-        constructor() {
-          this.src = NaN, this.p = NaN, this.lastmatch = NaN, this.ms = new qt;
-        }
-      };
-      return m(t, u), ce(u.ms, t, e, r, n, a), u.src = 0, u.p = 0, u.lastmatch = null, E(t, pe, 3), 1;
-    }, gsub: function(t) {
-      let e = at(t, 1), n = e.length, r = at(t, 2), a = r.length, u = null, l = j(t, 3), s = ot(t, 4, n + 1), o = r[0] === 94, i = 0, c = new qt(t), _ = new X;
-      for (W(t, l === L || l === h || l === f || l === d, 3, "string/function/table expected"), $(t, _), o && (r = r.subarray(1), a--), ce(c, t, e, n, r, a), e = 0, r = 0;i < s; ) {
-        let t;
-        if (_e(c), (t = se(c, e, r)) !== null && t !== u)
-          i++, Le(c, _, e, t, l), e = u = t;
-        else {
-          if (!(e < c.src_end))
-            break;
-          z(_, c.src[e++]);
-        }
-        if (o)
-          break;
-      }
-      return Y(_, c.src.subarray(e, c.src_end), c.src_end - e), _t(_), U(t, i), 2;
-    }, len: function(t) {
-      return U(t, at(t, 1).length), 1;
-    }, lower: function(t) {
-      let e = at(t, 1), n = e.length, r = new Uint8Array(n);
-      for (let t = 0;t < n; t++) {
-        let n = e[t];
-        It(n) && (n |= 32), r[t] = n;
-      }
-      return I(t, r), 1;
-    }, match: function(t) {
-      return fe(t, 0);
-    }, pack: function(t) {
-      let e = new X, n = new Gt(t), r = { s: at(t, 1), off: 0 }, a = 1, u = 0;
-      for (S(t), $(t, e);r.off < r.s.length; ) {
-        let l = Xt(n, u, r), { opt: s, size: o, ntoalign: i } = l;
-        for (u += i + o;i-- > 0; )
-          z(e, 0);
-        switch (a++, s) {
-          case 0: {
-            let r = et(t, a);
-            if (o < 4) {
-              let e = 1 << 8 * o - 1;
-              W(t, -e <= r && r < e, a, "integer overflow");
-            }
-            zt(e, r, n.islittle, o, r < 0);
-            break;
-          }
-          case 1: {
-            let r = et(t, a);
-            o < 4 && W(t, r >>> 0 < 1 << 8 * o, a, "unsigned overflow"), zt(e, r >>> 0, n.islittle, o, false);
-            break;
-          }
-          case 2: {
-            let r = ct(e, o), u = nt(t, a), l = new DataView(r.buffer, r.byteOffset, r.byteLength);
-            o === 4 ? l.setFloat32(0, u, n.islittle) : l.setFloat64(0, u, n.islittle), J(e, o);
-            break;
-          }
-          case 3: {
-            let n = at(t, a), r = n.length;
-            for (W(t, r <= o, a, "string longer than given size"), Y(e, n, r);r++ < o; )
-              z(e, 0);
-            break;
-          }
-          case 4: {
-            let r = at(t, a), l = r.length;
-            W(t, o >= 4 || l < 1 << 8 * o, a, "string length does not fit in given size"), zt(e, l, n.islittle, o, 0), Y(e, r, l), u += l;
-            break;
-          }
-          case 5: {
-            let n = at(t, a), r = n.length;
-            W(t, At(n, 0) < 0, a, "strings contains zeros"), Y(e, n, r), z(e, 0), u += r + 1;
-            break;
-          }
-          case 6:
-            z(e, 0);
-          case 7:
-          case 8:
-            a--;
-        }
-      }
-      return _t(e), 1;
-    }, packsize: function(t) {
-      let e = new Gt(t), n = { s: at(t, 1), off: 0 }, r = 0;
-      for (;n.off < n.s.length; ) {
-        let a = Xt(e, r, n), { opt: u, size: l, ntoalign: s } = a;
-        switch (W(t, r <= 2147483647 - (l += s), 1, "format result too large"), r += l, u) {
-          case 4:
-          case 5:
-            Q(t, 1, "variable-length format");
-        }
-      }
-      return U(t, r), 1;
-    }, rep: function(t) {
-      let e = at(t, 1), n = e.length, r = et(t, 2), a = it(t, 3, ""), u = a.length;
-      if (r <= 0)
-        N(t, "");
-      else {
-        if (n + u < n || n + u > 2147483647 / r)
-          return lt(t, Tt("resulting string too large"));
-        {
-          let l = r * n + (r - 1) * u, s = new X, o = tt(t, s, l), i = 0;
-          for (;r-- > 1; )
-            o.set(e, i), i += n, u > 0 && (o.set(a, i), i += u);
-          o.set(e, i), ft(s, l);
-        }
-      }
-      return 1;
-    }, reverse: function(t) {
-      let e = at(t, 1), n = e.length, r = new Uint8Array(n);
-      for (let t = 0;t < n; t++)
-        r[t] = e[n - 1 - t];
-      return I(t, r), 1;
-    }, sub: function(t) {
-      let e = at(t, 1), n = e.length, r = Ot(et(t, 2), n), a = Ot(ot(t, 3, -1), n);
-      return r < 1 && (r = 1), a > n && (a = n), r <= a ? I(t, e.subarray(r - 1, r - 1 + (a - r + 1))) : N(t, ""), 1;
-    }, unpack: function(t) {
-      let e = new Gt(t), n = { s: at(t, 1), off: 0 }, r = at(t, 2), a = r.length, u = Ot(ot(t, 3, 1), a) - 1, l = 0;
-      for (W(t, u <= a && u >= 0, 3, "initial position out of string");n.off < n.s.length; ) {
-        let s = Xt(e, u, n), { opt: o, size: i, ntoalign: c } = s;
-        switch (u + c + i > a && Q(t, 2, Tt("data string too short")), u += c, rt(t, 2, "too many results"), l++, o) {
-          case 0:
-          case 1: {
-            let n = Yt(t, r.subarray(u), e.islittle, i, o === 0);
-            U(t, n);
-            break;
-          }
-          case 2: {
-            let n = Jt(0, r.subarray(u), e.islittle, i);
-            w(t, n);
-            break;
-          }
-          case 3:
-            I(t, r.subarray(u, u + i));
-            break;
-          case 4: {
-            let n = Yt(t, r.subarray(u), e.islittle, i, 0);
-            W(t, u + n + i <= a, 2, "data string too short"), I(t, r.subarray(u + i, u + i + n)), u += n;
-            break;
-          }
-          case 5: {
-            let e = At(r, 0, u);
-            e === -1 && (e = r.length - u), I(t, r.subarray(u, e)), u = e + 1;
-            break;
-          }
-          case 7:
-          case 6:
-          case 8:
-            l--;
-        }
-        u += i;
-      }
-      return U(t, u + 1), l + 1;
-    }, upper: function(t) {
-      let e = at(t, 1), n = e.length, r = new Uint8Array(n);
-      for (let t = 0;t < n; t++) {
-        let n = e[t];
-        wt(n) && (n &= 223), r[t] = n;
-      }
-      return I(t, r), 1;
-    } };
-    t.exports.luaopen_string = function(t) {
-      return st(t, he), function(t) {
-        g(t, 0, 1), N(t, ""), y(t, -2), C(t, -2), v(t, 1), y(t, -2), P(t, -2, Tt("__index", true)), v(t, 1);
-      }(t), 1;
-    };
-  }, function(t, e, n) {
-    const { lua_gettop: r, lua_pushcfunction: a, lua_pushfstring: u, lua_pushinteger: l, lua_pushnil: s, lua_pushstring: o, lua_pushvalue: i, lua_setfield: c, lua_tointeger: _ } = n(2), { luaL_Buffer: f, luaL_addvalue: p, luaL_argcheck: L, luaL_buffinit: h, luaL_checkinteger: d, luaL_checkstack: A, luaL_checkstring: g, luaL_error: T, luaL_newlib: x, luaL_optinteger: b, luaL_pushresult: O } = n(7), { luastring_of: k, to_luastring: v } = n(5), E = function(t) {
-      return (192 & t) === 128;
-    }, U = function(t, e) {
-      return t >= 0 ? t : 0 - t > e ? 0 : e + t + 1;
-    }, m = [255, 127, 2047, 65535], N = function(t, e) {
-      let n = t[e], r = 0;
-      if (n < 128)
-        r = n;
-      else {
-        let a = 0;
-        for (;64 & n; ) {
-          let u = t[e + ++a];
-          if ((192 & u) != 128)
-            return null;
-          r = r << 6 | 63 & u, n <<= 1;
-        }
-        if (r |= (127 & n) << 5 * a, a > 3 || r > 1114111 || r <= m[a])
-          return null;
-        e += a;
-      }
-      return { code: r, pos: e + 1 };
-    }, R = v("%U"), S = function(t, e) {
-      let n = d(t, e);
-      L(t, 0 <= n && n <= 1114111, e, "value out of range"), u(t, R, n);
-    }, w = function(t) {
-      let e = g(t, 1), n = e.length, r = _(t, 2) - 1;
-      if (r < 0)
-        r = 0;
-      else if (r < n)
-        for (r++;E(e[r]); )
-          r++;
-      if (r >= n)
-        return 0;
-      {
-        let n = N(e, r);
-        return n === null || E(e[n.pos]) ? T(t, v("invalid UTF-8 code")) : (l(t, r + 1), l(t, n.code), 2);
-      }
-    }, I = { char: function(t) {
-      let e = r(t);
-      if (e === 1)
-        S(t, 1);
-      else {
-        let n = new f;
-        h(t, n);
-        for (let r = 1;r <= e; r++)
-          S(t, r), p(n);
-        O(n);
-      }
-      return 1;
-    }, codepoint: function(t) {
-      let e = g(t, 1), n = U(b(t, 2, 1), e.length), r = U(b(t, 3, n), e.length);
-      if (L(t, n >= 1, 2, "out of range"), L(t, r <= e.length, 3, "out of range"), n > r)
-        return 0;
-      if (r - n >= Number.MAX_SAFE_INTEGER)
-        return T(t, "string slice too long");
-      let a = r - n + 1;
-      for (A(t, a, "string slice too long"), a = 0, n -= 1;n < r; ) {
-        let r = N(e, n);
-        if (r === null)
-          return T(t, "invalid UTF-8 code");
-        l(t, r.code), n = r.pos, a++;
-      }
-      return a;
-    }, codes: function(t) {
-      return g(t, 1), a(t, w), i(t, 1), l(t, 0), 3;
-    }, len: function(t) {
-      let e = 0, n = g(t, 1), r = n.length, a = U(b(t, 2, 1), r), u = U(b(t, 3, -1), r);
-      for (L(t, 1 <= a && --a <= r, 2, "initial position out of string"), L(t, --u < r, 3, "final position out of string");a <= u; ) {
-        let r = N(n, a);
-        if (r === null)
-          return s(t), l(t, a + 1), 2;
-        a = r.pos, e++;
-      }
-      return l(t, e), 1;
-    }, offset: function(t) {
-      let e = g(t, 1), n = d(t, 2), r = n >= 0 ? 1 : e.length + 1;
-      if (r = U(b(t, 3, r), e.length), L(t, 1 <= r && --r <= e.length, 3, "position out of range"), n === 0)
-        for (;r > 0 && E(e[r]); )
-          r--;
-      else if (E(e[r]) && T(t, "initial position is a continuation byte"), n < 0)
-        for (;n < 0 && r > 0; ) {
-          do {
-            r--;
-          } while (r > 0 && E(e[r]));
-          n++;
-        }
-      else
-        for (n--;n > 0 && r < e.length; ) {
-          do {
-            r++;
-          } while (E(e[r]));
-          n--;
-        }
-      return n === 0 ? l(t, r + 1) : s(t), 1;
-    } }, y = k(91, 0, 45, 127, 194, 45, 244, 93, 91, 128, 45, 191, 93, 42);
-    t.exports.luaopen_utf8 = function(t) {
-      return x(t, I), o(t, y), c(t, -2, v("charpattern", true)), 1;
-    };
-  }, function(t, e, n) {
-    const { LUA_OPLT: r, LUA_TNUMBER: a, lua_compare: u, lua_gettop: l, lua_isinteger: s, lua_isnoneornil: o, lua_pushboolean: i, lua_pushinteger: c, lua_pushliteral: _, lua_pushnil: f, lua_pushnumber: p, lua_pushvalue: L, lua_setfield: h, lua_settop: d, lua_tointeger: A, lua_tointegerx: g, lua_type: T } = n(2), { luaL_argcheck: x, luaL_argerror: b, luaL_checkany: O, luaL_checkinteger: k, luaL_checknumber: v, luaL_error: E, luaL_newlib: U, luaL_optnumber: m } = n(7), { LUA_MAXINTEGER: N, LUA_MININTEGER: R, lua_numbertointeger: S } = n(3), { to_luastring: w } = n(5);
-    let I;
-    const y = function() {
-      return I = 1103515245 * I + 12345 & 2147483647;
-    }, M = function(t, e) {
-      let n = S(e);
-      n !== false ? c(t, n) : p(t, e);
-    }, P = { abs: function(t) {
-      if (s(t, 1)) {
-        let e = A(t, 1);
-        e < 0 && (e = 0 | -e), c(t, e);
-      } else
-        p(t, Math.abs(v(t, 1)));
-      return 1;
-    }, acos: function(t) {
-      return p(t, Math.acos(v(t, 1))), 1;
-    }, asin: function(t) {
-      return p(t, Math.asin(v(t, 1))), 1;
-    }, atan: function(t) {
-      let e = v(t, 1), n = m(t, 2, 1);
-      return p(t, Math.atan2(e, n)), 1;
-    }, ceil: function(t) {
-      return s(t, 1) ? d(t, 1) : M(t, Math.ceil(v(t, 1))), 1;
-    }, cos: function(t) {
-      return p(t, Math.cos(v(t, 1))), 1;
-    }, deg: function(t) {
-      return p(t, v(t, 1) * (180 / Math.PI)), 1;
-    }, exp: function(t) {
-      return p(t, Math.exp(v(t, 1))), 1;
-    }, floor: function(t) {
-      return s(t, 1) ? d(t, 1) : M(t, Math.floor(v(t, 1))), 1;
-    }, fmod: function(t) {
-      if (s(t, 1) && s(t, 2)) {
-        let e = A(t, 2);
-        e === 0 ? b(t, 2, "zero") : c(t, A(t, 1) % e | 0);
-      } else {
-        let e = v(t, 1), n = v(t, 2);
-        p(t, e % n);
-      }
-      return 1;
-    }, log: function(t) {
-      let e, n = v(t, 1);
-      if (o(t, 2))
-        e = Math.log(n);
-      else {
-        let r = v(t, 2);
-        e = r === 2 ? Math.log2(n) : r === 10 ? Math.log10(n) : Math.log(n) / Math.log(r);
-      }
-      return p(t, e), 1;
-    }, max: function(t) {
-      let e = l(t), n = 1;
-      x(t, e >= 1, 1, "value expected");
-      for (let a = 2;a <= e; a++)
-        u(t, n, a, r) && (n = a);
-      return L(t, n), 1;
-    }, min: function(t) {
-      let e = l(t), n = 1;
-      x(t, e >= 1, 1, "value expected");
-      for (let a = 2;a <= e; a++)
-        u(t, a, n, r) && (n = a);
-      return L(t, n), 1;
-    }, modf: function(t) {
-      if (s(t, 1))
-        d(t, 1), p(t, 0);
-      else {
-        let e = v(t, 1), n = e < 0 ? Math.ceil(e) : Math.floor(e);
-        M(t, n), p(t, e === n ? 0 : e - n);
-      }
-      return 2;
-    }, rad: function(t) {
-      return p(t, v(t, 1) * (Math.PI / 180)), 1;
-    }, random: function(t) {
-      let e, n, r = I === undefined ? Math.random() : y() / 2147483648;
-      switch (l(t)) {
-        case 0:
-          return p(t, r), 1;
-        case 1:
-          e = 1, n = k(t, 1);
-          break;
-        case 2:
-          e = k(t, 1), n = k(t, 2);
-          break;
-        default:
-          return E(t, "wrong number of arguments");
-      }
-      return x(t, e <= n, 1, "interval is empty"), x(t, e >= 0 || n <= N + e, 1, "interval too large"), r *= n - e + 1, c(t, Math.floor(r) + e), 1;
-    }, randomseed: function(t) {
-      return function(t) {
-        (I = 0 | t) == 0 && (I = 1);
-      }(v(t, 1)), y(), 0;
-    }, sin: function(t) {
-      return p(t, Math.sin(v(t, 1))), 1;
-    }, sqrt: function(t) {
-      return p(t, Math.sqrt(v(t, 1))), 1;
-    }, tan: function(t) {
-      return p(t, Math.tan(v(t, 1))), 1;
-    }, tointeger: function(t) {
-      let e = g(t, 1);
-      return e !== false ? c(t, e) : (O(t, 1), f(t)), 1;
-    }, type: function(t) {
-      return T(t, 1) === a ? s(t, 1) ? _(t, "integer") : _(t, "float") : (O(t, 1), f(t)), 1;
-    }, ult: function(t) {
-      let e = k(t, 1), n = k(t, 2);
-      return i(t, e >= 0 ? n < 0 || e < n : n < 0 && e < n), 1;
-    } };
-    t.exports.luaopen_math = function(t) {
-      return U(t, P), p(t, Math.PI), h(t, -2, w("pi", true)), p(t, 1 / 0), h(t, -2, w("huge", true)), c(t, N), h(t, -2, w("maxinteger", true)), c(t, R), h(t, -2, w("mininteger", true)), 1;
-    };
-  }, function(t, e, n) {
-    const { LUA_MASKCALL: r, LUA_MASKCOUNT: a, LUA_MASKLINE: u, LUA_MASKRET: l, LUA_REGISTRYINDEX: s, LUA_TFUNCTION: o, LUA_TNIL: i, LUA_TTABLE: c, LUA_TUSERDATA: _, lua_Debug: f, lua_call: p, lua_checkstack: L, lua_gethook: h, lua_gethookcount: d, lua_gethookmask: A, lua_getinfo: g, lua_getlocal: T, lua_getmetatable: x, lua_getstack: b, lua_getupvalue: O, lua_getuservalue: k, lua_insert: v, lua_iscfunction: E, lua_isfunction: U, lua_isnoneornil: m, lua_isthread: N, lua_newtable: R, lua_pcall: S, lua_pop: w, lua_pushboolean: I, lua_pushfstring: y, lua_pushinteger: M, lua_pushlightuserdata: P, lua_pushliteral: C, lua_pushnil: D, lua_pushstring: V, lua_pushvalue: B, lua_rawgetp: G, lua_rawsetp: K, lua_rotate: F, lua_setfield: j, lua_sethook: H, lua_setlocal: X, lua_setmetatable: z, lua_settop: Y, lua_setupvalue: J, lua_setuservalue: Z, lua_tojsstring: q, lua_toproxy: W, lua_tostring: Q, lua_tothread: $, lua_touserdata: tt, lua_type: et, lua_upvalueid: nt, lua_upvaluejoin: rt, lua_xmove: at } = n(2), { luaL_argcheck: ut, luaL_argerror: lt, luaL_checkany: st, luaL_checkinteger: ot, luaL_checkstring: it, luaL_checktype: ct, luaL_error: _t, luaL_loadbuffer: ft, luaL_newlib: pt, luaL_optinteger: Lt, luaL_optstring: ht, luaL_traceback: dt, lua_writestringerror: At } = n(7), gt = n(17), { luastring_indexOf: Tt, to_luastring: xt } = n(5), bt = function(t, e, n) {
-      t === e || L(e, n) || _t(t, xt("stack overflow", true));
-    }, Ot = function(t) {
-      return N(t, 1) ? { arg: 1, thread: $(t, 1) } : { arg: 0, thread: t };
-    }, kt = function(t, e, n) {
-      V(t, n), j(t, -2, e);
-    }, vt = function(t, e, n) {
-      M(t, n), j(t, -2, e);
-    }, Et = function(t, e, n) {
-      I(t, n), j(t, -2, e);
-    }, Ut = function(t, e, n) {
-      t == e ? F(t, -2, 1) : at(e, t, 1), j(t, -2, n);
-    }, mt = function(t, e) {
-      let n = ot(t, 2);
-      ct(t, 1, o);
-      let r = e ? O(t, 1, n) : J(t, 1, n);
-      return r === null ? 0 : (V(t, r), v(t, -(e + 1)), e + 1);
-    }, Nt = function(t, e, n) {
-      let r = ot(t, n);
-      return ct(t, e, o), ut(t, O(t, e, r) !== null, n, "invalid upvalue index"), r;
-    }, Rt = xt("__hooks__", true), St = ["call", "return", "line", "count", "tail call"].map((t) => xt(t)), wt = function(t, e) {
-      G(t, s, Rt);
-      let n = tt(t, -1).get(t);
-      n && (n(t), V(t, St[e.event]), e.currentline >= 0 ? M(t, e.currentline) : D(t), gt.lua_assert(g(t, xt("lS"), e)), p(t, 2, 0));
-    }, It = { gethook: function(t) {
-      let e = Ot(t).thread, n = new Uint8Array(5), a = A(e), o = h(e);
-      o === null ? D(t) : o !== wt ? C(t, "external hook") : (G(t, s, Rt), tt(t, -1).get(e)(t));
-      return V(t, function(t, e) {
-        let n = 0;
-        return t & r && (e[n++] = 99), t & l && (e[n++] = 114), t & u && (e[n++] = 108), e.subarray(0, n);
-      }(a, n)), M(t, d(e)), 3;
-    }, getinfo: function(t) {
-      let e = new f, n = Ot(t), { arg: r, thread: a } = n, u = ht(t, r + 2, "flnStu");
-      if (bt(t, a, 3), U(t, r + 1))
-        u = y(t, xt(">%s"), u), B(t, r + 1), at(t, a, 1);
-      else if (!b(a, ot(t, r + 1), e))
-        return D(t), 1;
-      return g(a, u, e) || lt(t, r + 2, "invalid option"), R(t), Tt(u, 83) > -1 && (kt(t, xt("source", true), e.source), kt(t, xt("short_src", true), e.short_src), vt(t, xt("linedefined", true), e.linedefined), vt(t, xt("lastlinedefined", true), e.lastlinedefined), kt(t, xt("what", true), e.what)), Tt(u, 108) > -1 && vt(t, xt("currentline", true), e.currentline), Tt(u, 117) > -1 && (vt(t, xt("nups", true), e.nups), vt(t, xt("nparams", true), e.nparams), Et(t, xt("isvararg", true), e.isvararg)), Tt(u, 110) > -1 && (kt(t, xt("name", true), e.name), kt(t, xt("namewhat", true), e.namewhat)), Tt(u, 116) > -1 && Et(t, xt("istailcall", true), e.istailcall), Tt(u, 76) > -1 && Ut(t, a, xt("activelines", true)), Tt(u, 102) > -1 && Ut(t, a, xt("func", true)), 1;
-    }, getlocal: function(t) {
-      let e = Ot(t), { thread: n, arg: r } = e, a = new f, u = ot(t, r + 2);
-      if (U(t, r + 1))
-        return B(t, r + 1), V(t, T(t, null, u)), 1;
-      {
-        let e = ot(t, r + 1);
-        if (!b(n, e, a))
-          return lt(t, r + 1, "level out of range");
-        bt(t, n, 1);
-        let l = T(n, a, u);
-        return l ? (at(n, t, 1), V(t, l), F(t, -2, 1), 2) : (D(t), 1);
-      }
-    }, getmetatable: function(t) {
-      return st(t, 1), x(t, 1) || D(t), 1;
-    }, getregistry: function(t) {
-      return B(t, s), 1;
-    }, getupvalue: function(t) {
-      return mt(t, 1);
-    }, getuservalue: function(t) {
-      return et(t, 1) !== _ ? D(t) : k(t, 1), 1;
-    }, sethook: function(t) {
-      let e, n, c, _, f = Ot(t), { thread: p, arg: L } = f;
-      if (m(t, L + 1))
-        Y(t, L + 1), c = null, e = 0, n = 0;
-      else {
-        const s = it(t, L + 2);
-        ct(t, L + 1, o), n = Lt(t, L + 3, 0), c = wt, e = function(t, e) {
-          let n = 0;
-          return Tt(t, 99) > -1 && (n |= r), Tt(t, 114) > -1 && (n |= l), Tt(t, 108) > -1 && (n |= u), e > 0 && (n |= a), n;
-        }(s, n);
-      }
-      G(t, s, Rt) === i ? (_ = new WeakMap, P(t, _), K(t, s, Rt)) : _ = tt(t, -1);
-      let h = W(t, L + 1);
-      return _.set(p, h), H(p, c, e, n), 0;
-    }, setlocal: function(t) {
-      let e = Ot(t), { thread: n, arg: r } = e, a = new f, u = ot(t, r + 1), l = ot(t, r + 2);
-      if (!b(n, u, a))
-        return lt(t, r + 1, "level out of range");
-      st(t, r + 3), Y(t, r + 3), bt(t, n, 1), at(t, n, 1);
-      let s = X(n, a, l);
-      return s === null && w(n, 1), V(t, s), 1;
-    }, setmetatable: function(t) {
-      const e = et(t, 2);
-      return ut(t, e == i || e == c, 2, "nil or table expected"), Y(t, 2), z(t, 1), 1;
-    }, setupvalue: function(t) {
-      return st(t, 3), mt(t, 0);
-    }, setuservalue: function(t) {
-      return ct(t, 1, _), st(t, 2), Y(t, 2), Z(t, 1), 1;
-    }, traceback: function(t) {
-      let e = Ot(t), { thread: n, arg: r } = e, a = Q(t, r + 1);
-      if (a !== null || m(t, r + 1)) {
-        let e = Lt(t, r + 2, t === n ? 1 : 0);
-        dt(t, n, a, e);
-      } else
-        B(t, r + 1);
-      return 1;
-    }, upvalueid: function(t) {
-      let e = Nt(t, 1, 2);
-      return P(t, nt(t, 1, e)), 1;
-    }, upvaluejoin: function(t) {
-      let e = Nt(t, 1, 2), n = Nt(t, 3, 4);
-      return ut(t, !E(t, 1), 1, "Lua function expected"), ut(t, !E(t, 3), 3, "Lua function expected"), rt(t, 1, e, 3, n), 0;
-    } };
-    let yt;
-    typeof window != "undefined" && (yt = function() {
-      let t = prompt("lua_debug>", "");
-      return t !== null ? t : "";
-    }), yt && (It.debug = function(t) {
-      for (;; ) {
-        let e = yt();
-        if (e === "cont")
-          return 0;
-        if (e.length === 0)
-          continue;
-        let n = xt(e);
-        (ft(t, n, n.length, xt("=(debug command)", true)) || S(t, 0, 0, 0)) && At(q(t, -1), `
-`), Y(t, 0);
-      }
-    });
-    t.exports.luaopen_debug = function(t) {
-      return pt(t, It), 1;
-    };
-  }, function(t, e, n) {
-    const { LUA_DIRSEP: r, LUA_EXEC_DIR: a, LUA_JSPATH_DEFAULT: u, LUA_PATH_DEFAULT: l, LUA_PATH_MARK: s, LUA_PATH_SEP: o } = n(3), { LUA_OK: i, LUA_REGISTRYINDEX: c, LUA_TNIL: _, LUA_TTABLE: f, lua_callk: p, lua_createtable: L, lua_getfield: h, lua_insert: d, lua_isfunction: A, lua_isnil: g, lua_isstring: T, lua_newtable: x, lua_pop: b, lua_pushboolean: O, lua_pushcclosure: k, lua_pushcfunction: v, lua_pushfstring: E, lua_pushglobaltable: U, lua_pushlightuserdata: m, lua_pushliteral: N, lua_pushlstring: R, lua_pushnil: S, lua_pushstring: w, lua_pushvalue: I, lua_rawgeti: y, lua_rawgetp: M, lua_rawseti: P, lua_rawsetp: C, lua_remove: D, lua_setfield: V, lua_setmetatable: B, lua_settop: G, lua_toboolean: K, lua_tostring: F, lua_touserdata: j, lua_upvalueindex: H } = n(2), { LUA_LOADED_TABLE: X, LUA_PRELOAD_TABLE: z, luaL_Buffer: Y, luaL_addvalue: J, luaL_buffinit: Z, luaL_checkstring: q, luaL_error: W, luaL_getsubtable: Q, luaL_gsub: $, luaL_len: tt, luaL_loadfile: et, luaL_newlib: nt, luaL_optstring: rt, luaL_pushresult: at, luaL_setfuncs: ut } = n(7), lt = n(17), { luastring_indexOf: st, to_jsstring: ot, to_luastring: it, to_uristring: ct } = n(5), _t = n(0), ft = typeof window != "undefined" ? window : typeof WorkerGlobalScope != "undefined" && self instanceof WorkerGlobalScope ? self : (0, eval)("this"), pt = it("__JSLIBS__"), Lt = r, ht = r, dt = it("luaopen_"), At = it("_"), gt = it("\x01");
-    let Tt;
-    Tt = function(t, e, n) {
-      e = ct(e);
-      let r = new XMLHttpRequest;
-      if (r.open("GET", e, false), r.send(), r.status < 200 || r.status >= 300)
-        return w(t, it(`${r.status}: ${r.statusText}`)), null;
-      let a, u = r.response;
-      /\/\/[#@] sourceURL=/.test(u) || (u += " //# sourceURL=" + e);
-      try {
-        a = Function("fengari", u);
-      } catch (e) {
-        return w(t, it(`${e.name}: ${e.message}`)), null;
-      }
-      let l = a(_t);
-      return typeof l == "function" || typeof l == "object" && l !== null ? l : l === undefined ? ft : (w(t, it(`library returned unexpected type (${typeof l})`)), null);
-    };
-    let xt;
-    xt = function(t) {
-      t = ct(t);
-      let e = new XMLHttpRequest;
-      return e.open("GET", t, false), e.send(), e.status >= 200 && e.status <= 299;
-    };
-    const bt = function(t, e, n) {
-      let r = vt(t, e);
-      if (r === null) {
-        if ((r = Tt(t, e, n[0] === 42)) === null)
-          return 1;
-        Et(t, e, r);
-      }
-      if (n[0] === 42)
-        return O(t, 1), 0;
-      {
-        let e = function(t, e, n) {
-          let r = e[ot(n)];
-          return r && typeof r == "function" ? r : (E(t, it("undefined symbol: %s"), n), null);
-        }(t, r, n);
-        return e === null ? 2 : (v(t, e), 0);
-      }
-    }, Ot = ft, kt = function(t, e, n, r) {
-      let a = `${n}${lt.LUA_VERSUFFIX}`;
-      w(t, it(a));
-      let u = Ot[a];
-      u === undefined && (u = Ot[n]), u === undefined || function(t) {
-        h(t, c, it("LUA_NOENV"));
-        let e = K(t, -1);
-        return b(t, 1), e;
-      }(t) ? w(t, r) : (u = $(t, it(u), it(o + o, true), it(o + ot(gt) + o, true)), $(t, u, gt, r), D(t, -2)), V(t, -3, e), b(t, 1);
-    }, vt = function(t, e) {
-      M(t, c, pt), h(t, -1, e);
-      let n = j(t, -1);
-      return b(t, 2), n;
-    }, Et = function(t, e, n) {
-      M(t, c, pt), m(t, n), I(t, -1), V(t, -3, e), P(t, -2, tt(t, -2) + 1), b(t, 1);
-    }, Ut = function(t, e) {
-      for (;e[0] === o.charCodeAt(0); )
-        e = e.subarray(1);
-      if (e.length === 0)
-        return null;
-      let n = st(e, o.charCodeAt(0));
-      return n < 0 && (n = e.length), R(t, e, n), e.subarray(n);
-    }, mt = function(t, e, n, r, a) {
-      let u = new Y;
-      for (Z(t, u), r[0] !== 0 && (e = $(t, e, r, a));(n = Ut(t, n)) !== null; ) {
-        let n = $(t, F(t, -1), it(s, true), e);
-        if (D(t, -2), xt(n))
-          return n;
-        E(t, it(`
-	no file '%s'`), n), D(t, -2), J(u);
-      }
-      return at(u), null;
-    }, Nt = function(t, e, n, r) {
-      h(t, H(1), n);
-      let a = F(t, -1);
-      return a === null && W(t, it("'package.%s' must be a string"), n), mt(t, e, a, it("."), r);
-    }, Rt = function(t, e, n) {
-      return e ? (w(t, n), 2) : W(t, it(`error loading module '%s' from file '%s':
-	%s`), F(t, 1), n, F(t, -1));
-    }, St = function(t) {
-      let e = q(t, 1), n = Nt(t, e, it("path", true), it(ht, true));
-      return n === null ? 1 : Rt(t, et(t, n) === i, n);
-    }, wt = function(t, e, n) {
-      let r;
-      n = $(t, n, it("."), At);
-      let a = st(n, 45);
-      if (a >= 0) {
-        r = R(t, n, a), r = E(t, it("%s%s"), dt, r);
-        let u = bt(t, e, r);
-        if (u !== 2)
-          return u;
-        n = a + 1;
-      }
-      return r = E(t, it("%s%s"), dt, n), bt(t, e, r);
-    }, It = function(t) {
-      let e = q(t, 1), n = Nt(t, e, it("jspath", true), it(Lt, true));
-      return n === null ? 1 : Rt(t, wt(t, n, e) === 0, n);
-    }, yt = function(t) {
-      let e, n = q(t, 1), r = st(n, 46);
-      if (r < 0)
-        return 0;
-      R(t, n, r);
-      let a = Nt(t, F(t, -1), it("jspath", true), it(Lt, true));
-      return a === null ? 1 : (e = wt(t, a, n)) !== 0 ? e != 2 ? Rt(t, 0, a) : (w(t, it(`
-	no module '%s' in file '%s'`), n, a), 1) : (w(t, a), 2);
-    }, Mt = function(t) {
-      let e = q(t, 1);
-      return h(t, c, z), h(t, -1, e) === _ && E(t, it(`
-	no field package.preload['%s']`), e), 1;
-    }, Pt = function(t, e, n) {
-      for (;e === i ? (y(t, 3, n.i) === _ && (b(t, 1), at(n.msg), W(t, it("module '%s' not found:%s"), n.name, F(t, -1))), w(t, n.name), p(t, 1, 2, n, Pt)) : e = i, !A(t, -2); n.i++)
-        T(t, -2) ? (b(t, 1), J(n.msg)) : b(t, 2);
-      return n.k(t, i, n.ctx);
-    }, Ct = function(t, e, n) {
-      return w(t, n), d(t, -2), p(t, 2, 1, n, Dt), Dt(t, i, n);
-    }, Dt = function(t, e, n) {
-      let r = n;
-      return g(t, -1) || V(t, 2, r), h(t, 2, r) == _ && (O(t, 1), I(t, -1), V(t, 2, r)), 1;
-    }, Vt = { loadlib: function(t) {
-      let e = q(t, 1), n = q(t, 2), r = bt(t, e, n);
-      return r === 0 ? 1 : (S(t), d(t, -2), N(t, r === 1 ? "open" : "init"), 3);
-    }, searchpath: function(t) {
-      return mt(t, q(t, 1), q(t, 2), rt(t, 3, "."), rt(t, 4, r)) !== null ? 1 : (S(t), d(t, -2), 2);
-    } }, Bt = { require: function(t) {
-      let e = q(t, 1);
-      return G(t, 1), h(t, c, X), h(t, 2, e), K(t, -1) ? 1 : (b(t, 1), function(t, e, n, r) {
-        let a = new Y;
-        return Z(t, a), h(t, H(1), it("searchers", true)) !== f && W(t, it("'package.searchers' must be a table")), Pt(t, i, { name: e, i: 1, msg: a, ctx: n, k: r });
-      }(t, e, e, Ct));
-    } };
-    t.exports.luaopen_package = function(t) {
-      return function(t) {
-        x(t), L(t, 0, 1), B(t, -2), C(t, c, pt);
-      }(t), nt(t, Vt), function(t) {
-        let e = [Mt, St, It, yt, null];
-        L(t);
-        for (let n = 0;e[n]; n++)
-          I(t, -2), k(t, e[n], 1), P(t, -2, n + 1);
-        V(t, -2, it("searchers", true));
-      }(t), kt(t, it("path", true), "LUA_PATH", l), kt(t, it("jspath", true), "LUA_JSPATH", u), N(t, r + `
-` + o + `
-` + s + `
-` + a + `
--
-`), V(t, -2, it("config", true)), Q(t, c, X), V(t, -2, it("loaded", true)), Q(t, c, z), V(t, -2, it("preload", true)), U(t), I(t, -2), ut(t, Bt, 1), b(t, 1), 1;
-    };
-  }, function(t, e, n) {
-    const { lua_pushinteger: r, lua_pushliteral: a, lua_setfield: u } = n(2), { luaL_newlib: l } = n(7), { FENGARI_AUTHORS: s, FENGARI_COPYRIGHT: o, FENGARI_RELEASE: i, FENGARI_VERSION: c, FENGARI_VERSION_MAJOR: _, FENGARI_VERSION_MINOR: f, FENGARI_VERSION_NUM: p, FENGARI_VERSION_RELEASE: L, to_luastring: h } = n(5);
-    t.exports.luaopen_fengari = function(t) {
-      return l(t, {}), a(t, s), u(t, -2, h("AUTHORS")), a(t, o), u(t, -2, h("COPYRIGHT")), a(t, i), u(t, -2, h("RELEASE")), a(t, c), u(t, -2, h("VERSION")), a(t, _), u(t, -2, h("VERSION_MAJOR")), a(t, f), u(t, -2, h("VERSION_MINOR")), r(t, p), u(t, -2, h("VERSION_NUM")), a(t, L), u(t, -2, h("VERSION_RELEASE")), 1;
-    };
-  }, function(t, e, n) {
-    n.r(e), n.d(e, "L", function() {
-      return R;
-    }), n.d(e, "load", function() {
-      return S;
-    });
-    var r = n(0);
-    n.d(e, "FENGARI_AUTHORS", function() {
-      return r.FENGARI_AUTHORS;
-    }), n.d(e, "FENGARI_COPYRIGHT", function() {
-      return r.FENGARI_COPYRIGHT;
-    }), n.d(e, "FENGARI_RELEASE", function() {
-      return r.FENGARI_RELEASE;
-    }), n.d(e, "FENGARI_VERSION", function() {
-      return r.FENGARI_VERSION;
-    }), n.d(e, "FENGARI_VERSION_MAJOR", function() {
-      return r.FENGARI_VERSION_MAJOR;
-    }), n.d(e, "FENGARI_VERSION_MINOR", function() {
-      return r.FENGARI_VERSION_MINOR;
-    }), n.d(e, "FENGARI_VERSION_NUM", function() {
-      return r.FENGARI_VERSION_NUM;
-    }), n.d(e, "FENGARI_VERSION_RELEASE", function() {
-      return r.FENGARI_VERSION_RELEASE;
-    }), n.d(e, "luastring_eq", function() {
-      return r.luastring_eq;
-    }), n.d(e, "luastring_indexOf", function() {
-      return r.luastring_indexOf;
-    }), n.d(e, "luastring_of", function() {
-      return r.luastring_of;
-    }), n.d(e, "to_jsstring", function() {
-      return r.to_jsstring;
-    }), n.d(e, "to_luastring", function() {
-      return r.to_luastring;
-    }), n.d(e, "to_uristring", function() {
-      return r.to_uristring;
-    }), n.d(e, "lua", function() {
-      return r.lua;
-    }), n.d(e, "lauxlib", function() {
-      return r.lauxlib;
-    }), n.d(e, "lualib", function() {
-      return r.lualib;
-    });
-    var a = n(21);
-    n.d(e, "interop", function() {
-      return a;
-    });
-    const { LUA_ERRRUN: u, LUA_ERRSYNTAX: l, LUA_OK: s, LUA_VERSION_MAJOR: o, LUA_VERSION_MINOR: i, lua_Debug: c, lua_getinfo: _, lua_getstack: f, lua_gettop: p, lua_insert: L, lua_pcall: h, lua_pop: d, lua_pushcfunction: A, lua_pushstring: g, lua_remove: T, lua_setglobal: x, lua_tojsstring: b } = r.lua, { luaL_loadbuffer: O, luaL_newstate: k, luaL_requiref: v } = r.lauxlib, { checkjs: E, luaopen_js: U, push: m, tojs: N } = a, R = k();
-    function S(t, e) {
-      if (typeof t == "string")
-        t = Object(r.to_luastring)(t);
-      else if (!(t instanceof Uint8Array))
-        throw new TypeError("expects an array of bytes or javascript string");
-      e = e ? Object(r.to_luastring)(e) : null;
-      let n, a = O(R, t, null, e);
-      if (n = a === l ? new SyntaxError(b(R, -1)) : N(R, -1), d(R, 1), a !== s)
-        throw n;
-      return n;
-    }
-    if (r.lualib.luaL_openlibs(R), v(R, Object(r.to_luastring)("js"), U, 1), d(R, 1), g(R, Object(r.to_luastring)(r.FENGARI_COPYRIGHT)), x(R, Object(r.to_luastring)("_COPYRIGHT")), typeof document != "undefined" && document instanceof HTMLDocument) {
-      const t = function(t) {
-        switch (t) {
-          case "anonymous":
-            return "omit";
-          case "use-credentials":
-            return "include";
-          default:
-            return "same-origin";
-        }
-      }, e = function(t) {
-        let e = new c;
-        return f(t, 2, e) && _(t, Object(r.to_luastring)("Sl"), e), m(t, new ErrorEvent("error", { bubbles: true, cancelable: true, message: b(t, 1), error: N(t, 1), filename: e.short_src ? Object(r.to_jsstring)(e.short_src) : undefined, lineno: e.currentline > 0 ? e.currentline : undefined })), 1;
-      }, n = function(t, n, r) {
-        let a, o = O(R, n, null, r);
-        if (o === l) {
-          let e = b(R, -1), n = t.src ? t.src : document.location, r = undefined, u = new SyntaxError(e, n, r);
-          a = new ErrorEvent("error", { message: e, error: u, filename: n, lineno: r });
-        } else if (o === s) {
-          let n = p(R);
-          A(R, e), L(R, n), Object.defineProperty(document, "currentScript", { value: t, configurable: true }), o = h(R, 0, 0, n), delete document.currentScript, T(R, n), o === u && (a = E(R, -1));
-        }
-        o !== s && (a === undefined && (a = new ErrorEvent("error", { message: b(R, -1), error: N(R, -1) })), d(R, 1), window.dispatchEvent(a) && console.error("uncaught exception", a.error));
-      }, a = function(t, e, a) {
-        if (t.status >= 200 && t.status < 300) {
-          let u = t.response;
-          u = typeof u == "string" ? Object(r.to_luastring)(t.response) : new Uint8Array(u), n(e, u, a);
-        } else
-          e.dispatchEvent(new Event("error"));
-      }, g = function(e) {
-        if (e.src) {
-          let u = Object(r.to_luastring)("@" + e.src);
-          if (document.readyState === "complete" || e.async)
-            if (typeof fetch == "function")
-              fetch(e.src, { method: "GET", credentials: t(e.crossorigin), redirect: "follow", integrity: e.integrity }).then(function(t) {
-                if (t.ok)
-                  return t.arrayBuffer();
-                throw new Error("unable to fetch");
-              }).then(function(t) {
-                let r = new Uint8Array(t);
-                n(e, r, u);
-              }).catch(function(t) {
-                e.dispatchEvent(new Event("error"));
-              });
-            else {
-              let t = new XMLHttpRequest;
-              t.open("GET", e.src, true), t.responseType = "arraybuffer", t.onreadystatechange = function() {
-                t.readyState === 4 && a(t, e, u);
-              }, t.send();
-            }
-          else {
-            let t = new XMLHttpRequest;
-            t.open("GET", e.src, false), t.send(), a(t, e, u);
-          }
-        } else {
-          let t = Object(r.to_luastring)(e.innerHTML), a = e.id ? Object(r.to_luastring)("=" + e.id) : t;
-          n(e, t, a);
-        }
-      }, x = /^(.*?\/.*?)([\t ]*;.*)?$/, k = /^(\d+)\.(\d+)$/, v = function(t) {
-        if (t.tagName !== "SCRIPT")
-          return;
-        let e = x.exec(t.type);
-        if (!e)
-          return;
-        let n = e[1];
-        if (n === "application/lua" || n === "text/lua") {
-          if (t.hasAttribute("lua-version")) {
-            let e = k.exec(t.getAttribute("lua-version"));
-            if (!e || e[1] !== o || e[2] !== i)
-              return;
-          }
-          g(t);
-        }
-      };
-      typeof MutationObserver != "undefined" ? new MutationObserver(function(t, e) {
-        for (let e = 0;e < t.length; e++) {
-          let n = t[e];
-          for (let t = 0;t < n.addedNodes.length; t++)
-            v(n.addedNodes[t]);
-        }
-      }).observe(document, { childList: true, subtree: true }) : console.warn && console.warn("fengari-web: MutationObserver not found; lua script tags will not be run when inserted");
-      const U = 'script[type^="application/lua"], script[type^="text/lua"]';
-      Array.prototype.forEach.call(document.querySelectorAll(U), v);
-    }
-  }, function(t, e, n) {
-    const { LUA_MULTRET: r, LUA_OPADD: a, LUA_OPBAND: u, LUA_OPBNOT: l, LUA_OPBOR: s, LUA_OPBXOR: o, LUA_OPDIV: i, LUA_OPIDIV: c, LUA_OPMOD: _, LUA_OPSHL: f, LUA_OPSHR: p, LUA_OPUNM: L, constant_types: { LUA_TBOOLEAN: h, LUA_TLIGHTUSERDATA: d, LUA_TLNGSTR: A, LUA_TNIL: g, LUA_TNUMFLT: T, LUA_TNUMINT: x, LUA_TTABLE: b }, to_luastring: O } = n(1), { lua_assert: k } = n(4), v = n(20), E = n(6), U = n(16), m = n(23), N = n(9), R = n(15), S = U.OpCodesI, w = E.TValue, I = { OPR_ADD: 0, OPR_SUB: 1, OPR_MUL: 2, OPR_MOD: 3, OPR_POW: 4, OPR_DIV: 5, OPR_IDIV: 6, OPR_BAND: 7, OPR_BOR: 8, OPR_BXOR: 9, OPR_SHL: 10, OPR_SHR: 11, OPR_CONCAT: 12, OPR_EQ: 13, OPR_LT: 14, OPR_LE: 15, OPR_NE: 16, OPR_GT: 17, OPR_GE: 18, OPR_AND: 19, OPR_OR: 20, OPR_NOBINOPR: 21 }, y = { OPR_MINUS: 0, OPR_BNOT: 1, OPR_NOT: 2, OPR_LEN: 3, OPR_NOUNOPR: 4 }, M = function(t) {
-      return t.t !== t.f;
-    }, P = function(t, e) {
-      let n = m.expkind;
-      if (M(t))
-        return false;
-      switch (t.k) {
-        case n.VKINT:
-          return !e || new w(x, t.u.ival);
-        case n.VKFLT:
-          return !e || new w(T, t.u.nval);
-        default:
-          return false;
-      }
-    }, C = function(t, e, n) {
-      let r, a = e + n - 1;
-      if (t.pc > t.lasttarget && (r = t.f.code[t.pc - 1]).opcode === S.OP_LOADNIL) {
-        let t = r.A, n = t + r.B;
-        if (t <= e && e <= n + 1 || e <= t && t <= a + 1)
-          return t < e && (e = t), n > a && (a = n), U.SETARG_A(r, e), void U.SETARG_B(r, a - e);
-      }
-      Q(t, S.OP_LOADNIL, e, n - 1, 0);
-    }, D = function(t, e) {
-      return t.f.code[e.u.info];
-    }, V = function(t, e) {
-      let n = t.f.code[e].sBx;
-      return n === -1 ? -1 : e + 1 + n;
-    }, B = function(t, e, n) {
-      let r = t.f.code[e], a = n - (e + 1);
-      k(n !== -1), Math.abs(a) > U.MAXARG_sBx && v.luaX_syntaxerror(t.ls, O("control structure too long", true)), U.SETARG_sBx(r, a);
-    }, G = function(t, e, n) {
-      if (n === -1)
-        return e;
-      if (e === -1)
-        e = n;
-      else {
-        let r = e, a = V(t, r);
-        for (;a !== -1; )
-          a = V(t, r = a);
-        B(t, r, n);
-      }
-      return e;
-    }, K = function(t) {
-      let e = t.jpc;
-      t.jpc = -1;
-      let n = tt(t, S.OP_JMP, 0, -1);
-      return n = G(t, n, e);
-    }, F = function(t, e, n, r, a) {
-      return Q(t, e, n, r, a), K(t);
-    }, j = function(t) {
-      return t.lasttarget = t.pc, t.pc;
-    }, H = function(t, e) {
-      return e >= 1 && U.testTMode(t.f.code[e - 1].opcode) ? e - 1 : e;
-    }, X = function(t, e) {
-      return t.f.code[H(t, e)];
-    }, z = function(t, e, n) {
-      let r = H(t, e), a = t.f.code[r];
-      return a.opcode === S.OP_TESTSET && (n !== U.NO_REG && n !== a.B ? U.SETARG_A(a, n) : t.f.code[r] = U.CREATE_ABC(S.OP_TEST, a.B, 0, a.C), true);
-    }, Y = function(t, e) {
-      for (;e !== -1; e = V(t, e))
-        z(t, e, U.NO_REG);
-    }, J = function(t, e, n, r, a) {
-      for (;e !== -1; ) {
-        let u = V(t, e);
-        z(t, e, r) ? B(t, e, n) : B(t, e, a), e = u;
-      }
-    }, Z = function(t, e) {
-      j(t), t.jpc = G(t, t.jpc, e);
-    }, q = function(t, e, n) {
-      n === t.pc ? Z(t, e) : (k(n < t.pc), J(t, e, n, U.NO_REG, n));
-    }, W = function(t, e) {
-      let n = t.f;
-      return function(t) {
-        J(t, t.jpc, t.pc, U.NO_REG, t.pc), t.jpc = -1;
-      }(t), n.code[t.pc] = e, n.lineinfo[t.pc] = t.ls.lastline, t.pc++;
-    }, Q = function(t, e, n, r, a) {
-      return k(U.getOpMode(e) === U.iABC), k(U.getBMode(e) !== U.OpArgN || r === 0), k(U.getCMode(e) !== U.OpArgN || a === 0), k(n <= U.MAXARG_A && r <= U.MAXARG_B && a <= U.MAXARG_C), W(t, U.CREATE_ABC(e, n, r, a));
-    }, $ = function(t, e, n, r) {
-      return k(U.getOpMode(e) === U.iABx || U.getOpMode(e) === U.iAsBx), k(U.getCMode(e) === U.OpArgN), k(n <= U.MAXARG_A && r <= U.MAXARG_Bx), W(t, U.CREATE_ABx(e, n, r));
-    }, tt = function(t, e, n, r) {
-      return $(t, e, n, r + U.MAXARG_sBx);
-    }, et = function(t, e) {
-      return k(e <= U.MAXARG_Ax), W(t, U.CREATE_Ax(S.OP_EXTRAARG, e));
-    }, nt = function(t, e, n) {
-      if (n <= U.MAXARG_Bx)
-        return $(t, S.OP_LOADK, e, n);
-      {
-        let r = $(t, S.OP_LOADKX, e, 0);
-        return et(t, n), r;
-      }
-    }, rt = function(t, e) {
-      let n = t.freereg + e;
-      n > t.f.maxstacksize && (n >= 255 && v.luaX_syntaxerror(t.ls, O("function or expression needs too many registers", true)), t.f.maxstacksize = n);
-    }, at = function(t, e) {
-      rt(t, e), t.freereg += e;
-    }, ut = function(t, e) {
-      !U.ISK(e) && e >= t.nactvar && (t.freereg--, k(e === t.freereg));
-    }, lt = function(t, e) {
-      e.k === m.expkind.VNONRELOC && ut(t, e.u.info);
-    }, st = function(t, e, n) {
-      let r = e.k === m.expkind.VNONRELOC ? e.u.info : -1, a = n.k === m.expkind.VNONRELOC ? n.u.info : -1;
-      r > a ? (ut(t, r), ut(t, a)) : (ut(t, a), ut(t, r));
-    }, ot = function(t, e, n) {
-      let r = t.f, a = N.luaH_get(t.L, t.ls.h, e);
-      if (a.ttisinteger()) {
-        let e = a.value;
-        if (e < t.nk && r.k[e].ttype() === n.ttype() && r.k[e].value === n.value)
-          return e;
-      }
-      let u = t.nk;
-      return N.luaH_setfrom(t.L, t.ls.h, e, new E.TValue(x, u)), r.k[u] = n, t.nk++, u;
-    }, it = function(t, e) {
-      let n = new w(d, e), r = new w(x, e);
-      return ot(t, n, r);
-    }, ct = function(t, e) {
-      let n = new w(T, e);
-      return ot(t, n, n);
-    }, _t = function(t, e) {
-      let n = new w(h, e);
-      return ot(t, n, n);
-    }, ft = function(t, e, n) {
-      let a = m.expkind;
-      if (e.k === a.VCALL)
-        U.SETARG_C(D(t, e), n + 1);
-      else if (e.k === a.VVARARG) {
-        let r = D(t, e);
-        U.SETARG_B(r, n + 1), U.SETARG_A(r, t.freereg), at(t, 1);
-      } else
-        k(n === r);
-    }, pt = function(t, e) {
-      let n = m.expkind;
-      e.k === n.VCALL ? (k(D(t, e).C === 2), e.k = n.VNONRELOC, e.u.info = D(t, e).A) : e.k === n.VVARARG && (U.SETARG_B(D(t, e), 2), e.k = n.VRELOCABLE);
-    }, Lt = function(t, e) {
-      let n = m.expkind;
-      switch (e.k) {
-        case n.VLOCAL:
-          e.k = n.VNONRELOC;
-          break;
-        case n.VUPVAL:
-          e.u.info = Q(t, S.OP_GETUPVAL, 0, e.u.info, 0), e.k = n.VRELOCABLE;
-          break;
-        case n.VINDEXED: {
-          let r;
-          ut(t, e.u.ind.idx), e.u.ind.vt === n.VLOCAL ? (ut(t, e.u.ind.t), r = S.OP_GETTABLE) : (k(e.u.ind.vt === n.VUPVAL), r = S.OP_GETTABUP), e.u.info = Q(t, r, 0, e.u.ind.t, e.u.ind.idx), e.k = n.VRELOCABLE;
-          break;
-        }
-        case n.VVARARG:
-        case n.VCALL:
-          pt(t, e);
-      }
-    }, ht = function(t, e, n, r) {
-      return j(t), Q(t, S.OP_LOADBOOL, e, n, r);
-    }, dt = function(t, e, n) {
-      let r = m.expkind;
-      switch (Lt(t, e), e.k) {
-        case r.VNIL:
-          C(t, n, 1);
-          break;
-        case r.VFALSE:
-        case r.VTRUE:
-          Q(t, S.OP_LOADBOOL, n, e.k === r.VTRUE, 0);
-          break;
-        case r.VK:
-          nt(t, n, e.u.info);
-          break;
-        case r.VKFLT:
-          nt(t, n, ct(t, e.u.nval));
-          break;
-        case r.VKINT:
-          nt(t, n, it(t, e.u.ival));
-          break;
-        case r.VRELOCABLE: {
-          let r = D(t, e);
-          U.SETARG_A(r, n);
-          break;
-        }
-        case r.VNONRELOC:
-          n !== e.u.info && Q(t, S.OP_MOVE, n, e.u.info, 0);
-          break;
-        default:
-          return void k(e.k === r.VJMP);
-      }
-      e.u.info = n, e.k = r.VNONRELOC;
-    }, At = function(t, e) {
-      e.k !== m.expkind.VNONRELOC && (at(t, 1), dt(t, e, t.freereg - 1));
-    }, gt = function(t, e) {
-      for (;e !== -1; e = V(t, e)) {
-        if (X(t, e).opcode !== S.OP_TESTSET)
-          return true;
-      }
-      return false;
-    }, Tt = function(t, e, n) {
-      let r = m.expkind;
-      if (dt(t, e, n), e.k === r.VJMP && (e.t = G(t, e.t, e.u.info)), M(e)) {
-        let a, u = -1, l = -1;
-        if (gt(t, e.t) || gt(t, e.f)) {
-          let a = e.k === r.VJMP ? -1 : K(t);
-          u = ht(t, n, 0, 1), l = ht(t, n, 1, 0), Z(t, a);
-        }
-        a = j(t), J(t, e.f, a, n, u), J(t, e.t, a, n, l);
-      }
-      e.f = e.t = -1, e.u.info = n, e.k = r.VNONRELOC;
-    }, xt = function(t, e) {
-      Lt(t, e), lt(t, e), at(t, 1), Tt(t, e, t.freereg - 1);
-    }, bt = function(t, e) {
-      if (Lt(t, e), e.k === m.expkind.VNONRELOC) {
-        if (!M(e))
-          return e.u.info;
-        if (e.u.info >= t.nactvar)
-          return Tt(t, e, e.u.info), e.u.info;
-      }
-      return xt(t, e), e.u.info;
-    }, Ot = function(t, e) {
-      M(e) ? bt(t, e) : Lt(t, e);
-    }, kt = function(t, e) {
-      let n = m.expkind, r = false;
-      switch (Ot(t, e), e.k) {
-        case n.VTRUE:
-          e.u.info = _t(t, true), r = true;
-          break;
-        case n.VFALSE:
-          e.u.info = _t(t, false), r = true;
-          break;
-        case n.VNIL:
-          e.u.info = function(t) {
-            let e = new w(g, null), n = new w(b, t.ls.h);
-            return ot(t, n, e);
-          }(t), r = true;
-          break;
-        case n.VKINT:
-          e.u.info = it(t, e.u.ival), r = true;
-          break;
-        case n.VKFLT:
-          e.u.info = ct(t, e.u.nval), r = true;
-          break;
-        case n.VK:
-          r = true;
-      }
-      return r && (e.k = n.VK, e.u.info <= U.MAXINDEXRK) ? U.RKASK(e.u.info) : bt(t, e);
-    }, vt = function(t, e) {
-      let n = X(t, e.u.info);
-      k(U.testTMode(n.opcode) && n.opcode !== S.OP_TESTSET && n.opcode !== S.OP_TEST), U.SETARG_A(n, !n.A);
-    }, Et = function(t, e, n) {
-      if (e.k === m.expkind.VRELOCABLE) {
-        let r = D(t, e);
-        if (r.opcode === S.OP_NOT)
-          return t.pc--, F(t, S.OP_TEST, r.B, 0, !n);
-      }
-      return At(t, e), lt(t, e), F(t, S.OP_TESTSET, U.NO_REG, e.u.info, n);
-    }, Ut = function(t, e) {
-      let n, r = m.expkind;
-      switch (Lt(t, e), e.k) {
-        case r.VJMP:
-          vt(t, e), n = e.u.info;
-          break;
-        case r.VK:
-        case r.VKFLT:
-        case r.VKINT:
-        case r.VTRUE:
-          n = -1;
-          break;
-        default:
-          n = Et(t, e, 0);
-      }
-      e.f = G(t, e.f, n), Z(t, e.t), e.t = -1;
-    }, mt = function(t, e) {
-      let n, r = m.expkind;
-      switch (Lt(t, e), e.k) {
-        case r.VJMP:
-          n = e.u.info;
-          break;
-        case r.VNIL:
-        case r.VFALSE:
-          n = -1;
-          break;
-        default:
-          n = Et(t, e, 1);
-      }
-      e.t = G(t, e.t, n), Z(t, e.f), e.f = -1;
-    }, Nt = function(t, e, n) {
-      let r, a, L = m.expkind;
-      if (!(r = P(e, true)) || !(a = P(n, true)) || !function(t, e, n) {
-        switch (t) {
-          case u:
-          case s:
-          case o:
-          case f:
-          case p:
-          case l:
-            return R.tointeger(e) !== false && R.tointeger(n) !== false;
-          case i:
-          case c:
-          case _:
-            return n.value !== 0;
-          default:
-            return 1;
-        }
-      }(t, r, a))
-        return 0;
-      let h = new w;
-      if (E.luaO_arith(null, t, r, a, h), h.ttisinteger())
-        e.k = L.VKINT, e.u.ival = h.value;
-      else {
-        let t = h.value;
-        if (isNaN(t) || t === 0)
-          return false;
-        e.k = L.VKFLT, e.u.nval = t;
-      }
-      return true;
-    }, Rt = function(t, e, n, r, a) {
-      let u = kt(t, r), l = kt(t, n);
-      st(t, n, r), n.u.info = Q(t, e, 0, l, u), n.k = m.expkind.VRELOCABLE, St(t, a);
-    }, St = function(t, e) {
-      t.f.lineinfo[t.pc - 1] = e;
-    };
-    t.exports.BinOpr = I, t.exports.NO_JUMP = -1, t.exports.UnOpr = y, t.exports.getinstruction = D, t.exports.luaK_checkstack = rt, t.exports.luaK_code = W, t.exports.luaK_codeABC = Q, t.exports.luaK_codeABx = $, t.exports.luaK_codeAsBx = tt, t.exports.luaK_codek = nt, t.exports.luaK_concat = G, t.exports.luaK_dischargevars = Lt, t.exports.luaK_exp2RK = kt, t.exports.luaK_exp2anyreg = bt, t.exports.luaK_exp2anyregup = function(t, e) {
-      (e.k !== m.expkind.VUPVAL || M(e)) && bt(t, e);
-    }, t.exports.luaK_exp2nextreg = xt, t.exports.luaK_exp2val = Ot, t.exports.luaK_fixline = St, t.exports.luaK_getlabel = j, t.exports.luaK_goiffalse = mt, t.exports.luaK_goiftrue = Ut, t.exports.luaK_indexed = function(t, e, n) {
-      let r = m.expkind;
-      k(!M(e) && (m.vkisinreg(e.k) || e.k === r.VUPVAL)), e.u.ind.t = e.u.info, e.u.ind.idx = kt(t, n), e.u.ind.vt = e.k === r.VUPVAL ? r.VUPVAL : r.VLOCAL, e.k = r.VINDEXED;
-    }, t.exports.luaK_infix = function(t, e, n) {
-      switch (e) {
-        case I.OPR_AND:
-          Ut(t, n);
-          break;
-        case I.OPR_OR:
-          mt(t, n);
-          break;
-        case I.OPR_CONCAT:
-          xt(t, n);
-          break;
-        case I.OPR_ADD:
-        case I.OPR_SUB:
-        case I.OPR_MUL:
-        case I.OPR_DIV:
-        case I.OPR_IDIV:
-        case I.OPR_MOD:
-        case I.OPR_POW:
-        case I.OPR_BAND:
-        case I.OPR_BOR:
-        case I.OPR_BXOR:
-        case I.OPR_SHL:
-        case I.OPR_SHR:
-          P(n, false) || kt(t, n);
-          break;
-        default:
-          kt(t, n);
-      }
-    }, t.exports.luaK_intK = it, t.exports.luaK_jump = K, t.exports.luaK_jumpto = function(t, e) {
-      return q(t, K(t), e);
-    }, t.exports.luaK_nil = C, t.exports.luaK_numberK = ct, t.exports.luaK_patchclose = function(t, e, n) {
-      for (n++;e !== -1; e = V(t, e)) {
-        let r = t.f.code[e];
-        k(r.opcode === S.OP_JMP && (r.A === 0 || r.A >= n)), U.SETARG_A(r, n);
-      }
-    }, t.exports.luaK_patchlist = q, t.exports.luaK_patchtohere = Z, t.exports.luaK_posfix = function(t, e, n, r, u) {
-      let l = m.expkind;
-      switch (e) {
-        case I.OPR_AND:
-          k(n.t === -1), Lt(t, r), r.f = G(t, r.f, n.f), n.to(r);
-          break;
-        case I.OPR_OR:
-          k(n.f === -1), Lt(t, r), r.t = G(t, r.t, n.t), n.to(r);
-          break;
-        case I.OPR_CONCAT: {
-          Ot(t, r);
-          let e = D(t, r);
-          r.k === l.VRELOCABLE && e.opcode === S.OP_CONCAT ? (k(n.u.info === e.B - 1), lt(t, n), U.SETARG_B(e, n.u.info), n.k = l.VRELOCABLE, n.u.info = r.u.info) : (xt(t, r), Rt(t, S.OP_CONCAT, n, r, u));
-          break;
-        }
-        case I.OPR_ADD:
-        case I.OPR_SUB:
-        case I.OPR_MUL:
-        case I.OPR_DIV:
-        case I.OPR_IDIV:
-        case I.OPR_MOD:
-        case I.OPR_POW:
-        case I.OPR_BAND:
-        case I.OPR_BOR:
-        case I.OPR_BXOR:
-        case I.OPR_SHL:
-        case I.OPR_SHR:
-          Nt(e + a, n, r) || Rt(t, e + S.OP_ADD, n, r, u);
-          break;
-        case I.OPR_EQ:
-        case I.OPR_LT:
-        case I.OPR_LE:
-        case I.OPR_NE:
-        case I.OPR_GT:
-        case I.OPR_GE:
-          (function(t, e, n, r) {
-            let a, u = m.expkind;
-            n.k === u.VK ? a = U.RKASK(n.u.info) : (k(n.k === u.VNONRELOC), a = n.u.info);
-            let l = kt(t, r);
-            switch (st(t, n, r), e) {
-              case I.OPR_NE:
-                n.u.info = F(t, S.OP_EQ, 0, a, l);
-                break;
-              case I.OPR_GT:
-              case I.OPR_GE: {
-                let r = e - I.OPR_NE + S.OP_EQ;
-                n.u.info = F(t, r, 1, l, a);
-                break;
-              }
-              default: {
-                let r = e - I.OPR_EQ + S.OP_EQ;
-                n.u.info = F(t, r, 1, a, l);
-                break;
-              }
-            }
-            n.k = u.VJMP;
-          })(t, e, n, r);
-      }
-      return n;
-    }, t.exports.luaK_prefix = function(t, e, n, r) {
-      let a = new m.expdesc;
-      switch (a.k = m.expkind.VKINT, a.u.ival = a.u.nval = a.u.info = 0, a.t = -1, a.f = -1, e) {
-        case y.OPR_MINUS:
-        case y.OPR_BNOT:
-          if (Nt(e + L, n, a))
-            break;
-        case y.OPR_LEN:
-          (function(t, e, n, r) {
-            let a = bt(t, n);
-            lt(t, n), n.u.info = Q(t, e, 0, a, 0), n.k = m.expkind.VRELOCABLE, St(t, r);
-          })(t, e + S.OP_UNM, n, r);
-          break;
-        case y.OPR_NOT:
-          (function(t, e) {
-            let n = m.expkind;
-            switch (Lt(t, e), e.k) {
-              case n.VNIL:
-              case n.VFALSE:
-                e.k = n.VTRUE;
-                break;
-              case n.VK:
-              case n.VKFLT:
-              case n.VKINT:
-              case n.VTRUE:
-                e.k = n.VFALSE;
-                break;
-              case n.VJMP:
-                vt(t, e);
-                break;
-              case n.VRELOCABLE:
-              case n.VNONRELOC:
-                At(t, e), lt(t, e), e.u.info = Q(t, S.OP_NOT, 0, e.u.info, 0), e.k = n.VRELOCABLE;
-            }
-            {
-              let t = e.f;
-              e.f = e.t, e.t = t;
-            }
-            Y(t, e.f), Y(t, e.t);
-          })(t, n);
-      }
-    }, t.exports.luaK_reserveregs = at, t.exports.luaK_ret = function(t, e, n) {
-      Q(t, S.OP_RETURN, e, n + 1, 0);
-    }, t.exports.luaK_self = function(t, e, n) {
-      bt(t, e);
-      let r = e.u.info;
-      lt(t, e), e.u.info = t.freereg, e.k = m.expkind.VNONRELOC, at(t, 2), Q(t, S.OP_SELF, e.u.info, r, kt(t, n)), lt(t, n);
-    }, t.exports.luaK_setlist = function(t, e, n, a) {
-      let u = (n - 1) / U.LFIELDS_PER_FLUSH + 1, l = a === r ? 0 : a;
-      k(a !== 0 && a <= U.LFIELDS_PER_FLUSH), u <= U.MAXARG_C ? Q(t, S.OP_SETLIST, e, l, u) : u <= U.MAXARG_Ax ? (Q(t, S.OP_SETLIST, e, l, 0), et(t, u)) : v.luaX_syntaxerror(t.ls, O("constructor too long", true)), t.freereg = e + 1;
-    }, t.exports.luaK_setmultret = function(t, e) {
-      ft(t, e, r);
-    }, t.exports.luaK_setoneret = pt, t.exports.luaK_setreturns = ft, t.exports.luaK_storevar = function(t, e, n) {
-      let r = m.expkind;
-      switch (e.k) {
-        case r.VLOCAL:
-          return lt(t, n), void Tt(t, n, e.u.info);
-        case r.VUPVAL: {
-          let r = bt(t, n);
-          Q(t, S.OP_SETUPVAL, r, e.u.info, 0);
-          break;
-        }
-        case r.VINDEXED: {
-          let a = e.u.ind.vt === r.VLOCAL ? S.OP_SETTABLE : S.OP_SETTABUP, u = kt(t, n);
-          Q(t, a, e.u.ind.t, e.u.ind.idx, u);
-          break;
-        }
-      }
-      lt(t, n);
-    }, t.exports.luaK_stringK = function(t, e) {
-      let n = new w(A, e);
-      return ot(t, n, n);
-    };
-  }, function(t, e, n) {
-    const { LUA_SIGNATURE: r, constant_types: { LUA_TBOOLEAN: a, LUA_TLNGSTR: u, LUA_TNIL: l, LUA_TNUMFLT: s, LUA_TNUMINT: o, LUA_TSHRSTR: i }, thread_status: { LUA_ERRSYNTAX: c }, is_luastring: _, luastring_eq: f, to_luastring: p } = n(1), L = n(8), h = n(13), d = n(6), { MAXARG_sBx: A, POS_A: g, POS_Ax: T, POS_B: x, POS_Bx: b, POS_C: O, POS_OP: k, SIZE_A: v, SIZE_Ax: E, SIZE_B: U, SIZE_Bx: m, SIZE_C: N, SIZE_OP: R } = n(16), { lua_assert: S } = n(4), { luaS_bless: w } = n(10), { luaZ_read: I, ZIO: y } = n(19);
-    let M = [25, 147, 13, 10, 26, 10];
-
-    class P {
-      constructor(t, e, n) {
-        this.intSize = 4, this.size_tSize = 4, this.instructionSize = 4, this.integerSize = 4, this.numberSize = 8, S(e instanceof y, "BytecodeParser only operates on a ZIO"), S(_(n)), n[0] === 64 || n[0] === 61 ? this.name = n.subarray(1) : n[0] == r[0] ? this.name = p("binary string", true) : this.name = n, this.L = t, this.Z = e, this.arraybuffer = new ArrayBuffer(Math.max(this.intSize, this.size_tSize, this.instructionSize, this.integerSize, this.numberSize)), this.dv = new DataView(this.arraybuffer), this.u8 = new Uint8Array(this.arraybuffer);
-      }
-      read(t) {
-        let e = new Uint8Array(t);
-        return I(this.Z, e, 0, t) !== 0 && this.error("truncated"), e;
-      }
-      LoadByte() {
-        return I(this.Z, this.u8, 0, 1) !== 0 && this.error("truncated"), this.u8[0];
-      }
-      LoadInt() {
-        return I(this.Z, this.u8, 0, this.intSize) !== 0 && this.error("truncated"), this.dv.getInt32(0, true);
-      }
-      LoadNumber() {
-        return I(this.Z, this.u8, 0, this.numberSize) !== 0 && this.error("truncated"), this.dv.getFloat64(0, true);
-      }
-      LoadInteger() {
-        return I(this.Z, this.u8, 0, this.integerSize) !== 0 && this.error("truncated"), this.dv.getInt32(0, true);
-      }
-      LoadSize_t() {
-        return this.LoadInteger();
-      }
-      LoadString() {
-        let t = this.LoadByte();
-        return t === 255 && (t = this.LoadSize_t()), t === 0 ? null : w(this.L, this.read(t - 1));
-      }
-      static MASK1(t, e) {
-        return ~(-1 << t) << e;
-      }
-      LoadCode(t) {
-        let e = this.LoadInt(), n = P;
-        for (let r = 0;r < e; r++) {
-          I(this.Z, this.u8, 0, this.instructionSize) !== 0 && this.error("truncated");
-          let e = this.dv.getUint32(0, true);
-          t.code[r] = { code: e, opcode: e >> k & n.MASK1(R, 0), A: e >> g & n.MASK1(v, 0), B: e >> x & n.MASK1(U, 0), C: e >> O & n.MASK1(N, 0), Bx: e >> b & n.MASK1(m, 0), Ax: e >> T & n.MASK1(E, 0), sBx: (e >> b & n.MASK1(m, 0)) - A };
-        }
-      }
-      LoadConstants(t) {
-        let e = this.LoadInt();
-        for (let n = 0;n < e; n++) {
-          let e = this.LoadByte();
-          switch (e) {
-            case l:
-              t.k.push(new d.TValue(l, null));
-              break;
-            case a:
-              t.k.push(new d.TValue(a, this.LoadByte() !== 0));
-              break;
-            case s:
-              t.k.push(new d.TValue(s, this.LoadNumber()));
-              break;
-            case o:
-              t.k.push(new d.TValue(o, this.LoadInteger()));
-              break;
-            case i:
-            case u:
-              t.k.push(new d.TValue(u, this.LoadString()));
-              break;
-            default:
-              this.error(`unrecognized constant '${e}'`);
-          }
-        }
-      }
-      LoadProtos(t) {
-        let e = this.LoadInt();
-        for (let n = 0;n < e; n++)
-          t.p[n] = new h.Proto(this.L), this.LoadFunction(t.p[n], t.source);
-      }
-      LoadUpvalues(t) {
-        let e = this.LoadInt();
-        for (let n = 0;n < e; n++)
-          t.upvalues[n] = { name: null, instack: this.LoadByte(), idx: this.LoadByte() };
-      }
-      LoadDebug(t) {
-        let e = this.LoadInt();
-        for (let n = 0;n < e; n++)
-          t.lineinfo[n] = this.LoadInt();
-        e = this.LoadInt();
-        for (let n = 0;n < e; n++)
-          t.locvars[n] = { varname: this.LoadString(), startpc: this.LoadInt(), endpc: this.LoadInt() };
-        e = this.LoadInt();
-        for (let n = 0;n < e; n++)
-          t.upvalues[n].name = this.LoadString();
-      }
-      LoadFunction(t, e) {
-        t.source = this.LoadString(), t.source === null && (t.source = e), t.linedefined = this.LoadInt(), t.lastlinedefined = this.LoadInt(), t.numparams = this.LoadByte(), t.is_vararg = this.LoadByte() !== 0, t.maxstacksize = this.LoadByte(), this.LoadCode(t), this.LoadConstants(t), this.LoadUpvalues(t), this.LoadProtos(t), this.LoadDebug(t);
-      }
-      checkliteral(t, e) {
-        let n = this.read(t.length);
-        f(n, t) || this.error(e);
-      }
-      checkHeader() {
-        this.checkliteral(r.subarray(1), "not a"), this.LoadByte() !== 83 && this.error("version mismatch in"), this.LoadByte() !== 0 && this.error("format mismatch in"), this.checkliteral(M, "corrupted"), this.intSize = this.LoadByte(), this.size_tSize = this.LoadByte(), this.instructionSize = this.LoadByte(), this.integerSize = this.LoadByte(), this.numberSize = this.LoadByte(), this.checksize(this.intSize, 4, "int"), this.checksize(this.size_tSize, 4, "size_t"), this.checksize(this.instructionSize, 4, "instruction"), this.checksize(this.integerSize, 4, "integer"), this.checksize(this.numberSize, 8, "number"), this.LoadInteger() !== 22136 && this.error("endianness mismatch in"), this.LoadNumber() !== 370.5 && this.error("float format mismatch in");
-      }
-      error(t) {
-        d.luaO_pushfstring(this.L, p("%s: %s precompiled chunk"), this.name, p(t)), L.luaD_throw(this.L, c);
-      }
-      checksize(t, e, n) {
-        t !== e && this.error(`${n} size mismatch in`);
-      }
-    }
-    t.exports.luaU_undump = function(t, e, n) {
-      let r = new P(t, e, n);
-      r.checkHeader();
-      let a = h.luaF_newLclosure(t, r.LoadByte());
-      return L.luaD_inctop(t), t.stack[t.top - 1].setclLvalue(a), a.p = new h.Proto(t), r.LoadFunction(a.p, null), S(a.nupvalues === a.p.upvalues.length), a;
-    };
-  }, function(t, e, n) {
-    const { LUA_SIGNATURE: r, LUA_VERSION_MAJOR: a, LUA_VERSION_MINOR: u, constant_types: { LUA_TBOOLEAN: l, LUA_TLNGSTR: s, LUA_TNIL: o, LUA_TNUMFLT: i, LUA_TNUMINT: c, LUA_TSHRSTR: _ }, luastring_of: f } = n(1), p = f(25, 147, 13, 10, 26, 10), L = 16 * Number(a) + Number(u);
-    const h = function(t, e, n) {
-      n.status === 0 && e > 0 && (n.status = n.writer(n.L, t, e, n.data));
-    }, d = function(t, e) {
-      h(f(t), 1, e);
-    }, A = function(t, e) {
-      let n = new ArrayBuffer(4);
-      new DataView(n).setInt32(0, t, true);
-      let r = new Uint8Array(n);
-      h(r, 4, e);
-    }, g = function(t, e) {
-      let n = new ArrayBuffer(4);
-      new DataView(n).setInt32(0, t, true);
-      let r = new Uint8Array(n);
-      h(r, 4, e);
-    }, T = function(t, e) {
-      let n = new ArrayBuffer(8);
-      new DataView(n).setFloat64(0, t, true);
-      let r = new Uint8Array(n);
-      h(r, 8, e);
-    }, x = function(t, e) {
-      if (t === null)
-        d(0, e);
-      else {
-        let n = t.tsslen() + 1, r = t.getstr();
-        n < 255 ? d(n, e) : (d(255, e), g(n, e)), h(r, n - 1, e);
-      }
-    }, b = function(t, e, n) {
-      n.strip || t.source === e ? x(null, n) : x(t.source, n), A(t.linedefined, n), A(t.lastlinedefined, n), d(t.numparams, n), d(t.is_vararg ? 1 : 0, n), d(t.maxstacksize, n), function(t, e) {
-        let n = t.code.map((t) => t.code);
-        A(n.length, e);
-        for (let t = 0;t < n.length; t++)
-          A(n[t], e);
-      }(t, n), function(t, e) {
-        let n = t.k.length;
-        A(n, e);
-        for (let r = 0;r < n; r++) {
-          let n = t.k[r];
-          switch (d(n.ttype(), e), n.ttype()) {
-            case o:
-              break;
-            case l:
-              d(n.value ? 1 : 0, e);
-              break;
-            case i:
-              T(n.value, e);
-              break;
-            case c:
-              g(n.value, e);
-              break;
-            case _:
-            case s:
-              x(n.tsvalue(), e);
-          }
-        }
-      }(t, n), function(t, e) {
-        let n = t.upvalues.length;
-        A(n, e);
-        for (let r = 0;r < n; r++)
-          d(t.upvalues[r].instack ? 1 : 0, e), d(t.upvalues[r].idx, e);
-      }(t, n), function(t, e) {
-        let n = t.p.length;
-        A(n, e);
-        for (let r = 0;r < n; r++)
-          b(t.p[r], t.source, e);
-      }(t, n), function(t, e) {
-        let n = e.strip ? 0 : t.lineinfo.length;
-        A(n, e);
-        for (let r = 0;r < n; r++)
-          A(t.lineinfo[r], e);
-        n = e.strip ? 0 : t.locvars.length, A(n, e);
-        for (let r = 0;r < n; r++)
-          x(t.locvars[r].varname, e), A(t.locvars[r].startpc, e), A(t.locvars[r].endpc, e);
-        n = e.strip ? 0 : t.upvalues.length, A(n, e);
-        for (let r = 0;r < n; r++)
-          x(t.upvalues[r].name, e);
-      }(t, n);
-    };
-    t.exports.luaU_dump = function(t, e, n, a, u) {
-      let l = new class {
-        constructor() {
-          this.L = null, this.write = null, this.data = null, this.strip = NaN, this.status = NaN;
-        }
-      };
-      return l.L = t, l.writer = n, l.data = a, l.strip = u, l.status = 0, function(t) {
-        h(r, r.length, t), d(L, t), d(0, t), h(p, p.length, t), d(4, t), d(4, t), d(4, t), d(4, t), d(8, t), g(22136, t), T(370.5, t);
-      }(l), d(e.upvalues.length, l), b(e, null, l), l.status;
-    };
-  }, function(t, e, n) {
-    var r;
-    (function() {
-      var a = { not_string: /[^s]/, not_bool: /[^t]/, not_type: /[^T]/, not_primitive: /[^v]/, number: /[diefg]/, numeric_arg: /[bcdiefguxX]/, json: /[j]/, not_json: /[^j]/, text: /^[^\x25]+/, modulo: /^\x25{2}/, placeholder: /^\x25(?:([1-9]\d*)\$|\(([^\)]+)\))?(\+)?(0|'[^$])?(-)?(\d+)?(?:\.(\d+))?([b-gijostTuvxX])/, key: /^([a-z_][a-z_\d]*)/i, key_access: /^\.([a-z_][a-z_\d]*)/i, index_access: /^\[(\d+)\]/, sign: /^[\+\-]/ };
-      function u(t) {
-        return function(t, e) {
-          var n, r, l, s, o, i, c, _, f, p = 1, L = t.length, h = "";
-          for (r = 0;r < L; r++)
-            if (typeof t[r] == "string")
-              h += t[r];
-            else if (Array.isArray(t[r])) {
-              if ((s = t[r])[2])
-                for (n = e[p], l = 0;l < s[2].length; l++) {
-                  if (!n.hasOwnProperty(s[2][l]))
-                    throw new Error(u('[sprintf] property "%s" does not exist', s[2][l]));
-                  n = n[s[2][l]];
-                }
-              else
-                n = s[1] ? e[s[1]] : e[p++];
-              if (a.not_type.test(s[8]) && a.not_primitive.test(s[8]) && n instanceof Function && (n = n()), a.numeric_arg.test(s[8]) && typeof n != "number" && isNaN(n))
-                throw new TypeError(u("[sprintf] expecting number but found %T", n));
-              switch (a.number.test(s[8]) && (_ = n >= 0), s[8]) {
-                case "b":
-                  n = parseInt(n, 10).toString(2);
-                  break;
-                case "c":
-                  n = String.fromCharCode(parseInt(n, 10));
-                  break;
-                case "d":
-                case "i":
-                  n = parseInt(n, 10);
-                  break;
-                case "j":
-                  n = JSON.stringify(n, null, s[6] ? parseInt(s[6]) : 0);
-                  break;
-                case "e":
-                  n = s[7] ? parseFloat(n).toExponential(s[7]) : parseFloat(n).toExponential();
-                  break;
-                case "f":
-                  n = s[7] ? parseFloat(n).toFixed(s[7]) : parseFloat(n);
-                  break;
-                case "g":
-                  n = s[7] ? String(Number(n.toPrecision(s[7]))) : parseFloat(n);
-                  break;
-                case "o":
-                  n = (parseInt(n, 10) >>> 0).toString(8);
-                  break;
-                case "s":
-                  n = String(n), n = s[7] ? n.substring(0, s[7]) : n;
-                  break;
-                case "t":
-                  n = String(!!n), n = s[7] ? n.substring(0, s[7]) : n;
-                  break;
-                case "T":
-                  n = Object.prototype.toString.call(n).slice(8, -1).toLowerCase(), n = s[7] ? n.substring(0, s[7]) : n;
-                  break;
-                case "u":
-                  n = parseInt(n, 10) >>> 0;
-                  break;
-                case "v":
-                  n = n.valueOf(), n = s[7] ? n.substring(0, s[7]) : n;
-                  break;
-                case "x":
-                  n = (parseInt(n, 10) >>> 0).toString(16);
-                  break;
-                case "X":
-                  n = (parseInt(n, 10) >>> 0).toString(16).toUpperCase();
-              }
-              a.json.test(s[8]) ? h += n : (!a.number.test(s[8]) || _ && !s[3] ? f = "" : (f = _ ? "+" : "-", n = n.toString().replace(a.sign, "")), i = s[4] ? s[4] === "0" ? "0" : s[4].charAt(1) : " ", c = s[6] - (f + n).length, o = s[6] && c > 0 ? i.repeat(c) : "", h += s[5] ? f + n + o : i === "0" ? f + o + n : o + f + n);
-            }
-          return h;
-        }(function(t) {
-          if (s[t])
-            return s[t];
-          var e, n = t, r = [], u = 0;
-          for (;n; ) {
-            if ((e = a.text.exec(n)) !== null)
-              r.push(e[0]);
-            else if ((e = a.modulo.exec(n)) !== null)
-              r.push("%");
-            else {
-              if ((e = a.placeholder.exec(n)) === null)
-                throw new SyntaxError("[sprintf] unexpected placeholder");
-              if (e[2]) {
-                u |= 1;
-                var l = [], o = e[2], i = [];
-                if ((i = a.key.exec(o)) === null)
-                  throw new SyntaxError("[sprintf] failed to parse named argument key");
-                for (l.push(i[1]);(o = o.substring(i[0].length)) !== ""; )
-                  if ((i = a.key_access.exec(o)) !== null)
-                    l.push(i[1]);
-                  else {
-                    if ((i = a.index_access.exec(o)) === null)
-                      throw new SyntaxError("[sprintf] failed to parse named argument key");
-                    l.push(i[1]);
-                  }
-                e[2] = l;
-              } else
-                u |= 2;
-              if (u === 3)
-                throw new Error("[sprintf] mixing positional and named placeholders is not (yet) supported");
-              r.push(e);
-            }
-            n = n.substring(e[0].length);
-          }
-          return s[t] = r;
-        }(t), arguments);
-      }
-      function l(t, e) {
-        return u.apply(null, [t].concat(e || []));
-      }
-      var s = Object.create(null);
-      e.sprintf = u, e.vsprintf = l, typeof window != "undefined" && (window.sprintf = u, window.vsprintf = l, (r = function() {
-        return { sprintf: u, vsprintf: l };
-      }.call(e, n, e, t)) === undefined || (t.exports = r));
-    })();
-  }, function(t, e, n) {
-    const { lua_pop: r } = n(2), { luaL_requiref: a } = n(7), { to_luastring: u } = n(5), l = {};
-    t.exports.luaL_openlibs = function(t) {
-      for (let e in l)
-        a(t, u(e), l[e], 1), r(t, 1);
-    };
-    const s = n(17), { luaopen_base: o } = n(24), { luaopen_coroutine: i } = n(25), { luaopen_debug: c } = n(31), { luaopen_math: _ } = n(30), { luaopen_package: f } = n(32), { luaopen_os: p } = n(27), { luaopen_string: L } = n(28), { luaopen_table: h } = n(26), { luaopen_utf8: d } = n(29);
-    l._G = o, l[s.LUA_LOADLIBNAME] = f, l[s.LUA_COLIBNAME] = i, l[s.LUA_TABLIBNAME] = h, l[s.LUA_OSLIBNAME] = p, l[s.LUA_STRLIBNAME] = L, l[s.LUA_MATHLIBNAME] = _, l[s.LUA_UTF8LIBNAME] = d, l[s.LUA_DBLIBNAME] = c;
-    const { luaopen_fengari: A } = n(33);
-    l[s.LUA_FENGARILIBNAME] = A;
-  }]);
 });
 
 // node:url
@@ -22172,10 +14998,12 @@ var spindle_default = {
     "web_search"
   ],
   requested_capabilities: [
-    "base64_decode"
+    "base64_decode",
+    "dynamic_code_execution"
   ],
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
+  interceptorTimeoutMs: 30000,
   minimum_lumiverse_version: "1.2.0",
   lumirealm: {
     risu_app_version: "2026.6.215",
@@ -22456,7 +15284,7 @@ function buildEvaluatorContext(input) {
     aiModel: input.system?.model ?? "",
     axModel: "",
     isFirstMessage: Number(chat.messageCount ?? 0) <= 1,
-    currentMessageIndex: input.currentMessageIndexOverride !== undefined ? Math.max(-1, input.currentMessageIndexOverride) : chat.lastMessageId != null ? Math.max(-1, chat.lastMessageId - 1) : null,
+    currentMessageIndex: input.currentMessageIndexOverride !== undefined ? input.currentMessageIndexOverride : chat.lastMessageId != null ? Math.max(-1, chat.lastMessageId - 1) : null,
     lorebook,
     jailbreakToggle: false,
     maxContext: Number(input.system?.maxContext ?? 0),
@@ -22470,6 +15298,7 @@ function buildEvaluatorContext(input) {
     ...input.modulesByNamespace ? { modulesByNamespace: input.modulesByNamespace } : {},
     ...input.positionPt ? { positionPt: input.positionPt } : {},
     ...input.cbsContext ? { cbsContext: true } : {},
+    ...input.visualize !== undefined ? { visualize: input.visualize } : {},
     ...input.rmVar ? { rmVar: true } : {},
     ...input.runVar ? { runVar: true } : {},
     ...input.suppressVarPersist ? { promptRegexLiteralVars: true } : {}
@@ -22499,14 +15328,15 @@ function freshParserContext(base) {
         base.vars.delete(scope, name);
     }
   };
-  const out = { ...base, vars, functions: makeFunctionRegistry() };
+  const out = { ...base, vars, tempVars: {}, functions: makeFunctionRegistry() };
   out.evaluate = (text) => {
     if (typeof text !== "string" || text.length === 0)
       return "";
     if (text.indexOf("{{") < 0 && text.indexOf("{#") < 0 && text.indexOf("<") < 0)
       return text;
     init_scanner();
-    return evaluate(text, out, out.callStack !== undefined ? { callStack: out.callStack } : {});
+    const nested = out.visualize === true ? { ...out, visualize: false } : out;
+    return evaluate(text, nested, out.callStack !== undefined ? { callStack: out.callStack } : {});
   };
   return out;
 }
@@ -22538,6 +15368,7 @@ function runPipeline(input, opts) {
     ...input.lorebook ? { lorebook: input.lorebook } : {},
     ...input.positionPt ? { positionPt: input.positionPt } : {},
     ...input.cbsContext ? { cbsContext: true } : {},
+    ...input.visualize !== undefined ? { visualize: input.visualize } : {},
     ...input.rmVar ? { rmVar: true } : {},
     ...input.runVar ? { runVar: true } : {},
     ...input.suppressVarPersist ? { suppressVarPersist: true } : {},
@@ -22586,7 +15417,6 @@ function isLogThreshold(v) {
 function meetsThreshold(call, threshold) {
   return LEVEL_RANK[call] <= LEVEL_RANK[threshold];
 }
-var MAX_BYTES = 5 * 1024 * 1024;
 var DEFAULT_STATE = { enabled: false, includeChatData: false, level: DEFAULT_LOG_LEVEL };
 var SYSTEM_KEY = "__SYSTEM__";
 
@@ -22641,11 +15471,6 @@ class LogStore {
     const size = approxBytes(ev);
     this.events.push(ev);
     this.bytes += size;
-    while (this.bytes > MAX_BYTES && this.events.length > 1) {
-      const dropped = this.events.shift();
-      if (dropped)
-        this.bytes -= approxBytes(dropped);
-    }
   }
   snapshot(userId) {
     if (userId === undefined)
@@ -23066,6 +15891,9 @@ function applyVarDelta(chatId, scope, values) {
     vars: { ...prev.vars, [scope]: { ...prev.vars[scope], ...values } }
   });
 }
+function clearDisplaySnapshot(chatId) {
+  snapshots.delete(chatId);
+}
 function diffSnapshotVars(prev, next) {
   const changed = [];
   for (const scope of ["local", "global", "chat"]) {
@@ -23078,6 +15906,12 @@ function diffSnapshotVars(prev, next) {
     }
   }
   return changed;
+}
+function snapshotMessagesChanged(prev, next) {
+  return prev.messagesHost.length !== next.messagesHost.length || prev.messagesHost.some((message, index) => {
+    const other = next.messagesHost[index];
+    return message.content !== other.content || message.role !== other.role || message.createdAt !== other.createdAt;
+  });
 }
 function isDisplayResolutionReady(chatId) {
   return mode !== "off" && snapshots.has(chatId);
@@ -23340,7 +16174,7 @@ function applyRegexScriptsCore(content, scripts, opts) {
     let findRegex = script.find_regex;
     if (script.preResolvedFind !== undefined) {
       findRegex = script.preResolvedFind;
-    } else if (script.substitute_macros !== "none") {
+    } else if (script.risuActions !== undefined ? script.risuActions.includes("cbs") : script.substitute_macros !== "none") {
       findRegex = evalTemplate(findRegex);
     }
     const movesMatch = script.matchActions?.includes("move_top") === true || script.matchActions?.includes("move_bottom") === true;
@@ -23349,6 +16183,10 @@ function applyRegexScriptsCore(content, scripts, opts) {
     if (!regex)
       continue;
     try {
+      if (script.risuActions !== undefined) {
+        result = applyRisuRule(result, regex, script, evalTemplate, previousContent);
+        continue;
+      }
       const behaviorResult = applyMatchActions(result, regex, script, previousContent, evalTemplate);
       if (behaviorResult.handled) {
         result = applyTrimStrings(behaviorResult.content, script.trim_strings);
@@ -23378,6 +16216,33 @@ function applyRegexScriptsCore(content, scripts, opts) {
     }
   }
   return result;
+}
+function applyRisuRule(content, regex, script, evalTemplate, previousContent) {
+  const movesTop = script.matchActions?.includes("move_top");
+  const movesBottom = script.matchActions?.includes("move_bottom");
+  const requiresMatch = script.risuActions.length > 0 || (script.matchActions?.length ?? 0) > 0 || script.replace_string.startsWith("@@");
+  if (requiresMatch && !regex.test(content)) {
+    return script.matchActions?.includes("repeat_back") ? applyMatchActions(content, regex, script, previousContent, evalTemplate).content : content;
+  }
+  if (movesTop || movesBottom) {
+    const match = content.match(regex);
+    const remainder = content.replace(regex, "");
+    if (!match)
+      return remainder;
+    const replacement = script.replace_string.replace(/(?<!\$)\$[0-9]+/g, (token) => {
+      const index = Number.parseInt(token.slice(1), 10);
+      return index < match.length ? String(match[index]) : token;
+    }).replace(/\$&/g, match[0]).replace(/(?<!\$)\$<([^>]+)>/g, (token) => {
+      const name = Number.parseInt(token.slice(2, -1), 10);
+      return match.groups?.[name] || token;
+    });
+    return applyTrimStrings(movesTop ? `${replacement}
+${remainder}` : `${remainder}
+${replacement}`, script.trim_strings);
+  }
+  const replaced = replaceWithDecoration(content, regex, script.replace_string, script.decorateReplacement);
+  const trimmed = applyTrimStrings(replaced, script.trim_strings);
+  return hasCbsSyntax(trimmed) ? evalTemplate(trimmed) : trimmed;
 }
 function replaceWithDecoration(input, regex, replacement, decorate, evalReplacement) {
   if (!decorate && !evalReplacement)
@@ -23768,6 +16633,22 @@ function makeVarsApi(state) {
 }
 
 // src/interpreter/runtime/template.ts
+function createLuaTemplateParser(input, read2) {
+  return (text) => {
+    const { currentMessageRoleOverride: _messageRole, ...parserInput } = input();
+    const context = buildEvaluatorContext({
+      ...parserInput,
+      commit: false,
+      rmVar: false,
+      runVar: false,
+      cbsContext: true,
+      visualize: false,
+      reparseMacroResults: false,
+      currentMessageIndexOverride: -1
+    });
+    return freshParserContext({ ...context, vars: { ...context.vars, get: read2 } }).evaluate(text);
+  };
+}
 function createTriggerTemplateParser(input, read2) {
   const base = buildEvaluatorContext({
     ...input,
@@ -23779,6 +16660,554 @@ function createTriggerTemplateParser(input, read2) {
   });
   const vars = { ...base.vars, get: read2 };
   return (text) => freshParserContext({ ...base, vars }).evaluate(text);
+}
+
+// src/interpreter/runtime/lua-state.ts
+class LiveValue {
+  value;
+  revision = 0;
+  loading;
+  dirty = false;
+  read;
+  constructor(value) {
+    this.value = value;
+  }
+  invalidate() {
+    this.revision++;
+    this.dirty = true;
+  }
+  async load(read2) {
+    this.read = read2;
+    this.dirty = true;
+    return this.synchronize();
+  }
+  async synchronize() {
+    if (this.loading)
+      return this.loading;
+    const loading = (async () => {
+      while (this.dirty && this.read) {
+        this.dirty = false;
+        const revision = this.revision;
+        try {
+          const value = await this.read();
+          if (revision === this.revision)
+            this.value = value;
+          else
+            this.dirty = true;
+        } catch (error) {
+          this.dirty = true;
+          throw error;
+        }
+      }
+    })();
+    this.loading = loading;
+    try {
+      await loading;
+    } finally {
+      if (this.loading === loading)
+        delete this.loading;
+    }
+  }
+}
+
+class LiveCharacter extends LiveValue {
+  tail = Promise.resolve();
+  pending = new Set;
+  current() {
+    return this.value ? Object.assign({}, this.value, ...this.pending) : null;
+  }
+  write(patch, persist) {
+    this.pending.add(patch);
+    this.revision++;
+    const result = this.tail.then(async () => {
+      try {
+        await persist();
+      } finally {
+        if (this.value)
+          this.value = { ...this.value, ...patch };
+        this.pending.delete(patch);
+        this.invalidate();
+      }
+    });
+    this.tail = result.catch(() => {
+      return;
+    });
+    return result;
+  }
+}
+var scopes = new WeakMap;
+var backendScopes = new Map;
+function stateFor(scope) {
+  let state = scopes.get(scope);
+  if (!state) {
+    state = { characters: new Map, persona: new LiveValue(null), notes: new Map };
+    scopes.set(scope, state);
+  }
+  return state;
+}
+function noteText(note) {
+  const content = note && typeof note === "object" && "content" in note ? note.content : note;
+  return typeof content === "string" ? content : "";
+}
+async function prepareLuaHostState(api, characterId) {
+  const state = stateFor(api.luaStateScope ?? api.characters);
+  let character = characterId ? state.characters.get(characterId) : undefined;
+  if (characterId && !character) {
+    character = new LiveCharacter(null);
+    state.characters.set(characterId, character);
+  }
+  const chatId = api.chat.getChatId?.() ?? "";
+  let note = state.notes.get(chatId);
+  if (!note) {
+    note = new LiveValue("");
+    state.notes.set(chatId, note);
+  }
+  await Promise.all([
+    character?.load(() => api.characters.get(characterId)),
+    state.persona.load(() => api.personas?.getActive() ?? Promise.resolve(null)),
+    note.load(async () => noteText(await api.chat.getMetadata("authors_note")))
+  ]);
+  return {
+    get character() {
+      return character?.current() ?? null;
+    },
+    get persona() {
+      return state.persona.value;
+    },
+    get authorsNote() {
+      return note.value;
+    },
+    async synchronize(refresh = false) {
+      if (refresh) {
+        character?.invalidate();
+        state.persona.invalidate();
+        note.invalidate();
+      }
+      await Promise.all([character?.synchronize(), state.persona.synchronize(), note.synchronize()]);
+    },
+    updateCharacter(patch) {
+      if (!characterId || !character?.current())
+        throw new Error("Lua character state is unavailable");
+      return character.write(patch, () => api.characters.update(characterId, patch));
+    }
+  };
+}
+// node_modules/uuid/dist/esm-browser/native.js
+var randomUUID = typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID.bind(crypto);
+var native_default = {
+  randomUUID
+};
+
+// node_modules/uuid/dist/esm-browser/rng.js
+var getRandomValues;
+var rnds8 = new Uint8Array(16);
+function rng() {
+  if (!getRandomValues) {
+    getRandomValues = typeof crypto !== "undefined" && crypto.getRandomValues && crypto.getRandomValues.bind(crypto);
+    if (!getRandomValues) {
+      throw new Error("crypto.getRandomValues() not supported. See https://github.com/uuidjs/uuid#getrandomvalues-not-supported");
+    }
+  }
+  return getRandomValues(rnds8);
+}
+
+// node_modules/uuid/dist/esm-browser/stringify.js
+var byteToHex = [];
+for (let i = 0;i < 256; ++i) {
+  byteToHex.push((i + 256).toString(16).slice(1));
+}
+function unsafeStringify(arr, offset = 0) {
+  return byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]];
+}
+
+// node_modules/uuid/dist/esm-browser/v4.js
+function v4(options, buf, offset) {
+  if (native_default.randomUUID && !buf && !options) {
+    return native_default.randomUUID();
+  }
+  options = options || {};
+  const rnds = options.random || (options.rng || rng)();
+  rnds[6] = rnds[6] & 15 | 64;
+  rnds[8] = rnds[8] & 63 | 128;
+  if (buf) {
+    offset = offset || 0;
+    for (let i = 0;i < 16; ++i) {
+      buf[offset + i] = rnds[i];
+    }
+    return buf;
+  }
+  return unsafeStringify(rnds);
+}
+var v4_default = v4;
+// src/interpreter/lua-wrapper.lua
+var lua_wrapper_default = `\r
+json = require 'json'\r
+\r
+function getChat(id, index)\r
+    return json.decode(getChatMain(id, index))\r
+end\r
+\r
+function getFullChat(id)\r
+    return json.decode(getFullChatMain(id))\r
+end\r
+\r
+function getRecentChats(id, count)\r
+    return json.decode(getRecentChatsMain(id, count))\r
+end\r
+\r
+function setFullChat(id, value)\r
+    setFullChatMain(id, json.encode(value))\r
+end\r
+\r
+function log(value)\r
+    logMain(json.encode(value))\r
+end\r
+\r
+function getLoreBooks(id, search)\r
+    return json.decode(getLoreBooksMain(id, search))\r
+end\r
+\r
+\r
+function loadLoreBooks(id)\r
+    return json.decode(loadLoreBooksMain(id):await())\r
+end\r
+\r
+function LLM(id, prompt, useMultimodal, options)\r
+    useMultimodal = useMultimodal or false\r
+    options = options or {}\r
+    return json.decode(LLMMain(id, json.encode(prompt), useMultimodal, json.encode(options)):await())\r
+end\r
+\r
+function axLLM(id, prompt, useMultimodal, options)\r
+    useMultimodal = useMultimodal or false\r
+    options = options or {}\r
+    return json.decode(axLLMMain(id, json.encode(prompt), useMultimodal, json.encode(options)):await())\r
+end\r
+\r
+function getCharacterImage(id)\r
+    return getCharacterImageMain(id):await()\r
+end\r
+\r
+function getPersonaImage(id)\r
+    return getPersonaImageMain(id):await()\r
+end\r
+\r
+local editRequestFuncs = {}\r
+local editDisplayFuncs = {}\r
+local editInputFuncs = {}\r
+local editOutputFuncs = {}\r
+\r
+function listenEdit(type, func)\r
+    if type == 'editRequest' then\r
+        editRequestFuncs[#editRequestFuncs + 1] = func\r
+        return\r
+    end\r
+\r
+    if type == 'editDisplay' then\r
+        editDisplayFuncs[#editDisplayFuncs + 1] = func\r
+        return\r
+    end\r
+\r
+    if type == 'editInput' then\r
+        editInputFuncs[#editInputFuncs + 1] = func\r
+        return\r
+    end\r
+\r
+    if type == 'editOutput' then\r
+        editOutputFuncs[#editOutputFuncs + 1] = func\r
+        return\r
+    end\r
+\r
+    throw('Invalid type')\r
+end\r
+\r
+function getState(id, name)\r
+    local escapedName = "__"..name\r
+    return json.decode(getChatVar(id, escapedName))\r
+end\r
+\r
+function setState(id, name, value)\r
+    local escapedName = "__"..name\r
+    setChatVar(id, escapedName, json.encode(value))\r
+end\r
+\r
+function setStateChanged(id, name, value)\r
+    local escapedName = "__"..name\r
+    return setChatVarChanged(id, escapedName, json.encode(value))\r
+end\r
+\r
+function async(callback)\r
+    return function(...)\r
+        local co = coroutine.create(callback)\r
+        local safe, result = coroutine.resume(co, ...)\r
+\r
+        return Promise.create(function(resolve, reject)\r
+            local checkresult\r
+            local step = function()\r
+                if coroutine.status(co) == "dead" then\r
+                    local send = safe and resolve or reject\r
+                    return send(result)\r
+                end\r
+\r
+                safe, result = coroutine.resume(co)\r
+                checkresult()\r
+            end\r
+\r
+            checkresult = function()\r
+                if safe and result == Promise.resolve(result) then\r
+                    result:finally(step)\r
+                else\r
+                    step()\r
+                end\r
+            end\r
+\r
+            checkresult()\r
+        end)\r
+    end\r
+end\r
+\r
+callListenMain = async(function(type, id, value, meta)\r
+    local realValue = json.decode(value)\r
+    local realMeta = json.decode(meta)\r
+\r
+    if type == 'editRequest' then\r
+        for _, func in ipairs(editRequestFuncs) do\r
+            realValue = func(id, realValue, realMeta)\r
+        end\r
+    end\r
+\r
+    if type == 'editDisplay' then\r
+        for _, func in ipairs(editDisplayFuncs) do\r
+            realValue = func(id, realValue, realMeta)\r
+        end\r
+    end\r
+\r
+    if type == 'editInput' then\r
+        for _, func in ipairs(editInputFuncs) do\r
+            realValue = func(id, realValue, realMeta)\r
+        end\r
+    end\r
+\r
+    if type == 'editOutput' then\r
+        for _, func in ipairs(editOutputFuncs) do\r
+            realValue = func(id, realValue, realMeta)\r
+        end\r
+    end\r
+\r
+    return json.encode(realValue)\r
+end)\r
+`;
+
+// src/interpreter/lua-engine.ts
+class LuaChunkError extends Error {
+  constructor(cause) {
+    super(`Lua chunk failed: ${String(cause)}`, { cause });
+    this.name = "LuaChunkError";
+  }
+}
+
+class LuaCallbackError extends Error {
+  constructor(cause) {
+    super(`Lua callback failed: ${String(cause)}`, { cause });
+    this.name = "LuaCallbackError";
+  }
+}
+
+class LuaInitializationError extends Error {
+  constructor(cause) {
+    super(`Lua engine initialization failed: ${String(cause)}`, { cause });
+    this.name = "LuaInitializationError";
+  }
+}
+var safeApis = new Set([
+  "stopChat",
+  "alertError",
+  "alertNormal",
+  "alertInput",
+  "alertSelect",
+  "alertConfirm",
+  "setChat",
+  "setChatRole",
+  "cutChat",
+  "removeChat",
+  "addChat",
+  "insertChat",
+  "getTokens",
+  "sleep",
+  "setFullChatMain",
+  "reloadDisplay",
+  "reloadChat",
+  "setName",
+  "getDescription",
+  "setDescription",
+  "setCharacterFirstMessage",
+  "getBackgroundEmbedding",
+  "setBackgroundEmbedding",
+  "upsertLocalLoreBook"
+]);
+var lowApis = new Set(["similarity", "request", "generateImage", "LLMMain", "simpleLLM", "loadLoreBooksMain", "axLLMMain"]);
+var asyncApis = new Set([...lowApis, "getTokens"]);
+function createLuaExecutor(getFactory) {
+  const scopes = new Map;
+  async function execute(code, globals, opts = {}) {
+    const scopeKey = opts.scope ?? "";
+    let scope = scopes.get(scopeKey);
+    if (!scope) {
+      scope = { engines: new Map, safeIds: new Set, displayIds: new Set, lowIds: new Set };
+      scopes.set(scopeKey, scope);
+    }
+    const mode = opts.mode ?? opts.entry ?? "manual";
+    let state = scope.engines.get(mode);
+    if (!state) {
+      state = { tail: Promise.resolve(), globals };
+      scope.engines.set(mode, state);
+    }
+    const current = state;
+    const access = scope;
+    const run = current.tail.then(async () => {
+      opts.signal?.throwIfAborted();
+      current.globals = globals;
+      current.signal = opts.signal;
+      current.synchronize = opts.synchronizeState;
+      await current.synchronize?.();
+      if (code !== current.code) {
+        current.engine?.global.close();
+        try {
+          current.engine = await (await getFactory()).createEngine({ injectObjects: true });
+        } catch (cause) {
+          delete current.code;
+          delete current.engine;
+          throw new LuaInitializationError(cause);
+        }
+        current.code = code;
+        for (const [name, value] of Object.entries(globals)) {
+          if (typeof value !== "function") {
+            current.engine.global.set(name, value);
+            continue;
+          }
+          const invoke = (...args) => {
+            current.signal?.throwIfAborted();
+            if (opts.enforceAccess) {
+              if (name === "LLMMain" || name === "axLLMMain")
+                JSON.parse(args[1]);
+              if (safeApis.has(name) && !access.safeIds.has(args[0]))
+                return;
+              if (lowApis.has(name) && !access.lowIds.has(args[0]))
+                return;
+              if ((name === "setChatVar" || name === "setChatVarChanged") && !access.safeIds.has(args[0]) && !access.displayIds.has(args[0]))
+                return;
+              if (name === "setDescription" && typeof (opts.data ?? "") !== "string")
+                throw new Error("Invalid data type");
+            }
+            if (name === "stopChat")
+              return value(...args);
+            const result = current.globals[name](...args);
+            if (!(result instanceof Promise) || !current.synchronize && !current.signal)
+              return result;
+            return result.then(async (value) => {
+              current.signal?.throwIfAborted();
+              await current.synchronize?.(true);
+              return value;
+            }, async (error) => {
+              current.signal?.throwIfAborted();
+              await current.synchronize?.(true);
+              throw error;
+            });
+          };
+          current.engine.global.set(name, asyncApis.has(name) ? async (...args) => invoke(...args) : invoke);
+        }
+        try {
+          await current.engine.doString(lua_wrapper_default + code + `
+`);
+        } catch (cause) {
+          opts.signal?.throwIfAborted();
+          throw new LuaChunkError(cause);
+        }
+      }
+      const args = [...opts.args ?? []];
+      const accessKey = opts.enforceAccess ? v4_default() : undefined;
+      if (accessKey) {
+        args[opts.entry === "callListenMain" ? 1 : 0] = accessKey;
+        if (mode === "editDisplay")
+          access.displayIds.add(accessKey);
+        else {
+          access.safeIds.add(accessKey);
+          if (opts.lowLevelAccess)
+            access.lowIds.add(accessKey);
+        }
+      }
+      try {
+        if (!opts.entry)
+          return;
+        const func = current.engine.global.get(opts.entry);
+        if (func)
+          return await func(...args);
+      } catch (cause) {
+        opts.signal?.throwIfAborted();
+        throw new LuaCallbackError(cause);
+      } finally {
+        if (accessKey) {
+          access.safeIds.delete(accessKey);
+          access.lowIds.delete(accessKey);
+        }
+      }
+    });
+    current.tail = run.catch(() => {
+      return;
+    });
+    return run;
+  }
+  async function clear(scopeKey = "", mode) {
+    const scope = scopes.get(scopeKey);
+    if (!scope)
+      return;
+    const entries = mode === undefined ? [...scope.engines.entries()] : [...scope.engines.entries()].filter(([key]) => key === mode);
+    if (mode === undefined)
+      scopes.delete(scopeKey);
+    for (const [key] of entries)
+      scope.engines.delete(key);
+    for (const [, state] of entries) {
+      await state.tail;
+      state.engine?.global.close();
+    }
+  }
+  return { execute, clear };
+}
+
+// src/interpreter/runtime/als-compat.ts
+var {AsyncLocalStorage} = (() => ({}));
+function createAls() {
+  if (typeof AsyncLocalStorage === "function")
+    return new AsyncLocalStorage;
+  const shim = {
+    getStore: () => {
+      return;
+    },
+    run: (_store, fn, ...args) => fn(...args),
+    enterWith: (_store) => {
+      return;
+    },
+    disable: () => {
+      return;
+    },
+    exit: (fn, ...args) => fn(...args)
+  };
+  return shim;
+}
+
+// src/interpreter/runtime/als.ts
+var userIdAls = createAls();
+function currentUserId() {
+  return userIdAls.getStore() ?? null;
+}
+var triggerDepthAls = createAls();
+var MAX_TRIGGER_DEPTH = 64;
+function withTriggerDepth(fn) {
+  const depth = (triggerDepthAls.getStore() ?? 0) + 1;
+  if (depth > MAX_TRIGGER_DEPTH) {
+    throw new Error(`trigger recursion exceeded max depth (${MAX_TRIGGER_DEPTH})`);
+  }
+  return triggerDepthAls.run(depth, fn);
 }
 
 // src/core/triggers/templates.ts
@@ -24661,27 +18090,6 @@ var BASE_SAMPLER_KEYS = new Set([
   "top_p",
   "top_k"
 ]);
-// src/interpreter/runtime/als-compat.ts
-var {AsyncLocalStorage} = (() => ({}));
-function createAls() {
-  if (typeof AsyncLocalStorage === "function")
-    return new AsyncLocalStorage;
-  const shim = {
-    getStore: () => {
-      return;
-    },
-    run: (_store, fn, ...args) => fn(...args),
-    enterWith: (_store) => {
-      return;
-    },
-    disable: () => {
-      return;
-    },
-    exit: (fn, ...args) => fn(...args)
-  };
-  return shim;
-}
-
 // src/interpreter/runtime/dispatch-context.ts
 var dispatchAls = createAls();
 function getDispatchContext() {
@@ -24756,20 +18164,22 @@ async function loadVars(api, chatId) {
     throw new VariablePersistenceError("read", VAR_STORE_KEY, cause);
   }
 }
+function parseGlobalVars(raw) {
+  if (!raw || typeof raw !== "object")
+    return {};
+  const global2 = raw.global;
+  if (!global2 || typeof global2 !== "object")
+    return {};
+  const out = {};
+  for (const [key, value] of Object.entries(global2)) {
+    if (value !== undefined)
+      out[key] = value === null ? null : toStr(value);
+  }
+  return out;
+}
 async function loadGlobalVars(api) {
   try {
-    const raw = await api.chat.getMetadata("macro_variables");
-    if (!raw || typeof raw !== "object")
-      return {};
-    const global2 = raw.global;
-    if (!global2 || typeof global2 !== "object")
-      return {};
-    const out = {};
-    for (const [key, value] of Object.entries(global2)) {
-      if (value !== undefined)
-        out[key] = value === null ? null : toStr(value);
-    }
-    return out;
+    return parseGlobalVars(await api.chat.getMetadata("macro_variables"));
   } catch (cause) {
     throw new VariablePersistenceError("read", "macro_variables", cause);
   }
@@ -25128,6 +18538,7 @@ var _logStateChanged = makeSafeLogger("runtime.stateChanged");
 var _logMake = makeSafeLogger("runtime.makeRisuTriggerRuntime");
 var _logTriggercode = makeSafeLogger("runtime.triggercode");
 var _logRunLua = makeSafeLogger("runtime.runLua");
+var _logAlert = makeSafeLogger("runtime.showAlert");
 var _logSetChat = makeSafeLogger("runtime.setChat");
 var _logSetFullChat = makeSafeLogger("runtime.setFullChat");
 var _logAddChat = makeSafeLogger("runtime.addChat");
@@ -25135,25 +18546,11 @@ var _logLLMMain = makeSafeLogger("runtime.LLMMain");
 var _logAxLLMMain = makeSafeLogger("runtime.axLLMMain");
 var _logFlush = makeSafeLogger("runtime.flush");
 var _logLuaPrint = makeSafeLogger("runtime.lua");
-var _logCbs = makeSafeLogger("runtime.cbs");
 var _wasmoonExec = null;
 function setWasmoonExecutor(fn) {
   _wasmoonExec = fn;
 }
 var _wasmoonEnabled = true;
-function setWasmoonEnabled(b) {
-  _wasmoonEnabled = b;
-}
-var _cbsUnresolvedAlertFired = false;
-function warnCbsUnresolvedOnce(api) {
-  _logCbs.warn("cbs(): no resolver wired, returning input verbatim");
-  if (_cbsUnresolvedAlertFired)
-    return;
-  _cbsUnresolvedAlertFired = true;
-  try {
-    api.ui?.alert?.("A card script called cbs(template) but no resolver was wired. Output will contain raw {{...}} markers. Report this if you see it.", "error");
-  } catch {}
-}
 async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const invocation = opts.invocationState ?? { stopSending: false };
   const displayMode = !!opts.displayMode;
@@ -25171,7 +18568,6 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const submodelModelOverride = opts.submodelModelOverride ?? dispatchCtx.submodelModelOverride ?? auxModelOverride;
   const submodelSamplers = opts.submodelSamplers ?? dispatchCtx.submodelSamplers ?? auxSamplers;
   const auxDebugCapture = opts.auxDebugCapture ?? dispatchCtx.auxDebugCapture;
-  const capturedResolveTemplate = opts.resolveTemplate ?? dispatchCtx.resolveTemplate;
   const auxParamsWire = samplersToWire(auxSamplers);
   const submodelParamsWire = samplersToWire(submodelSamplers);
   const auxPrefillCompat = Boolean(opts.auxPrefillCompat ?? dispatchCtx.auxPrefillCompat ?? false);
@@ -25183,7 +18579,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     }
     _logStateChanged.info(`source=${source} → calling backend`);
     try {
-      stateChanged();
+      stateChanged(source);
     } catch (err) {
       _logStateChanged.warn(`callback threw: ${err.message}`);
     }
@@ -25222,7 +18618,11 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   let _msgsSrc = "fetched";
   const _tMsgsStart = Date.now();
   try {
-    if (invocation.messagesCache) {
+    if (opts.luaChat && !opts.invocationState) {
+      messagesCache = opts.luaChat.messages;
+      firstMessage = opts.luaChat.firstMessage;
+      _msgsSrc = "preloaded";
+    } else if (invocation.messagesCache) {
       messagesCache = invocation.messagesCache;
       firstMessage = invocation.firstMessage;
       _msgsSrc = "preloaded";
@@ -25304,7 +18704,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   let chatMutationTail = Promise.resolve();
   let cutChatFailure;
   function enqueueChatMutation(label, operation) {
-    const next = chatMutationTail.then(operation);
+    const next = opts.luaChat?.enqueue ? opts.luaChat.enqueue(operation) : chatMutationTail.then(operation);
     chatMutationTail = next.catch((err) => {
       _logSetFullChat.warn(`${label} failed: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -25336,7 +18736,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   }
   async function persistChatSend(entry) {
     try {
-      const result = await api.chat.sendMessage(entry.content, { role: entry.role });
+      const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, { role: entry.role, ...opts.luaChat?.enqueue ? { messageId: entry.id } : {} });
       const id = result && typeof result.id === "string" ? result.id : "";
       if (id)
         entry.id = id;
@@ -25348,7 +18748,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     try {
       const id = await resolveHostMessageId(entry);
       if (id)
-        await api.chat.deleteMessage(id);
+        await (opts.luaChat?.persistence ?? api.chat).deleteMessage(id);
     } catch (err) {
       _logSetFullChat.warn(`delete msgId=${entry.id} threw: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -25363,29 +18763,18 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           rememberOurWrite(portalChatId, id, next.content);
         } catch {}
       }
-      await api.chat.editMessage(id, next.content);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content);
     } catch (err) {
       _logSetFullChat.warn(`edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   function reconcileFullChat(value) {
-    let parsed;
-    try {
-      parsed = JSON.parse(toStr(value));
-    } catch (err) {
-      _logSetFullChat.warn(`invalid JSON ignored: ${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-    if (!Array.isArray(parsed)) {
-      _logSetFullChat.warn("non-array payload ignored");
-      return;
-    }
+    const parsed = JSON.parse(value);
     const previous = [...messagesCache];
     const desired = parsed.map((raw) => {
-      const item = raw && typeof raw === "object" ? raw : {};
       return {
-        role: risuRoleToLumi(toStr(item.role)),
-        content: toStr(item.data)
+        role: risuRoleToLumi(toStr(raw.role)),
+        content: toStr(raw.data)
       };
     });
     const overlap = Math.min(previous.length, desired.length);
@@ -25527,49 +18916,36 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     return true;
   }
   async function showAlert(type, value, inputVar) {
-    const t = toStr(type).toLowerCase();
     const v = toStr(value);
-    try {
-      if (t === "input") {
-        const r = api.ui && api.ui.prompt ? await api.ui.prompt(v, "") : null;
-        if (inputVar)
-          setVar(inputVar, toStr(r ?? ""));
-        return;
-      }
-      if (t === "ask" || t === "confirm") {
-        const r = api.ui && api.ui.confirm ? await api.ui.confirm(v, "") : false;
-        if (inputVar)
-          setVar(inputVar, r ? "1" : "0");
-        return;
-      }
-      if (api.ui && api.ui.toast) {
-        const kind = t === "error" ? "error" : t === "warn" || t === "warning" ? "warning" : t === "success" ? "success" : "info";
-        api.ui.toast(v, kind);
-      }
-      if (inputVar)
-        setVar(inputVar, "");
-    } catch {
-      if (inputVar)
-        setVar(inputVar, "");
+    switch (type) {
+      case "normal":
+      case "error":
+        if (!api.ui?.alert)
+          return unsupported("showAlert", "requires api.ui.alert");
+        api.ui.alert(v, type === "error" ? "error" : "info").catch((error) => _logAlert.error(`Alert failed: ${String(error)}`));
+        break;
+      case "input":
+        setVar(inputVar ?? "", await alertInput(v));
+        break;
+      case "select":
+        setVar(inputVar ?? "", await alertSelect(undefined, v.split("§")));
+        break;
     }
   }
   async function alertInput(display) {
-    try {
-      if (api.ui && api.ui.prompt) {
-        const r = await api.ui.prompt(toStr(display), "");
-        return toStr(r ?? "");
-      }
-    } catch {}
-    return "";
+    if (!api.ui?.prompt)
+      return unsupported("alertInput", "requires api.ui.prompt");
+    return toStr(await api.ui.prompt(toStr(display), "") ?? "");
   }
   async function alertSelect(display, options) {
     if (api.ui && typeof api.ui.pick === "function") {
       const opts = Array.isArray(options) ? options.map(toStr) : [];
-      const r = await api.ui.pick(toStr(display), opts);
-      if (r == null)
-        return "";
-      const idx = opts.indexOf(toStr(r));
-      return idx >= 0 ? String(idx) : "";
+      const message = display === undefined ? opts.join("||") : `__DISPLAY__${toStr(display)}||${opts.join("||")}`;
+      const hasDisplay = message.startsWith("__DISPLAY__");
+      const parts = (hasDisplay ? message.substring(11) : message).split("||");
+      const title = hasDisplay ? parts.shift() : "";
+      const r = await api.ui.pick(title, parts);
+      return r ?? "";
     }
     return unsupported("alertSelect", "requires api.ui.pick");
   }
@@ -25613,6 +18989,53 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     triggerCodeWarned.add(key);
     _logTriggercode.warn(`dropped (Risu parity: triggercode no longer dispatched). ` + `characterId=${characterId ?? "<none>"} binding=${binding ?? "<none>"} ` + `body[0..60]=${JSON.stringify(key)}`);
   }
+  let luaState = preloaded?.luaState;
+  let parseLuaTemplate = opts.luaTemplate;
+  const identityWrites = [];
+  async function prepareLua() {
+    luaState ??= await prepareLuaHostState(api, characterId ?? data.characterId);
+    if (parseLuaTemplate)
+      return;
+    const prepare = opts.templateContext ?? dispatchCtx.templateContext;
+    if (!prepare)
+      return;
+    const input = await prepare();
+    parseLuaTemplate = createLuaTemplateParser(() => ({
+      ...input,
+      charName: luaState.character?.name ?? input.charName,
+      userName: luaState.persona?.name ?? input.userName,
+      personaText: luaState.persona?.description ?? input.personaText ?? "",
+      character: { ...input.character, ...luaState.character },
+      chat: {
+        ...input.chat,
+        messages: messagesCache.map((m) => ({ ...m, createdAt: m.createdAt ?? 0, role: risuRoleToLumi(lumiRoleToRisu(m.role)) })),
+        messageCount: messagesCache.length,
+        lastMessage: messagesCache.at(-1)?.content ?? "",
+        lastUserMessage: getLastUserMessage(""),
+        lastCharMessage: getLastCharMessage(luaState.character?.firstMessage ?? "")
+      }
+    }), (scope, name) => {
+      onVarRead?.(name, scope === "global" ? "global" : "chat");
+      return opts.luaVariables ? opts.luaVariables.get(name, scope === "global" ? "global" : "chat") : scope === "global" ? globalVarsCache[name] ?? "null" : _vars.getStoredVar(name);
+    });
+  }
+  function luaCbs(value) {
+    if (!parseLuaTemplate)
+      return unsupported("lua.cbs", "no synchronous evaluation context was prepared");
+    return parseLuaTemplate(value);
+  }
+  function updateLuaCharacter(patch) {
+    const character = luaState.character;
+    if (!character)
+      return unsupported("lua.character", "no current character");
+    if (!luaState.updateCharacter)
+      return unsupported("lua.character", "character state is read-only");
+    const pending = luaState.updateCharacter(patch);
+    pending.catch(() => {
+      return;
+    });
+    identityWrites.push(pending);
+  }
   async function runLua(code, luaOpts) {
     let verbose = false;
     try {
@@ -25642,16 +19065,43 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       request: "onRequest"
     };
     const effective = { ...luaOpts || {} };
-    if (!effective["entry"])
-      effective["entry"] = entryMap[binding] || binding || "onRun";
+    if (!effective["entry"]) {
+      if (binding === "manual" && typeof data.manualName === "string") {
+        const mode = data.manualName;
+        effective["mode"] ??= mode;
+        effective["entry"] = ["input", "output", "start"].includes(mode) ? entryMap[mode] : mode;
+        if (["editInput", "editOutput", "editDisplay", "editRequest"].includes(mode)) {
+          effective["entry"] = "callListenMain";
+          effective["args"] ??= [mode, undefined, '""', "{}"];
+        } else if (mode === "onButtonClick")
+          effective["args"] ??= [undefined, ""];
+      } else
+        effective["entry"] = entryMap[binding] || binding || "onRun";
+    }
     if (!effective["args"])
-      effective["args"] = [String(Math.random()).slice(2, 10)];
+      effective["args"] = [];
+    effective["data"] ??= effective["args"][1] ?? "";
     rverbose(`calling lua.execute entry=${String(effective["entry"])} args=${JSON.stringify(effective["args"])}`);
+    await prepareLua();
+    effective["mode"] = effective["mode"] ?? (effective["entry"] === "callListenMain" ? effective["args"][0] : ["input", "output", "start"].includes(binding) ? binding : effective["entry"]);
+    effective["scope"] = currentUserId() ?? "";
+    effective["enforceAccess"] = true;
+    effective["lowLevelAccess"] = lowLevelAccess;
+    effective["synchronizeState"] = luaState?.synchronize;
+    effective["signal"] = opts.luaSignal;
     const globals = makeRisuLuaGlobals();
     rverbose(`globals keys=${Object.keys(globals).length}: ${Object.keys(globals).slice(0, 20).join(",")}${Object.keys(globals).length > 20 ? "…" : ""}`);
     const wasmoonKey = typeof effective["wasmoonKey"] === "string" ? effective["wasmoonKey"] : null;
     try {
-      const result = wasmoonKey && _wasmoonExec && _wasmoonEnabled ? await _wasmoonExec(codeStr, globals, { entry: String(effective["entry"]), args: effective["args"], wasmoonKey }) : await lua.execute(codeStr, globals, effective);
+      let result = wasmoonKey && _wasmoonExec && _wasmoonEnabled ? await _wasmoonExec(codeStr, globals, { ...effective, wasmoonKey }) : await lua.execute(codeStr, globals, effective);
+      if (effective["entry"] === "callListenMain") {
+        try {
+          result = JSON.parse(result);
+        } catch (err) {
+          rerr(`Lua edit result is not JSON: ${String(err)}`);
+          return result;
+        }
+      }
       const preview = result === undefined ? "undefined" : String(JSON.stringify(result) ?? "").slice(0, 200);
       rlog(`DONE elapsed=${Date.now() - tStart}ms result_type=${typeof result} result_preview=${preview}`);
       if (result === false)
@@ -25659,22 +19109,51 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       return result;
     } catch (err) {
       rerr(`THREW after ${Date.now() - tStart}ms: ${err.message}`);
-      throw err;
+      if (!(err instanceof LuaCallbackError)) {
+        await flush();
+        throw err;
+      }
+      return;
+    } finally {
+      await opts.luaVariables?.flush();
     }
   }
   function makeRisuLuaGlobals() {
+    function readMessages() {
+      opts.onMessageRead?.();
+      return messagesCache;
+    }
     function luaReject(name, reason) {
       return function() {
         return Promise.reject(new Error("risu-compat: lua." + name + " unavailable: " + reason));
       };
     }
+    function writeVariable(key, value) {
+      const name = toStr(key);
+      const text = toStr(value);
+      if (opts.luaVariables)
+        return opts.luaVariables.set(name, text) === true ? true : undefined;
+      if (varsCache["$" + name] === text)
+        return;
+      setVar(name, text);
+      return true;
+    }
     return {
-      getChatVar: (_id, key) => getVar(toStr(key)),
-      setChatVar: (_id, key, value) => setVar(toStr(key), toStr(value)),
+      getChatVar: (_id, key) => {
+        const k = toStr(key);
+        if (!opts.luaVariables)
+          return getVar(k);
+        onVarRead?.(k, "chat");
+        return opts.luaVariables.get(k, "chat");
+      },
+      setChatVar: (_id, key, value) => {
+        writeVariable(key, value);
+      },
+      setChatVarChanged: (_id, key, value) => writeVariable(key, value),
       getGlobalVar: (_id, key) => {
         const k = toStr(key);
         onVarRead?.(k, "global");
-        return globalVarsCache[k] ?? "null";
+        return opts.luaVariables ? opts.luaVariables.get(k, "global") : globalVarsCache[k] ?? "null";
       },
       stopChat: (_id) => {
         invocation.stopSending = true;
@@ -25703,16 +19182,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         return api.ui.prompt(toStr(value), "").then((r) => toStr(r ?? ""));
       },
       alertSelect: (_id, options) => {
-        if (api.ui?.pick) {
-          const opts = Array.isArray(options) ? options.map(toStr) : [];
-          return api.ui.pick("", opts).then((r) => {
-            if (r == null)
-              return "";
-            const idx = opts.indexOf(toStr(r));
-            return idx >= 0 ? String(idx) : "";
-          });
-        }
-        return Promise.reject(new Error("risu-compat: lua.alertSelect requires api.ui.pick"));
+        return alertSelect(undefined, options);
       },
       alertConfirm: (_id, value) => {
         if (!api.ui?.confirm)
@@ -25720,13 +19190,11 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         return api.ui.confirm(toStr(value), "");
       },
       getChatMain: (_id, index) => {
-        const n = Number(index);
-        const real = n >= 0 ? n : messagesCache.length + n;
-        const m = messagesCache[real];
-        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }) : JSON.stringify(null);
+        const m = readMessages().at(Number(index));
+        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }) : JSON.stringify(null);
       },
       setChat: (_id, index, value) => {
-        const n = Number(index);
+        const n = Math.trunc(Number(index)) || 0;
         const real = n >= 0 ? n : messagesCache.length + n;
         if (!messagesCache[real]) {
           _logSetChat.warn(`out-of-range index=${index} ` + `(real=${real}, messagesCache.length=${messagesCache.length}): ignored`);
@@ -25747,7 +19215,8 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         enqueueChatMutation("setChat", () => persistChatEdit(oldEntry, newEntry));
       },
       setChatRole: (_id, index, value) => {
-        const n = Number(index);
+        const rawIndex = Math.trunc(Number(index)) || 0;
+        const n = rawIndex < 0 ? messagesCache.length + Math.trunc(rawIndex) : Math.trunc(rawIndex);
         if (!messagesCache[n])
           return;
         const desired = messagesCache.map((message) => ({
@@ -25784,17 +19253,9 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         });
       },
       removeChat: (_id, index) => {
-        const n = Number(index);
-        if (!Number.isFinite(n))
-          return;
-        const len = messagesCache.length;
-        const start = n < 0 ? Math.max(len + n, 0) : Math.min(n, len);
-        if (start >= len)
-          return;
-        const m = messagesCache[start];
+        const [m] = messagesCache.splice(Number(index), 1);
         if (m)
           enqueueChatMutation("removeChat", () => persistChatDelete(m));
-        messagesCache.splice(start, 1);
       },
       addChat: (_id, role, value) => {
         const raw = toStr(value);
@@ -25815,38 +19276,21 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         });
         reconcileFullChat(JSON.stringify(desired));
       },
-      getChatLength: (_id) => messagesCache.length,
-      getFullChatMain: (_id) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
+      getChatData: (_id, index) => readMessages().at(index)?.content ?? "",
+      getChatRole: (_id, index) => {
+        const message = readMessages().at(index);
+        return message ? lumiRoleToRisu(message.role) : "";
+      },
+      getRecentChatsMain: (_id, count) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map((m) => ({ role: lumiRoleToRisu(m.role), data: m.content, time: m.createdAt ?? 0 }))),
+      getChatLength: (_id) => readMessages().length,
+      getFullChatMain: (_id) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }))),
       setFullChatMain: (_id, value) => {
         reconcileFullChat(value);
       },
-      sleep: (_id, ms) => new Promise((r) => setTimeout(r, Math.max(0, Number(ms) || 0))),
-      cbsMain: async (value) => {
-        const text = toStr(value);
-        const resolver = capturedResolveTemplate;
-        if (resolver) {
-          try {
-            return await resolver(text);
-          } catch (err) {
-            _logCbs.warn(`cbs resolver threw — returning input verbatim: ${err instanceof Error ? err.message : String(err)}`);
-            return text;
-          }
-        }
-        if (api.utils?.template?.render) {
-          try {
-            return await api.utils.template.render(text, {});
-          } catch (err) {
-            _logCbs.warn(`cbs api.utils.template.render threw — returning input verbatim: ${err instanceof Error ? err.message : String(err)}`);
-            return text;
-          }
-        }
-        warnCbsUnresolvedOnce(api);
-        return text;
-      },
+      sleep: (_id, ms) => new Promise((resolve) => setTimeout(() => resolve(true), ms)),
+      cbs: luaCbs,
       logMain: (value) => {
-        try {
-          _logLuaPrint.debug(toStr(value));
-        } catch {}
+        _logLuaPrint.debug(JSON.parse(value));
       },
       reloadDisplay: (_id) => {
         notifyStateChanged("reloadDisplay");
@@ -25854,55 +19298,52 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       reloadChat: (_id, _index) => {
         notifyStateChanged("reloadChat");
       },
-      getNameMain: async (_id) => {
-        const cid = characterId || data.characterId;
-        if (!cid)
-          return "";
-        try {
-          return toStr((await api.characters.get(cid)).name);
-        } catch {
-          return toStr(data.characterName || "");
-        }
+      getName: (_id) => luaState.character?.name,
+      setName: (_id, name) => {
+        if (typeof name !== "string")
+          throw new Error("Invalid data type");
+        updateLuaCharacter({ name });
       },
-      setNameMain: async (_id, name) => {
-        const cid = characterId || data.characterId;
-        if (cid)
-          await api.characters.update(cid, { name: toStr(name) });
+      getDescription: (_id) => luaState.character?.description,
+      setDescription: (_id, description) => {
+        updateLuaCharacter({ description });
       },
-      getDescriptionMain: (_id) => _charNote.getCharacterDesc(),
-      setDescriptionMain: (_id, desc) => _charNote.setCharacterDesc(desc),
-      getCharacterFirstMessageMain: async (_id) => {
-        const cid = characterId || data.characterId;
-        if (!cid)
-          return toStr(firstMessage ?? "");
-        try {
-          return toStr((await api.characters.get(cid)).firstMessage);
-        } catch {
-          return toStr(firstMessage ?? "");
-        }
+      getCharacterFirstMessage: (_id) => luaState.character?.firstMessage,
+      setCharacterFirstMessage: (_id, firstMessage) => {
+        if (typeof firstMessage !== "string")
+          return false;
+        updateLuaCharacter({ firstMessage });
+        return true;
       },
-      setCharacterFirstMessageMain: async (_id, value) => {
-        const cid = characterId || data.characterId;
-        if (cid)
-          await api.characters.update(cid, { firstMessage: toStr(value) });
+      getPersonaName: (_id) => luaState.persona?.name ?? data.userName ?? "user",
+      getPersonaDescription: (_id) => luaCbs(luaState.persona?.description ?? ""),
+      getAuthorsNote: (_id) => {
+        if (luaState.authorsNote)
+          return luaState.authorsNote;
+        onVarRead?.("__risu_author_note__", "chat");
+        return varsCache["$__risu_author_note__"] ?? "";
       },
-      getPersonaName: (_id) => toStr(data.userName || "user"),
-      getPersonaDescriptionMain: async (_id) => {
-        const description = await _charNote.getPersonaDesc();
-        const resolver = capturedResolveTemplate;
-        if (!resolver)
-          return description;
-        try {
-          return await resolver(description);
-        } catch {
-          return description;
-        }
+      getBackgroundEmbedding: (_id) => {
+        if (!luaState.character || !("backgroundHTML" in luaState.character))
+          return unsupported("lua.getBackgroundEmbedding", "host character state does not expose background HTML");
+        return luaState.character.backgroundHTML;
       },
-      getAuthorsNoteMain: (_id) => _charNote.getAuthorNote(),
-      getBackgroundEmbedding: (_id) => "",
-      setBackgroundEmbedding: (_id, _data) => {},
-      getCharacterLastMessage: (_id) => getLastCharMessage(toStr(firstMessage ?? "")),
-      getUserLastMessage: (_id) => getLastUserMessage(""),
+      setBackgroundEmbedding: (_id, backgroundHTML) => {
+        if (typeof backgroundHTML !== "string")
+          return false;
+        if (!luaState.character || !("backgroundHTML" in luaState.character))
+          return unsupported("lua.setBackgroundEmbedding", "host character state does not expose background HTML");
+        updateLuaCharacter({ backgroundHTML });
+        return true;
+      },
+      getCharacterLastMessage: (_id) => {
+        readMessages();
+        return getLastCharMessage(luaState.character?.firstMessage ?? "");
+      },
+      getUserLastMessage: (_id) => {
+        readMessages();
+        return getLastUserMessage("");
+      },
       LLMMain: async (_id, promptStr, _useMulti, _optionsStr) => {
         if (!lowLevelAccess) {
           return JSON.stringify({
@@ -26000,15 +19441,15 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           return JSON.stringify({ success: false, result: "Error: " + errMsg });
         }
       },
-      simpleLLM: async (_id, prompt2) => {
+      simpleLLM: async (_id, prompt) => {
         if (!lowLevelAccess) {
           return "";
         }
         if (!api.llm?.generate) {
           throw new Error("risu-compat: lua.simpleLLM requires api.llm.generate");
         }
-        const r = await api.llm.generate({ messages: [{ role: "user", content: toStr(prompt2) }], ...auxPrefillCompat ? { prefillCompat: true } : {} });
-        return toStr(r && r.content);
+        const r = await api.llm.generate({ messages: [{ role: "user", content: toStr(prompt) }], ...auxPrefillCompat ? { prefillCompat: true } : {} });
+        return { success: true, result: toStr(r && r.content) };
       },
       hash: (_id, value) => {
         if (typeof crypto === "undefined" || !crypto.subtle) {
@@ -26138,6 +19579,12 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     }
     dirty.value = false;
     await drainChatMutations();
+    const writes = await Promise.allSettled(identityWrites.splice(0));
+    const errors = writes.filter((result) => result.status === "rejected").map((result) => result.reason);
+    if (errors.length === 1)
+      throw errors[0];
+    if (errors.length > 1)
+      throw new AggregateError(errors, "Lua identity persistence failed");
     flog(`DONE`);
     return wasDirty;
   }
@@ -26317,7 +19764,7 @@ var log3 = makeSafeLogger("listenEdit.runChain");
 async function runListenEditChain(triggers, mode, value, meta, api, data, scriptNS, opts = {}) {
   const eligible = triggers.filter((t) => {
     const luaTrigger = t.source.effect?.[0]?.type === "triggerlua";
-    return luaTrigger && t.luaCode.length > 0;
+    return luaTrigger;
   });
   if (eligible.length === 0)
     return value;
@@ -26329,9 +19776,11 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
   const chainStart = Date.now();
   log3.trace(`chain.start mode=${mode} eligible=${eligible.length}/${triggers.length} ` + `value_len=${typeof value === "string" ? value.length : Array.isArray(value) ? value.length : -1} ` + `chatId=${opts.chatId ?? "<none>"} characterId=${opts.characterId ?? "<none>"}`);
   const tPreload = Date.now();
-  const preloaded = opts.preloaded ?? await preloadForListenEditChain(api, opts.chatId, opts.characterId ?? null);
+  const snapshot = opts.preloaded ?? await preloadForListenEditChain(api, opts.chatId, opts.characterId ?? null);
+  const preloaded = { ...snapshot, luaState: snapshot.luaState ?? await prepareLuaHostState(api, opts.characterId) };
+  const templateInput = opts.templateContext ? await opts.templateContext() : undefined;
+  const invocationState = { stopSending: false };
   const preloadMs = Date.now() - tPreload;
-  const accessKey = opts.characterId ?? "edit-trigger";
   let current = value;
   let totalFactoryMs = 0;
   let totalRunLuaMs = 0;
@@ -26348,7 +19797,13 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
         ...opts.characterId !== undefined ? { characterId: opts.characterId } : {},
         ...opts.resolveTemplate !== undefined ? { resolveTemplate: opts.resolveTemplate } : {},
         ...opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {},
-        preloaded
+        ...opts.onMessageRead ? { onMessageRead: opts.onMessageRead } : {},
+        ...opts.luaVariables !== undefined ? { luaVariables: opts.luaVariables } : {},
+        preloaded,
+        ...opts.luaChat ? { luaChat: opts.luaChat } : { invocationState },
+        ...opts.luaSignal ? { luaSignal: opts.luaSignal } : {},
+        ...templateInput ? { templateContext: async () => templateInput } : {},
+        ...opts.luaTemplate ? { luaTemplate: opts.luaTemplate } : {}
       });
       const factoryMs = Date.now() - tFactoryStart;
       totalFactoryMs += factoryMs;
@@ -26358,33 +19813,30 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
       const serdeMs = Date.now() - tSerdeStart;
       totalSerdeMs += serdeMs;
       const tRunLuaStart = Date.now();
-      const result = await runtime.runLua(t.luaCode, {
-        entry: "callListenMain",
-        args: [mode, accessKey, valueJson, metaJson],
-        ...opts.wasmoonKey !== undefined ? { wasmoonKey: opts.wasmoonKey } : {}
-      });
+      let result;
+      try {
+        result = await runtime.runLua(t.luaCode, {
+          entry: "callListenMain",
+          args: [mode, undefined, valueJson, metaJson],
+          data: current,
+          ...opts.wasmoonKey !== undefined ? { wasmoonKey: opts.wasmoonKey } : {}
+        });
+      } finally {
+        await runtime.flush();
+        if (!opts.luaChat)
+          await commitInvocation(invocationState, opts.chatId);
+      }
       const runLuaMs = Date.now() - tRunLuaStart;
       totalRunLuaMs += runLuaMs;
-      try {
-        await runtime.flush();
-      } catch (err) {
-        log3.warn(`trigger[${i}] mode=${mode} flush failed — ${errMsg(err)}; continuing chain`);
-      }
-      if (typeof result === "string") {
-        try {
-          const parsed = JSON.parse(result);
-          current = parsed;
-        } catch (err) {
-          log3.warn(`trigger[${i}] returned non-JSON, keeping prior value — ${errMsg(err)}`);
-        }
-      } else if (result === undefined) {} else {
-        log3.warn(`trigger[${i}] returned unexpected type=${typeof result}; keeping prior value`);
-      }
+      current = result ?? current;
       const triggerTotal = Date.now() - tStart;
       const otherMs = triggerTotal - factoryMs - serdeMs - runLuaMs;
       log3.trace(`trigger[${i}] mode=${mode} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `other=${otherMs}ms (lua_len=${t.luaCode.length})`);
     } catch (err) {
-      log3.warn(`trigger[${i}] mode=${mode} elapsed=${Date.now() - tStart}ms THREW — ${errMsg(err)}; keeping prior value`);
+      if (!(err instanceof LuaChunkError))
+        throw err;
+      log3.error(`trigger[${i}] mode=${mode} chunk failed: ${errMsg(err)}; restoring original input`);
+      return value;
     }
   }
   const chainTotal = Date.now() - chainStart;
@@ -26428,6 +19880,7 @@ function withCurrentDisplayMessage(snap, context, content) {
   const messagesHost = [...snap.messagesHost];
   const current = messagesHost[index];
   const next = {
+    ...current,
     id: context.messageId ?? current?.id ?? "",
     role: context.role ?? current?.role ?? (context.isUser ? "user" : "assistant"),
     content
@@ -26441,6 +19894,10 @@ function withCurrentDisplayMessage(snap, context, content) {
   return { ...snap, messagesHost };
 }
 function buildPreloaded(snap) {
+  const current = () => {
+    const value = getDisplaySnapshot(snap.chatId);
+    return value?.characterId === snap.characterId ? value : snap;
+  };
   const varsCache = {};
   for (const [k, v] of Object.entries(snap.vars.local))
     varsCache["$" + k] = v;
@@ -26453,7 +19910,20 @@ function buildPreloaded(snap) {
     globalVars: { ...snap.vars.global },
     scriptstateDefaults: snap.scriptstateDefaults,
     messagesRaw: snap.messagesHost,
-    lorebook
+    lorebook,
+    luaState: {
+      get character() {
+        const value = current();
+        return { id: value.characterId, ...value.character, name: value.charName };
+      },
+      get persona() {
+        const value = current();
+        return { id: "", name: value.userName, description: value.personaText, imageId: value.personaImageId };
+      },
+      get authorsNote() {
+        return current().chatAuthorsNote?.content ?? "";
+      }
+    }
   };
 }
 function makeSnapshotHostApi(snap, onVarWrite, onEffect) {
@@ -26525,7 +19995,7 @@ function makeSnapshotHostApi(snap, onVarWrite, onEffect) {
       setExpression
     },
     characters: {
-      get: (id) => Promise.resolve({ id, description: snap.character.description, worldBookIds: [], imageId: snap.character.imageId }),
+      get: (id) => Promise.resolve({ id, ...snap.character, name: snap.charName, worldBookIds: [] }),
       update: noWrite,
       setExpression
     },
@@ -27855,1001 +21325,251 @@ var EMITTERS = {
   ...V1_EMITTERS,
   ...V2_EMITTERS
 };
-// src/interpreter/lua-bridge.ts
-var fengari = __toESM(require_fengari_web_bundle(), 1);
 
-// src/interpreter/lua-json.lua
-var lua_json_default = `--\r
--- json.lua\r
---\r
--- Copyright (c) 2020 rxi\r
---\r
--- Permission is hereby granted, free of charge, to any person obtaining a copy of\r
--- this software and associated documentation files (the "Software"), to deal in\r
--- the Software without restriction, including without limitation the rights to\r
--- use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies\r
--- of the Software, and to permit persons to whom the Software is furnished to do\r
--- so, subject to the following conditions:\r
---\r
--- The above copyright notice and this permission notice shall be included in all\r
--- copies or substantial portions of the Software.\r
---\r
--- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\r
--- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\r
--- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\r
--- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\r
--- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\r
--- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\r
--- SOFTWARE.\r
---\r
-\r
-local json = { _version = "0.1.2" }\r
-\r
--------------------------------------------------------------------------------\r
--- Encode\r
--------------------------------------------------------------------------------\r
-\r
-local encode\r
-\r
-local escape_char_map = {\r
-  [ "\\\\" ] = "\\\\",\r
-  [ "\\"" ] = "\\"",\r
-  [ "\\b" ] = "b",\r
-  [ "\\f" ] = "f",\r
-  [ "\\n" ] = "n",\r
-  [ "\\r" ] = "r",\r
-  [ "\\t" ] = "t",\r
-}\r
-\r
-local escape_char_map_inv = { [ "/" ] = "/" }\r
-for k, v in pairs(escape_char_map) do\r
-  escape_char_map_inv[v] = k\r
-end\r
-\r
-\r
-local function escape_char(c)\r
-  return "\\\\" .. (escape_char_map[c] or string.format("u%04x", c:byte()))\r
-end\r
-\r
-\r
-local function encode_nil(val)\r
-  return "null"\r
-end\r
-\r
-\r
-local function encode_table(val, stack)\r
-  local res = {}\r
-  stack = stack or {}\r
-\r
-  -- Circular reference?\r
-  if stack[val] then error("circular reference") end\r
-\r
-  stack[val] = true\r
-\r
-  if rawget(val, 1) ~= nil or next(val) == nil then\r
-    -- Treat as array -- check keys are valid and it is not sparse\r
-    local n = 0\r
-    for k in pairs(val) do\r
-      if type(k) ~= "number" then\r
-        error("invalid table: mixed or invalid key types")\r
-      end\r
-      n = n + 1\r
-    end\r
-    if n ~= #val then\r
-      error("invalid table: sparse array")\r
-    end\r
-    -- Encode\r
-    for i, v in ipairs(val) do\r
-      table.insert(res, encode(v, stack))\r
-    end\r
-    stack[val] = nil\r
-    return "[" .. table.concat(res, ",") .. "]"\r
-\r
-  else\r
-    -- Treat as an object\r
-    for k, v in pairs(val) do\r
-      if type(k) ~= "string" then\r
-        error("invalid table: mixed or invalid key types")\r
-      end\r
-      table.insert(res, encode(k, stack) .. ":" .. encode(v, stack))\r
-    end\r
-    stack[val] = nil\r
-    return "{" .. table.concat(res, ",") .. "}"\r
-  end\r
-end\r
-\r
-\r
-local function encode_string(val)\r
-  return '"' .. val:gsub('[%z\\1-\\31\\\\"]', escape_char) .. '"'\r
-end\r
-\r
-\r
-local function encode_number(val)\r
-  -- Check for NaN, -inf and inf\r
-  if val ~= val or val <= -math.huge or val >= math.huge then\r
-    error("unexpected number value '" .. tostring(val) .. "'")\r
-  end\r
-  return string.format("%.14g", val)\r
-end\r
-\r
-\r
-local type_func_map = {\r
-  [ "nil"     ] = encode_nil,\r
-  [ "table"   ] = encode_table,\r
-  [ "string"  ] = encode_string,\r
-  [ "number"  ] = encode_number,\r
-  [ "boolean" ] = tostring,\r
-}\r
-\r
-\r
-encode = function(val, stack)\r
-  local t = type(val)\r
-  local f = type_func_map[t]\r
-  if f then\r
-    return f(val, stack)\r
-  end\r
-  error("unexpected type '" .. t .. "'")\r
-end\r
-\r
-\r
-function json.encode(val)\r
-  return ( encode(val) )\r
-end\r
-\r
-\r
--------------------------------------------------------------------------------\r
--- Decode\r
--------------------------------------------------------------------------------\r
-\r
-local parse\r
-\r
-local function create_set(...)\r
-  local res = {}\r
-  for i = 1, select("#", ...) do\r
-    res[ select(i, ...) ] = true\r
-  end\r
-  return res\r
-end\r
-\r
-local space_chars   = create_set(" ", "\\t", "\\r", "\\n")\r
-local delim_chars   = create_set(" ", "\\t", "\\r", "\\n", "]", "}", ",")\r
-local escape_chars  = create_set("\\\\", "/", '"', "b", "f", "n", "r", "t", "u")\r
-local literals      = create_set("true", "false", "null")\r
-\r
-local literal_map = {\r
-  [ "true"  ] = true,\r
-  [ "false" ] = false,\r
-  [ "null"  ] = nil,\r
-}\r
-\r
-\r
-local function next_char(str, idx, set, negate)\r
-  for i = idx, #str do\r
-    if set[str:sub(i, i)] ~= negate then\r
-      return i\r
-    end\r
-  end\r
-  return #str + 1\r
-end\r
-\r
-\r
-local function decode_error(str, idx, msg)\r
-  local line_count = 1\r
-  local col_count = 1\r
-  for i = 1, idx - 1 do\r
-    col_count = col_count + 1\r
-    if str:sub(i, i) == "\\n" then\r
-      line_count = line_count + 1\r
-      col_count = 1\r
-    end\r
-  end\r
-  error( string.format("%s at line %d col %d", msg, line_count, col_count) )\r
-end\r
-\r
-\r
-local function codepoint_to_utf8(n)\r
-  -- http://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=iws-appendixa\r
-  local f = math.floor\r
-  if n <= 0x7f then\r
-    return string.char(n)\r
-  elseif n <= 0x7ff then\r
-    return string.char(f(n / 64) + 192, n % 64 + 128)\r
-  elseif n <= 0xffff then\r
-    return string.char(f(n / 4096) + 224, f(n % 4096 / 64) + 128, n % 64 + 128)\r
-  elseif n <= 0x10ffff then\r
-    return string.char(f(n / 262144) + 240, f(n % 262144 / 4096) + 128,\r
-                       f(n % 4096 / 64) + 128, n % 64 + 128)\r
-  end\r
-  error( string.format("invalid unicode codepoint '%x'", n) )\r
-end\r
-\r
-\r
-local function parse_unicode_escape(s)\r
-  local n1 = tonumber( s:sub(1, 4),  16 )\r
-  local n2 = tonumber( s:sub(7, 10), 16 )\r
-   -- Surrogate pair?\r
-  if n2 then\r
-    return codepoint_to_utf8((n1 - 0xd800) * 0x400 + (n2 - 0xdc00) + 0x10000)\r
-  else\r
-    return codepoint_to_utf8(n1)\r
-  end\r
-end\r
-\r
-\r
-local function parse_string(str, i)\r
-  local res = ""\r
-  local j = i + 1\r
-  local k = j\r
-\r
-  while j <= #str do\r
-    local x = str:byte(j)\r
-\r
-    if x < 32 then\r
-      decode_error(str, j, "control character in string")\r
-\r
-    elseif x == 92 then -- \`\\\`: Escape\r
-      res = res .. str:sub(k, j - 1)\r
-      j = j + 1\r
-      local c = str:sub(j, j)\r
-      if c == "u" then\r
-        local hex = str:match("^[dD][89aAbB]%x%x\\\\u%x%x%x%x", j + 1)\r
-                 or str:match("^%x%x%x%x", j + 1)\r
-                 or decode_error(str, j - 1, "invalid unicode escape in string")\r
-        res = res .. parse_unicode_escape(hex)\r
-        j = j + #hex\r
-      else\r
-        if not escape_chars[c] then\r
-          decode_error(str, j - 1, "invalid escape char '" .. c .. "' in string")\r
-        end\r
-        res = res .. escape_char_map_inv[c]\r
-      end\r
-      k = j + 1\r
-\r
-    elseif x == 34 then -- \`"\`: End of string\r
-      res = res .. str:sub(k, j - 1)\r
-      return res, j + 1\r
-    end\r
-\r
-    j = j + 1\r
-  end\r
-\r
-  decode_error(str, i, "expected closing quote for string")\r
-end\r
-\r
-\r
-local function parse_number(str, i)\r
-  local x = next_char(str, i, delim_chars)\r
-  local s = str:sub(i, x - 1)\r
-  local n = tonumber(s)\r
-  if not n then\r
-    decode_error(str, i, "invalid number '" .. s .. "'")\r
-  end\r
-  return n, x\r
-end\r
-\r
-\r
-local function parse_literal(str, i)\r
-  local x = next_char(str, i, delim_chars)\r
-  local word = str:sub(i, x - 1)\r
-  if not literals[word] then\r
-    decode_error(str, i, "invalid literal '" .. word .. "'")\r
-  end\r
-  return literal_map[word], x\r
-end\r
-\r
-\r
-local function parse_array(str, i)\r
-  local res = {}\r
-  local n = 1\r
-  i = i + 1\r
-  while 1 do\r
-    local x\r
-    i = next_char(str, i, space_chars, true)\r
-    -- Empty / end of array?\r
-    if str:sub(i, i) == "]" then\r
-      i = i + 1\r
-      break\r
-    end\r
-    -- Read token\r
-    x, i = parse(str, i)\r
-    res[n] = x\r
-    n = n + 1\r
-    -- Next token\r
-    i = next_char(str, i, space_chars, true)\r
-    local chr = str:sub(i, i)\r
-    i = i + 1\r
-    if chr == "]" then break end\r
-    if chr ~= "," then decode_error(str, i, "expected ']' or ','") end\r
-  end\r
-  return res, i\r
-end\r
-\r
-\r
-local function parse_object(str, i)\r
-  local res = {}\r
-  i = i + 1\r
-  while 1 do\r
-    local key, val\r
-    i = next_char(str, i, space_chars, true)\r
-    -- Empty / end of object?\r
-    if str:sub(i, i) == "}" then\r
-      i = i + 1\r
-      break\r
-    end\r
-    -- Read key\r
-    if str:sub(i, i) ~= '"' then\r
-      decode_error(str, i, "expected string for key")\r
-    end\r
-    key, i = parse(str, i)\r
-    -- Read ':' delimiter\r
-    i = next_char(str, i, space_chars, true)\r
-    if str:sub(i, i) ~= ":" then\r
-      decode_error(str, i, "expected ':' after key")\r
-    end\r
-    i = next_char(str, i + 1, space_chars, true)\r
-    -- Read value\r
-    val, i = parse(str, i)\r
-    -- Set\r
-    res[key] = val\r
-    -- Next token\r
-    i = next_char(str, i, space_chars, true)\r
-    local chr = str:sub(i, i)\r
-    i = i + 1\r
-    if chr == "}" then break end\r
-    if chr ~= "," then decode_error(str, i, "expected '}' or ','") end\r
-  end\r
-  return res, i\r
-end\r
-\r
-\r
-local char_func_map = {\r
-  [ '"' ] = parse_string,\r
-  [ "0" ] = parse_number,\r
-  [ "1" ] = parse_number,\r
-  [ "2" ] = parse_number,\r
-  [ "3" ] = parse_number,\r
-  [ "4" ] = parse_number,\r
-  [ "5" ] = parse_number,\r
-  [ "6" ] = parse_number,\r
-  [ "7" ] = parse_number,\r
-  [ "8" ] = parse_number,\r
-  [ "9" ] = parse_number,\r
-  [ "-" ] = parse_number,\r
-  [ "t" ] = parse_literal,\r
-  [ "f" ] = parse_literal,\r
-  [ "n" ] = parse_literal,\r
-  [ "[" ] = parse_array,\r
-  [ "{" ] = parse_object,\r
-}\r
-\r
-\r
-parse = function(str, idx)\r
-  local chr = str:sub(idx, idx)\r
-  local f = char_func_map[chr]\r
-  if f then\r
-    return f(str, idx)\r
-  end\r
-  decode_error(str, idx, "unexpected character '" .. chr .. "'")\r
-end\r
-\r
-\r
-function json.decode(str)\r
-  if type(str) ~= "string" then\r
-    error("expected argument of type string, got " .. type(str))\r
-  end\r
-  local res, idx = parse(str, next_char(str, 1, space_chars, true))\r
-  idx = next_char(str, idx, space_chars, true)\r
-  if idx <= #str then\r
-    decode_error(str, idx, "trailing garbage")\r
-  end\r
-  return res\r
-end\r
-\r
-\r
-return json`;
-
-// src/util/perf.ts
-var ENABLED = (() => {
-  try {
-    return globalThis.process?.env?.RISU_COMPAT_PERF === "1";
-  } catch {
-    return false;
+// src/core/triggers/compile.ts
+function compileTrigger(trigger, opts = {}) {
+  const issues = [];
+  const baseIndent = opts.baseIndent ?? 1;
+  const ctx = {
+    indent: baseIndent,
+    issues,
+    lowLevelAccess: Boolean(opts.lowLevelAccess ?? trigger.lowLevelAccess ?? false),
+    displayMode: Boolean(opts.displayMode ?? false),
+    loopDepth: 0
+  };
+  const out = [];
+  if (triggerNeedsTemplates(trigger)) {
+    out.push(line2(ctx, "await __risu.prepareTemplates();"));
   }
-})();
-function emitLine(line) {
-  try {
-    const sp = globalThis.spindle;
-    if (sp?.log?.info) {
-      sp.log.info(line);
-      return;
-    }
-  } catch {}
-  try {
-    console.log(line);
-  } catch {}
-}
-if (ENABLED) {
-  emitLine("[lumirealm perf] instrumentation ENABLED (RISU_COMPAT_PERF=1)");
-}
-var buckets = new Map;
-var startedAt = 0;
-var dirty = false;
-var flushTimer = null;
-var FLUSH_INTERVAL_MS = 5000;
-function perfEnabled() {
-  return ENABLED;
-}
-function ensureTimer() {
-  if (flushTimer)
-    return;
-  startedAt = Date.now();
-  flushTimer = setInterval(() => {
-    if (dirty)
-      flushNow();
-  }, FLUSH_INTERVAL_MS);
-  flushTimer.unref?.();
-}
-function getBucket(name) {
-  let b = buckets.get(name);
-  if (!b) {
-    b = { count: 0, totalMs: 0, subs: {} };
-    buckets.set(name, b);
+  const hasConditions = Array.isArray(trigger.conditions) && trigger.conditions.length > 0;
+  if (hasConditions) {
+    out.push(line2(ctx, `if (!__risu.checkConditions(${JSON.stringify(trigger.conditions)})) return;`));
   }
-  return b;
-}
-function perfRecord(name, ms, subs) {
-  if (!ENABLED)
-    return;
-  ensureTimer();
-  const b = getBucket(name);
-  b.count += 1;
-  b.totalMs += ms;
-  if (subs)
-    for (const k in subs)
-      b.subs[k] = (b.subs[k] ?? 0) + subs[k];
-  dirty = true;
-}
-function perfBump(name, subs) {
-  if (!ENABLED)
-    return;
-  ensureTimer();
-  const b = getBucket(name);
-  b.count += 1;
-  if (subs)
-    for (const k in subs)
-      b.subs[k] = (b.subs[k] ?? 0) + subs[k];
-  dirty = true;
-}
-var PANEL_TRACE = (() => {
-  try {
-    return globalThis.process?.env?.LUMIVERSE_PANEL_TRACE === "1";
-  } catch {
-    return false;
-  }
-})();
-function flushNow() {
-  if (!ENABLED || buckets.size === 0)
-    return;
-  dirty = false;
-  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-  const rows = [...buckets.entries()].sort((a, b) => b[1].totalMs - a[1].totalMs);
-  const lines = rows.map(([name, b]) => {
-    const avg = b.count > 0 ? (b.totalMs / b.count).toFixed(2) : "0";
-    const subStr = Object.keys(b.subs).length ? "  " + Object.entries(b.subs).map(([k, v]) => `${k}=${v}`).join(" ") : "";
-    return `    ${name.padEnd(28)} n=${b.count} total=${Math.round(b.totalMs)}ms avg=${avg}ms${subStr}`;
-  });
-  emitLine(`[lumirealm perf] +${elapsed}s — LumiRealm cost centers (by total ms):
-${lines.join(`
-`)}`);
-}
-
-// src/interpreter/lua-bridge.ts
-var fen = fengari;
-var lua = fen.lua;
-var lauxlib = fen.lauxlib;
-var lualib = fen.lualib;
-var toL = fen.to_luastring;
-var toJS = fen.to_jsstring;
-var _luaLog = makeSafeLogger("lua-bridge");
-function flog(msg) {
-  _luaLog.info(msg);
-}
-var LUA_BRIDGE_VERBOSE = (() => {
-  try {
-    return typeof process !== "undefined" && globalThis.process?.env?.RISU_COMPAT_VERBOSE === "1";
-  } catch {
-    return false;
-  }
-})();
-function fverbose(msg) {
-  if (LUA_BRIDGE_VERBOSE)
-    flog(msg);
-}
-function flogErr(msg) {
-  _luaLog.error(msg);
-}
-function getJsonLuaSource() {
-  fverbose(`getJsonLuaSource: returning bundled source (${lua_json_default.length} chars)`);
-  return lua_json_default;
-}
-function pushJs(L, v) {
-  if (v === null || v === undefined) {
-    lua.lua_pushnil(L);
-    return;
-  }
-  if (typeof v === "boolean") {
-    lua.lua_pushboolean(L, v ? 1 : 0);
-    return;
-  }
-  if (typeof v === "number") {
-    if (Number.isInteger(v))
-      lua.lua_pushinteger(L, v);
-    else
-      lua.lua_pushnumber(L, v);
-    return;
-  }
-  if (typeof v === "string") {
-    lua.lua_pushstring(L, toL(v));
-    return;
-  }
-  if (Array.isArray(v)) {
-    lua.lua_createtable(L, v.length, 0);
-    for (let i = 0;i < v.length; i++) {
-      pushJs(L, v[i]);
-      lua.lua_rawseti(L, -2, i + 1);
-    }
-    return;
-  }
-  if (typeof v === "object") {
-    const obj = v;
-    const keys = Object.keys(obj);
-    lua.lua_createtable(L, 0, keys.length);
-    for (const k of keys) {
-      lua.lua_pushstring(L, toL(k));
-      pushJs(L, obj[k]);
-      lua.lua_settable(L, -3);
-    }
-    return;
-  }
-  lua.lua_pushnil(L);
-}
-function luaToJs(L, idx) {
-  const t = lua.lua_type(L, idx);
-  if (t === lua.LUA_TNIL)
-    return null;
-  if (t === lua.LUA_TBOOLEAN)
-    return !!lua.lua_toboolean(L, idx);
-  if (t === lua.LUA_TNUMBER)
-    return lua.lua_tonumber(L, idx);
-  if (t === lua.LUA_TSTRING)
-    return toJS(lua.lua_tostring(L, idx));
-  if (t === lua.LUA_TTABLE) {
-    const absIdx = lua.lua_absindex(L, idx);
-    const arr = [];
-    const len = lua.lua_rawlen(L, absIdx);
-    for (let i = 1;i <= len; i++) {
-      lua.lua_rawgeti(L, absIdx, i);
-      arr.push(luaToJs(L, -1));
-      lua.lua_pop(L, 1);
-    }
-    let isArray = true;
-    lua.lua_pushnil(L);
-    while (lua.lua_next(L, absIdx) !== 0) {
-      const keyType = lua.lua_type(L, -2);
-      if (keyType !== lua.LUA_TNUMBER) {
-        isArray = false;
-        lua.lua_pop(L, 2);
-        break;
+  const effects = trigger.effect ?? [];
+  if (effects.length > 0) {
+    const controlEffects = effects.map((effect) => CONTROL_OPS.has(effect.type) ? effect : { type: effect.type, ..."indent" in effect ? { indent: effect.indent } : {} });
+    out.push(line2(ctx, `const __effects = ${JSON.stringify(controlEffects)};`));
+    out.push(line2(ctx, `const __control = { loops: {}, ticks: 0 };`));
+    out.push(line2(ctx, `for (let __index = 0; __index < __effects.length; __index++) {`));
+    const inner = { ...ctx, indent: ctx.indent + 1 };
+    out.push(line2(inner, `const __next = await __risu.advanceControl(__effects, __index, __control);`));
+    out.push(line2(inner, `if (__next !== undefined) { __index = __next; continue; }`));
+    out.push(line2(inner, `switch (__index) {`));
+    const leafCtx = { ...inner, indent: inner.indent + 2 };
+    for (const [index, op] of effects.entries()) {
+      if (CONTROL_OPS.has(op.type))
+        continue;
+      const emitter = EMITTERS[op.type];
+      if (!emitter) {
+        issues.push({ opcode: op.type, message: "unknown opcode: likely a newer RisuAI version. Card may not work properly. Contact `amousepad` on Discord if you see this message.", severity: "warn" });
+        out.push(line2(inner, "/* unknown opcode skipped */"));
+        continue;
       }
-      const k = lua.lua_tonumber(L, -2);
-      if (!Number.isInteger(k) || k < 1 || k > len) {
-        isArray = false;
-        lua.lua_pop(L, 2);
-        break;
-      }
-      lua.lua_pop(L, 1);
+      out.push(line2(inner, `case ${index}: {`));
+      out.push(emitter(op, leafCtx).code);
+      out.push(line2(leafCtx, `break;`));
+      out.push(line2(inner, `}`));
     }
-    if (isArray)
-      return arr;
-    const obj = {};
-    lua.lua_pushnil(L);
-    while (lua.lua_next(L, absIdx) !== 0) {
-      const key = lua.lua_type(L, -2) === lua.LUA_TSTRING ? toJS(lua.lua_tostring(L, -2)) : String(luaToJs(L, -2));
-      obj[key] = luaToJs(L, -1);
-      lua.lua_pop(L, 1);
-    }
-    return obj;
+    out.push(line2(inner, `}`));
+    out.push(line2(ctx, `}`));
   }
-  return null;
-}
-var pendingPromises = new Map;
-var nextPromiseToken = 1;
-function luaAwaitMethod(L) {
-  lua.lua_getfield(L, 1, toL("__token"));
-  const token = lua.lua_tointeger(L, -1);
-  lua.lua_pop(L, 1);
-  const entry = pendingPromises.get(token);
-  if (entry && entry.done) {
-    if (entry.error !== undefined) {
-      lauxlib.luaL_error(L, toL("await error: " + String(entry.errorMsg ?? entry.error)));
-      return 0;
-    }
-    pushJs(L, entry.value);
-    return 1;
+  const unimplementedCounts = {};
+  for (const issue of issues) {
+    if (!issue.message.startsWith("unknown opcode"))
+      continue;
+    unimplementedCounts[issue.opcode] = (unimplementedCounts[issue.opcode] ?? 0) + 1;
   }
-  lua.lua_pushinteger(L, token);
-  return lua.lua_yield(L, 1);
-}
-function makeWrapper(fn) {
-  return function(L) {
-    const nargs = lua.lua_gettop(L);
-    const args = [];
-    for (let i = 1;i <= nargs; i++)
-      args.push(luaToJs(L, i));
-    let result;
-    try {
-      result = fn.apply(null, args);
-    } catch (e) {
-      lauxlib.luaL_error(L, toL("JS error: " + (e instanceof Error ? e.message : String(e))));
-      return 0;
-    }
-    if (result && typeof result.then === "function") {
-      const token = nextPromiseToken++;
-      pendingPromises.set(token, { promise: result, done: false });
-      lua.lua_createtable(L, 0, 2);
-      lua.lua_pushinteger(L, token);
-      lua.lua_setfield(L, -2, toL("__token"));
-      lua.lua_pushjsfunction(L, luaAwaitMethod);
-      lua.lua_setfield(L, -2, toL("await"));
-      return 1;
-    }
-    if (result === undefined)
-      return 0;
-    pushJs(L, result);
-    return 1;
+  return {
+    body: out.filter((s) => s.length > 0).join(`
+`),
+    issues,
+    unimplementedCounts,
+    hasConditions
   };
 }
-function registerJsonModule(L) {
-  const preloadCode = "package.preload.json = function() " + getJsonLuaSource() + " end";
-  const status = lauxlib.luaL_loadstring(L, toL(preloadCode));
-  if (status !== lua.LUA_OK) {
-    lua.lua_pop(L, 1);
-    return;
-  }
-  lua.lua_pcall(L, 0, 0, 0);
+function line2(ctx, body) {
+  return indent(ctx) + body;
 }
-var __luaBytecodeCache = new Map;
-function __luaCodeHash(s) {
-  let h = 2166136261;
+
+// src/core/mappers/triggers.ts
+var BINDING_EVENT_MAP = {
+  input: ["MESSAGE_SENT"],
+  output: ["GENERATION_ENDED"],
+  display: ["CHARACTER_MESSAGE_RENDERED"],
+  start: ["ls:startup", "CHAT_CHANGED"],
+  manual: [],
+  request: ["GENERATION_STARTED"]
+};
+function compileTriggers(triggers, opts) {
+  const files = [];
+  const issues = [];
+  const opcodeUnimplemented = {};
+  let luaCount = 0;
+  const seenSlugs = new Set;
+  triggers.forEach((t, i) => {
+    if (!t.type || !Object.prototype.hasOwnProperty.call(BINDING_EVENT_MAP, t.type)) {
+      issues.push({
+        path: `trigger[${i}]`,
+        message: `unknown binding type "${t.type}" — skipped`
+      });
+      return;
+    }
+    const displayMode = t.type === "display";
+    const lowLevelAccess = Boolean(t.lowLevelAccess);
+    const compiled = compileTrigger(t, { displayMode, lowLevelAccess });
+    for (const [opcode, count] of Object.entries(compiled.unimplementedCounts)) {
+      opcodeUnimplemented[opcode] = (opcodeUnimplemented[opcode] ?? 0) + count;
+    }
+    for (const issue of compiled.issues) {
+      if (issue.severity === "error") {
+        issues.push({
+          path: `trigger[${i}]`,
+          message: `${issue.opcode}: ${issue.message}`
+        });
+      }
+    }
+    const hasLua = Array.isArray(t.effect) && t.effect.some((e) => e.type === "triggerlua");
+    if (hasLua)
+      luaCount++;
+    const slug = uniqueSlug(t.comment ?? "", t.type, i, seenSlugs);
+    const events = BINDING_EVENT_MAP[t.type] ?? [];
+    const runtimeLib = opts.runtimeLibrary ?? "risu-compat";
+    const isManual = t.type === "manual";
+    const code = renderTriggerCode({
+      slug,
+      name: nameFor(t, i, isManual ? "manual" : t.type),
+      characterId: opts.characterId,
+      binding: t.type,
+      events,
+      displayMode,
+      lowLevelAccess,
+      comment: t.comment ?? "",
+      body: compiled.body,
+      hasConditions: compiled.hasConditions,
+      index: i,
+      isManual,
+      runtimeLib
+    });
+    const bindings = isManual ? undefined : [
+      {
+        type: "character",
+        characterId: opts.characterId,
+        displayName: opts.characterName ?? opts.characterId
+      }
+    ];
+    const scriptName = isManual ? `risu-manual-${slug}` : `risu-trigger-${t.type}-${slug}`;
+    const entry = {
+      name: scriptName,
+      code,
+      type: isManual ? "library" : "trigger",
+      folder: isManual ? "risu/manual" : `risu/${t.type}`,
+      path: isManual ? `scripts/libraries/${scriptName}.js` : `scripts/triggers/${scriptName}.js`,
+      ...events.length > 0 ? { triggers: events } : {},
+      ...bindings ? { bindings } : {}
+    };
+    files.push(entry);
+  });
+  return { files, issues, opcodeUnimplemented, luaCount };
+}
+function nameFor(t, i, fallback) {
+  const c = (t.comment ?? "").trim();
+  return c.length > 0 ? c : `risu_${fallback}_${i}`;
+}
+function renderTriggerCode(a) {
+  const frontmatter = [
+    `// @name       ${a.name}`,
+    `// @type       ${a.isManual ? "library" : "trigger"}`,
+    ...a.events.length > 0 ? [`// @triggers   ${a.events.join(", ")}`] : [],
+    `// @folder     ${a.isManual ? "risu/manual" : `risu/${a.binding}`}`,
+    `// @description LumiRealm translated trigger (character ${a.characterId}, binding ${a.binding}, source index ${a.index})`
+  ].join(`
+`);
+  const comment = [
+    `//`,
+    `// source comment: ${sanitizeComment(a.comment)}`,
+    `//`
+  ].join(`
+`);
+  const rtOpts = JSON.stringify({
+    displayMode: a.displayMode,
+    lowLevelAccess: a.lowLevelAccess,
+    binding: a.binding,
+    characterId: a.characterId
+  });
+  const bodyText = a.body.length > 0 ? a.body : "    // (empty trigger body)";
+  const inner = [
+    `const __rc = await script.require(${JSON.stringify(a.runtimeLib)});`,
+    `const __risu = await __rc.makeRisuTriggerRuntime(api, data, script, ${a.isManual ? `{ ...${rtOpts}, invocationState: invokeCtx.invocationState }` : rtOpts});`,
+    `try {`,
+    bodyText,
+    `} finally {`,
+    `  await __risu.flush();`,
+    `}`
+  ].join(`
+`);
+  if (a.isManual) {
+    return [
+      frontmatter,
+      comment,
+      ``,
+      `module.exports = {`,
+      `  async run(invokeCtx) {`,
+      `    const api = invokeCtx.api;`,
+      `    const data = invokeCtx.data || {};`,
+      `    const script = invokeCtx.script;`,
+      indent2(inner, "    "),
+      `  },`,
+      `};`,
+      ``
+    ].join(`
+`);
+  }
+  return [frontmatter, comment, ``, inner, ``].join(`
+`);
+}
+function indent2(text, prefix) {
+  return text.split(`
+`).map((line) => line.length > 0 ? prefix + line : line).join(`
+`);
+}
+function sanitizeComment(s) {
+  return s.replace(/\r?\n/g, " ").replace(/\*\//g, "*\\/").slice(0, 200);
+}
+function uniqueSlug(comment, type, index, seen) {
+  const base = slugify(comment) || `${type}_${index}`;
+  let candidate = base;
+  let n = 1;
+  while (seen.has(candidate)) {
+    n++;
+    candidate = `${base}_${n}`;
+  }
+  seen.add(candidate);
+  return candidate;
+}
+function slugify(s) {
+  const out = [];
   for (let i = 0;i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+    const c = s.charCodeAt(i);
+    if (c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95 || c === 45) {
+      out.push(s[i]);
+    } else if (c === 32 || c === 9) {
+      out.push("_");
+    }
   }
-  return h >>> 0;
+  return out.join("").slice(0, 64);
 }
-async function execute(code, globals, opts = {}) {
-  const tStart = Date.now();
-  const codeStr = String(code || "");
-  const globalKeys = globals && typeof globals === "object" ? Object.keys(globals) : [];
-  flog(`execute: START code_len=${codeStr.length} globals=${globalKeys.length} entry=${String(opts.entry ?? "<none>")} args=${JSON.stringify(opts.args ?? [])}`);
-  fverbose(`execute: globals_keys=${globalKeys.join(",").slice(0, 400)}`);
-  fverbose(`execute: code[0..300]=${JSON.stringify(codeStr.slice(0, 300))}`);
-  const __perfCreate0 = perfEnabled() ? Date.now() : 0;
-  const L = lauxlib.luaL_newstate();
-  try {
-    lualib.luaL_openlibs(L);
-    fverbose(`execute: luaL_openlibs done`);
-    registerJsonModule(L);
-    fverbose(`execute: registerJsonModule done`);
-    if (__perfCreate0)
-      perfRecord("lua.vmCreate", Date.now() - __perfCreate0);
-    if (globals && typeof globals === "object") {
-      let pushed = 0;
-      for (const name of Object.keys(globals)) {
-        const fn = globals[name];
-        if (typeof fn !== "function")
-          continue;
-        lua.lua_pushjsfunction(L, makeWrapper(fn));
-        lua.lua_setglobal(L, toL(name));
-        pushed += 1;
-      }
-      fverbose(`execute: pushed ${pushed} js globals`);
-    }
-    const prelude = `
-json = require 'json'
+// src/frontend-lua/protocol.ts
+class FrontendLuaUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FrontendLuaUnavailableError";
+  }
+}
 
-local function __risuAwait(self)
-  if self.__risu_failed then error(self.__risu_err) end
-  return table.unpack(self.__risu_results, 1, self.__risu_n)
-end
-
-local function __risuFinally(self, cb)
-  if type(cb) == 'function' then pcall(cb) end
-  return self
-end
-
-function async(callback)
-  return function(...)
-    local n = select('#', ...)
-    local args = {...}
-    local ok, r1, r2, r3, r4, r5, r6, r7, r8 = pcall(callback, table.unpack(args, 1, n))
-    local thenable = { await = __risuAwait, ['finally'] = __risuFinally }
-    if ok then
-      thenable.__risu_failed = false
-      thenable.__risu_n = 8
-      thenable.__risu_results = { r1, r2, r3, r4, r5, r6, r7, r8 }
-    else
-      thenable.__risu_failed = true
-      thenable.__risu_err = r1
-    end
-    return thenable
-  end
-end
-
-Promise = {}
-Promise.resolve = function(v)
-  return { await = function(self) return v end, ['finally'] = __risuFinally }
-end
-Promise.reject = function(err)
-  return { await = function(self) error(err) end, ['finally'] = __risuFinally }
-end
-
-function getChat(id, index)
-  return json.decode(getChatMain(id, index))
-end
-
-function getFullChat(id)
-  return json.decode(getFullChatMain(id))
-end
-
-function setFullChat(id, value)
-  setFullChatMain(id, json.encode(value))
-end
-
-function log(value)
-  logMain(json.encode(value))
-end
-
-function getLoreBooks(id, search)
-  return json.decode(getLoreBooksMain(id, search))
-end
-
-function loadLoreBooks(id)
-  return json.decode(loadLoreBooksMain(id):await())
-end
-
--- Risu scriptings.ts.
-function getCharacterImage(id)
-  return getCharacterImageMain(id):await()
-end
-
-function getPersonaImage(id)
-  return getPersonaImageMain(id):await()
-end
-
--- Risu scriptings.ts.
-function LLM(id, prompt, useMultimodal, options)
-  useMultimodal = useMultimodal or false
-  options = options or {}
-  return json.decode(LLMMain(id, json.encode(prompt), useMultimodal, json.encode(options)):await())
-end
-
-function axLLM(id, prompt, useMultimodal, options)
-  useMultimodal = useMultimodal or false
-  options = options or {}
-  return json.decode(axLLMMain(id, json.encode(prompt), useMultimodal, json.encode(options)):await())
-end
-
--- Risu parity: cards write cbs("...") and get a string. JS-side cbsMain is async because resolveTemplate routes through resolveReadonly IPC.
-function cbs(value)
-  return cbsMain(value):await()
-end
-
-function getName(id)
-  return getNameMain(id):await()
-end
-
-function setName(id, value)
-  return setNameMain(id, value):await()
-end
-
-function getDescription(id)
-  return getDescriptionMain(id):await()
-end
-
-function setDescription(id, value)
-  return setDescriptionMain(id, value):await()
-end
-
-function getPersonaDescription(id)
-  return getPersonaDescriptionMain(id):await()
-end
-
-function getAuthorsNote(id)
-  return getAuthorsNoteMain(id):await()
-end
-
-function getCharacterFirstMessage(id)
-  return getCharacterFirstMessageMain(id):await()
-end
-
-function setCharacterFirstMessage(id, value)
-  return setCharacterFirstMessageMain(id, value):await()
-end
-
-local editRequestFuncs = {}
-local editDisplayFuncs = {}
-local editInputFuncs = {}
-local editOutputFuncs = {}
-
-function listenEdit(type, func)
-  if type == 'editRequest' then
-    editRequestFuncs[#editRequestFuncs + 1] = func
-    return
-  end
-  if type == 'editDisplay' then
-    editDisplayFuncs[#editDisplayFuncs + 1] = func
-    return
-  end
-  if type == 'editInput' then
-    editInputFuncs[#editInputFuncs + 1] = func
-    return
-  end
-  if type == 'editOutput' then
-    editOutputFuncs[#editOutputFuncs + 1] = func
-    return
-  end
-  error('Invalid type')
-end
-
-function getState(id, name)
-  local escapedName = '__' .. name
-  local raw = getChatVar(id, escapedName)
-  if raw == nil or raw == '' or raw == 'null' then return nil end
-  local ok, v = pcall(json.decode, raw)
-  if ok then return v end
-  return nil
-end
-
-function setState(id, name, value)
-  local escapedName = '__' .. name
-  setChatVar(id, escapedName, json.encode(value))
-end
-
-function callListenMain(type, id, value, meta)
-  local realValue = json.decode(value)
-  local realMeta = json.decode(meta)
-  if type == 'editRequest' then
-    for _, f in ipairs(editRequestFuncs) do realValue = f(id, realValue, realMeta) end
-  elseif type == 'editDisplay' then
-    for _, f in ipairs(editDisplayFuncs) do realValue = f(id, realValue, realMeta) end
-  elseif type == 'editInput' then
-    for _, f in ipairs(editInputFuncs) do realValue = f(id, realValue, realMeta) end
-  elseif type == 'editOutput' then
-    for _, f in ipairs(editOutputFuncs) do realValue = f(id, realValue, realMeta) end
-  end
-  return json.encode(realValue)
-end
-`;
-    const wrapped = prelude + `
-` + codeStr;
-    const __compile0 = perfEnabled() ? Date.now() : 0;
-    const __bcKey = __luaCodeHash(wrapped);
-    const __cachedBc = __luaBytecodeCache.get(__bcKey);
-    let loadStatus;
-    if (__cachedBc) {
-      loadStatus = lauxlib.luaL_loadbuffer(L, __cachedBc, __cachedBc.length, toL("=card"));
-    } else {
-      loadStatus = lauxlib.luaL_loadstring(L, toL(wrapped));
-      if (loadStatus === lua.LUA_OK) {
-        try {
-          const __bc = [];
-          lua.lua_dump(L, (_L, p, sz) => {
-            for (let i = 0;i < sz; i++)
-              __bc.push(p[i]);
-            return 0;
-          }, null, 0);
-          __luaBytecodeCache.set(__bcKey, new Uint8Array(__bc));
-          if (__luaBytecodeCache.size > 32) {
-            const k = __luaBytecodeCache.keys().next().value;
-            if (k !== undefined)
-              __luaBytecodeCache.delete(k);
-          }
-        } catch {}
-      }
-    }
-    if (__compile0)
-      perfRecord("lua.compile", Date.now() - __compile0, { codeLen: wrapped.length, cached: __cachedBc ? 1 : 0 });
-    if (loadStatus !== lua.LUA_OK) {
-      const err = toJS(lua.lua_tostring(L, -1));
-      flogErr(`execute: luaL_loadstring failed — ${err}`);
-      throw new Error("Lua compile error: " + err);
-    }
-    fverbose(`execute: luaL_loadstring OK`);
-    const topBefore = lua.lua_gettop(L);
-    const __run0 = perfEnabled() ? Date.now() : 0;
-    const runStatus = lua.lua_pcall(L, 0, lua.LUA_MULTRET, 0);
-    if (__run0)
-      perfRecord("lua.runChunk", Date.now() - __run0);
-    if (runStatus !== lua.LUA_OK) {
-      const err = toJS(lua.lua_tostring(L, -1));
-      flogErr(`execute: main chunk pcall FAILED — ${err}`);
-      throw new Error("Lua runtime error: " + err);
-    }
-    fverbose(`execute: main chunk pcall OK`);
-    if (opts.entry) {
-      lua.lua_getglobal(L, toL(String(opts.entry)));
-      if (!lua.lua_isfunction(L, -1)) {
-        lua.lua_pop(L, 1);
-        flog(`execute: no '${opts.entry}' global function defined; skipping entry call (returning undefined) elapsed=${Date.now() - tStart}ms`);
-        return;
-      }
-      lua.lua_pop(L, 1);
-      fverbose(`execute: entry '${opts.entry}' exists — starting coroutine`);
-      const co = lua.lua_newthread(L);
-      lua.lua_getglobal(co, toL(String(opts.entry)));
-      const args = Array.isArray(opts.args) ? opts.args : [];
-      for (const a of args)
-        pushJs(co, a);
-      const nresultsRef = { ref: 0 };
-      let status = lua.lua_resume(co, L, args.length, nresultsRef);
-      let iters = 0;
-      while (status === lua.LUA_YIELD) {
-        iters += 1;
-        const tokenArg = lua.lua_tointeger(co, -1);
-        lua.lua_pop(co, nresultsRef.ref || 1);
-        const rec = pendingPromises.get(tokenArg);
-        if (!rec) {
-          fverbose(`execute: yield iter=${iters} token=${tokenArg} — no pending record, pushing nil`);
-          lua.lua_pushnil(co);
-          status = lua.lua_resume(co, L, 1, nresultsRef);
-          continue;
-        }
-        try {
-          rec.value = await rec.promise;
-          rec.done = true;
-          fverbose(`execute: yield iter=${iters} token=${tokenArg} resolved OK`);
-          pushJs(co, rec.value);
-          status = lua.lua_resume(co, L, 1, nresultsRef);
-        } catch (awaitErr) {
-          rec.done = true;
-          rec.error = awaitErr;
-          rec.errorMsg = awaitErr instanceof Error ? awaitErr.message : String(awaitErr);
-          flogErr(`execute: yield iter=${iters} token=${tokenArg} REJECTED — ${rec.errorMsg}`);
-          throw new Error("Lua await error: " + rec.errorMsg);
-        }
-      }
-      if (status !== lua.LUA_OK) {
-        const err = toJS(lua.lua_tostring(co, -1));
-        flogErr(`execute: entry '${opts.entry}' FAILED after ${iters} yields — ${err}`);
-        throw new Error("Lua entry '" + opts.entry + "' error: " + err);
-      }
-      const nret = lua.lua_gettop(co);
-      flog(`execute: entry '${opts.entry}' OK after ${iters} yields nret=${nret} elapsed=${Date.now() - tStart}ms`);
-      if (nret === 0)
-        return;
-      return luaToJs(co, -1);
-    }
-    const topAfter = lua.lua_gettop(L);
-    const returnCount = topAfter - (topBefore - 1);
-    flog(`execute: no entry fn — main-chunk returnCount=${returnCount} elapsed=${Date.now() - tStart}ms`);
-    if (returnCount > 0) {
-      const res = luaToJs(L, -1);
-      lua.lua_pop(L, returnCount);
-      return res;
-    }
-    return;
-  } catch (err) {
-    flogErr(`execute: THREW — ${err.message}`);
-    throw err;
-  } finally {
-    try {
-      lua.lua_close(L);
-    } catch {}
-    if (perfEnabled()) {
-      perfRecord("lua.execute", Date.now() - tStart, { codeLen: codeStr.length });
-      perfBump(`lua.execute.entry:${String(opts.entry ?? "<none>")}`);
-    }
+class FrontendLuaExecutionError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FrontendLuaExecutionError";
   }
 }
 
@@ -29336,22 +22056,12 @@ async function interpretTrigger(trigger, rt, console2, opts) {
   }
 }
 
-// src/interpreter/runtime/als.ts
-var userIdAls = createAls();
-var triggerDepthAls = createAls();
-var MAX_TRIGGER_DEPTH = 64;
-function withTriggerDepth(fn) {
-  const depth = (triggerDepthAls.getStore() ?? 0) + 1;
-  if (depth > MAX_TRIGGER_DEPTH) {
-    throw new Error(`trigger recursion exceeded max depth (${MAX_TRIGGER_DEPTH})`);
-  }
-  return triggerDepthAls.run(depth, fn);
-}
-
 // src/interpreter/dispatcher.ts
-function makeDispatcherScriptNS() {
+function makeDispatcherScriptNS(execute = async () => {
+  throw new FrontendLuaUnavailableError("Lua execution requires a frontend executor");
+}) {
   const nlog = makeSafeLogger("scriptNS").info;
-  const manuals = new Map;
+  let manual;
   const risuCompat = { makeRisuTriggerRuntime, makeRisuRegexRuntime };
   const risuCompatLua = { execute };
   return {
@@ -29364,17 +22074,94 @@ function makeDispatcherScriptNS() {
         nlog(`require('risu-compat-lua') → OK`);
         return risuCompatLua;
       }
-      if (manuals.has(name)) {
+      if (manual && name.startsWith("risu-manual-")) {
+        const runner = manual;
         nlog(`require('${name}') → manual OK`);
-        return manuals.get(name);
+        return { run: (ctx) => runner(name.slice("risu-manual-".length), ctx) };
       }
-      nlog(`require('${name}') → NULL (not found; manuals=${JSON.stringify([...manuals.keys()])})`);
+      nlog(`require('${name}') → NULL (not found)`);
       return null;
     },
-    registerManual(name, runner) {
-      manuals.set("risu-manual-" + name, { run: async (ctx) => runner(ctx) });
+    registerManual(runner) {
+      manual = runner;
     }
   };
+}
+function prepareTriggerSources(rawTriggers, characterId) {
+  const compiled = compileTriggers(rawTriggers, { characterId });
+  const out = [];
+  for (let i = 0;i < compiled.files.length; i++) {
+    const f = compiled.files[i];
+    const sourceTrigger = rawTriggers[i];
+    if (!sourceTrigger)
+      continue;
+    const binding = sourceTrigger.type;
+    out.push({
+      name: f.name,
+      code: f.code,
+      type: f.type,
+      triggers: f.triggers ?? [],
+      binding,
+      source: sourceTrigger,
+      rtOpts: {
+        displayMode: binding === "display",
+        lowLevelAccess: Boolean(sourceTrigger.lowLevelAccess),
+        binding,
+        characterId
+      }
+    });
+  }
+  return out;
+}
+function triggerMatchesBinding(t, binding) {
+  const firstEffect = t.source?.effect?.[0];
+  const isLuaOrCode = firstEffect?.type === "triggerlua" || firstEffect?.type === "triggercode";
+  if (isLuaOrCode)
+    return true;
+  if (t.type !== "trigger")
+    return false;
+  return t.binding === binding;
+}
+async function dispatchBinding(ctx, binding, onError) {
+  const dlog = makeSafeLogger("dispatcher").info;
+  const matches = ctx.compiledTriggers.filter((t) => triggerMatchesBinding(t, binding));
+  dlog(`dispatchBinding: binding=${binding} matches=${matches.length}/${ctx.compiledTriggers.length} data=${JSON.stringify(ctx.data).slice(0, 200)}`);
+  let stopSending = false;
+  let varsFlushed = false;
+  const localState = createTriggerLocalState();
+  const invocationState = ctx.opts.invocationState ?? { stopSending: false };
+  let aborted = false;
+  for (const entry of matches) {
+    const tStart = Date.now();
+    dlog(`→ trigger START name=${entry.name} binding=${entry.binding} triggers=${JSON.stringify(entry.triggers)} effects=${entry.source?.effect?.length ?? 0}`);
+    const flags = { stopSending: false, varsFlushed: false };
+    try {
+      const result = await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS, { ...ctx.opts, binding, displayMode: binding === "display", localState, invocationState }, flags);
+      if (result === "abort") {
+        aborted = true;
+        break;
+      }
+      dlog(`← trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms stopSending=${flags.stopSending}`);
+    } catch (err) {
+      dlog(`× trigger ERROR name=${entry.name} elapsed=${Date.now() - tStart}ms msg=${err.message} stopSending=${flags.stopSending}`);
+      aborted = true;
+      if (onError)
+        onError(err, entry.name);
+      else
+        throw err;
+      break;
+    } finally {
+      if (flags.stopSending)
+        stopSending = true;
+      if (flags.varsFlushed)
+        varsFlushed = true;
+    }
+  }
+  if (!aborted && !ctx.opts.invocationState)
+    await commitInvocation(invocationState, ctx.opts.chatId, binding === "start");
+  if (!aborted && varsFlushed)
+    ctx.opts.stateChanged?.("variables");
+  return { stopSending: !aborted && stopSending };
 }
 function makeMirroredConsole(name) {
   const L = makeSafeLogger(`trigger[${name}]`);
@@ -29397,6 +22184,7 @@ async function runInterpretedTrigger(entry, api, data, scriptNS, invocation, out
     const rLog = makeSafeLogger(`runTrigger[${entry.name}]`);
     const t0 = Date.now();
     const rt = await makeRisuTriggerRuntime(api, data, scriptNS, {
+      ...invocation,
       displayMode: invocation.displayMode,
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
       binding: invocation.binding,
@@ -29430,17 +22218,18 @@ async function dispatchByManualName(ctx, manualName, onError, outFlags) {
     const firstEffect = t.source?.effect?.[0];
     const isLuaOrCode = firstEffect?.type === "triggerlua" || firstEffect?.type === "triggercode";
     if (isLuaOrCode)
-      return false;
-    return t.source?.comment === manualName;
+      return true;
+    return manualName ? t.source?.comment === manualName : t.binding === "manual";
   });
   dlog(`dispatchByManualName: name="${manualName}" matches=${matches.length}/${ctx.compiledTriggers.length}`);
   let fired = 0;
+  const flags = { stopSending: false, varsFlushed: false };
   const localState = createTriggerLocalState();
   const invocationState = ctx.opts.invocationState ?? { stopSending: false };
   let aborted = false;
   for (const entry of matches) {
     try {
-      const result = await runInterpretedTrigger(entry, ctx.api, ctx.data, ctx.scriptNS, { binding: "manual", displayMode: false, localState, invocationState }, outFlags);
+      const result = await runInterpretedTrigger(entry, ctx.api, { ...ctx.data, manualName }, ctx.scriptNS, { ...ctx.opts, binding: "manual", displayMode: false, localState, invocationState }, flags);
       fired++;
       if (result === "abort") {
         aborted = true;
@@ -29458,275 +22247,461 @@ async function dispatchByManualName(ctx, manualName, onError, outFlags) {
   }
   if (outFlags) {
     outFlags.aborted = aborted;
+    outFlags.stopSending ||= flags.stopSending;
+    if (flags.varsFlushed)
+      outFlags.varsFlushed = true;
     if (aborted)
       outFlags.stopSending = false;
   }
   if (!aborted && !ctx.opts.invocationState)
     await commitInvocation(invocationState, ctx.opts.chatId);
+  if (!aborted && flags.varsFlushed)
+    ctx.opts.stateChanged?.("variables");
   if (outFlags && invocationState.live?.varsFlushed)
     outFlags.varsFlushed = true;
   return fired;
 }
-function registerManualTriggers(scriptNS, compiled, api) {
-  for (const name of new Set(compiled.map((entry) => entry.source.comment))) {
-    scriptNS.registerManual(name, async (ctx) => {
-      const flags = { stopSending: false, aborted: false };
-      await dispatchByManualName({ compiledTriggers: compiled, api: ctx.api ?? api, data: ctx.data, scriptNS, opts: { binding: "manual", ...ctx.invocationState ? { invocationState: ctx.invocationState } : {} } }, name, (err) => {
-        throw err;
-      }, flags);
-      return { aborted: flags.aborted };
-    });
-  }
+function registerManualTriggers(scriptNS, compiled, api, opts = {}) {
+  scriptNS.registerManual(async (name, ctx) => {
+    const flags = { stopSending: false, aborted: false };
+    await dispatchByManualName({ compiledTriggers: compiled, api: ctx.api ?? api, data: ctx.data, scriptNS, opts: { ...opts, binding: "manual", ...ctx.invocationState ? { invocationState: ctx.invocationState } : {} } }, name, (err) => {
+      throw err;
+    }, flags);
+    return { aborted: flags.aborted };
+  });
 }
+
+// src/interpreter/lua-json.lua
+var lua_json_default = `--\r
+-- json.lua\r
+--\r
+-- Copyright (c) 2020 rxi\r
+--\r
+-- Permission is hereby granted, free of charge, to any person obtaining a copy of\r
+-- this software and associated documentation files (the "Software"), to deal in\r
+-- the Software without restriction, including without limitation the rights to\r
+-- use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies\r
+-- of the Software, and to permit persons to whom the Software is furnished to do\r
+-- so, subject to the following conditions:\r
+--\r
+-- The above copyright notice and this permission notice shall be included in all\r
+-- copies or substantial portions of the Software.\r
+--\r
+-- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\r
+-- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\r
+-- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\r
+-- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\r
+-- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\r
+-- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\r
+-- SOFTWARE.\r
+--\r
+\r
+local json = { _version = "0.1.2" }\r
+\r
+-------------------------------------------------------------------------------\r
+-- Encode\r
+-------------------------------------------------------------------------------\r
+\r
+local encode\r
+\r
+local escape_char_map = {\r
+  [ "\\\\" ] = "\\\\",\r
+  [ "\\"" ] = "\\"",\r
+  [ "\\b" ] = "b",\r
+  [ "\\f" ] = "f",\r
+  [ "\\n" ] = "n",\r
+  [ "\\r" ] = "r",\r
+  [ "\\t" ] = "t",\r
+}\r
+\r
+local escape_char_map_inv = { [ "/" ] = "/" }\r
+for k, v in pairs(escape_char_map) do\r
+  escape_char_map_inv[v] = k\r
+end\r
+\r
+\r
+local function escape_char(c)\r
+  return "\\\\" .. (escape_char_map[c] or string.format("u%04x", c:byte()))\r
+end\r
+\r
+\r
+local function encode_nil(val)\r
+  return "null"\r
+end\r
+\r
+\r
+local function encode_table(val, stack)\r
+  local res = {}\r
+  stack = stack or {}\r
+\r
+  -- Circular reference?\r
+  if stack[val] then error("circular reference") end\r
+\r
+  stack[val] = true\r
+\r
+  if rawget(val, 1) ~= nil or next(val) == nil then\r
+    -- Treat as array -- check keys are valid and it is not sparse\r
+    local n = 0\r
+    for k in pairs(val) do\r
+      if type(k) ~= "number" then\r
+        error("invalid table: mixed or invalid key types")\r
+      end\r
+      n = n + 1\r
+    end\r
+    if n ~= #val then\r
+      error("invalid table: sparse array")\r
+    end\r
+    -- Encode\r
+    for i, v in ipairs(val) do\r
+      table.insert(res, encode(v, stack))\r
+    end\r
+    stack[val] = nil\r
+    return "[" .. table.concat(res, ",") .. "]"\r
+\r
+  else\r
+    -- Treat as an object\r
+    for k, v in pairs(val) do\r
+      if type(k) ~= "string" then\r
+        error("invalid table: mixed or invalid key types")\r
+      end\r
+      table.insert(res, encode(k, stack) .. ":" .. encode(v, stack))\r
+    end\r
+    stack[val] = nil\r
+    return "{" .. table.concat(res, ",") .. "}"\r
+  end\r
+end\r
+\r
+\r
+local function encode_string(val)\r
+  return '"' .. val:gsub('[%z\\1-\\31\\\\"]', escape_char) .. '"'\r
+end\r
+\r
+\r
+local function encode_number(val)\r
+  -- Check for NaN, -inf and inf\r
+  if val ~= val or val <= -math.huge or val >= math.huge then\r
+    error("unexpected number value '" .. tostring(val) .. "'")\r
+  end\r
+  return string.format("%.14g", val)\r
+end\r
+\r
+\r
+local type_func_map = {\r
+  [ "nil"     ] = encode_nil,\r
+  [ "table"   ] = encode_table,\r
+  [ "string"  ] = encode_string,\r
+  [ "number"  ] = encode_number,\r
+  [ "boolean" ] = tostring,\r
+}\r
+\r
+\r
+encode = function(val, stack)\r
+  local t = type(val)\r
+  local f = type_func_map[t]\r
+  if f then\r
+    return f(val, stack)\r
+  end\r
+  error("unexpected type '" .. t .. "'")\r
+end\r
+\r
+\r
+function json.encode(val)\r
+  return ( encode(val) )\r
+end\r
+\r
+\r
+-------------------------------------------------------------------------------\r
+-- Decode\r
+-------------------------------------------------------------------------------\r
+\r
+local parse\r
+\r
+local function create_set(...)\r
+  local res = {}\r
+  for i = 1, select("#", ...) do\r
+    res[ select(i, ...) ] = true\r
+  end\r
+  return res\r
+end\r
+\r
+local space_chars   = create_set(" ", "\\t", "\\r", "\\n")\r
+local delim_chars   = create_set(" ", "\\t", "\\r", "\\n", "]", "}", ",")\r
+local escape_chars  = create_set("\\\\", "/", '"', "b", "f", "n", "r", "t", "u")\r
+local literals      = create_set("true", "false", "null")\r
+\r
+local literal_map = {\r
+  [ "true"  ] = true,\r
+  [ "false" ] = false,\r
+  [ "null"  ] = nil,\r
+}\r
+\r
+\r
+local function next_char(str, idx, set, negate)\r
+  for i = idx, #str do\r
+    if set[str:sub(i, i)] ~= negate then\r
+      return i\r
+    end\r
+  end\r
+  return #str + 1\r
+end\r
+\r
+\r
+local function decode_error(str, idx, msg)\r
+  local line_count = 1\r
+  local col_count = 1\r
+  for i = 1, idx - 1 do\r
+    col_count = col_count + 1\r
+    if str:sub(i, i) == "\\n" then\r
+      line_count = line_count + 1\r
+      col_count = 1\r
+    end\r
+  end\r
+  error( string.format("%s at line %d col %d", msg, line_count, col_count) )\r
+end\r
+\r
+\r
+local function codepoint_to_utf8(n)\r
+  -- http://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=iws-appendixa\r
+  local f = math.floor\r
+  if n <= 0x7f then\r
+    return string.char(n)\r
+  elseif n <= 0x7ff then\r
+    return string.char(f(n / 64) + 192, n % 64 + 128)\r
+  elseif n <= 0xffff then\r
+    return string.char(f(n / 4096) + 224, f(n % 4096 / 64) + 128, n % 64 + 128)\r
+  elseif n <= 0x10ffff then\r
+    return string.char(f(n / 262144) + 240, f(n % 262144 / 4096) + 128,\r
+                       f(n % 4096 / 64) + 128, n % 64 + 128)\r
+  end\r
+  error( string.format("invalid unicode codepoint '%x'", n) )\r
+end\r
+\r
+\r
+local function parse_unicode_escape(s)\r
+  local n1 = tonumber( s:sub(1, 4),  16 )\r
+  local n2 = tonumber( s:sub(7, 10), 16 )\r
+   -- Surrogate pair?\r
+  if n2 then\r
+    return codepoint_to_utf8((n1 - 0xd800) * 0x400 + (n2 - 0xdc00) + 0x10000)\r
+  else\r
+    return codepoint_to_utf8(n1)\r
+  end\r
+end\r
+\r
+\r
+local function parse_string(str, i)\r
+  local res = ""\r
+  local j = i + 1\r
+  local k = j\r
+\r
+  while j <= #str do\r
+    local x = str:byte(j)\r
+\r
+    if x < 32 then\r
+      decode_error(str, j, "control character in string")\r
+\r
+    elseif x == 92 then -- \`\\\`: Escape\r
+      res = res .. str:sub(k, j - 1)\r
+      j = j + 1\r
+      local c = str:sub(j, j)\r
+      if c == "u" then\r
+        local hex = str:match("^[dD][89aAbB]%x%x\\\\u%x%x%x%x", j + 1)\r
+                 or str:match("^%x%x%x%x", j + 1)\r
+                 or decode_error(str, j - 1, "invalid unicode escape in string")\r
+        res = res .. parse_unicode_escape(hex)\r
+        j = j + #hex\r
+      else\r
+        if not escape_chars[c] then\r
+          decode_error(str, j - 1, "invalid escape char '" .. c .. "' in string")\r
+        end\r
+        res = res .. escape_char_map_inv[c]\r
+      end\r
+      k = j + 1\r
+\r
+    elseif x == 34 then -- \`"\`: End of string\r
+      res = res .. str:sub(k, j - 1)\r
+      return res, j + 1\r
+    end\r
+\r
+    j = j + 1\r
+  end\r
+\r
+  decode_error(str, i, "expected closing quote for string")\r
+end\r
+\r
+\r
+local function parse_number(str, i)\r
+  local x = next_char(str, i, delim_chars)\r
+  local s = str:sub(i, x - 1)\r
+  local n = tonumber(s)\r
+  if not n then\r
+    decode_error(str, i, "invalid number '" .. s .. "'")\r
+  end\r
+  return n, x\r
+end\r
+\r
+\r
+local function parse_literal(str, i)\r
+  local x = next_char(str, i, delim_chars)\r
+  local word = str:sub(i, x - 1)\r
+  if not literals[word] then\r
+    decode_error(str, i, "invalid literal '" .. word .. "'")\r
+  end\r
+  return literal_map[word], x\r
+end\r
+\r
+\r
+local function parse_array(str, i)\r
+  local res = {}\r
+  local n = 1\r
+  i = i + 1\r
+  while 1 do\r
+    local x\r
+    i = next_char(str, i, space_chars, true)\r
+    -- Empty / end of array?\r
+    if str:sub(i, i) == "]" then\r
+      i = i + 1\r
+      break\r
+    end\r
+    -- Read token\r
+    x, i = parse(str, i)\r
+    res[n] = x\r
+    n = n + 1\r
+    -- Next token\r
+    i = next_char(str, i, space_chars, true)\r
+    local chr = str:sub(i, i)\r
+    i = i + 1\r
+    if chr == "]" then break end\r
+    if chr ~= "," then decode_error(str, i, "expected ']' or ','") end\r
+  end\r
+  return res, i\r
+end\r
+\r
+\r
+local function parse_object(str, i)\r
+  local res = {}\r
+  i = i + 1\r
+  while 1 do\r
+    local key, val\r
+    i = next_char(str, i, space_chars, true)\r
+    -- Empty / end of object?\r
+    if str:sub(i, i) == "}" then\r
+      i = i + 1\r
+      break\r
+    end\r
+    -- Read key\r
+    if str:sub(i, i) ~= '"' then\r
+      decode_error(str, i, "expected string for key")\r
+    end\r
+    key, i = parse(str, i)\r
+    -- Read ':' delimiter\r
+    i = next_char(str, i, space_chars, true)\r
+    if str:sub(i, i) ~= ":" then\r
+      decode_error(str, i, "expected ':' after key")\r
+    end\r
+    i = next_char(str, i + 1, space_chars, true)\r
+    -- Read value\r
+    val, i = parse(str, i)\r
+    -- Set\r
+    res[key] = val\r
+    -- Next token\r
+    i = next_char(str, i, space_chars, true)\r
+    local chr = str:sub(i, i)\r
+    i = i + 1\r
+    if chr == "}" then break end\r
+    if chr ~= "," then decode_error(str, i, "expected '}' or ','") end\r
+  end\r
+  return res, i\r
+end\r
+\r
+\r
+local char_func_map = {\r
+  [ '"' ] = parse_string,\r
+  [ "0" ] = parse_number,\r
+  [ "1" ] = parse_number,\r
+  [ "2" ] = parse_number,\r
+  [ "3" ] = parse_number,\r
+  [ "4" ] = parse_number,\r
+  [ "5" ] = parse_number,\r
+  [ "6" ] = parse_number,\r
+  [ "7" ] = parse_number,\r
+  [ "8" ] = parse_number,\r
+  [ "9" ] = parse_number,\r
+  [ "-" ] = parse_number,\r
+  [ "t" ] = parse_literal,\r
+  [ "f" ] = parse_literal,\r
+  [ "n" ] = parse_literal,\r
+  [ "[" ] = parse_array,\r
+  [ "{" ] = parse_object,\r
+}\r
+\r
+\r
+parse = function(str, idx)\r
+  local chr = str:sub(idx, idx)\r
+  local f = char_func_map[chr]\r
+  if f then\r
+    return f(str, idx)\r
+  end\r
+  decode_error(str, idx, "unexpected character '" .. chr .. "'")\r
+end\r
+\r
+\r
+function json.decode(str)\r
+  if type(str) ~= "string" then\r
+    error("expected argument of type string, got " .. type(str))\r
+  end\r
+  local res, idx = parse(str, next_char(str, 1, space_chars, true))\r
+  idx = next_char(str, idx, space_chars, true)\r
+  if idx <= #str then\r
+    decode_error(str, idx, "trailing garbage")\r
+  end\r
+  return res\r
+end\r
+\r
+\r
+return json`;
 
 // src/interpreter/lua-wasmoon.ts
-var PRELUDE = `
-json = require 'json'
+var factory;
+var executor = createLuaExecutor(() => factory ??= (async () => {
+  const [mod, glue] = await Promise.all([
+    Promise.resolve().then(() => __toESM(require_dist(), 1)),
+    Promise.resolve().then(() => ({}))
+  ]);
+  const value = new mod.LuaFactory(GLUE_WASM_DATA_URI);
+  await value.mountFile("json.lua", lua_json_default);
+  return value;
+})().catch((cause) => {
+  factory = undefined;
+  throw cause;
+}));
+var executeWasmoon = (code, globals, opts) => executor.execute(code, globals, { ...opts, mode: opts.mode ?? opts.wasmoonKey });
 
-function getChat(id, index)
-  return json.decode(getChatMain(id, index))
-end
-
-function getFullChat(id)
-  return json.decode(getFullChatMain(id))
-end
-
-function setFullChat(id, value)
-  setFullChatMain(id, json.encode(value))
-end
-
-function log(value)
-  logMain(json.encode(value))
-end
-
-function getLoreBooks(id, search)
-  return json.decode(getLoreBooksMain(id, search))
-end
-
-function loadLoreBooks(id)
-  return json.decode(loadLoreBooksMain(id):await())
-end
-
-function LLM(id, prompt, useMultimodal, options)
-  useMultimodal = useMultimodal or false
-  options = options or {}
-  return json.decode(LLMMain(id, json.encode(prompt), useMultimodal, json.encode(options)):await())
-end
-
-function axLLM(id, prompt, useMultimodal, options)
-  useMultimodal = useMultimodal or false
-  options = options or {}
-  return json.decode(axLLMMain(id, json.encode(prompt), useMultimodal, json.encode(options)):await())
-end
-
-function getCharacterImage(id)
-  return getCharacterImageMain(id):await()
-end
-
-function getPersonaImage(id)
-  return getPersonaImageMain(id):await()
-end
-
-function cbs(value)
-  return cbsMain(value):await()
-end
-
-function getName(id)
-  return getNameMain(id):await()
-end
-
-function setName(id, value)
-  return setNameMain(id, value):await()
-end
-
-function getDescription(id)
-  return getDescriptionMain(id):await()
-end
-
-function setDescription(id, value)
-  return setDescriptionMain(id, value):await()
-end
-
-function getPersonaDescription(id)
-  return getPersonaDescriptionMain(id):await()
-end
-
-function getAuthorsNote(id)
-  return getAuthorsNoteMain(id):await()
-end
-
-function getCharacterFirstMessage(id)
-  return getCharacterFirstMessageMain(id):await()
-end
-
-function setCharacterFirstMessage(id, value)
-  return setCharacterFirstMessageMain(id, value):await()
-end
-
-local editRequestFuncs = {}
-local editDisplayFuncs = {}
-local editInputFuncs = {}
-local editOutputFuncs = {}
-
-function listenEdit(type, func)
-  if type == 'editRequest' then editRequestFuncs[#editRequestFuncs + 1] = func return end
-  if type == 'editDisplay' then editDisplayFuncs[#editDisplayFuncs + 1] = func return end
-  if type == 'editInput' then editInputFuncs[#editInputFuncs + 1] = func return end
-  if type == 'editOutput' then editOutputFuncs[#editOutputFuncs + 1] = func return end
-  error('Invalid type')
-end
-
-function getState(id, name)
-  local escapedName = '__' .. name
-  local raw = getChatVar(id, escapedName)
-  if raw == nil or raw == '' or raw == 'null' then return nil end
-  local ok, v = pcall(json.decode, raw)
-  if ok then return v end
-  return nil
-end
-
-function setState(id, name, value)
-  local escapedName = '__' .. name
-  setChatVar(id, escapedName, json.encode(value))
-end
-
-function async(callback)
-  return function(...)
-    local co = coroutine.create(callback)
-    local safe, result = coroutine.resume(co, ...)
-    return Promise.create(function(resolve, reject)
-      local checkresult
-      local step = function()
-        if coroutine.status(co) == "dead" then
-          local send = safe and resolve or reject
-          return send(result)
-        end
-        safe, result = coroutine.resume(co)
-        checkresult()
-      end
-      checkresult = function()
-        if safe and result == Promise.resolve(result) then
-          result:finally(step)
-        else
-          step()
-        end
-      end
-      checkresult()
-    end)
-  end
-end
-
-callListenMain = async(function(type, id, value, meta)
-  local realValue = json.decode(value)
-  local realMeta = json.decode(meta)
-  if type == 'editRequest' then for _, f in ipairs(editRequestFuncs) do realValue = f(id, realValue, realMeta) end
-  elseif type == 'editDisplay' then for _, f in ipairs(editDisplayFuncs) do realValue = f(id, realValue, realMeta) end
-  elseif type == 'editInput' then for _, f in ipairs(editInputFuncs) do realValue = f(id, realValue, realMeta) end
-  elseif type == 'editOutput' then for _, f in ipairs(editOutputFuncs) do realValue = f(id, realValue, realMeta) end
-  end
-  return json.encode(realValue)
-end)
-`;
-var factoryPromise = null;
-var engines = new Map;
-async function ensureFactory() {
-  if (factoryPromise)
-    return factoryPromise;
-  factoryPromise = (async () => {
-    const [mod, glue] = await Promise.all([
-      Promise.resolve().then(() => __toESM(require_dist(), 1)),
-      Promise.resolve().then(() => ({}))
-    ]);
-    const factory = new mod.LuaFactory(GLUE_WASM_DATA_URI);
-    await factory.mountFile("json.lua", lua_json_default);
-    return factory;
-  })();
-  return factoryPromise;
-}
-function getEngineEntry(key) {
-  const existing = engines.get(key);
-  if (existing)
-    return existing;
-  const created = (async () => {
-    const factory = await ensureFactory();
-    const engine = await factory.createEngine({ injectObjects: true });
-    return { engine, code: null, tail: Promise.resolve(), current: {}, bound: new Set };
-  })();
-  engines.set(key, created);
-  return created;
-}
-async function executeWasmoon(code, globals, opts) {
-  const entry = await getEngineEntry(opts.wasmoonKey);
-  const run = entry.tail.then(async () => {
-    if (entry.code !== null && entry.code !== code) {
-      entry.engine.global.close?.();
-      const factory = await ensureFactory();
-      entry.engine = await factory.createEngine({ injectObjects: true });
-      entry.code = null;
-      entry.bound.clear();
-    }
-    const engine = entry.engine;
-    entry.current = globals;
-    for (const name of Object.keys(globals)) {
-      if (typeof globals[name] !== "function" || entry.bound.has(name))
-        continue;
-      engine.global.set(name, (...args) => entry.current[name](...args));
-      entry.bound.add(name);
-    }
-    if (entry.code === null) {
-      await engine.doString(PRELUDE + `
-` + code);
-      entry.code = code;
-    }
-    const fn = engine.global.get(String(opts.entry ?? "callListenMain"));
-    if (typeof fn === "function") {
-      return await fn(...opts.args ?? []);
-    }
-    return;
-  });
-  entry.tail = run.catch(() => {
-    return;
-  });
-  return run;
-}
-
-// src/display/lua-runner.ts
-setWasmoonExecutor(executeWasmoon);
-function risuChatIndex(context, snap) {
-  return resolveRisuDisplayMessageIndex(snap, context);
-}
-async function runEditDisplayChain(snap, content, context, resolveTemplate, onVarWrite, onEffect, onVarRead) {
-  if (snap.luaTriggers.length === 0)
+// src/util/llm-message-content.ts
+function projectLlmText(content) {
+  if (typeof content === "string")
     return content;
-  const api = makeSnapshotHostApi(snap, onVarWrite, onEffect);
-  const scriptNS = makeDispatcherScriptNS();
-  registerManualTriggers(scriptNS, snap.compiledLibraries, api);
-  const data = {
-    characterId: snap.characterId,
-    characterName: snap.charName,
-    userName: snap.userName
-  };
-  const index = risuChatIndex(context, snap);
-  return runListenEditChain(snap.luaTriggers, "editDisplay", content, { index }, api, data, scriptNS, {
-    chatId: snap.chatId,
-    characterId: snap.characterId,
-    resolveTemplate,
-    preloaded: buildPreloaded(snap),
-    wasmoonKey: "editDisplay",
-    ...onVarRead ? { onVarRead } : {}
-  });
+  return content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
 }
-async function runEditDisplayAtActions(snap, content, context, actions = snap.atActions, options = {}) {
-  if (actions.length === 0)
+function mergeLlmText(content, text) {
+  if (typeof content === "string")
+    return text;
+  if (projectLlmText(content) === text)
     return content;
-  const api = makeSnapshotHostApi(snap, undefined, options.onEffect);
-  const role = context.role ?? undefined;
-  return runAtActionsForPhase(actions, "editdisplay", content, {
-    api,
-    chatIndex: risuChatIndex(context, snap),
-    ...role ? { role } : {},
-    ...options.resolveTemplate ? { resolveTemplate: options.resolveTemplate } : {}
-  });
+  const parts = [];
+  let foundText = false;
+  for (const part of content) {
+    if (part.type !== "text") {
+      parts.push(part);
+    } else if (!foundText) {
+      if (text.length > 0)
+        parts.push({ ...part, text });
+      foundText = true;
+    }
+  }
+  if (!foundText && text.length > 0)
+    parts.unshift({ type: "text", text });
+  return parts;
 }
 
 // src/interpreter/restricted-trigger.ts
@@ -29803,6 +22778,242 @@ function selectRestrictedTriggers(sources, mode) {
   return sources.filter((source) => matchesBinding(source, mode)).map((source) => restrictEffects(source, mode)).filter((source) => source.conditions.length > 0 || source.effect.some((effect) => effect.type !== "v2Comment"));
 }
 
+// src/interpreter/request-trigger-runner.ts
+var quietConsole = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+  info: () => {}
+};
+async function runRequestTriggerChain(messages, opts) {
+  const triggers = selectRestrictedTriggers(opts.triggers, "request");
+  if (triggers.length === 0)
+    return messages.slice();
+  const runtime = await makeRisuTriggerRuntime(opts.api, {
+    characterId: opts.characterId,
+    characterName: opts.characterName ?? "",
+    userName: opts.userName ?? ""
+  }, opts.scriptNS ?? makeDispatcherScriptNS(), {
+    ...opts.runtimeOpts,
+    chatId: opts.chatId,
+    characterId: opts.characterId,
+    binding: "request",
+    displayMode: true,
+    ...opts.templateContext ? { templateContext: opts.templateContext } : {},
+    requestData: messages.map(({ role, content }) => ({
+      role,
+      content: projectLlmText(content)
+    }))
+  });
+  try {
+    for (const trigger of triggers) {
+      const result = await interpretTrigger(trigger, runtime, quietConsole, {
+        displayMode: true,
+        lowLevelAccess: Boolean(trigger.lowLevelAccess)
+      });
+      if (result === "abort")
+        return messages.slice();
+    }
+    const state = runtime.getRequestStateMessages();
+    if (state.length !== messages.length) {
+      throw new Error(`request trigger changed message count: ${messages.length} -> ${state.length}`);
+    }
+    return messages.map((message, index) => ({
+      ...message,
+      role: state[index].role,
+      content: mergeLlmText(message.content, state[index].content)
+    }));
+  } finally {
+    await runtime.flush();
+  }
+}
+
+// src/frontend-lua/executor.ts
+function makeFrontendScriptNS() {
+  return makeDispatcherScriptNS((code, globals, opts = {}) => executeWasmoon(code, globals, { ...opts, wasmoonKey: opts.mode ?? "manual" }));
+}
+async function runFrontendLuaOperation(operation, env, signal) {
+  signal.throwIfAborted();
+  const scriptNS = makeFrontendScriptNS();
+  const options = () => ({ ...env.prepareRuntime(), luaSignal: signal });
+  const dispatch = () => {
+    const { luaVariables: _liveVariables, luaChat: _liveChat, ...frameOpts } = options();
+    registerManualTriggers(scriptNS, env.compiled, env.api, frameOpts);
+    return { compiledTriggers: env.compiled, api: env.api, data: env.data, scriptNS, opts: frameOpts };
+  };
+  const edit = (mode, value, meta = {}) => runListenEditChain(env.triggers, mode, value, meta, env.api, env.data, scriptNS, options());
+  if (operation.kind === "intercept") {
+    let messages = operation.messages.slice();
+    if (operation.generationType === "normal") {
+      let index = -1;
+      for (let i = messages.length - 1;i >= 0; i--)
+        if (messages[i].role === "user") {
+          index = i;
+          break;
+        }
+      if (index >= 0) {
+        const message = messages[index];
+        const content = await edit("editInput", projectLlmText(message.content), { index: index - 1 });
+        messages[index] = { ...message, content: mergeLlmText(message.content, content) };
+      }
+    }
+    messages = await edit("editRequest", messages, { generationType: operation.generationType });
+    try {
+      return await runRequestTriggerChain(messages, {
+        api: env.api,
+        chatId: options().chatId,
+        characterId: options().characterId,
+        triggers: env.triggers.map((trigger) => trigger.source),
+        runtimeOpts: dispatch().opts,
+        scriptNS
+      });
+    } catch (error) {
+      if (signal.aborted || error instanceof FrontendLuaExecutionError || error instanceof FrontendLuaUnavailableError)
+        throw error;
+      console.warn("Request trigger failed; preserving the previous request", error);
+      return messages;
+    }
+  }
+  if (operation.kind === "edit") {
+    if (!["editInput", "editOutput", "editDisplay", "editRequest"].includes(operation.mode))
+      throw new Error(`Unknown Lua edit mode: ${operation.mode}`);
+    return edit(operation.mode, operation.value, operation.meta);
+  }
+  if (operation.kind === "request") {
+    const { opts } = dispatch();
+    return runRequestTriggerChain(operation.messages, {
+      api: env.api,
+      chatId: opts.chatId,
+      characterId: opts.characterId,
+      triggers: env.triggers.map((trigger) => trigger.source),
+      runtimeOpts: opts,
+      scriptNS
+    });
+  }
+  if (operation.kind === "binding") {
+    if (operation.binding === "output") {
+      const messages = await env.api.chat.getMessages();
+      const message = [...messages].reverse().find((value) => value.role === "assistant");
+      if (message) {
+        const index = Math.max(-1, messages.indexOf(message) - (messages[0]?.role !== "user" ? 1 : 0));
+        let content = await edit("editOutput", message.content, { index });
+        for (const phase of ["editoutput", "edittrans"])
+          content = await runAtActionsForPhase(env.atActions.filter(isRowlessAtAction), phase, content, { api: env.api, chatIndex: index, role: "assistant" });
+        if (content !== message.content)
+          await env.api.chat.editMessage(message.id, content);
+      }
+    }
+    return dispatchBinding(dispatch(), operation.binding);
+  }
+  if (operation.kind === "manual") {
+    await dispatchByManualName(dispatch(), operation.name);
+    return;
+  }
+  for (const trigger of env.triggers) {
+    if (trigger.source.effect[0]?.type !== "triggerlua")
+      continue;
+    const runtime = await makeRisuTriggerRuntime(env.api, env.data, scriptNS, {
+      ...options(),
+      binding: "manual",
+      lowLevelAccess: Boolean(trigger.source.lowLevelAccess)
+    });
+    try {
+      await runtime.runLua(trigger.luaCode, { entry: "onButtonClick", args: [undefined, operation.value] });
+    } finally {
+      await runtime.flush();
+    }
+  }
+}
+
+// src/display/lua-runner.ts
+setWasmoonExecutor(executeWasmoon);
+var varLog = makeSafeLogger("runtime.setVar");
+var environment;
+function setDisplayLuaEnvironment(provider) {
+  environment = provider;
+}
+function getDisplayLuaEnvironment(snapshot) {
+  return environment?.(snapshot);
+}
+function risuChatIndex(context, snap) {
+  return resolveRisuDisplayMessageIndex(snap, context);
+}
+async function runEditDisplayChain(snap, content, context, resolveTemplate, onVarWrite, onEffect, onVarRead, onMessageRead) {
+  if (snap.luaTriggers.length === 0)
+    return content;
+  const local = environment?.(snap);
+  const api = local?.api ?? makeSnapshotHostApi(snap, onVarWrite, onEffect);
+  const scriptNS = makeFrontendScriptNS();
+  registerManualTriggers(scriptNS, snap.compiledLibraries, api);
+  const data = {
+    characterId: snap.characterId,
+    characterName: snap.charName,
+    userName: snap.userName
+  };
+  const index = risuChatIndex(context, snap);
+  let vars = snap.vars;
+  const currentVars = () => getDisplaySnapshot(snap.chatId)?.vars ?? vars;
+  const written = new Set;
+  try {
+    return await runListenEditChain(snap.luaTriggers, "editDisplay", content, { index }, api, data, scriptNS, {
+      preloaded: buildPreloaded(snap),
+      luaVariables: {
+        get(name, scope) {
+          const values = currentVars()[scope === "chat" ? "local" : "global"];
+          const value = Object.hasOwn(values, name) ? values[name] : undefined;
+          return value ?? (scope === "chat" && Object.hasOwn(snap.scriptstateDefaults, name) ? snap.scriptstateDefaults[name] : "null");
+        },
+        set(name, value) {
+          const current = currentVars();
+          if (current.local[name] === value)
+            return;
+          vars = { ...current, local: { ...current.local, [name]: value } };
+          applyVarDelta(snap.chatId, "local", { [name]: value });
+          written.add(name);
+          varLog.info(`$${name}=${JSON.stringify(value.slice(0, 80))}`);
+          return true;
+        },
+        flush() {
+          const current = currentVars().local;
+          const delta = {};
+          for (const key of written)
+            if (typeof current[key] === "string")
+              delta[key] = current[key];
+          written.clear();
+          if (Object.keys(delta).length)
+            onVarWrite(delta);
+        }
+      },
+      wasmoonKey: "editDisplay",
+      ...onVarRead ? { onVarRead } : {},
+      ...onMessageRead ? { onMessageRead } : {},
+      ...local?.options,
+      chatId: snap.chatId,
+      characterId: snap.characterId,
+      luaTemplate: resolveTemplate
+    });
+  } finally {
+    await local?.flush();
+  }
+}
+async function runEditDisplayAtActions(snap, content, context, actions = snap.atActions, options = {}) {
+  if (actions.length === 0)
+    return content;
+  const local = environment?.(snap);
+  const api = local?.api ?? makeSnapshotHostApi(snap, undefined, options.onEffect);
+  const role = context.role ?? undefined;
+  try {
+    return await runAtActionsForPhase(actions, "editdisplay", content, {
+      api,
+      chatIndex: risuChatIndex(context, snap),
+      ...role ? { role } : {},
+      ...options.resolveTemplate ? { resolveTemplate: options.resolveTemplate } : {}
+    });
+  } finally {
+    await local?.flush();
+  }
+}
+
 // src/display/trigger-runner.ts
 var log5 = makeSafeLogger("display-trigger");
 function formatConsoleArgs(args) {
@@ -29824,18 +23035,21 @@ async function runDisplayTriggerChain(snap, content) {
   const triggers = selectRestrictedTriggers(snap.luaTriggers.map((entry) => entry.source), "display");
   if (triggers.length === 0)
     return { content, ran: false };
+  const local = getDisplayLuaEnvironment(snap);
+  const { luaChat: _chat, luaVariables: _variables, ...options } = local?.options ?? {};
   try {
-    const runtime = await makeRisuTriggerRuntime(makeSnapshotHostApi(snap), {
+    const runtime = await makeRisuTriggerRuntime(local?.api ?? makeSnapshotHostApi(snap), {
       characterId: snap.characterId,
       characterName: snap.charName,
       userName: snap.userName
-    }, makeDispatcherScriptNS(), {
+    }, makeFrontendScriptNS(), {
       chatId: snap.chatId,
       characterId: snap.characterId,
       binding: "display",
       displayMode: true,
       displayData: content,
       preloaded: buildPreloaded(snap),
+      ...options,
       templateContext: async () => ({
         ...snap,
         character: snap.character,
@@ -29863,6 +23077,8 @@ async function runDisplayTriggerChain(snap, content) {
   } catch (err) {
     log5.warn(`display trigger runtime failed: ${String(err)}`);
     return { content, ran: true };
+  } finally {
+    await local?.flush();
   }
 }
 
@@ -30000,17 +23216,72 @@ init_dispatch();
 init_cbs();
 var assetTypes = "raw|path|img|image|video|audio|bgm|bg|emotion|asset|video-img|source";
 var assetPattern = new RegExp(`{{(${assetTypes})::(.+?)}}`, "gms");
-var deferredAssets = new Set([...assetTypes.split("|"), "inlay", "inlayed", "inlayeddata"].map(normalizeMacroName));
+var additionalAssets = new Set(assetTypes.split("|").map(normalizeMacroName));
+var callerAssets = new Set([...additionalAssets, "inlay", "inlayed", "inlayeddata"]);
+function deferAssets(names) {
+  return (name, _args, raw) => raw !== undefined && names.has(normalizeMacroName(name)) ? { text: `{{${raw}}}`, terminal: true } : undefined;
+}
+var deferDisplayAssets = deferAssets(additionalAssets);
+var deferCallerAssets = deferAssets(callerAssets);
+function replaceAssets(body, getContext) {
+  if (!body.includes("{{"))
+    return body;
+  const end = body.lastIndexOf("}}") + 2;
+  if (end < 2)
+    return body;
+  let context;
+  const replace = (_full, type, name) => type === "bg" ? "" : lookup(type).handler(context ??= getContext(), [name], `${type}::${name}`);
+  return body.slice(0, end).replace(assetPattern, replace) + body.slice(end);
+}
+function displayAssetBaseline(body) {
+  if (!body.includes("{{"))
+    return;
+  const end = body.lastIndexOf("}}") + 2;
+  return end >= 2 && body.slice(0, end).search(assetPattern) >= 0 ? body : undefined;
+}
+function finalizeDisplayAssets(input, recorder) {
+  return replaceAssets(input.template, () => buildEvaluatorContext({ ...input, commit: false, recorder }));
+}
 function parseDisplayCaller(input, recorder) {
   const context = buildEvaluatorContext({
     ...input,
     commit: false,
+    visualize: true,
     recorder,
     reparseMacroResults: false,
-    resolveLeaf: (name, _args, raw) => raw !== undefined && deferredAssets.has(normalizeMacroName(name)) ? { text: `{{${raw}}}`, terminal: true } : undefined
+    resolveLeaf: deferCallerAssets
   });
   const body = evaluate(input.template, context);
-  return body.replace(assetPattern, (_full, type, name) => type === "bg" ? "" : lookup(type).handler(context, [name], `${type}::${name}`));
+  return replaceAssets(body, () => context);
+}
+
+// src/display/resolver.ts
+init_scanner();
+
+// src/bghtml/strip-imports.ts
+var IMPORT_RULE_RE = /@import\s+(?:url\(\s*["']?[^)"']*["']?\s*\)|["'][^"']*["'])[^;]*;/gi;
+function stripCssImports(css) {
+  if (!css || !/@import/i.test(css))
+    return css;
+  return css.replace(IMPORT_RULE_RE, "");
+}
+function splitCssImports(css) {
+  if (!css || css.indexOf("@import") < 0)
+    return { imports: "", rest: css };
+  const imports = [];
+  const rest = css.replace(IMPORT_RULE_RE, (match) => {
+    imports.push(match.trim());
+    return "";
+  });
+  return { imports: imports.join(`
+`), rest };
+}
+
+// src/display/style-imports.ts
+function stripDisplayStyleImports(content) {
+  if (!/@import/i.test(content))
+    return content;
+  return content.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi, (_match, open, css, close) => open + stripCssImports(css) + close);
 }
 
 // src/display/resolver.ts
@@ -30056,7 +23327,12 @@ function buildInput(snap, content, context) {
   };
 }
 function evalTemplate(snap, text, context, recorder) {
-  return runPipeline(buildInput(snap, text, context), { recorder });
+  return runPipeline({
+    ...buildInput(snap, text, context),
+    visualize: false,
+    rmVar: false,
+    reparseMacroResults: false
+  }, { recorder, resolveLeaf: deferDisplayAssets });
 }
 async function fetchBackendBody(chatId, messageId, role, content) {
   try {
@@ -30155,10 +23431,12 @@ function toCoreScript(script, nativeEval, prepared) {
   const matchActions = readRegexMatchActions(script.metadata);
   const actions = script.actions;
   const isRisu = isRisuRegexScript(script);
+  const risu = script.metadata?.["_risu"];
+  const unicodeFlags = risu?.["unicode_flags"];
   return {
     find_regex: script.find_regex,
     replace_string: script.replace_string,
-    flags: script.flags,
+    flags: isRisu && typeof unicodeFlags === "string" && script.flags === (unicodeFlags.replace(/u/g, "") || "u") ? unicodeFlags : script.flags,
     substitute_macros: script.substitute_macros,
     placement: script.placement,
     target: "display",
@@ -30166,6 +23444,7 @@ function toCoreScript(script, nativeEval, prepared) {
     max_depth: script.max_depth,
     trim_strings: script.trim_strings,
     reResolveAfterRule: isRisu,
+    ...isRisu ? { risuActions: Array.isArray(risu?.["flag_actions"]) ? risu["flag_actions"].filter((action) => typeof action === "string") : [] } : {},
     ...typeof prepared.get(script.id) === "string" ? { preResolvedFind: prepared.get(script.id) } : {},
     ...!isRisu ? { evalTemplate: nativeEval } : {},
     ...actions && actions.length > 0 ? {
@@ -30201,10 +23480,11 @@ function displayBehaviorContext(snap, context) {
     ...greeting !== undefined ? { previousContent: greeting } : {}
   };
 }
-async function runApply(snap, args, recorder, activationPatterns, onEffect) {
+async function runApply(snap, args, recorder, activationPatterns, cache, onEffect) {
   const ctx = args.context;
   const placement = ctx.isUser ? "user_input" : "ai_output";
-  const scripts = args.scripts;
+  const scopeOrder = { global: 0, character: 1, chat: 2 };
+  const scripts = [...args.scripts].sort((a, b) => scopeOrder[a.scope ?? "global"] - scopeOrder[b.scope ?? "global"]);
   const prepared = await activationPatterns.resolve(scripts.filter((script) => scriptApplies(script, ctx)), ctx, recorder.touched);
   const plan = buildModuleDisplayPlan(scripts.filter((script) => {
     const result = prepared.get(script.id);
@@ -30223,51 +23503,98 @@ async function runApply(snap, args, recorder, activationPatterns, onEffect) {
     nativeVariables ??= createNativeVariableMacros(snap.vars, recorder.touched);
     return runPipeline(buildInput(snap, text, ctx), { recorder, resolveLeaf: nativeVariables });
   };
-  for (let index = 0;index < plan.length; index++) {
-    const step = plan[index];
-    if (step.kind === "skip") {
-      warnActionBinding(step.script.id, step.reason);
-      continue;
-    }
-    if (step.kind === "action") {
-      if (!scriptApplies(step.script, ctx))
-        continue;
-      const dependencies = getRuntimeAtActionDependencies(step.action);
-      if (dependencies.messages)
-        recorder.touched.add(MSG_DEP_KEY);
-      if (dependencies.effects)
-        recorder.volatile = true;
-      content = await runEditDisplayAtActions(snap, content, ctx, [step.action], {
-        resolveTemplate: (text) => evalTemplate(snap, text, ctx, recorder),
-        ...onEffect ? { onEffect } : {}
-      });
-      continue;
-    }
-    const coreScripts = [toCoreScript(step.script, nativeEval, prepared)];
-    while (plan[index + 1]?.kind === "script") {
-      const next = plan[++index];
-      if (next.kind === "script")
-        coreScripts.push(toCoreScript(next.script, nativeEval, prepared));
-    }
-    content = applyRegexScriptsCore(content, coreScripts, {
-      placement,
-      depth: ctx.depth,
-      ...behaviorContext,
-      evalTemplate: (text) => {
-        try {
-          return evalTemplate(snap, text, ctx, recorder);
-        } catch (err) {
-          recorder.volatile = true;
-          throw err;
+  for (let start = 0;start < plan.length; ) {
+    const risu = isRisuRegexScript(plan[start].script);
+    let end = start + 1;
+    while (end < plan.length && isRisuRegexScript(plan[end].script) === risu)
+      end++;
+    const reads = risu ? { touched: new Set, volatile: false } : recorder;
+    const key = risu ? JSON.stringify([
+      snap.chatId,
+      snap.characterId,
+      resolveRisuDisplayMessageIndex(snap, ctx),
+      start,
+      content,
+      plan.slice(start, end).map((step) => [
+        step.script,
+        scriptApplies(step.script, ctx),
+        step.script.metadata?.["_risu"]?.flag_actions?.includes("cbs") ? evalTemplate(snap, step.script.find_regex, ctx, reads) : step.script.find_regex,
+        step.kind === "action" ? step.action : step.kind === "skip" ? step.reason : null
+      ])
+    ]) : undefined;
+    const cached = key === undefined ? undefined : cache.get(key);
+    if (cached?.content) {
+      content = cached.content;
+      for (const dependency of cached.touchedVars ?? [])
+        reads.touched.add(dependency);
+      if (cached.cacheable === false)
+        reads.volatile = true;
+    } else {
+      for (let index = start;index < end; index++) {
+        const step = plan[index];
+        if (step.kind === "skip") {
+          warnActionBinding(step.script.id, step.reason);
+          continue;
         }
-      },
-      reResolveAfterRule: true
-    });
+        if (step.kind === "action") {
+          if (!scriptApplies(step.script, ctx))
+            continue;
+          const dependencies = getRuntimeAtActionDependencies(step.action);
+          if (dependencies.messages)
+            reads.touched.add(MSG_DEP_KEY);
+          if (dependencies.effects)
+            reads.volatile = true;
+          content = await runEditDisplayAtActions(snap, content, ctx, [step.action], {
+            resolveTemplate: (text) => evalTemplate(snap, text, ctx, reads),
+            ...onEffect ? { onEffect } : {}
+          });
+          continue;
+        }
+        const coreScripts = [toCoreScript(step.script, nativeEval, prepared)];
+        while (index + 1 < end && plan[index + 1]?.kind === "script") {
+          const next = plan[++index];
+          if (next.kind === "script")
+            coreScripts.push(toCoreScript(next.script, nativeEval, prepared));
+        }
+        content = applyRegexScriptsCore(content, coreScripts, {
+          placement,
+          depth: ctx.depth,
+          ...behaviorContext,
+          evalTemplate: (text) => {
+            try {
+              return evalTemplate(snap, text, ctx, reads);
+            } catch (err) {
+              reads.volatile = true;
+              throw err;
+            }
+          },
+          reResolveAfterRule: true
+        });
+      }
+      if (key !== undefined) {
+        cache.set(key, { content, touchedVars: [...reads.touched], cacheable: !reads.volatile });
+        if (cache.size > 1000)
+          cache.delete(cache.keys().next().value);
+      }
+    }
+    if (reads !== recorder) {
+      for (const dependency of reads.touched)
+        recorder.touched.add(dependency);
+      if (reads.volatile)
+        recorder.volatile = true;
+    }
+    start = end;
   }
   return content;
 }
 function createDisplayResolver(writeback, onEffect, activationPatterns = createActivationPatternCache()) {
+  const scriptCache = new Map;
   return {
+    finalizeWithoutScripts: true,
+    skipFormattingHealing: true,
+    resetScriptCache() {
+      scriptCache.clear();
+    },
     ready(chatId) {
       return isDisplayResolutionReady(chatId);
     },
@@ -30279,26 +23606,47 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
       if (!snap)
         return null;
       let feContent;
+      let processingState;
       const recorder = { touched: new Set, volatile: false };
       try {
         const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
-        const liveSnap = snap.luaTriggers.length > 0 || rowlessAtActions.length > 0 ? withCurrentDisplayMessage(snap, args.context, args.content) : snap;
+        let liveSnap = snap.luaTriggers.length > 0 || rowlessAtActions.length > 0 ? withCurrentDisplayMessage(snap, args.context, args.content) : snap;
         let body = parseDisplayCaller(buildInput(liveSnap, args.content, args.context), recorder);
+        processingState = displayAssetBaseline(body);
         if (liveSnap.luaTriggers.length > 0) {
-          body = await runEditDisplayChain(liveSnap, body, args.context, (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })), (vars) => writeback?.(chatId, vars), onEffect, (name, scope) => {
+          body = await runEditDisplayChain(liveSnap, body, args.context, (t) => {
+            const current = getDisplaySnapshot(chatId);
+            const source = current?.characterId === liveSnap.characterId ? current : liveSnap;
+            const { currentMessageRoleOverride: _messageRole, ...input } = buildInput(source, t, args.context);
+            return evaluate(t, buildEvaluatorContext({
+              ...input,
+              recorder,
+              commit: false,
+              rmVar: false,
+              runVar: false,
+              cbsContext: true,
+              visualize: false,
+              reparseMacroResults: false,
+              currentMessageIndexOverride: -1
+            }));
+          }, (vars) => writeback?.(chatId, vars), onEffect, (name, scope) => {
             if (scope === "global")
               recorder.touched.add(`global:${name}`);
             else {
               recorder.touched.add(`chat:${name}`);
               recorder.touched.add(`local:${name}`);
             }
-          });
+          }, () => recorder.touched.add(MSG_DEP_KEY));
+          const current = getDisplaySnapshot(chatId);
+          if (current?.characterId === liveSnap.characterId) {
+            liveSnap = withCurrentDisplayMessage(current, args.context, args.content);
+          }
         }
         const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
         body = displayTriggerResult.content;
         if (displayTriggerResult.ran)
           recorder.volatile = true;
-        body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
+        body = evalTemplate(liveSnap, body, args.context, recorder);
         if (rowlessAtActions.length > 0) {
           for (const action of rowlessAtActions) {
             const dependencies = getRuntimeAtActionDependencies(action);
@@ -30330,6 +23678,7 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
       }
       return {
         content: feContent,
+        ...processingState !== undefined ? { processingState } : {},
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile
       };
@@ -30378,7 +23727,10 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
       let feContent;
       const recorder = { touched: new Set, volatile: false };
       try {
-        feContent = await runApply(snap, args, recorder, activationPatterns, onEffect);
+        feContent = args.scripts.length === 0 ? args.content : await runApply(snap, args, recorder, activationPatterns, scriptCache, onEffect);
+        if (args.processingState !== feContent) {
+          feContent = finalizeDisplayAssets(buildInput(snap, feContent, args.context), recorder);
+        }
       } catch (err) {
         log6.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
@@ -30388,20 +23740,1273 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
       if (mode === "shadow") {
         const beContent = await fetchBackendApply(args);
         if (beContent === null) {
-          return { content: feContent, touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
+          return { content: stripDisplayStyleImports(feContent), touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
         }
         if (beContent !== feContent) {
           log6.warn(`[shadow] apply mismatch chat=${chatId} msg=${args.context.messageId ?? "?"} ` + `feLen=${feContent.length} beLen=${beContent.length} ` + `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` + `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`);
         } else {
           log6.trace(`[shadow] apply match chat=${chatId} msg=${args.context.messageId ?? "?"} len=${feContent.length}`);
         }
-        return { content: beContent };
+        return { content: stripDisplayStyleImports(beContent) };
       }
       return {
-        content: feContent,
+        content: stripDisplayStyleImports(feContent),
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile
       };
+    }
+  };
+}
+
+// src/frontend-lua/receiver.ts
+function createFrontendLuaReceiver(sessionId, run, send) {
+  const active = new Map;
+  const received = new Set;
+  let disposed = false;
+  return {
+    async receive(message) {
+      if (disposed || message.sessionId !== sessionId)
+        return;
+      if (message.type === "lua_cancel") {
+        received.add(message.requestId);
+        active.get(message.requestId)?.abort(new FrontendLuaUnavailableError("Lua operation was cancelled"));
+        return;
+      }
+      if (received.has(message.requestId))
+        return;
+      received.add(message.requestId);
+      const controller = new AbortController;
+      active.set(message.requestId, controller);
+      const result = await Promise.resolve().then(() => {
+        controller.signal.throwIfAborted();
+        return run(message, controller.signal);
+      }).then((value) => ({ ok: true, value }), (error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+      active.delete(message.requestId);
+      if (!disposed && !controller.signal.aborted)
+        send({ type: "lua_reply", sessionId, requestId: message.requestId, ...result });
+    },
+    dispose() {
+      disposed = true;
+      for (const controller of active.values())
+        controller.abort(new FrontendLuaUnavailableError("The browser Lua runtime stopped"));
+      active.clear();
+      received.clear();
+    }
+  };
+}
+
+// src/frontend-lua/services.ts
+function createRuntimeServices(send) {
+  const pending = new Map;
+  return {
+    call(chatId, characterId, request) {
+      return new Promise((resolve, reject) => {
+        const requestId = v4_default();
+        pending.set(requestId, { resolve: (value) => resolve(value), reject });
+        try {
+          send({ type: "lua_service", requestId, chatId, characterId, request });
+        } catch (error) {
+          pending.delete(requestId);
+          reject(error);
+        }
+      });
+    },
+    receive(reply) {
+      const request = pending.get(reply.requestId);
+      if (!request)
+        return;
+      pending.delete(reply.requestId);
+      if (reply.ok)
+        request.resolve(reply.value);
+      else
+        request.reject(new FrontendLuaExecutionError(reply.error));
+    },
+    dispose() {
+      for (const request of pending.values())
+        request.reject(new FrontendLuaUnavailableError("The frontend Lua service connection closed"));
+      pending.clear();
+    }
+  };
+}
+
+// src/frontend-lua/ordered-state.ts
+function sameStateValue(left, right) {
+  if (Object.is(left, right))
+    return true;
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object")
+    return false;
+  if (Array.isArray(left) !== Array.isArray(right))
+    return false;
+  if (Array.isArray(left) && left.length !== right.length)
+    return false;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length)
+    return false;
+  return keys.every((key) => Object.hasOwn(right, key) && sameStateValue(left[key], right[key]));
+}
+
+class RuntimeStateEpochError extends Error {
+  constructor() {
+    super("The runtime state belongs to a previous host connection");
+    this.name = "RuntimeStateEpochError";
+  }
+}
+
+class OrderedRuntimeState {
+  changed;
+  confirmed = new Map;
+  visible = new Map;
+  revisions = new Map;
+  pending = new Map;
+  pendingByKey = new Map;
+  epoch;
+  initialSequence;
+  constructor(revision, initial, changed) {
+    this.changed = changed;
+    this.epoch = revision.epoch;
+    this.initialSequence = revision.sequence;
+    for (const [key, value] of initial) {
+      this.confirmed.set(key, value);
+      this.visible.set(key, value);
+    }
+  }
+  get(key) {
+    return this.visible.get(key);
+  }
+  keys() {
+    return [...this.visible.keys()];
+  }
+  publish(keys) {
+    const changed = [];
+    for (const key of keys) {
+      let value = this.confirmed.get(key);
+      const pending = this.pendingByKey.get(key);
+      if (pending?.last)
+        value = pending.last.value;
+      if (!sameStateValue(this.visible.get(key), value)) {
+        this.visible.set(key, value);
+        changed.push(key);
+      }
+    }
+    if (changed.length)
+      this.changed(changed);
+  }
+  apply(revision, patch) {
+    if (revision.epoch !== this.epoch)
+      throw new RuntimeStateEpochError;
+    const changed = [];
+    for (const [key, value] of patch) {
+      if (revision.sequence < (this.revisions.get(key) ?? this.initialSequence))
+        continue;
+      this.revisions.set(key, revision.sequence);
+      this.confirmed.set(key, value);
+      changed.push(key);
+    }
+    if (changed.length)
+      this.publish(changed);
+  }
+  begin(patch) {
+    const id = Symbol();
+    this.pending.set(id, new Map(patch));
+    for (const [key, value] of patch) {
+      const pending = this.pendingByKey.get(key) ?? { values: new Map };
+      const node = { value, previous: pending.last };
+      if (pending.last)
+        pending.last.next = node;
+      pending.last = node;
+      pending.values.set(id, node);
+      this.pendingByKey.set(key, pending);
+    }
+    this.publish(patch.keys());
+    return id;
+  }
+  settle(id, revision, patch) {
+    this.settleMany([id], revision, patch);
+  }
+  settleMany(ids, revision, patch, partialId) {
+    if (ids.some((id) => !this.pending.has(id)))
+      throw new Error("Unknown runtime state mutation");
+    if (revision.epoch !== this.epoch)
+      throw new RuntimeStateEpochError;
+    for (const [key, value] of patch) {
+      if (revision.sequence < (this.revisions.get(key) ?? this.initialSequence))
+        continue;
+      this.revisions.set(key, revision.sequence);
+      this.confirmed.set(key, value);
+    }
+    const changed = new Set([...ids.flatMap((id) => [...this.pending.get(id).keys()]), ...patch.keys()]);
+    for (const id of ids)
+      this.remove(id);
+    if (partialId && this.pending.has(partialId))
+      this.remove(partialId, patch.keys());
+    this.publish(changed);
+  }
+  discard(id) {
+    const patch = this.pending.get(id);
+    if (patch) {
+      const keys = [...patch.keys()];
+      this.remove(id);
+      this.publish(keys);
+    }
+  }
+  remove(id, keys) {
+    const patch = this.pending.get(id);
+    for (const key of keys ?? patch.keys()) {
+      if (!patch.has(key))
+        continue;
+      const pending = this.pendingByKey.get(key);
+      const node = pending.values.get(id);
+      if (node.previous)
+        node.previous.next = node.next;
+      if (node.next)
+        node.next.previous = node.previous;
+      else
+        pending.last = node.previous;
+      pending.values.delete(id);
+      if (!pending.values.size)
+        this.pendingByKey.delete(key);
+      patch.delete(key);
+    }
+    if (!keys)
+      this.pending.delete(id);
+  }
+}
+
+// src/util/message-time.ts
+function hostMessageTime(message) {
+  const seconds = typeof message.send_date === "number" ? message.send_date : typeof message.created_at === "number" ? message.created_at : 0;
+  return seconds * 1000;
+}
+
+// src/frontend-lua/state-contract.ts
+function runtimeMessage(message) {
+  return {
+    id: message.id,
+    content: message.content,
+    role: message.role ?? (message.is_user ? "user" : message.extra?.spindle_role === "system" ? "system" : "assistant"),
+    createdAt: hostMessageTime(message),
+    ...message.name ? { speaker: message.name } : {},
+    ...typeof message.extra?.greeting_index === "number" ? { greetingIndex: message.extra.greeting_index } : {}
+  };
+}
+function runtimeCharacter(value) {
+  return {
+    ...value,
+    name: String(value.name ?? ""),
+    description: String(value.description ?? ""),
+    firstMessage: String(value.first_mes ?? ""),
+    worldBookIds: value.world_book_ids ?? [],
+    imageId: value.image_id ?? null
+  };
+}
+function runtimePersona(value) {
+  return value ? { ...value, name: String(value.name ?? ""), description: String(value.description ?? ""), imageId: value.image_id ?? null } : null;
+}
+function runtimeLore(value) {
+  return { ...value, worldBookId: String(value.world_book_id ?? ""), orderValue: Number(value.order_value ?? 0) };
+}
+
+// src/frontend-lua/state.ts
+var key = (group, id, field) => JSON.stringify([group, id, field]);
+
+class FrontendRuntimeState {
+  persist;
+  changed;
+  chatId;
+  characterId;
+  messages = [];
+  state;
+  messageIds = new Set;
+  loreIds = new Set;
+  fieldNames = new Map;
+  observedMessages = [];
+  tail = Promise.resolve();
+  writes = new Set;
+  failures = [];
+  stagedVariables = new Map;
+  mutations = new Map;
+  activeChatMutation;
+  greeting;
+  messageObservers = new Set;
+  constructor(initial, persist, changed) {
+    this.persist = persist;
+    this.changed = changed;
+    this.chatId = initial.chat.id;
+    this.characterId = initial.character.id;
+    const patch = this.snapshotPatch(initial);
+    this.state = new OrderedRuntimeState(initial.revision, patch, (keys) => this.publish(keys));
+    this.publish([...patch.keys()]);
+  }
+  record(patch, group, id, values, replace = false) {
+    const groupKey = JSON.stringify([group, id]);
+    const names = this.fieldNames.get(groupKey) ?? new Set;
+    if (replace) {
+      for (const name of names)
+        if (!Object.hasOwn(values, name))
+          patch.set(key(group, id, name), undefined);
+    }
+    for (const [name, value] of Object.entries(values)) {
+      names.add(name);
+      patch.set(key(group, id, name), value);
+    }
+    this.fieldNames.set(groupKey, names);
+  }
+  object(group, id = "") {
+    const names = this.fieldNames.get(JSON.stringify([group, id])) ?? [];
+    return Object.fromEntries([...names].map((name) => [name, this.state.get(key(group, id, name))]).filter(([, value]) => value !== undefined));
+  }
+  patch(value) {
+    const patch = new Map;
+    if (value.chat) {
+      const { chat_variables, ...metadata } = value.chat.metadata;
+      this.record(patch, "metadata", "", metadata, true);
+      this.record(patch, "vars", "", chat_variables ?? {}, true);
+      this.record(patch, "global", "", parseGlobalVars(metadata.macro_variables), true);
+    }
+    if (value.character?.id === this.characterId)
+      this.record(patch, "character", "", value.character, true);
+    if (Object.hasOwn(value, "persona"))
+      this.record(patch, "persona", "", value.persona ?? {}, true);
+    if (value.message) {
+      this.messageIds.add(value.message.id);
+      this.record(patch, "message", value.message.id, { ...runtimeMessage(value.message), index: value.message.index_in_chat, present: true }, true);
+    }
+    if (value.deletedMessageId)
+      this.record(patch, "message", value.deletedMessageId, { present: false });
+    if (value.loreEntry) {
+      this.loreIds.add(value.loreEntry.id);
+      this.record(patch, "lore", value.loreEntry.id, { ...runtimeLore(value.loreEntry), present: true }, true);
+    }
+    if (value.deletedLoreId)
+      this.record(patch, "lore", value.deletedLoreId, { present: false });
+    return patch;
+  }
+  snapshotPatch(value) {
+    const patch = this.patch(value);
+    const messageIds = new Set(value.messages.map((message) => message.id));
+    const loreIds = new Set(value.lore.map((entry) => entry.id));
+    for (const id of this.messageIds)
+      if (!messageIds.has(id))
+        this.record(patch, "message", id, { present: false });
+    for (const id of this.loreIds)
+      if (!loreIds.has(id))
+        this.record(patch, "lore", id, { present: false });
+    for (const message of value.messages)
+      for (const [key, item] of this.patch({ message }))
+        patch.set(key, item);
+    for (const loreEntry of value.lore)
+      for (const [key, item] of this.patch({ loreEntry }))
+        patch.set(key, item);
+    return patch;
+  }
+  publish(keys) {
+    if (keys.some((key) => key.startsWith('["message",'))) {
+      const view = buildRisuChatView({ messages: this.hostMessages() });
+      this.messages.splice(0, this.messages.length, ...view.messages);
+      this.observedMessages = this.messages.map((message) => ({ ...message }));
+      this.greeting = view.greeting;
+      const ids = new Set(keys.filter((key) => key.startsWith('["message",')).map((key) => JSON.parse(key)[1]));
+      for (const observer of this.messageObservers)
+        observer(ids);
+    }
+    this.changed(keys);
+  }
+  apply(revision, patch, mutationId) {
+    const pending = mutationId ? this.mutations.get(mutationId) : undefined;
+    if (pending) {
+      this.state.settleMany(pending.ids, revision, this.patch(patch), pending.partial);
+      this.mutations.delete(mutationId);
+    } else
+      this.state.apply(revision, this.patch(patch));
+  }
+  replace(value) {
+    this.state.apply(value.revision, this.snapshotPatch(value));
+  }
+  hostMessages() {
+    return [...this.messageIds].map((id) => this.object("message", id)).filter((value) => value.present).sort((a, b) => Number(a.index) - Number(b.index)).map(({ index: _index, present: _present, ...value }) => value);
+  }
+  character() {
+    return runtimeCharacter(this.object("character"));
+  }
+  persona() {
+    const value = this.object("persona");
+    return runtimePersona(value.id ? value : null);
+  }
+  metadata(name) {
+    return name === "chat_variables" ? this.variables() : this.state.get(key("metadata", "", name));
+  }
+  variables() {
+    return this.object("vars");
+  }
+  globalVariables() {
+    return this.object("global");
+  }
+  variable(name, global2 = false) {
+    return this.state.get(key(global2 ? "global" : "vars", "", name));
+  }
+  stageVariables(values) {
+    if (!Object.keys(values).length)
+      return;
+    const patch = new Map;
+    this.record(patch, "vars", "", values);
+    this.stagedVariables.set(this.state.begin(patch), Object.keys(values));
+  }
+  lore() {
+    return [...this.loreIds].map((id) => this.object("lore", id)).filter((value) => value.present);
+  }
+  optimistic(command) {
+    const patch = new Map;
+    switch (command.kind) {
+      case "chat.metadata":
+        this.record(patch, "metadata", "", { [command.key]: command.value });
+        if (command.key === "macro_variables")
+          this.record(patch, "global", "", parseGlobalVars(command.value), true);
+        break;
+      case "chat.variables":
+        this.record(patch, "vars", "", command.values);
+        break;
+      case "character.update":
+        this.record(patch, "character", "", command.patch);
+        break;
+      case "persona.update":
+        this.record(patch, "persona", "", command.patch);
+        break;
+      case "message.edit":
+        this.record(patch, "message", command.id, { content: command.content });
+        break;
+      case "message.delete":
+        this.record(patch, "message", command.id, { present: false });
+        break;
+      case "message.create": {
+        this.messageIds.add(command.id);
+        const index = Math.max(-1, ...[...this.messageIds].map((id) => Number(this.object("message", id).index ?? -1))) + 1;
+        this.record(patch, "message", command.id, { id: command.id, content: command.content, role: command.role, index, present: true });
+        break;
+      }
+      case "lore.update":
+        this.record(patch, "lore", command.id, { ...command.patch, ...command.patch.order_value !== undefined ? { orderValue: command.patch.order_value } : {} });
+        break;
+      case "lore.delete":
+        this.record(patch, "lore", command.id, { present: false });
+        break;
+      case "lore.create":
+        break;
+    }
+    return patch;
+  }
+  write(command, optimistic = true, staged = []) {
+    const id = this.state.begin(optimistic ? this.optimistic(command) : new Map);
+    const mutationId = v4_default();
+    this.mutations.set(mutationId, {
+      ids: [id, ...staged],
+      ...!optimistic && this.activeChatMutation && command.kind.startsWith("message.") ? { partial: this.activeChatMutation } : {}
+    });
+    const operation = this.persist(command, mutationId).then((result) => {
+      this.apply(result.revision, result.patch, mutationId);
+      return result.value;
+    }).catch((error) => {
+      for (const token of this.mutations.get(mutationId)?.ids ?? [])
+        this.state.discard(token);
+      this.mutations.delete(mutationId);
+      this.failures.push(error);
+      throw error;
+    });
+    this.writes.add(operation);
+    operation.finally(() => this.writes.delete(operation)).catch(() => {});
+    return operation;
+  }
+  displayChat(initial, persistence) {
+    const rows = initial.map((message) => ({ ...message }));
+    const view = buildRisuChatView({ messages: rows });
+    let greeting = view.greeting;
+    const chat = this.chatAdapter(view.messages, () => greeting, persistence);
+    const observe = (ids) => {
+      const current = new Map(this.hostMessages().map((message) => [message.id, message]));
+      for (let i = rows.length - 1;i >= 0; i--) {
+        const id = rows[i].id;
+        if (!ids.has(id))
+          continue;
+        const next = current.get(id);
+        if (next)
+          rows[i] = { ...next };
+        else
+          rows.splice(i, 1);
+      }
+      for (const id of ids)
+        if (current.has(id) && !rows.some((message) => message.id === id))
+          rows.push({ ...current.get(id) });
+      const next = buildRisuChatView({ messages: rows });
+      greeting = next.greeting;
+      view.messages.splice(0, view.messages.length, ...next.messages);
+      chat.observed();
+    };
+    this.messageObservers.add(observe);
+    return { chat: chat.value, release: () => this.messageObservers.delete(observe) };
+  }
+  luaChat(persistence) {
+    return this.chatAdapter(this.messages, () => this.greeting, persistence).value;
+  }
+  chatAdapter(messages, greeting, persistence) {
+    const owner = this;
+    let observed = messages.map((message) => ({ ...message }));
+    const value = {
+      messages,
+      ...persistence ? { persistence } : {},
+      get firstMessage() {
+        return greeting();
+      },
+      enqueue: (operation) => {
+        const patch = new Map;
+        const previous = new Map((messages === owner.messages ? this.observedMessages : observed).map((message) => [message.id, message]));
+        const present = new Set;
+        for (const [index, message] of messages.entries()) {
+          if (!message.id)
+            message.id = v4_default();
+          present.add(message.id);
+          const before = previous.get(message.id);
+          if (!before) {
+            this.messageIds.add(message.id);
+            this.record(patch, "message", message.id, { ...message, index: index + (greeting() === undefined ? 0 : 1), present: true });
+          } else {
+            this.record(patch, "message", message.id, Object.fromEntries(Object.entries(message).filter(([name, value]) => value !== before[name])));
+          }
+        }
+        for (const id of previous.keys())
+          if (!present.has(id))
+            this.record(patch, "message", id, { present: false });
+        const id = this.state.begin(patch);
+        const pending = this.tail.then(async () => {
+          this.activeChatMutation = id;
+          try {
+            await operation();
+          } finally {
+            this.activeChatMutation = undefined;
+          }
+        }).finally(() => this.state.discard(id));
+        this.tail = pending.catch((error) => {
+          this.failures.push(error);
+        });
+        return pending;
+      }
+    };
+    return { value, observed: () => {
+      observed = messages.map((message) => ({ ...message }));
+    } };
+  }
+  async flush() {
+    if (this.stagedVariables.size) {
+      const staged = this.stagedVariables;
+      this.stagedVariables = new Map;
+      const values = Object.fromEntries([...new Set([...staged.values()].flat())].map((name) => [name, this.variable(name) ?? null]));
+      try {
+        await this.write({ kind: "chat.variables", values }, false, [...staged.keys()]);
+      } catch {} finally {
+        for (const id of staged.keys())
+          this.state.discard(id);
+      }
+    }
+    await this.tail;
+    while (this.writes.size)
+      await Promise.allSettled(this.writes);
+    const failures = this.failures.splice(0);
+    if (failures.length)
+      throw new AggregateError(failures, "Frontend Lua persistence failed");
+  }
+}
+
+// src/frontend-lua/host.ts
+function createFrontendHost(state, snapshot, settings, services) {
+  const chatWrites = (optimistic) => ({
+    async sendMessage(content, options) {
+      const role = options?.role ?? "user";
+      const id = options?.messageId || v4_default();
+      await state.write({
+        kind: "message.create",
+        id,
+        content,
+        role: role === "sys" || role === "system" ? "system" : ["char", "bot", "assistant"].includes(role) ? "assistant" : "user"
+      }, optimistic);
+      return { id };
+    },
+    async editMessage(id, content) {
+      await state.write({ kind: "message.edit", id, content }, optimistic);
+    },
+    async deleteMessage(id) {
+      await state.write({ kind: "message.delete", id }, optimistic);
+    }
+  });
+  const lorePatch = (value) => ({
+    ...value.key !== undefined ? { key: typeof value.key === "string" ? [value.key] : value.key } : {},
+    ...value.content !== undefined ? { content: value.content } : {},
+    ...value.comment !== undefined ? { comment: value.comment } : {},
+    ...value.orderValue !== undefined ? { order_value: value.orderValue } : {},
+    ...value.disabled !== undefined ? { disabled: value.disabled } : {},
+    ...value.constant !== undefined ? { constant: value.constant } : {}
+  });
+  const api = {
+    chat: {
+      ...chatWrites(true),
+      getChatId: () => state.chatId,
+      getMessages: async () => state.hostMessages(),
+      getMetadata: async (name) => state.metadata(name),
+      async setMetadata(name, value) {
+        if (name === "chat_variables") {
+          const current = state.variables();
+          state.stageVariables(Object.fromEntries(Object.entries(value).filter(([key, value]) => current[key] !== value)));
+        } else
+          await state.write({ kind: "chat.metadata", key: name, value });
+      },
+      inject: async (id, content, options) => services.call({ kind: "chat.inject", id, content, ...options ? { options } : {} }),
+      setExpression: services.expression
+    },
+    characters: {
+      get: async (id) => {
+        if (id !== state.characterId)
+          throw new Error("Character is outside the active Lua runtime");
+        return state.character();
+      },
+      async update(id, patch) {
+        if (id !== state.characterId)
+          throw new Error("Character is outside the active Lua runtime");
+        await state.write({ kind: "character.update", id, patch: {
+          ...patch.name !== undefined ? { name: patch.name } : {},
+          ...patch.description !== undefined ? { description: patch.description } : {},
+          ...patch.firstMessage !== undefined ? { first_mes: patch.firstMessage } : {}
+        } });
+      },
+      setExpression: services.expression
+    },
+    personas: {
+      getActive: async () => state.persona(),
+      async update(id, patch) {
+        await state.write({ kind: "persona.update", id, patch: {
+          ...patch.name !== undefined ? { name: patch.name } : {},
+          ...patch.description !== undefined ? { description: patch.description } : {}
+        } });
+      }
+    },
+    worldInfo: { entries: {
+      list: async (bookId) => ({ data: state.lore().filter((entry) => entry.worldBookId === bookId) }),
+      async create(bookId, entry) {
+        return runtimeLore(await state.write({ kind: "lore.create", bookId, patch: lorePatch(entry) }));
+      },
+      async update(id, entry) {
+        return runtimeLore(await state.write({ kind: "lore.update", id, patch: lorePatch(entry) }));
+      },
+      async delete(id) {
+        await state.write({ kind: "lore.delete", id });
+      }
+    } },
+    ui: services.ui,
+    llm: { generate: (request) => services.call({ kind: "llm.generate", request }), listConnections: () => services.call({ kind: "connections.list" }) },
+    tokens: { count: (text) => services.call({ kind: "tokens.count", text }) }
+  };
+  const templateInput = () => {
+    const value = snapshot();
+    return { ...value, variables: value.vars, commit: false };
+  };
+  const read2 = (scope, name) => state.variable(name, scope === "global") ?? (scope !== "global" ? snapshot().scriptstateDefaults[name] : undefined) ?? "null";
+  return {
+    api,
+    prepareRuntime() {
+      const snap = snapshot();
+      return {
+        ...settings,
+        chatId: state.chatId,
+        characterId: state.characterId,
+        ...services.capture ? { auxDebugCapture: (event) => {
+          if (event.kind === "request" ? settings.auxDebugCaptureRequest : settings.auxDebugCaptureResponse)
+            services.capture(event);
+        } } : {},
+        luaChat: state.luaChat(chatWrites(false)),
+        luaVariables: {
+          get: (name, scope) => read2(scope, name),
+          set(name, value) {
+            if (state.variable(name) === value)
+              return;
+            state.stageVariables({ [name]: value });
+            return true;
+          },
+          flush() {}
+        },
+        stateChanged: services.invalidate,
+        luaTemplate: createLuaTemplateParser(templateInput, read2),
+        templateContext: async () => templateInput(),
+        resolveTemplate: async (text) => createTriggerTemplateParser(templateInput(), read2)(text),
+        preloaded: {
+          varsCache: Object.fromEntries(Object.entries(state.variables()).map(([name, value]) => ["$" + name, value])),
+          globalVars: state.globalVariables(),
+          scriptstateDefaults: snap.scriptstateDefaults,
+          messagesRaw: state.hostMessages(),
+          lorebook: { entries: sortLorebookEntriesBySourceOrder(state.lore()), primaryBookId: state.character().worldBookIds?.[0] ?? null },
+          luaState: {
+            get character() {
+              return state.character();
+            },
+            get persona() {
+              return state.persona();
+            },
+            get authorsNote() {
+              const note = state.metadata("authors_note");
+              return typeof note === "string" ? note : note?.content ?? "";
+            },
+            updateCharacter: (patch) => api.characters.update(state.characterId, patch),
+            synchronize: services.synchronize
+          }
+        }
+      };
+    }
+  };
+}
+
+// src/frontend-lua/ui.ts
+function createFrontendLuaUi(ctx) {
+  const pending = new Set;
+  let modal;
+  let current;
+  let value = null;
+  function show(title, message, choices, input, signal, mode = "alert") {
+    return new Promise((resolve, reject) => {
+      signal?.throwIfAborted();
+      const cleanup = () => {
+        pending.delete(waiter);
+        signal?.removeEventListener("abort", abort);
+      };
+      const waiter = {
+        mode,
+        resolve(result) {
+          cleanup();
+          resolve(result);
+        },
+        reject(error) {
+          cleanup();
+          reject(error);
+        }
+      };
+      const abort = () => {
+        waiter.reject(signal.reason);
+        if (current === waiter)
+          modal?.dismiss();
+      };
+      pending.add(waiter);
+      signal?.addEventListener("abort", abort, { once: true });
+      try {
+        if (!modal) {
+          modal = ctx.ui.showModal({ title, width: 420 });
+          modal.onDismiss(() => {
+            modal = undefined;
+            current = undefined;
+            for (const call of pending)
+              if (call.mode === "alert")
+                call.resolve(value);
+          });
+        } else {
+          modal.setTitle(title);
+        }
+      } catch (error) {
+        waiter.reject(error);
+        return;
+      }
+      if (current?.mode === "alert")
+        current.resolve("");
+      current = waiter;
+      value = null;
+      modal.root.replaceChildren();
+      modal.root.classList.remove("lr-pick-modal", "lr-alert-modal");
+      modal.root.classList.add(mode === "select" ? "lr-pick-modal" : "lr-alert-modal");
+      const description = document.createElement("p");
+      description.className = "lr-alert-message";
+      description.textContent = message;
+      modal.root.appendChild(description);
+      let field;
+      if (input !== undefined) {
+        field = document.createElement("input");
+        field.value = input;
+        modal.root.appendChild(field);
+      }
+      const actions = document.createElement("div");
+      actions.className = mode === "select" ? "lr-pick-list" : "lr-alert-actions";
+      modal.root.appendChild(actions);
+      for (const [index, choice] of choices.entries()) {
+        const button = document.createElement("button");
+        button.className = mode === "select" ? "lr-pick-option" : "lr-alert-ok";
+        button.type = "button";
+        button.textContent = choice;
+        button.addEventListener("click", () => {
+          if (current !== waiter)
+            return;
+          value = mode === "select" ? String(index) : mode === "input" ? field.value : mode === "confirm" ? index === 0 ? "yes" : "no" : "";
+          modal.dismiss();
+        });
+        actions.appendChild(button);
+      }
+      field?.focus();
+      if (mode !== "alert")
+        (async () => {
+          while (modal && pending.has(waiter))
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          if (pending.has(waiter))
+            waiter.resolve(value);
+        })();
+    });
+  }
+  const api = (signal) => ({
+    alert: async (message) => {
+      await show("", message, ["OK"], undefined, signal);
+    },
+    prompt: (message, value = "") => show("", message, ["OK"], value, signal, "input"),
+    pick: (title, values) => show(title, "", values, undefined, signal, "select"),
+    confirm: async (message) => await show("Confirm", message, ["Yes", "No"], undefined, signal, "confirm") === "yes"
+  });
+  return { api, dispose() {
+    for (const call of pending)
+      call.reject(new FrontendLuaUnavailableError("The browser Lua runtime closed"));
+    modal?.dismiss();
+  } };
+}
+
+// src/state/lorebook-cache.ts
+var byCharacter2 = new Map;
+var chatToCharacter2 = new Map;
+
+// src/interpreter/screen-dims-cache.ts
+var byUser = new Map;
+
+// src/interpreter/image-cache.ts
+var characterImageByChat = new Map;
+var personaImageByUser = new Map;
+function imageUrlFromId(imageId) {
+  if (!imageId || typeof imageId !== "string" || imageId.length === 0)
+    return "";
+  return `/api/v1/images/${imageId}`;
+}
+
+// src/interpreter/greeting-index.ts
+function toRisuFirstMessageIndex(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value - 1 : -1;
+}
+
+// src/state/display-snapshot-assembly.ts
+function buildDisplayChatStateFromView(view) {
+  const messages = view.messages.map((m) => ({
+    role: m.role === "user" ? "user" : "assistant",
+    content: m.content,
+    createdAt: m.createdAt ?? 0,
+    ...m.speaker ? { speaker: m.speaker } : {}
+  }));
+  const risuLen = messages.length;
+  let lastUser = "";
+  let lastChar = "";
+  for (let i = risuLen - 1;i >= 0; i--) {
+    const m = messages[i];
+    if (!lastUser && m.role === "user")
+      lastUser = m.content;
+    if (!lastChar && m.role === "assistant")
+      lastChar = m.content;
+    if (lastUser && lastChar)
+      break;
+  }
+  return {
+    messageCount: risuLen + 1,
+    lastMessage: risuLen > 0 ? messages[risuLen - 1].content : "",
+    lastUserMessage: lastUser,
+    lastCharMessage: lastChar,
+    lastMessageId: risuLen,
+    messages
+  };
+}
+function buildDisplayChatState(messagesHost) {
+  return buildDisplayChatStateFromView(buildRisuChatView({ messages: messagesHost }));
+}
+
+// src/state/lorebook-fetch.ts
+function lumiEntryToRisuLore(e) {
+  const keyStr = (e.key ?? []).join(",");
+  const secondStr = (e.keysecondary ?? []).join(",");
+  return {
+    key: keyStr,
+    secondkey: secondStr,
+    secondKey: secondStr,
+    content: e.content ?? "",
+    comment: e.comment ?? "",
+    insertorder: e.order_value ?? 0,
+    alwaysActive: e.constant === true,
+    selective: e.selective === true,
+    mode: e.constant ? "constant" : "normal"
+  };
+}
+
+// src/frontend-lua/snapshot.ts
+function runtimeDisplaySnapshot(config, state) {
+  const character = state.character();
+  const persona = state.persona();
+  const messagesHost = state.hostMessages();
+  const view = buildRisuChatView({ messages: messagesHost });
+  const note = state.metadata("authors_note");
+  const { selectedGreeting: _greeting, ...configCharacter } = config.character;
+  const lorebookHost = state.lore();
+  return {
+    ...config,
+    charName: character.name ?? "",
+    userName: persona?.name ?? "",
+    personaText: persona?.description ?? "",
+    personaImageId: persona?.imageId ?? null,
+    personaImage: imageUrlFromId(persona?.imageId) ?? "",
+    chatAuthorsNote: note && typeof note === "object" ? note : null,
+    character: {
+      ...configCharacter,
+      description: character.description ?? "",
+      firstMessage: character.firstMessage ?? "",
+      personality: String(character.personality ?? ""),
+      scenario: String(character.scenario ?? ""),
+      exampleDialogue: String(character.mes_example ?? ""),
+      mainPrompt: String(character.system_prompt ?? ""),
+      postHistoryInstructions: String(character.post_history_instructions ?? ""),
+      creatorNotes: String(character.creator_notes ?? ""),
+      alternateGreetings: character.alternate_greetings ?? [],
+      imageId: character.imageId ?? null,
+      image: imageUrlFromId(character.imageId) ?? "",
+      selectedAlternateGreetingIndex: toRisuFirstMessageIndex(state.metadata("activeGreetingIndex") ?? view.greetingIndex),
+      ...view.greeting !== undefined ? { selectedGreeting: view.greeting } : {}
+    },
+    messagesHost,
+    chat: buildDisplayChatState(messagesHost),
+    vars: { local: state.variables(), global: state.globalVariables(), chat: {} },
+    lorebookHost,
+    lorebook: lorebookHost.map((entry) => lumiEntryToRisuLore(entry))
+  };
+}
+
+// src/frontend-lua/frontend.ts
+function displayConfiguration(snapshot) {
+  const { configVersion: _version, vars: _vars, chat: _chat, messagesHost: _messages, ...configuration } = snapshot;
+  return configuration;
+}
+function setupFrontendLua(ctx, invalidate, report, capture) {
+  const sessionId = ctx.frontendSessionId;
+  if (!sessionId)
+    throw new FrontendLuaUnavailableError("Frontend Lua requires Lumiverse browser session routing");
+  const services = createRuntimeServices((request) => ctx.sendToBackend(request));
+  const entries = new Map;
+  const loading = new Map;
+  const cleanups = [];
+  const ui = createFrontendLuaUi(ctx);
+  const localCalls = new Set;
+  let connected = true;
+  let connectionGeneration = 0;
+  function remove(entry, reason) {
+    entry.lifetime.abort(new FrontendLuaUnavailableError(reason));
+    entries.delete(entry.state.chatId);
+    clearDisplaySnapshot(entry.state.chatId);
+  }
+  function publish(entry, keys) {
+    if (entries.get(entry.state.chatId) !== entry)
+      return;
+    const previous = getDisplaySnapshot(entry.state.chatId);
+    const variablesOnly = keys?.every((key) => key.startsWith('["vars",') || key.startsWith('["global",'));
+    const next = previous && variablesOnly ? {
+      ...previous,
+      vars: { local: entry.state.variables(), global: entry.state.globalVariables(), chat: {} }
+    } : runtimeDisplaySnapshot(entry.config, entry.state);
+    setDisplaySnapshot(next);
+    if (!previous) {
+      invalidate(next.chatId, ["*"], true);
+      return;
+    }
+    const changed = diffSnapshotVars(previous, next);
+    if (snapshotMessagesChanged(previous, next))
+      changed.push(MSG_DEP_KEY);
+    const configurationMayChange = !keys || keys.some((key) => !["vars", "global", "message"].includes(JSON.parse(key)[0]));
+    if (configurationMayChange && !sameStateValue(displayConfiguration(previous), displayConfiguration(next)))
+      changed.push("*");
+    if (changed.length)
+      invalidate(next.chatId, changed, changed.includes("*"));
+  }
+  function reload(entry) {
+    entry.updates = entry.updates.then(async () => {
+      const value = await services.call(entry.state.chatId, entry.state.characterId, { kind: "state.read" });
+      entry.state.replace(value);
+    });
+    entry.updates.catch(report);
+  }
+  function observe(entry, { event, payload, revision, mutationId }) {
+    const apply = (patch) => entry.state.apply(revision, patch, mutationId);
+    const chatId = payload.chatId ?? payload.chat?.id;
+    if (event.startsWith("MESSAGE_") || event === "CHAT_CHANGED" || event === "CHAT_DELETED") {
+      if (chatId !== entry.state.chatId && payload.id !== entry.state.chatId)
+        return;
+      if (event === "CHAT_DELETED") {
+        remove(entry, "The Lua chat was deleted");
+        return;
+      }
+      if (event === "MESSAGE_DELETED")
+        apply({ deletedMessageId: String(payload.messageId) });
+      else if (payload.message)
+        apply({ message: payload.message });
+      else if (payload.chat)
+        apply({ chat: payload.chat });
+      else
+        reload(entry);
+    } else if (event === "CHARACTER_EDITED" && payload.id === entry.state.characterId) {
+      const character = payload.character;
+      if (!character) {
+        reload(entry);
+        return;
+      }
+      const { extensions, ...value } = character;
+      const extra = extensions;
+      const worldBookIds = Array.isArray(extra?.world_book_ids) ? extra.world_book_ids : typeof extra?.world_book_id === "string" ? [extra.world_book_id] : [];
+      const previous = entry.state.character().worldBookIds ?? [];
+      apply({ character: { ...value, world_book_ids: worldBookIds } });
+      if (JSON.stringify(previous) !== JSON.stringify(worldBookIds))
+        reload(entry);
+    } else if (event === "PERSONA_CHANGED") {
+      if (payload.id !== entry.state.persona()?.id)
+        return;
+      if (payload.persona)
+        apply({ persona: payload.persona });
+      else
+        reload(entry);
+    } else if (event === "WORLD_BOOK_ENTRY_CHANGED" || event === "WORLD_BOOK_ENTRY_DELETED") {
+      if (!entry.state.character().worldBookIds?.includes(String(payload.worldBookId)))
+        return;
+      if (event === "WORLD_BOOK_ENTRY_DELETED")
+        apply({ deletedLoreId: String(payload.id) });
+      else if (payload.entry)
+        apply({ loreEntry: payload.entry });
+      else
+        reload(entry);
+    } else if (event === "SETTINGS_UPDATED") {
+      const keys = Array.isArray(payload.keys) ? payload.keys : [payload.key];
+      if (keys.some((key) => key === "activePersonaId"))
+        reload(entry);
+    } else if (event === "SPINDLE_BATCH_CHANGED" || event === "WORLD_BOOK_CHANGED" || event === "WORLD_BOOK_DELETED")
+      reload(entry);
+    else if (event === "CHARACTER_DELETED" && payload.id === entry.state.characterId) {
+      remove(entry, "The Lua character was deleted");
+    }
+  }
+  async function ensure(chatId, characterId) {
+    if (!connected)
+      throw new FrontendLuaUnavailableError("The frontend Lua connection is unavailable");
+    const existing = entries.get(chatId);
+    if (existing?.state.characterId === characterId)
+      return existing;
+    const pending = loading.get(chatId);
+    if (pending) {
+      if (pending.characterId !== characterId)
+        throw new FrontendLuaUnavailableError("The Lua character changed during initialization");
+      return pending.promise;
+    }
+    if (existing)
+      remove(existing, "The Lua character changed");
+    const generation = connectionGeneration;
+    const events = [];
+    const promise = services.call(chatId, characterId, { kind: "bootstrap" }).then((value) => {
+      if (!connected || generation !== connectionGeneration)
+        throw new FrontendLuaUnavailableError("The frontend Lua connection closed during initialization");
+      let entry;
+      const state = new FrontendRuntimeState(value.state, (command, mutationId) => services.call(chatId, characterId, { kind: "state.write", command, mutationId }), (keys) => {
+        if (entry)
+          publish(entry, keys);
+      });
+      entry = { config: value.snapshot, settings: value.settings, state, updates: Promise.resolve(), lifetime: new AbortController };
+      entries.set(chatId, entry);
+      for (const event of events)
+        observe(entry, event);
+      publish(entry);
+      return entry;
+    }).finally(() => {
+      if (loading.get(chatId)?.promise === promise)
+        loading.delete(chatId);
+    });
+    loading.set(chatId, { characterId, promise, events });
+    return promise;
+  }
+  function environment(entry, signal) {
+    const { chatId, characterId } = entry.state;
+    return createFrontendHost(entry.state, () => {
+      entry.lifetime.signal.throwIfAborted();
+      const snapshot = getDisplaySnapshot(chatId);
+      if (!snapshot)
+        throw new FrontendLuaUnavailableError("The Lua display state is unavailable");
+      return snapshot;
+    }, entry.settings, {
+      call: (request) => services.call(chatId, characterId, request),
+      ui: ui.api(signal),
+      expression: async (label) => {
+        const imageId = entry.config.character.emotionImages[label]?.imageIds[0];
+        if (imageId)
+          ctx.display.setExpression({ chatId, characterId, label, imageId });
+      },
+      invalidate: (source) => invalidate(chatId, ["*"], source !== "reloadChat" && source !== "updateChatAt"),
+      synchronize: () => entry.updates,
+      ...capture ? { capture: (event) => capture(chatId, event) } : {}
+    });
+  }
+  setDisplayLuaEnvironment((snapshot) => {
+    const entry = entries.get(snapshot.chatId);
+    if (!entry)
+      throw new FrontendLuaUnavailableError("The display Lua runtime is not ready");
+    entry.lifetime.signal.throwIfAborted();
+    const host = environment(entry);
+    const options = host.prepareRuntime();
+    const view = entry.state.displayChat(snapshot.messagesHost, options.luaChat?.persistence);
+    return {
+      api: host.api,
+      options: {
+        ...options,
+        luaSignal: entry.lifetime.signal,
+        luaChat: view.chat,
+        preloaded: { ...options.preloaded, messagesRaw: snapshot.messagesHost }
+      },
+      async flush() {
+        try {
+          await entry.state.flush();
+        } finally {
+          view.release();
+        }
+      }
+    };
+  });
+  async function run(chatId, characterId, operation, signal) {
+    const entry = await ensure(chatId, characterId);
+    signal = AbortSignal.any([signal, entry.lifetime.signal]);
+    await entry.updates;
+    signal.throwIfAborted();
+    const host = environment(entry, signal);
+    try {
+      return await runFrontendLuaOperation(operation, {
+        ...host,
+        data: { characterId, characterName: entry.state.character().name ?? "", userName: entry.state.persona()?.name ?? "" },
+        compiled: prepareTriggerSources(entry.config.luaTriggers.map((trigger) => trigger.source), characterId),
+        triggers: entry.config.luaTriggers,
+        atActions: entry.config.atActions
+      }, signal);
+    } finally {
+      await entry.state.flush();
+      publish(entry);
+    }
+  }
+  let receiver = createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), (reply) => ctx.sendToBackend(reply));
+  const eventNames = [
+    "CHAT_CHANGED",
+    "CHAT_DELETED",
+    "MESSAGE_SENT",
+    "MESSAGE_EDITED",
+    "MESSAGE_DELETED",
+    "MESSAGE_SWIPED",
+    "CHARACTER_EDITED",
+    "CHARACTER_DELETED",
+    "PERSONA_CHANGED",
+    "SETTINGS_UPDATED",
+    "WORLD_BOOK_CHANGED",
+    "WORLD_BOOK_DELETED",
+    "WORLD_BOOK_ENTRY_CHANGED",
+    "WORLD_BOOK_ENTRY_DELETED",
+    "SPINDLE_BATCH_CHANGED"
+  ];
+  for (const event of eventNames)
+    cleanups.push(ctx.events.on(event, (raw, metadata) => {
+      if (!metadata?.stateRevision) {
+        for (const entry of entries.values())
+          remove(entry, "The host state event is missing its revision");
+        report(new FrontendLuaUnavailableError("The host state event is missing its revision"));
+        return;
+      }
+      const value = {
+        event,
+        payload: raw,
+        revision: metadata.stateRevision,
+        ...metadata.runtimeMutationId ? { mutationId: metadata.runtimeMutationId } : {}
+      };
+      for (const pending of loading.values())
+        pending.events.push(value);
+      for (const entry of entries.values()) {
+        try {
+          observe(entry, value);
+        } catch (error) {
+          remove(entry, "The Lua state could not be synchronized");
+          report(error);
+        }
+      }
+    }));
+  cleanups.push(ctx.events.on("__ws_close", () => {
+    connected = false;
+    receiver.dispose();
+    services.dispose();
+    ui.dispose();
+    connectionGeneration++;
+    loading.clear();
+    for (const controller of localCalls)
+      controller.abort(new FrontendLuaUnavailableError("The frontend Lua connection closed"));
+    for (const entry of entries.values())
+      remove(entry, "The frontend Lua connection closed");
+  }));
+  cleanups.push(ctx.events.on("__ws_open", () => {
+    connected = true;
+    receiver = createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), (reply) => ctx.sendToBackend(reply));
+  }));
+  return {
+    receive(raw) {
+      const message = raw;
+      if (message?.type === "lua_service_reply") {
+        services.receive(raw);
+        return true;
+      }
+      if (message?.type === "lua_call" || message?.type === "lua_cancel") {
+        receiver.receive(raw).catch(report);
+        return true;
+      }
+      return false;
+    },
+    async snapshot(value) {
+      const entry = await ensure(value.chatId, value.characterId);
+      if ((value.configVersion ?? 0) < (entry.config.configVersion ?? 0))
+        return;
+      entry.config = value;
+      publish(entry);
+    },
+    settings(value) {
+      for (const entry of entries.values())
+        entry.settings = value;
+    },
+    writeback(chatId, values) {
+      const entry = entries.get(chatId);
+      if (!entry)
+        throw new FrontendLuaUnavailableError("The display Lua runtime is not ready");
+      entry.state.stageVariables(values);
+      entry.state.flush().catch(report);
+    },
+    async manual(chatId, operation) {
+      const value = getDisplaySnapshot(chatId);
+      if (!value)
+        throw new FrontendLuaUnavailableError("The Lua runtime is not ready for this chat");
+      const controller = new AbortController;
+      localCalls.add(controller);
+      try {
+        await run(chatId, value.characterId, operation, controller.signal);
+      } finally {
+        localCalls.delete(controller);
+      }
+    },
+    owns(chatId) {
+      return entries.has(chatId) || loading.has(chatId);
+    },
+    dispose() {
+      connected = false;
+      connectionGeneration++;
+      loading.clear();
+      for (const controller of localCalls)
+        controller.abort(new FrontendLuaUnavailableError("The frontend Lua runtime stopped"));
+      for (const entry of entries.values())
+        remove(entry, "The frontend Lua runtime stopped");
+      setDisplayLuaEnvironment(undefined);
+      receiver.dispose();
+      services.dispose();
+      ui.dispose();
+      for (const cleanup of cleanups)
+        cleanup();
     }
   };
 }
@@ -36855,11 +31460,11 @@ function _toPrimitive8(t, r) {
 var hasStorage = false;
 try {
   hasStorage = "localStorage" in window;
-  key = "tusSupport";
-  originalValue = localStorage.getItem(key);
-  localStorage.setItem(key, originalValue);
+  key2 = "tusSupport";
+  originalValue = localStorage.getItem(key2);
+  localStorage.setItem(key2, originalValue);
   if (originalValue === null)
-    localStorage.removeItem(key);
+    localStorage.removeItem(key2);
 } catch (e) {
   if (e.code === e.SECURITY_ERR || e.code === e.QUOTA_EXCEEDED_ERR) {
     hasStorage = false;
@@ -36867,7 +31472,7 @@ try {
     throw e;
   }
 }
-var key;
+var key2;
 var originalValue;
 var canStoreURLs = hasStorage;
 var WebStorageUrlStorage = /* @__PURE__ */ function() {
@@ -40599,13 +35204,15 @@ function consoleFor2(level) {
 }
 function makeFrontendLogger(category) {
   function emit(level, msg, rest) {
-    const consoleEmit = level === "error" || logStore.shouldEmit(level);
+    const record = logStore.shouldEmit(level);
+    const consoleEmit = level === "error" || record;
     if (consoleEmit) {
       try {
         consoleFor2(level)("[lumirealm]", `${category}:`, msg, ...rest);
       } catch {}
     }
-    logStore.push(level, category, formatLine(msg, rest));
+    if (record)
+      logStore.push(level, category, formatLine(msg, rest));
   }
   return {
     error: (m, ...r) => emit("error", m, r),
@@ -40617,7 +35224,7 @@ function makeFrontendLogger(category) {
 }
 
 // src/ui/browser-translator.ts
-var flog2 = makeFrontendLogger("translator");
+var flog = makeFrontendLogger("translator");
 var TARGET = "en";
 var translatorByPair = null;
 var detectorPromise = null;
@@ -40633,7 +35240,7 @@ function disableFallback(reason) {
   if (fallbackDisabled)
     return;
   fallbackDisabled = true;
-  flog2.warn(`google-translate fallback disabled: ${reason}`);
+  flog.warn(`google-translate fallback disabled: ${reason}`);
   for (const cb of fallbackDisabledSubscribers) {
     try {
       cb(reason);
@@ -40686,15 +35293,15 @@ async function getTranslatorForPair(src, tgt) {
     try {
       if (ctor.availability) {
         const avail = await ctor.availability({ sourceLanguage: src, targetLanguage: tgt });
-        flog2.debug(`translator ${src}->${tgt} availability=${avail}`);
+        flog.debug(`translator ${src}->${tgt} availability=${avail}`);
         if (avail !== "available")
           return null;
       }
       const inst = await ctor.create({ sourceLanguage: src, targetLanguage: tgt });
-      flog2.debug(`translator ${src}->${tgt} created`);
+      flog.debug(`translator ${src}->${tgt} created`);
       return inst;
     } catch (err) {
-      flog2.warn(`translator ${src}->${tgt} create failed:`, err);
+      flog.warn(`translator ${src}->${tgt} create failed:`, err);
       return null;
     }
   })();
@@ -40715,7 +35322,7 @@ async function googleTranslateFallback(text, src) {
   try {
     res = await fetch(url);
   } catch (err) {
-    flog2.warn("google-translate fetch failed:", err);
+    flog.warn("google-translate fetch failed:", err);
     return null;
   }
   if (res.status === 429) {
@@ -40723,7 +35330,7 @@ async function googleTranslateFallback(text, src) {
     return null;
   }
   if (!res.ok) {
-    flog2.warn(`google-translate http ${res.status}`);
+    flog.warn(`google-translate http ${res.status}`);
     return null;
   }
   let data;
@@ -40746,7 +35353,7 @@ function getTranslator() {
   if (!haveLocal && fallbackDisabled) {
     if (!unavailableLogged) {
       unavailableLogged = true;
-      flog2.debug("browser Translator API unavailable and fallback disabled");
+      flog.debug("browser Translator API unavailable and fallback disabled");
     }
     return null;
   }
@@ -40962,7 +35569,7 @@ function setupTranslateToggle(opts) {
 }
 
 // src/ui/translate-orchestrator.ts
-var FLUSH_INTERVAL_MS2 = 250;
+var FLUSH_INTERVAL_MS = 250;
 var singleton = null;
 function initTranslateOrchestrator(opts) {
   if (singleton !== null)
@@ -41012,7 +35619,7 @@ function setupTranslateOrchestrator(opts) {
       return;
     if (timer !== null)
       return;
-    timer = setTimeout(flush, FLUSH_INTERVAL_MS2);
+    timer = setTimeout(flush, FLUSH_INTERVAL_MS);
   }
   function flush() {
     if (timer !== null) {
@@ -45567,25 +40174,6 @@ function mountBgHost(ctx, opts = {}) {
   };
 }
 
-// src/bghtml/strip-imports.ts
-var IMPORT_RULE_RE = /@import\s+(?:url\(\s*["']?[^)"']*["']?\s*\)|["'][^"']*["'])[^;]*;/gi;
-function stripCssImports(css) {
-  if (!css || css.indexOf("@import") < 0)
-    return css;
-  return css.replace(IMPORT_RULE_RE, "");
-}
-function splitCssImports(css) {
-  if (!css || css.indexOf("@import") < 0)
-    return { imports: "", rest: css };
-  const imports = [];
-  const rest = css.replace(IMPORT_RULE_RE, (match) => {
-    imports.push(match.trim());
-    return "";
-  });
-  return { imports: imports.join(`
-`), rest };
-}
-
 // src/bghtml/risu-environment.css
 var risu_environment_default = "@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:inline))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-scale-x:1;--tw-scale-y:1;--tw-scale-z:1;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-space-y-reverse:0;--tw-space-x-reverse:0;--tw-border-style:solid;--tw-gradient-position:initial;--tw-gradient-from:#0000;--tw-gradient-via:#0000;--tw-gradient-to:#0000;--tw-gradient-stops:initial;--tw-gradient-via-stops:initial;--tw-gradient-from-position:0%;--tw-gradient-via-position:50%;--tw-gradient-to-position:100%;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial;--tw-backdrop-blur:initial;--tw-backdrop-brightness:initial;--tw-backdrop-contrast:initial;--tw-backdrop-grayscale:initial;--tw-backdrop-hue-rotate:initial;--tw-backdrop-invert:initial;--tw-backdrop-opacity:initial;--tw-backdrop-saturate:initial;--tw-backdrop-sepia:initial;--tw-duration:initial}}}@layer theme{:root,:host{--font-sans:ui-sans-serif,system-ui,sans-serif,\"Apple Color Emoji\",\"Segoe UI Emoji\",\"Segoe UI Symbol\",\"Noto Color Emoji\";--font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;--color-red-200:oklch(88.5% .062 18.334);--color-red-300:oklch(80.8% .114 19.571);--color-red-400:oklch(70.4% .191 22.216);--color-red-500:oklch(63.7% .237 25.331);--color-red-600:oklch(57.7% .245 27.325);--color-red-700:oklch(50.5% .213 27.518);--color-red-800:oklch(44.4% .177 26.899);--color-red-900:oklch(39.6% .141 25.723);--color-orange-300:oklch(83.7% .128 66.29);--color-orange-400:oklch(75% .183 55.934);--color-orange-800:oklch(47% .157 37.304);--color-amber-400:oklch(82.8% .189 84.429);--color-amber-500:oklch(76.9% .188 70.08);--color-amber-600:oklch(66.6% .179 58.318);--color-amber-700:oklch(55.5% .163 48.998);--color-yellow-100:oklch(97.3% .071 103.193);--color-yellow-200:oklch(94.5% .129 101.54);--color-yellow-300:oklch(90.5% .182 98.111);--color-yellow-400:oklch(85.2% .199 91.936);--color-yellow-500:oklch(79.5% .184 86.047);--color-yellow-600:oklch(68.1% .162 75.834);--color-yellow-700:oklch(55.4% .135 66.442);--color-yellow-800:oklch(47.6% .114 61.907);--color-yellow-900:oklch(42.1% .095 57.708);--color-green-200:oklch(92.5% .084 155.995);--color-green-300:oklch(87.1% .15 154.449);--color-green-400:oklch(79.2% .209 151.711);--color-green-500:oklch(72.3% .219 149.579);--color-green-600:oklch(62.7% .194 149.214);--color-green-700:oklch(52.7% .154 150.069);--color-green-900:oklch(39.3% .095 152.535);--color-emerald-400:oklch(76.5% .177 163.223);--color-emerald-600:oklch(59.6% .145 163.225);--color-emerald-900:oklch(37.8% .077 168.94);--color-cyan-500:oklch(71.5% .143 215.221);--color-blue-200:oklch(88.2% .059 254.128);--color-blue-300:oklch(80.9% .105 251.813);--color-blue-400:oklch(70.7% .165 254.624);--color-blue-500:oklch(62.3% .214 259.815);--color-blue-600:oklch(54.6% .245 262.881);--color-blue-700:oklch(48.8% .243 264.376);--color-blue-800:oklch(42.4% .199 265.638);--color-blue-900:oklch(37.9% .146 265.522);--color-indigo-400:oklch(67.3% .182 276.935);--color-indigo-500:oklch(58.5% .233 277.117);--color-indigo-600:oklch(51.1% .262 276.966);--color-indigo-700:oklch(45.7% .24 277.023);--color-indigo-900:oklch(35.9% .144 278.697);--color-violet-500:oklch(60.6% .25 292.717);--color-purple-200:oklch(90.2% .063 306.703);--color-purple-500:oklch(62.7% .265 303.9);--color-purple-700:oklch(49.6% .265 301.924);--color-purple-800:oklch(43.8% .218 303.724);--color-purple-900:oklch(38.1% .176 304.987);--color-pink-500:oklch(65.6% .241 354.308);--color-pink-700:oklch(52.5% .223 3.958);--color-pink-900:oklch(40.8% .153 2.432);--color-rose-300:oklch(81% .117 11.638);--color-slate-500:oklch(55.4% .046 257.417);--color-slate-700:oklch(37.2% .044 257.287);--color-gray-100:oklch(96.7% .003 264.542);--color-gray-200:oklch(92.8% .006 264.531);--color-gray-300:oklch(87.2% .01 258.338);--color-gray-400:oklch(70.7% .022 261.325);--color-gray-500:oklch(55.1% .027 264.364);--color-gray-600:oklch(44.6% .03 256.802);--color-gray-700:oklch(37.3% .034 259.733);--color-gray-800:oklch(27.8% .033 256.848);--color-gray-900:oklch(21% .034 264.665);--color-zinc-100:oklch(96.7% .001 286.375);--color-zinc-200:oklch(92% .004 286.32);--color-zinc-300:oklch(87.1% .006 286.286);--color-zinc-400:oklch(70.5% .015 286.067);--color-zinc-500:oklch(55.2% .016 285.938);--color-zinc-600:oklch(44.2% .017 285.786);--color-zinc-700:oklch(37% .013 285.805);--color-zinc-800:oklch(27.4% .006 286.033);--color-zinc-900:oklch(21% .006 285.885);--color-neutral-50:var(--risu-theme-neutral-50);--color-neutral-200:var(--risu-theme-neutral-200);--color-stone-500:oklch(55.3% .013 58.071);--color-stone-900:oklch(21.6% .006 56.043);--color-black:#000;--color-white:#fff;--spacing:.25rem;--breakpoint-sm:40rem;--breakpoint-lg:64rem;--container-md:28rem;--container-xl:36rem;--container-2xl:42rem;--container-3xl:48rem;--container-4xl:56rem;--container-6xl:72rem;--text-xs:.75rem;--text-xs--line-height:calc(1/.75);--text-sm:.875rem;--text-sm--line-height:calc(1.25/.875);--text-base:1rem;--text-base--line-height: 1.5 ;--text-lg:1.125rem;--text-lg--line-height:calc(1.75/1.125);--text-xl:1.25rem;--text-xl--line-height:calc(1.75/1.25);--text-2xl:1.5rem;--text-2xl--line-height:calc(2/1.5);--text-3xl:1.875rem;--text-3xl--line-height: 1.2 ;--text-4xl:2.25rem;--text-4xl--line-height:calc(2.5/2.25);--text-6xl:3.75rem;--text-6xl--line-height:1;--font-weight-extralight:200;--font-weight-light:300;--font-weight-medium:500;--font-weight-semibold:600;--font-weight-bold:700;--font-weight-black:900;--tracking-wide:.025em;--tracking-wider:.05em;--leading-tight:1.25;--leading-snug:1.375;--leading-relaxed:1.625;--radius-xs:.125rem;--radius-sm:.25rem;--radius-md:.375rem;--radius-lg:.5rem;--radius-xl:.75rem;--radius-2xl:1rem;--radius-3xl:1.5rem;--drop-shadow-lg:0 4px 4px #00000026;--drop-shadow-2xl:0 25px 25px #00000026;--animate-spin:spin 1s linear infinite;--animate-pulse:pulse 2s cubic-bezier(.4,0,.6,1)infinite;--animate-bounce:bounce 1s infinite;--blur-sm:8px;--default-transition-duration:.15s;--default-transition-timing-function:cubic-bezier(.4,0,.2,1);--default-font-family:var(--font-sans);--default-mono-font-family:var(--font-mono);--color-bgcolor:var(--risu-theme-bgcolor);--color-darkbg:var(--risu-theme-darkbg);--color-borderc:var(--risu-theme-borderc);--color-selected:var(--risu-theme-selected);--color-draculared:var(--risu-theme-draculared);--color-textcolor:var(--risu-theme-textcolor);--color-textcolor2:var(--risu-theme-textcolor2);--color-darkborderc:var(--risu-theme-darkborderc);--color-darkbutton:var(--risu-theme-darkbutton);--color-primary-500:var(--risu-theme-primary-500);--color-primary-600:var(--risu-theme-primary-600);--color-danger-500:var(--risu-theme-danger-500);--color-danger-600:var(--risu-theme-danger-600);--min-width-5:1.25rem;--min-width-6:1.5rem;--min-width-12:3rem;--min-width-14:3.5rem;--min-width-20:5rem;--min-width-96:24rem;--min-width-110:28rem;--min-width-124:32rem;--min-width-138:36rem;--container-14:3.5rem;--container-24:6rem;--container-36:9rem;--container-80vw:80vw;--container-100vw:100vw;--border-width-1:1px;--width-110:28rem;--width-124:32rem;--width-138:36rem;--width-2xl:48rem;--width-3xl:72rem;--width-7xl:1280px;--min-height-4:.75rem;--min-height-5:1.25rem;--min-height-8:2rem;--min-height-20:5rem;--min-height-32:9rem;--height-96:24rem;--height-138:36rem}}@layer base{*,:after,:before,::backdrop{box-sizing:border-box;border:0 solid;margin:0;padding:0}::file-selector-button{box-sizing:border-box;border:0 solid;margin:0;padding:0}html,:host{-webkit-text-size-adjust:100%;tab-size:4;line-height:1.5;font-family:var(--default-font-family,ui-sans-serif,system-ui,sans-serif,\"Apple Color Emoji\",\"Segoe UI Emoji\",\"Segoe UI Symbol\",\"Noto Color Emoji\");font-feature-settings:var(--default-font-feature-settings,normal);font-variation-settings:var(--default-font-variation-settings,normal);-webkit-tap-highlight-color:transparent}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;-webkit-text-decoration:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:var(--default-mono-font-family,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace);font-feature-settings:var(--default-mono-font-feature-settings,normal);font-variation-settings:var(--default-mono-font-variation-settings,normal);font-size:1em}small{font-size:80%}sub,sup{vertical-align:baseline;font-size:75%;line-height:0;position:relative}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}:-moz-focusring{outline:auto}progress{vertical-align:baseline}summary{display:list-item}ol,ul,menu{list-style:none}img,svg,video,canvas,audio,iframe,embed,object{vertical-align:middle;display:block}img,video{max-width:100%;height:auto}button,input,select,optgroup,textarea{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}::file-selector-button{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}:where(select:is([multiple],[size])) optgroup{font-weight:bolder}:where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}::file-selector-button{margin-inline-end:4px}::placeholder{opacity:1}@supports (not ((-webkit-appearance:-apple-pay-button))) or (contain-intrinsic-size:1px){::placeholder{color:currentColor}@supports (color:color-mix(in lab,red,red)){::placeholder{color:color-mix(in oklab,currentcolor 50%,transparent)}}}textarea{resize:vertical}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}::-webkit-datetime-edit{display:inline-flex}::-webkit-datetime-edit-fields-wrapper{padding:0}::-webkit-datetime-edit{padding-block:0}::-webkit-datetime-edit-year-field{padding-block:0}::-webkit-datetime-edit-month-field{padding-block:0}::-webkit-datetime-edit-day-field{padding-block:0}::-webkit-datetime-edit-hour-field{padding-block:0}::-webkit-datetime-edit-minute-field{padding-block:0}::-webkit-datetime-edit-second-field{padding-block:0}::-webkit-datetime-edit-millisecond-field{padding-block:0}::-webkit-datetime-edit-meridiem-field{padding-block:0}::-webkit-calendar-picker-indicator{line-height:1}:-moz-ui-invalid{box-shadow:none}button,input:where([type=button],[type=reset],[type=submit]){appearance:button}::file-selector-button{appearance:button}::-webkit-inner-spin-button{height:auto}::-webkit-outer-spin-button{height:auto}[hidden]:where(:not([hidden=until-found])){display:none!important}*,:after,:before,::backdrop{border-color:var(--color-gray-200,currentcolor)}::file-selector-button{border-color:var(--color-gray-200,currentcolor)}button:not(:disabled),[role=button]:not(:disabled){cursor:pointer}input::placeholder,textarea::placeholder{color:var(--color-gray-400)}dialog{margin:auto}}@layer components;@layer utilities{.pointer-events-auto{pointer-events:auto}.pointer-events-none{pointer-events:none}.collapse{visibility:collapse}.invisible{visibility:hidden}.visible{visibility:visible}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.sticky{position:sticky}.inset-0{inset:calc(var(--spacing)*0)}.inset-1{inset:calc(var(--spacing)*1)}.end-1{inset-inline-end:calc(var(--spacing)*1)}.-top-1{top:calc(var(--spacing)*-1)}.-top-5{top:calc(var(--spacing)*-5)}.-top-96{top:calc(var(--spacing)*-96)}.top-0{top:calc(var(--spacing)*0)}.top-1\\/2{top:50%}.top-2{top:calc(var(--spacing)*2)}.top-3{top:calc(var(--spacing)*3)}.top-4{top:calc(var(--spacing)*4)}.-right-1{right:calc(var(--spacing)*-1)}.right-0{right:calc(var(--spacing)*0)}.right-2{right:calc(var(--spacing)*2)}.right-3{right:calc(var(--spacing)*3)}.right-4{right:calc(var(--spacing)*4)}.bottom-0{bottom:calc(var(--spacing)*0)}.bottom-2{bottom:calc(var(--spacing)*2)}.bottom-6{bottom:calc(var(--spacing)*6)}.bottom-16{bottom:calc(var(--spacing)*16)}.bottom-20{bottom:calc(var(--spacing)*20)}.bottom-36{bottom:calc(var(--spacing)*36)}.bottom-55{bottom:calc(var(--spacing)*55)}.bottom-full{bottom:100%}.-left-96{left:calc(var(--spacing)*-96)}.left-0{left:calc(var(--spacing)*0)}.left-1{left:calc(var(--spacing)*1)}.left-1\\/2{left:50%}.left-4{left:calc(var(--spacing)*4)}.left-6{left:calc(var(--spacing)*6)}.left-\\[-4px\\]{left:-4px}.isolate{isolation:isolate}.-z-10{z-index:-10}.z-0{z-index:0}.z-10{z-index:10}.z-20{z-index:20}.z-30{z-index:30}.z-40{z-index:40}.z-50{z-index:50}.z-100{z-index:100}.col-span-1{grid-column:span 1/span 1}.col-span-2{grid-column:span 2/span 2}.col-span-3{grid-column:span 3/span 3}.col-span-full{grid-column:1/-1}.float-end{float:inline-end}.float-right{float:right}.container{width:100%}@media(min-width:40rem){.container{max-width:40rem}}@media(min-width:48rem){.container{max-width:48rem}}@media(min-width:64rem){.container{max-width:64rem}}@media(min-width:80rem){.container{max-width:80rem}}@media(min-width:96rem){.container{max-width:96rem}}.m-0{margin:calc(var(--spacing)*0)}.m-1{margin:calc(var(--spacing)*1)}.m-2{margin:calc(var(--spacing)*2)}.m-4{margin:calc(var(--spacing)*4)}.mx-1\\.5{margin-inline:calc(var(--spacing)*1.5)}.mx-2{margin-inline:calc(var(--spacing)*2)}.mx-3{margin-inline:calc(var(--spacing)*3)}.mx-4{margin-inline:calc(var(--spacing)*4)}.mx-auto{margin-inline:auto}.my-1{margin-block:calc(var(--spacing)*1)}.my-2{margin-block:calc(var(--spacing)*2)}.my-3{margin-block:calc(var(--spacing)*3)}.my-4{margin-block:calc(var(--spacing)*4)}.my-6{margin-block:calc(var(--spacing)*6)}.prose{color:var(--tw-prose-body);max-width:65ch}.prose :where(p):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:1.25em;margin-bottom:1.25em}.prose :where([class~=lead]):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-lead);margin-top:1.2em;margin-bottom:1.2em;font-size:1.25em;line-height:1.6}.prose :where(a):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-links);font-weight:500;text-decoration:underline}.prose :where(strong):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-bold);font-weight:600}.prose :where(a strong):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(blockquote strong):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(thead th strong):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit}.prose :where(ol):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:1.25em;margin-bottom:1.25em;padding-inline-start:1.625em;list-style-type:decimal}.prose :where(ol[type=A]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:upper-alpha}.prose :where(ol[type=a]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:lower-alpha}.prose :where(ol[type=A s]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:upper-alpha}.prose :where(ol[type=a s]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:lower-alpha}.prose :where(ol[type=I]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:upper-roman}.prose :where(ol[type=i]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:lower-roman}.prose :where(ol[type=I s]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:upper-roman}.prose :where(ol[type=i s]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:lower-roman}.prose :where(ol[type=\"1\"]):not(:where([class~=not-prose],[class~=not-prose] *)){list-style-type:decimal}.prose :where(ul):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:1.25em;margin-bottom:1.25em;padding-inline-start:1.625em;list-style-type:disc}.prose :where(ol>li):not(:where([class~=not-prose],[class~=not-prose] *))::marker{color:var(--tw-prose-counters);font-weight:400}.prose :where(ul>li):not(:where([class~=not-prose],[class~=not-prose] *))::marker{color:var(--tw-prose-bullets)}.prose :where(dt):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-headings);margin-top:1.25em;font-weight:600}.prose :where(hr):not(:where([class~=not-prose],[class~=not-prose] *)){border-color:var(--tw-prose-hr);border-top-width:1px;margin-top:3em;margin-bottom:3em}.prose :where(blockquote):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-quotes);border-inline-start-width:.25rem;border-inline-start-color:var(--tw-prose-quote-borders);quotes:\"“\"\"”\"\"‘\"\"’\";margin-top:1.6em;margin-bottom:1.6em;padding-inline-start:1em;font-style:italic;font-weight:500}.prose :where(blockquote p:first-of-type):not(:where([class~=not-prose],[class~=not-prose] *)):before{content:open-quote}.prose :where(blockquote p:last-of-type):not(:where([class~=not-prose],[class~=not-prose] *)):after{content:close-quote}.prose :where(h1):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-headings);margin-top:0;margin-bottom:.888889em;font-size:2.25em;font-weight:800;line-height:1.11111}.prose :where(h1 strong):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit;font-weight:900}.prose :where(h2):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-headings);margin-top:2em;margin-bottom:1em;font-size:1.5em;font-weight:700;line-height:1.33333}.prose :where(h2 strong):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit;font-weight:800}.prose :where(h3):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-headings);margin-top:1.6em;margin-bottom:.6em;font-size:1.25em;font-weight:600;line-height:1.6}.prose :where(h3 strong):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit;font-weight:700}.prose :where(h4):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-headings);margin-top:1.5em;margin-bottom:.5em;font-weight:600;line-height:1.5}.prose :where(h4 strong):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit;font-weight:700}.prose :where(img):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:2em;margin-bottom:2em}.prose :where(picture):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:2em;margin-bottom:2em;display:block}.prose :where(video):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:2em;margin-bottom:2em}.prose :where(kbd):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-kbd);box-shadow:0 0 0 1px var(--tw-prose-kbd-shadows),0 3px 0 var(--tw-prose-kbd-shadows);padding-top:.1875em;padding-inline-end:.375em;padding-bottom:.1875em;border-radius:.3125rem;padding-inline-start:.375em;font-family:inherit;font-size:.875em;font-weight:500}.prose :where(code):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-code);font-size:.875em;font-weight:600}.prose :where(code):not(:where([class~=not-prose],[class~=not-prose] *)):before,.prose :where(code):not(:where([class~=not-prose],[class~=not-prose] *)):after{content:\"`\"}.prose :where(a code):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(h1 code):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit}.prose :where(h2 code):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit;font-size:.875em}.prose :where(h3 code):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit;font-size:.9em}.prose :where(h4 code):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(blockquote code):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(thead th code):not(:where([class~=not-prose],[class~=not-prose] *)){color:inherit}.prose :where(pre):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-pre-code);background-color:var(--tw-prose-pre-bg);padding-top:.857143em;padding-inline-end:1.14286em;padding-bottom:.857143em;border-radius:.375rem;margin-top:1.71429em;margin-bottom:1.71429em;padding-inline-start:1.14286em;font-size:.875em;font-weight:400;line-height:1.71429;overflow-x:auto}.prose :where(pre code):not(:where([class~=not-prose],[class~=not-prose] *)){font-weight:inherit;color:inherit;font-size:inherit;font-family:inherit;line-height:inherit;background-color:#0000;border-width:0;border-radius:0;padding:0}.prose :where(pre code):not(:where([class~=not-prose],[class~=not-prose] *)):before,.prose :where(pre code):not(:where([class~=not-prose],[class~=not-prose] *)):after{content:none}.prose :where(table):not(:where([class~=not-prose],[class~=not-prose] *)){table-layout:auto;width:100%;margin-top:2em;margin-bottom:2em;font-size:.875em;line-height:1.71429}.prose :where(thead):not(:where([class~=not-prose],[class~=not-prose] *)){border-bottom-width:1px;border-bottom-color:var(--tw-prose-th-borders)}.prose :where(thead th):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-headings);vertical-align:bottom;padding-inline-end:.571429em;padding-bottom:.571429em;padding-inline-start:.571429em;font-weight:600}.prose :where(tbody tr):not(:where([class~=not-prose],[class~=not-prose] *)){border-bottom-width:1px;border-bottom-color:var(--tw-prose-td-borders)}.prose :where(tbody tr:last-child):not(:where([class~=not-prose],[class~=not-prose] *)){border-bottom-width:0}.prose :where(tbody td):not(:where([class~=not-prose],[class~=not-prose] *)){vertical-align:baseline}.prose :where(tfoot):not(:where([class~=not-prose],[class~=not-prose] *)){border-top-width:1px;border-top-color:var(--tw-prose-th-borders)}.prose :where(tfoot td):not(:where([class~=not-prose],[class~=not-prose] *)){vertical-align:top}.prose :where(th,td):not(:where([class~=not-prose],[class~=not-prose] *)){text-align:start}.prose :where(figure>*):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:0;margin-bottom:0}.prose :where(figcaption):not(:where([class~=not-prose],[class~=not-prose] *)){color:var(--tw-prose-captions);margin-top:.857143em;font-size:.875em;line-height:1.42857}.prose{--tw-prose-body:oklch(37.3% .034 259.733);--tw-prose-headings:oklch(21% .034 264.665);--tw-prose-lead:oklch(44.6% .03 256.802);--tw-prose-links:oklch(21% .034 264.665);--tw-prose-bold:oklch(21% .034 264.665);--tw-prose-counters:oklch(55.1% .027 264.364);--tw-prose-bullets:oklch(87.2% .01 258.338);--tw-prose-hr:oklch(92.8% .006 264.531);--tw-prose-quotes:oklch(21% .034 264.665);--tw-prose-quote-borders:oklch(92.8% .006 264.531);--tw-prose-captions:oklch(55.1% .027 264.364);--tw-prose-kbd:oklch(21% .034 264.665);--tw-prose-kbd-shadows:oklab(21% -.00316127 -.0338527/.1);--tw-prose-code:oklch(21% .034 264.665);--tw-prose-pre-code:oklch(92.8% .006 264.531);--tw-prose-pre-bg:oklch(27.8% .033 256.848);--tw-prose-th-borders:oklch(87.2% .01 258.338);--tw-prose-td-borders:oklch(92.8% .006 264.531);--tw-prose-invert-body:oklch(87.2% .01 258.338);--tw-prose-invert-headings:#fff;--tw-prose-invert-lead:oklch(70.7% .022 261.325);--tw-prose-invert-links:#fff;--tw-prose-invert-bold:#fff;--tw-prose-invert-counters:oklch(70.7% .022 261.325);--tw-prose-invert-bullets:oklch(44.6% .03 256.802);--tw-prose-invert-hr:oklch(37.3% .034 259.733);--tw-prose-invert-quotes:oklch(96.7% .003 264.542);--tw-prose-invert-quote-borders:oklch(37.3% .034 259.733);--tw-prose-invert-captions:oklch(70.7% .022 261.325);--tw-prose-invert-kbd:#fff;--tw-prose-invert-kbd-shadows:#ffffff1a;--tw-prose-invert-code:#fff;--tw-prose-invert-pre-code:oklch(87.2% .01 258.338);--tw-prose-invert-pre-bg:#00000080;--tw-prose-invert-th-borders:oklch(44.6% .03 256.802);--tw-prose-invert-td-borders:oklch(37.3% .034 259.733);font-size:1rem;line-height:1.75}.prose :where(picture>img):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:0;margin-bottom:0}.prose :where(li):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:.5em;margin-bottom:.5em}.prose :where(ol>li):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(ul>li):not(:where([class~=not-prose],[class~=not-prose] *)){padding-inline-start:.375em}.prose :where(.prose>ul>li p):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:.75em;margin-bottom:.75em}.prose :where(.prose>ul>li>p:first-child):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:1.25em}.prose :where(.prose>ul>li>p:last-child):not(:where([class~=not-prose],[class~=not-prose] *)){margin-bottom:1.25em}.prose :where(.prose>ol>li>p:first-child):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:1.25em}.prose :where(.prose>ol>li>p:last-child):not(:where([class~=not-prose],[class~=not-prose] *)){margin-bottom:1.25em}.prose :where(ul ul,ul ol,ol ul,ol ol):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:.75em;margin-bottom:.75em}.prose :where(dl):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:1.25em;margin-bottom:1.25em}.prose :where(dd):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:.5em;padding-inline-start:1.625em}.prose :where(hr+*):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(h2+*):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(h3+*):not(:where([class~=not-prose],[class~=not-prose] *)),.prose :where(h4+*):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:0}.prose :where(thead th:first-child):not(:where([class~=not-prose],[class~=not-prose] *)){padding-inline-start:0}.prose :where(thead th:last-child):not(:where([class~=not-prose],[class~=not-prose] *)){padding-inline-end:0}.prose :where(tbody td,tfoot td):not(:where([class~=not-prose],[class~=not-prose] *)){padding-top:.571429em;padding-inline-end:.571429em;padding-bottom:.571429em;padding-inline-start:.571429em}.prose :where(tbody td:first-child,tfoot td:first-child):not(:where([class~=not-prose],[class~=not-prose] *)){padding-inline-start:0}.prose :where(tbody td:last-child,tfoot td:last-child):not(:where([class~=not-prose],[class~=not-prose] *)){padding-inline-end:0}.prose :where(figure):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:2em;margin-bottom:2em}.prose :where(.prose>:first-child):not(:where([class~=not-prose],[class~=not-prose] *)){margin-top:0}.prose :where(.prose>:last-child):not(:where([class~=not-prose],[class~=not-prose] *)){margin-bottom:0}.mt-0{margin-top:calc(var(--spacing)*0)}.mt-0\\.5{margin-top:calc(var(--spacing)*.5)}.mt-1{margin-top:calc(var(--spacing)*1)}.mt-1\\.5{margin-top:calc(var(--spacing)*1.5)}.mt-2{margin-top:calc(var(--spacing)*2)}.mt-3{margin-top:calc(var(--spacing)*3)}.mt-4{margin-top:calc(var(--spacing)*4)}.mt-5{margin-top:calc(var(--spacing)*5)}.mt-6{margin-top:calc(var(--spacing)*6)}.mt-8{margin-top:calc(var(--spacing)*8)}.mt-14{margin-top:calc(var(--spacing)*14)}.mt-auto{margin-top:auto}.mr-1{margin-right:calc(var(--spacing)*1)}.mr-2{margin-right:calc(var(--spacing)*2)}.mr-3{margin-right:calc(var(--spacing)*3)}.mr-4{margin-right:calc(var(--spacing)*4)}.mr-10{margin-right:calc(var(--spacing)*10)}.mr-auto{margin-right:auto}.\\!mb-0{margin-bottom:calc(var(--spacing)*0)!important}.mb-0{margin-bottom:calc(var(--spacing)*0)}.mb-1{margin-bottom:calc(var(--spacing)*1)}.mb-2{margin-bottom:calc(var(--spacing)*2)}.mb-3{margin-bottom:calc(var(--spacing)*3)}.mb-4{margin-bottom:calc(var(--spacing)*4)}.mb-5{margin-bottom:calc(var(--spacing)*5)}.mb-6{margin-bottom:calc(var(--spacing)*6)}.mb-8{margin-bottom:calc(var(--spacing)*8)}.mb-12{margin-bottom:calc(var(--spacing)*12)}.-ml-1{margin-left:calc(var(--spacing)*-1)}.ml-1{margin-left:calc(var(--spacing)*1)}.ml-2{margin-left:calc(var(--spacing)*2)}.ml-4{margin-left:calc(var(--spacing)*4)}.ml-9{margin-left:calc(var(--spacing)*9)}.ml-auto{margin-left:auto}.line-clamp-1{-webkit-line-clamp:1;-webkit-box-orient:vertical;display:-webkit-box;overflow:hidden}.line-clamp-2{-webkit-line-clamp:2;-webkit-box-orient:vertical;display:-webkit-box;overflow:hidden}.line-clamp-4{-webkit-line-clamp:4;-webkit-box-orient:vertical;display:-webkit-box;overflow:hidden}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline{display:inline}.inline-block{display:inline-block}.inline-flex{display:inline-flex}.table{display:table}.h-0{height:calc(var(--spacing)*0)}.h-0\\.5{height:calc(var(--spacing)*.5)}.h-1{height:calc(var(--spacing)*1)}.h-1\\.5{height:calc(var(--spacing)*1.5)}.h-2{height:calc(var(--spacing)*2)}.h-3{height:calc(var(--spacing)*3)}.h-3\\.5{height:calc(var(--spacing)*3.5)}.h-4{height:calc(var(--spacing)*4)}.h-5{height:calc(var(--spacing)*5)}.h-6{height:calc(var(--spacing)*6)}.h-8{height:calc(var(--spacing)*8)}.h-10{height:calc(var(--spacing)*10)}.h-11\\/12{height:91.6667%}.h-12{height:calc(var(--spacing)*12)}.h-14{height:calc(var(--spacing)*14)}.h-16{height:calc(var(--spacing)*16)}.h-20{height:calc(var(--spacing)*20)}.h-24{height:calc(var(--spacing)*24)}.h-28{height:calc(var(--spacing)*28)}.h-32{height:calc(var(--spacing)*32)}.h-36{height:calc(var(--spacing)*36)}.h-40{height:calc(var(--spacing)*40)}.h-44{height:calc(var(--spacing)*44)}.h-48{height:calc(var(--spacing)*48)}.h-52{height:calc(var(--spacing)*52)}.h-56{height:calc(var(--spacing)*56)}.h-60{height:calc(var(--spacing)*60)}.h-64{height:calc(var(--spacing)*64)}.h-80{height:calc(var(--spacing)*80)}.h-120{height:calc(var(--spacing)*120)}.h-138{height:var(--height-138)}.h-\\[8px\\]{height:8px}.h-\\[20px\\]\\!{height:20px!important}.h-\\[56px\\]{height:56px}.h-\\[70px\\]{height:70px}.h-\\[110px\\]{height:110px}.h-\\[calc\\(100\\%-2rem\\)\\]{height:calc(100% - 2rem)}.h-dvh{height:100dvh}.h-fit{height:fit-content}.h-full{height:100%}.h-px{height:1px}.h-screen{height:100vh}.h-svh{height:100svh}.max-h-8{max-height:calc(var(--spacing)*8)}.max-h-11\\/12{max-height:91.6667%}.max-h-24{max-height:calc(var(--spacing)*24)}.max-h-32{max-height:calc(var(--spacing)*32)}.max-h-48{max-height:calc(var(--spacing)*48)}.max-h-60{max-height:calc(var(--spacing)*60)}.max-h-64{max-height:calc(var(--spacing)*64)}.max-h-80{max-height:calc(var(--spacing)*80)}.max-h-\\[90\\%\\]{max-height:90%}.max-h-\\[90vh\\]{max-height:90vh}.max-h-\\[calc\\(100\\%-2rem\\)\\]{max-height:calc(100% - 2rem)}.max-h-full{max-height:100%}.min-h-0\\.5{min-height:calc(var(--spacing)*.5)}.min-h-4{min-height:var(--min-height-4)}.min-h-5{min-height:var(--min-height-5)}.min-h-6{min-height:calc(var(--spacing)*6)}.min-h-8{min-height:var(--min-height-8)}.min-h-10{min-height:calc(var(--spacing)*10)}.min-h-16{min-height:calc(var(--spacing)*16)}.min-h-18{min-height:calc(var(--spacing)*18)}.min-h-20{min-height:var(--min-height-20)}.min-h-24{min-height:calc(var(--spacing)*24)}.min-h-28{min-height:calc(var(--spacing)*28)}.min-h-32{min-height:var(--min-height-32)}.min-h-36{min-height:calc(var(--spacing)*36)}.min-h-40{min-height:calc(var(--spacing)*40)}.min-h-48{min-height:calc(var(--spacing)*48)}.min-h-56{min-height:calc(var(--spacing)*56)}.min-h-64{min-height:calc(var(--spacing)*64)}.min-h-72{min-height:calc(var(--spacing)*72)}.min-h-80{min-height:calc(var(--spacing)*80)}.min-h-full{min-height:100%}.min-h-screen{min-height:100vh}.min-h-svh{min-height:100svh}.w-0{width:calc(var(--spacing)*0)}.w-1{width:calc(var(--spacing)*1)}.w-1\\.5{width:calc(var(--spacing)*1.5)}.w-1\\/2{width:50%}.w-1\\/3{width:33.3333%}.w-2{width:calc(var(--spacing)*2)}.w-2\\/3{width:66.6667%}.w-2xl{width:var(--width-2xl)}.w-3{width:calc(var(--spacing)*3)}.w-3\\.5{width:calc(var(--spacing)*3.5)}.w-3xl{width:var(--width-3xl)}.w-4{width:calc(var(--spacing)*4)}.w-5{width:calc(var(--spacing)*5)}.w-5\\/6{width:83.3333%}.w-6{width:calc(var(--spacing)*6)}.w-7xl{width:var(--width-7xl)}.w-8{width:calc(var(--spacing)*8)}.w-10{width:calc(var(--spacing)*10)}.w-11\\/12{width:91.6667%}.w-12{width:calc(var(--spacing)*12)}.w-14{width:var(--container-14)}.w-16{width:calc(var(--spacing)*16)}.w-20{width:calc(var(--spacing)*20)}.w-24{width:var(--container-24)}.w-28{width:calc(var(--spacing)*28)}.w-32{width:calc(var(--spacing)*32)}.w-36{width:var(--container-36)}.w-40{width:calc(var(--spacing)*40)}.w-44{width:calc(var(--spacing)*44)}.w-48{width:calc(var(--spacing)*48)}.w-72{width:calc(var(--spacing)*72)}.w-96{width:calc(var(--spacing)*96)}.w-110{width:var(--width-110)}.w-124{width:var(--width-124)}.w-138{width:var(--width-138)}.w-\\[8px\\]{width:8px}.w-\\[56px\\]{width:56px}.w-auto{width:auto}.w-dvw{width:100dvw}.w-full{width:100%}.w-px{width:1px}.w-xl{width:var(--container-xl)}.max-w-\\(--breakpoint-lg\\){max-width:var(--breakpoint-lg)}.max-w-\\(--breakpoint-sm\\){max-width:var(--breakpoint-sm)}.max-w-2\\/3{max-width:66.6667%}.max-w-2xl{max-width:var(--container-2xl)}.max-w-3xl{max-width:var(--container-3xl)}.max-w-4xl{max-width:var(--container-4xl)}.max-w-6xl{max-width:var(--container-6xl)}.max-w-16{max-width:calc(var(--spacing)*16)}.max-w-24{max-width:var(--container-24)}.max-w-48{max-width:calc(var(--spacing)*48)}.max-w-80vw{max-width:var(--container-80vw)}.max-w-100vw{max-width:var(--container-100vw)}.max-w-\\[70\\%\\]{max-width:70%}.max-w-fit{max-width:fit-content}.max-w-full{max-width:100%}.max-w-md{max-width:var(--container-md)}.max-w-prose{max-width:65ch}.max-w-xl{max-width:var(--container-xl)}.min-w-0{min-width:calc(var(--spacing)*0)}.min-w-5{min-width:var(--min-width-5)}.min-w-6{min-width:var(--min-width-6)}.min-w-12{min-width:var(--min-width-12)}.min-w-14{min-width:var(--min-width-14)}.min-w-20{min-width:var(--min-width-20)}.min-w-32{min-width:calc(var(--spacing)*32)}.min-w-64{min-width:calc(var(--spacing)*64)}.min-w-96{min-width:var(--min-width-96)}.min-w-110{min-width:var(--min-width-110)}.min-w-124{min-width:var(--min-width-124)}.min-w-138{min-width:var(--min-width-138)}.min-w-\\[160px\\]{min-width:160px}.flex-1{flex:1}.shrink{flex-shrink:1}.shrink-0{flex-shrink:0}.flex-grow,.grow{flex-grow:1}.grow-0{flex-grow:0}.-translate-x-1\\/2{--tw-translate-x: -50% ;translate:var(--tw-translate-x)var(--tw-translate-y)}.-translate-y-1\\/2{--tw-translate-y: -50% ;translate:var(--tw-translate-x)var(--tw-translate-y)}.scale-95{--tw-scale-x:95%;--tw-scale-y:95%;--tw-scale-z:95%;scale:var(--tw-scale-x)var(--tw-scale-y)}.transform{transform:var(--tw-rotate-x,)var(--tw-rotate-y,)var(--tw-rotate-z,)var(--tw-skew-x,)var(--tw-skew-y,)}.animate-bounce{animation:var(--animate-bounce)}.animate-pulse{animation:var(--animate-pulse)}.animate-spin{animation:var(--animate-spin)}.cursor-default{cursor:default}.cursor-move{cursor:move}.cursor-not-allowed{cursor:not-allowed}.cursor-not-allowed\\!{cursor:not-allowed!important}.cursor-pointer{cursor:pointer}.resize{resize:both}.resize-none{resize:none}.list-inside{list-style-position:inside}.list-disc{list-style-type:disc}.appearance-none{appearance:none}.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid-cols-\\[1fr_auto_1fr\\]{grid-template-columns:1fr auto 1fr}.flex-col{flex-direction:column}.flex-col-reverse{flex-direction:column-reverse}.flex-row{flex-direction:row}.flex-row-reverse{flex-direction:row-reverse}.flex-wrap{flex-wrap:wrap}.items-center{align-items:center}.items-end{align-items:flex-end}.items-start{align-items:flex-start}.items-stretch{align-items:stretch}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.justify-start{justify-content:flex-start}.justify-stretch{justify-content:stretch}.gap-0{gap:calc(var(--spacing)*0)}.gap-0\\.5{gap:calc(var(--spacing)*.5)}.gap-1{gap:calc(var(--spacing)*1)}.gap-1\\.5{gap:calc(var(--spacing)*1.5)}.gap-2{gap:calc(var(--spacing)*2)}.gap-3{gap:calc(var(--spacing)*3)}.gap-4{gap:calc(var(--spacing)*4)}.gap-5{gap:calc(var(--spacing)*5)}.gap-6{gap:calc(var(--spacing)*6)}:where(.space-y-2>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing)*2)*var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing)*2)*calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-4>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing)*4)*var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing)*4)*calc(1 - var(--tw-space-y-reverse)))}.gap-x-3{column-gap:calc(var(--spacing)*3)}.gap-x-4{column-gap:calc(var(--spacing)*4)}:where(.space-x-4>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing)*4)*var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing)*4)*calc(1 - var(--tw-space-x-reverse)))}.gap-y-2{row-gap:calc(var(--spacing)*2)}.justify-self-end{justify-self:flex-end}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-auto{overflow:auto}.overflow-hidden{overflow:hidden}.overflow-x-auto{overflow-x:auto}.overflow-x-hidden{overflow-x:hidden}.overflow-y-auto{overflow-y:auto}.overflow-y-clip{overflow-y:clip}.overflow-y-hidden{overflow-y:hidden}.rounded{border-radius:.25rem}.rounded-2xl{border-radius:var(--radius-2xl)}.rounded-3xl{border-radius:var(--radius-3xl)}.rounded-full{border-radius:3.40282e38px}.rounded-lg{border-radius:var(--radius-lg)}.rounded-md{border-radius:var(--radius-md)}.rounded-sm{border-radius:var(--radius-sm)}.rounded-xl{border-radius:var(--radius-xl)}.rounded-xs{border-radius:var(--radius-xs)}.rounded-t-lg{border-top-left-radius:var(--radius-lg);border-top-right-radius:var(--radius-lg)}.rounded-t-md{border-top-left-radius:var(--radius-md);border-top-right-radius:var(--radius-md)}.rounded-l-lg{border-top-left-radius:var(--radius-lg);border-bottom-left-radius:var(--radius-lg)}.rounded-l-md{border-top-left-radius:var(--radius-md);border-bottom-left-radius:var(--radius-md)}.rounded-l-none{border-top-left-radius:0;border-bottom-left-radius:0}.rounded-tl-none{border-top-left-radius:0}.rounded-tl-sm{border-top-left-radius:var(--radius-sm)}.rounded-r-lg{border-top-right-radius:var(--radius-lg);border-bottom-right-radius:var(--radius-lg)}.rounded-r-md{border-top-right-radius:var(--radius-md);border-bottom-right-radius:var(--radius-md)}.rounded-r-none{border-top-right-radius:0;border-bottom-right-radius:0}.rounded-tr-none{border-top-right-radius:0}.rounded-tr-sm{border-top-right-radius:var(--radius-sm)}.rounded-b-lg{border-bottom-right-radius:var(--radius-lg);border-bottom-left-radius:var(--radius-lg)}.rounded-b-md{border-bottom-right-radius:var(--radius-md);border-bottom-left-radius:var(--radius-md)}.rounded-br-md{border-bottom-right-radius:var(--radius-md)}.rounded-bl-md{border-bottom-left-radius:var(--radius-md)}.border{border-style:var(--tw-border-style);border-width:1px}.border-0{border-style:var(--tw-border-style);border-width:0}.border-1{border-style:var(--tw-border-style);border-width:var(--border-width-1)}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-4{border-style:var(--tw-border-style);border-width:4px}.border-x{border-inline-style:var(--tw-border-style);border-inline-width:1px}.border-y{border-block-style:var(--tw-border-style);border-block-width:1px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-t-1{border-top-style:var(--tw-border-style);border-top-width:var(--border-width-1)}.border-t-2{border-top-style:var(--tw-border-style);border-top-width:2px}.border-r{border-right-style:var(--tw-border-style);border-right-width:1px}.border-r-0{border-right-style:var(--tw-border-style);border-right-width:0}.border-r-1{border-right-style:var(--tw-border-style);border-right-width:var(--border-width-1)}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-b-1{border-bottom-style:var(--tw-border-style);border-bottom-width:var(--border-width-1)}.border-l{border-left-style:var(--tw-border-style);border-left-width:1px}.border-l-4{border-left-style:var(--tw-border-style);border-left-width:4px}.border-dashed{--tw-border-style:dashed;border-style:dashed}.border-none{--tw-border-style:none;border-style:none}.border-solid{--tw-border-style:solid;border-style:solid}.border-\\[\\#bbbbbb15\\]{border-color:#bbbbbb15}.border-\\[\\#bbbbbb30\\]{border-color:#bbbbbb30}.border-amber-500{border-color:var(--color-amber-500)}.border-bgcolor{border-color:var(--color-bgcolor)}.border-black{border-color:var(--color-black)}.border-blue-400{border-color:var(--color-blue-400)}.border-blue-500{border-color:var(--color-blue-500)}.border-blue-500\\/40{border-color:#3080ff66}@supports (color:color-mix(in lab,red,red)){.border-blue-500\\/40{border-color:color-mix(in oklab,var(--color-blue-500)40%,transparent)}}.border-blue-600{border-color:var(--color-blue-600)}.border-borderc{border-color:var(--color-borderc)}.border-darkborderc{border-color:var(--color-darkborderc)}.border-darkbutton{border-color:var(--color-darkbutton)}.border-gray-300{border-color:var(--color-gray-300)}.border-gray-400{border-color:var(--color-gray-400)}.border-gray-700{border-color:var(--color-gray-700)}.border-gray-800{border-color:var(--color-gray-800)}.border-green-500{border-color:var(--color-green-500)}.border-green-500\\/40{border-color:#00c75866}@supports (color:color-mix(in lab,red,red)){.border-green-500\\/40{border-color:color-mix(in oklab,var(--color-green-500)40%,transparent)}}.border-red-500{border-color:var(--color-red-500)}.border-red-500\\/40{border-color:#fb2c3666}@supports (color:color-mix(in lab,red,red)){.border-red-500\\/40{border-color:color-mix(in oklab,var(--color-red-500)40%,transparent)}}.border-red-600{border-color:var(--color-red-600)}.border-selected{border-color:var(--color-selected)}.border-stone-500{border-color:var(--color-stone-500)}.border-textcolor\\/10{border-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.border-textcolor\\/10{border-color:color-mix(in oklab,var(--color-textcolor)10%,transparent)}}.border-textcolor2{border-color:var(--color-textcolor2)}.border-transparent{border-color:#0000}.border-white\\/10{border-color:#ffffff1a}@supports (color:color-mix(in lab,red,red)){.border-white\\/10{border-color:color-mix(in oklab,var(--color-white)10%,transparent)}}.border-white\\/15{border-color:#ffffff26}@supports (color:color-mix(in lab,red,red)){.border-white\\/15{border-color:color-mix(in oklab,var(--color-white)15%,transparent)}}.border-white\\/20{border-color:#fff3}@supports (color:color-mix(in lab,red,red)){.border-white\\/20{border-color:color-mix(in oklab,var(--color-white)20%,transparent)}}.border-yellow-600{border-color:var(--color-yellow-600)}.border-zinc-600{border-color:var(--color-zinc-600)}.border-zinc-600\\/60{border-color:#52525c99}@supports (color:color-mix(in lab,red,red)){.border-zinc-600\\/60{border-color:color-mix(in oklab,var(--color-zinc-600)60%,transparent)}}.border-zinc-700{border-color:var(--color-zinc-700)}.border-x-blue-500{border-inline-color:var(--color-blue-500)}.border-x-red-500{border-inline-color:var(--color-red-500)}.border-y-red-500{border-block-color:var(--color-red-500)}.border-y-selected{border-block-color:var(--color-selected)}.border-t-bgcolor{border-top-color:var(--color-bgcolor)}.border-t-darkborderc{border-top-color:var(--color-darkborderc)}.border-t-gray-900{border-top-color:var(--color-gray-900)}.border-t-selected{border-top-color:var(--color-selected)}.border-t-transparent{border-top-color:#0000}.border-r-bgcolor{border-right-color:var(--color-bgcolor)}.border-r-darkborderc{border-right-color:var(--color-darkborderc)}.border-r-selected{border-right-color:var(--color-selected)}.border-b-darkborderc{border-bottom-color:var(--color-darkborderc)}.border-b-gray-200{border-bottom-color:var(--color-gray-200)}.border-b-red-500{border-bottom-color:var(--color-red-500)}.border-b-selected{border-bottom-color:var(--color-selected)}.border-l-black{border-left-color:var(--color-black)}.border-l-blue-500{border-left-color:var(--color-blue-500)}.border-l-gray-500{border-left-color:var(--color-gray-500)}.border-l-green-500{border-left-color:var(--color-green-500)}.border-l-red-500{border-left-color:var(--color-red-500)}.border-l-selected{border-left-color:var(--color-selected)}.border-l-yellow-500{border-left-color:var(--color-yellow-500)}.bg-\\[\\#212121\\]{background-color:#212121}.bg-\\[\\#303030\\]{background-color:#303030}.bg-\\[\\#bbbbbb\\]{background-color:#bbb}.bg-amber-700{background-color:var(--color-amber-700)}.bg-bgcolor,.bg-bgcolor\\/30{background-color:var(--color-bgcolor)}@supports (color:color-mix(in lab,red,red)){.bg-bgcolor\\/30{background-color:color-mix(in oklab,var(--color-bgcolor)30%,transparent)}}.bg-bgcolor\\/80{background-color:var(--color-bgcolor)}@supports (color:color-mix(in lab,red,red)){.bg-bgcolor\\/80{background-color:color-mix(in oklab,var(--color-bgcolor)80%,transparent)}}.bg-black{background-color:var(--color-black)}.bg-black\\/10{background-color:#0000001a}@supports (color:color-mix(in lab,red,red)){.bg-black\\/10{background-color:color-mix(in oklab,var(--color-black)10%,transparent)}}.bg-black\\/20{background-color:#0003}@supports (color:color-mix(in lab,red,red)){.bg-black\\/20{background-color:color-mix(in oklab,var(--color-black)20%,transparent)}}.bg-black\\/30{background-color:#0000004d}@supports (color:color-mix(in lab,red,red)){.bg-black\\/30{background-color:color-mix(in oklab,var(--color-black)30%,transparent)}}.bg-black\\/40{background-color:#0006}@supports (color:color-mix(in lab,red,red)){.bg-black\\/40{background-color:color-mix(in oklab,var(--color-black)40%,transparent)}}.bg-black\\/50{background-color:#00000080}@supports (color:color-mix(in lab,red,red)){.bg-black\\/50{background-color:color-mix(in oklab,var(--color-black)50%,transparent)}}.bg-black\\/60{background-color:#0009}@supports (color:color-mix(in lab,red,red)){.bg-black\\/60{background-color:color-mix(in oklab,var(--color-black)60%,transparent)}}.bg-black\\/70{background-color:#000000b3}@supports (color:color-mix(in lab,red,red)){.bg-black\\/70{background-color:color-mix(in oklab,var(--color-black)70%,transparent)}}.bg-black\\/80{background-color:#000c}@supports (color:color-mix(in lab,red,red)){.bg-black\\/80{background-color:color-mix(in oklab,var(--color-black)80%,transparent)}}.bg-black\\/90{background-color:#000000e6}@supports (color:color-mix(in lab,red,red)){.bg-black\\/90{background-color:color-mix(in oklab,var(--color-black)90%,transparent)}}.bg-blue-200{background-color:var(--color-blue-200)}.bg-blue-200\\/50{background-color:#bedbff80}@supports (color:color-mix(in lab,red,red)){.bg-blue-200\\/50{background-color:color-mix(in oklab,var(--color-blue-200)50%,transparent)}}.bg-blue-500{background-color:var(--color-blue-500)}.bg-blue-500\\/10{background-color:#3080ff1a}@supports (color:color-mix(in lab,red,red)){.bg-blue-500\\/10{background-color:color-mix(in oklab,var(--color-blue-500)10%,transparent)}}.bg-blue-500\\/15{background-color:#3080ff26}@supports (color:color-mix(in lab,red,red)){.bg-blue-500\\/15{background-color:color-mix(in oklab,var(--color-blue-500)15%,transparent)}}.bg-blue-600{background-color:var(--color-blue-600)}.bg-blue-700\\/20{background-color:#1447e633}@supports (color:color-mix(in lab,red,red)){.bg-blue-700\\/20{background-color:color-mix(in oklab,var(--color-blue-700)20%,transparent)}}.bg-blue-700\\/50{background-color:#1447e680}@supports (color:color-mix(in lab,red,red)){.bg-blue-700\\/50{background-color:color-mix(in oklab,var(--color-blue-700)50%,transparent)}}.bg-blue-800{background-color:var(--color-blue-800)}.bg-blue-900{background-color:var(--color-blue-900)}.bg-blue-900\\/70{background-color:#1c398eb3}@supports (color:color-mix(in lab,red,red)){.bg-blue-900\\/70{background-color:color-mix(in oklab,var(--color-blue-900)70%,transparent)}}.bg-borderc{background-color:var(--color-borderc)}.bg-danger-600{background-color:var(--color-danger-600)}.bg-darkbg,.bg-darkbg\\/20{background-color:var(--color-darkbg)}@supports (color:color-mix(in lab,red,red)){.bg-darkbg\\/20{background-color:color-mix(in oklab,var(--color-darkbg)20%,transparent)}}.bg-darkbg\\/50{background-color:var(--color-darkbg)}@supports (color:color-mix(in lab,red,red)){.bg-darkbg\\/50{background-color:color-mix(in oklab,var(--color-darkbg)50%,transparent)}}.bg-darkbg\\/70{background-color:var(--color-darkbg)}@supports (color:color-mix(in lab,red,red)){.bg-darkbg\\/70{background-color:color-mix(in oklab,var(--color-darkbg)70%,transparent)}}.bg-darkborderc{background-color:var(--color-darkborderc)}.bg-darkbutton{background-color:var(--color-darkbutton)}.bg-emerald-600{background-color:var(--color-emerald-600)}.bg-emerald-900\\/60{background-color:#004e3b99}@supports (color:color-mix(in lab,red,red)){.bg-emerald-900\\/60{background-color:color-mix(in oklab,var(--color-emerald-900)60%,transparent)}}.bg-gray-100{background-color:var(--color-gray-100)}.bg-gray-200{background-color:var(--color-gray-200)}.bg-gray-200\\/50{background-color:#e5e7eb80}@supports (color:color-mix(in lab,red,red)){.bg-gray-200\\/50{background-color:color-mix(in oklab,var(--color-gray-200)50%,transparent)}}.bg-gray-500{background-color:var(--color-gray-500)}.bg-gray-600{background-color:var(--color-gray-600)}.bg-gray-700{background-color:var(--color-gray-700)}.bg-gray-800{background-color:var(--color-gray-800)}.bg-gray-900{background-color:var(--color-gray-900)}.bg-green-500{background-color:var(--color-green-500)}.bg-green-500\\/10{background-color:#00c7581a}@supports (color:color-mix(in lab,red,red)){.bg-green-500\\/10{background-color:color-mix(in oklab,var(--color-green-500)10%,transparent)}}.bg-green-500\\/15{background-color:#00c75826}@supports (color:color-mix(in lab,red,red)){.bg-green-500\\/15{background-color:color-mix(in oklab,var(--color-green-500)15%,transparent)}}.bg-green-500\\/20{background-color:#00c75833}@supports (color:color-mix(in lab,red,red)){.bg-green-500\\/20{background-color:color-mix(in oklab,var(--color-green-500)20%,transparent)}}.bg-green-500\\/70{background-color:#00c758b3}@supports (color:color-mix(in lab,red,red)){.bg-green-500\\/70{background-color:color-mix(in oklab,var(--color-green-500)70%,transparent)}}.bg-green-600{background-color:var(--color-green-600)}.bg-green-700{background-color:var(--color-green-700)}.bg-green-700\\/20{background-color:#00813833}@supports (color:color-mix(in lab,red,red)){.bg-green-700\\/20{background-color:color-mix(in oklab,var(--color-green-700)20%,transparent)}}.bg-green-700\\/50{background-color:#00813880}@supports (color:color-mix(in lab,red,red)){.bg-green-700\\/50{background-color:color-mix(in oklab,var(--color-green-700)50%,transparent)}}.bg-green-900{background-color:var(--color-green-900)}.bg-green-900\\/70{background-color:#0d542bb3}@supports (color:color-mix(in lab,red,red)){.bg-green-900\\/70{background-color:color-mix(in oklab,var(--color-green-900)70%,transparent)}}.bg-indigo-400{background-color:var(--color-indigo-400)}.bg-indigo-600{background-color:var(--color-indigo-600)}.bg-indigo-700\\/20{background-color:#432dd733}@supports (color:color-mix(in lab,red,red)){.bg-indigo-700\\/20{background-color:color-mix(in oklab,var(--color-indigo-700)20%,transparent)}}.bg-indigo-700\\/50{background-color:#432dd780}@supports (color:color-mix(in lab,red,red)){.bg-indigo-700\\/50{background-color:color-mix(in oklab,var(--color-indigo-700)50%,transparent)}}.bg-indigo-900{background-color:var(--color-indigo-900)}.bg-indigo-900\\/60{background-color:#312c8599}@supports (color:color-mix(in lab,red,red)){.bg-indigo-900\\/60{background-color:color-mix(in oklab,var(--color-indigo-900)60%,transparent)}}.bg-orange-800{background-color:var(--color-orange-800)}.bg-pink-700\\/20{background-color:#c4005c33}@supports (color:color-mix(in lab,red,red)){.bg-pink-700\\/20{background-color:color-mix(in oklab,var(--color-pink-700)20%,transparent)}}.bg-pink-700\\/50{background-color:#c4005c80}@supports (color:color-mix(in lab,red,red)){.bg-pink-700\\/50{background-color:color-mix(in oklab,var(--color-pink-700)50%,transparent)}}.bg-pink-900{background-color:var(--color-pink-900)}.bg-primary-600{background-color:var(--color-primary-600)}.bg-purple-700\\/20{background-color:#8200da33}@supports (color:color-mix(in lab,red,red)){.bg-purple-700\\/20{background-color:color-mix(in oklab,var(--color-purple-700)20%,transparent)}}.bg-purple-700\\/50{background-color:#8200da80}@supports (color:color-mix(in lab,red,red)){.bg-purple-700\\/50{background-color:color-mix(in oklab,var(--color-purple-700)50%,transparent)}}.bg-purple-900{background-color:var(--color-purple-900)}.bg-purple-900\\/70{background-color:#59168bb3}@supports (color:color-mix(in lab,red,red)){.bg-purple-900\\/70{background-color:color-mix(in oklab,var(--color-purple-900)70%,transparent)}}.bg-red-500{background-color:var(--color-red-500)}.bg-red-500\\/10{background-color:#fb2c361a}@supports (color:color-mix(in lab,red,red)){.bg-red-500\\/10{background-color:color-mix(in oklab,var(--color-red-500)10%,transparent)}}.bg-red-500\\/15{background-color:#fb2c3626}@supports (color:color-mix(in lab,red,red)){.bg-red-500\\/15{background-color:color-mix(in oklab,var(--color-red-500)15%,transparent)}}.bg-red-500\\/20{background-color:#fb2c3633}@supports (color:color-mix(in lab,red,red)){.bg-red-500\\/20{background-color:color-mix(in oklab,var(--color-red-500)20%,transparent)}}.bg-red-600{background-color:var(--color-red-600)}.bg-red-600\\/80{background-color:#e40014cc}@supports (color:color-mix(in lab,red,red)){.bg-red-600\\/80{background-color:color-mix(in oklab,var(--color-red-600)80%,transparent)}}.bg-red-700{background-color:var(--color-red-700)}.bg-red-700\\/20{background-color:#bf000f33}@supports (color:color-mix(in lab,red,red)){.bg-red-700\\/20{background-color:color-mix(in oklab,var(--color-red-700)20%,transparent)}}.bg-red-700\\/50{background-color:#bf000f80}@supports (color:color-mix(in lab,red,red)){.bg-red-700\\/50{background-color:color-mix(in oklab,var(--color-red-700)50%,transparent)}}.bg-red-800{background-color:var(--color-red-800)}.bg-red-900{background-color:var(--color-red-900)}.bg-selected{background-color:var(--color-selected)}.bg-slate-500{background-color:var(--color-slate-500)}.bg-slate-700{background-color:var(--color-slate-700)}.bg-stone-900{background-color:var(--color-stone-900)}.bg-textcolor\\/5{background-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.bg-textcolor\\/5{background-color:color-mix(in oklab,var(--color-textcolor)5%,transparent)}}.bg-textcolor\\/10{background-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.bg-textcolor\\/10{background-color:color-mix(in oklab,var(--color-textcolor)10%,transparent)}}.bg-textcolor\\/15{background-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.bg-textcolor\\/15{background-color:color-mix(in oklab,var(--color-textcolor)15%,transparent)}}.bg-textcolor2{background-color:var(--color-textcolor2)}.bg-transparent{background-color:#0000}.bg-white{background-color:var(--color-white)}.bg-white\\/10{background-color:#ffffff1a}@supports (color:color-mix(in lab,red,red)){.bg-white\\/10{background-color:color-mix(in oklab,var(--color-white)10%,transparent)}}.bg-yellow-100{background-color:var(--color-yellow-100)}.bg-yellow-600{background-color:var(--color-yellow-600)}.bg-yellow-700\\/20{background-color:#a3610033}@supports (color:color-mix(in lab,red,red)){.bg-yellow-700\\/20{background-color:color-mix(in oklab,var(--color-yellow-700)20%,transparent)}}.bg-yellow-700\\/50{background-color:#a3610080}@supports (color:color-mix(in lab,red,red)){.bg-yellow-700\\/50{background-color:color-mix(in oklab,var(--color-yellow-700)50%,transparent)}}.bg-yellow-900{background-color:var(--color-yellow-900)}.bg-yellow-900\\/70{background-color:#733e0ab3}@supports (color:color-mix(in lab,red,red)){.bg-yellow-900\\/70{background-color:color-mix(in oklab,var(--color-yellow-900)70%,transparent)}}.bg-zinc-600{background-color:var(--color-zinc-600)}.bg-zinc-700{background-color:var(--color-zinc-700)}.bg-zinc-700\\/40{background-color:#3f3f4666}@supports (color:color-mix(in lab,red,red)){.bg-zinc-700\\/40{background-color:color-mix(in oklab,var(--color-zinc-700)40%,transparent)}}.bg-zinc-700\\/65{background-color:#3f3f46a6}@supports (color:color-mix(in lab,red,red)){.bg-zinc-700\\/65{background-color:color-mix(in oklab,var(--color-zinc-700)65%,transparent)}}.bg-zinc-800{background-color:var(--color-zinc-800)}.bg-zinc-800\\/50{background-color:#27272a80}@supports (color:color-mix(in lab,red,red)){.bg-zinc-800\\/50{background-color:color-mix(in oklab,var(--color-zinc-800)50%,transparent)}}.bg-zinc-900{background-color:var(--color-zinc-900)}.bg-linear-to-b{--tw-gradient-position:to bottom}@supports (background-image:linear-gradient(in lab,red,red)){.bg-linear-to-b{--tw-gradient-position:to bottom in oklab}}.bg-linear-to-b{background-image:linear-gradient(var(--tw-gradient-stops))}.bg-linear-to-br{--tw-gradient-position:to bottom right}@supports (background-image:linear-gradient(in lab,red,red)){.bg-linear-to-br{--tw-gradient-position:to bottom right in oklab}}.bg-linear-to-br{background-image:linear-gradient(var(--tw-gradient-stops))}.bg-linear-to-r{--tw-gradient-position:to right}@supports (background-image:linear-gradient(in lab,red,red)){.bg-linear-to-r{--tw-gradient-position:to right in oklab}}.bg-linear-to-r{background-image:linear-gradient(var(--tw-gradient-stops))}.bg-\\[linear-gradient\\(135deg\\,rgba\\(255\\,255\\,255\\,0\\.06\\)_0\\,rgba\\(255\\,255\\,255\\,0\\.06\\)_10px\\,rgba\\(255\\,255\\,255\\,0\\.02\\)_10px\\,rgba\\(255\\,255\\,255\\,0\\.02\\)_20px\\)\\]{background-image:linear-gradient(135deg,#ffffff0f 0 10px,#ffffff05 10px 20px)}.from-blue-500{--tw-gradient-from:var(--color-blue-500);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position),var(--tw-gradient-from)var(--tw-gradient-from-position),var(--tw-gradient-to)var(--tw-gradient-to-position))}.from-gray-100{--tw-gradient-from:var(--color-gray-100);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position),var(--tw-gradient-from)var(--tw-gradient-from-position),var(--tw-gradient-to)var(--tw-gradient-to-position))}.from-gray-200{--tw-gradient-from:var(--color-gray-200);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position),var(--tw-gradient-from)var(--tw-gradient-from-position),var(--tw-gradient-to)var(--tw-gradient-to-position))}.to-gray-200{--tw-gradient-to:var(--color-gray-200);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position),var(--tw-gradient-from)var(--tw-gradient-from-position),var(--tw-gradient-to)var(--tw-gradient-to-position))}.to-gray-300{--tw-gradient-to:var(--color-gray-300);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position),var(--tw-gradient-from)var(--tw-gradient-from-position),var(--tw-gradient-to)var(--tw-gradient-to-position))}.to-purple-800{--tw-gradient-to:var(--color-purple-800);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position),var(--tw-gradient-from)var(--tw-gradient-from-position),var(--tw-gradient-to)var(--tw-gradient-to-position))}.bg-\\[length\\:20px_20px\\]{background-size:20px 20px}.bg-center{background-position:50%}.bg-top{background-position:top}.object-contain{object-fit:contain}.object-cover{object-fit:cover}.object-top{object-position:top}.p-0{padding:calc(var(--spacing)*0)}.p-1{padding:calc(var(--spacing)*1)}.p-1\\.5{padding:calc(var(--spacing)*1.5)}.p-2{padding:calc(var(--spacing)*2)}.p-2\\.5{padding:calc(var(--spacing)*2.5)}.p-3{padding:calc(var(--spacing)*3)}.p-4{padding:calc(var(--spacing)*4)}.p-5{padding:calc(var(--spacing)*5)}.p-6{padding:calc(var(--spacing)*6)}.p-px{padding:1px}.px-0{padding-inline:calc(var(--spacing)*0)}.px-0\\.5{padding-inline:calc(var(--spacing)*.5)}.px-1{padding-inline:calc(var(--spacing)*1)}.px-1\\.5{padding-inline:calc(var(--spacing)*1.5)}.px-2{padding-inline:calc(var(--spacing)*2)}.px-2\\.5{padding-inline:calc(var(--spacing)*2.5)}.px-3{padding-inline:calc(var(--spacing)*3)}.px-3\\.5{padding-inline:calc(var(--spacing)*3.5)}.px-4{padding-inline:calc(var(--spacing)*4)}.px-5{padding-inline:calc(var(--spacing)*5)}.px-6{padding-inline:calc(var(--spacing)*6)}.px-8{padding-inline:calc(var(--spacing)*8)}.py-0\\.5{padding-block:calc(var(--spacing)*.5)}.py-1{padding-block:calc(var(--spacing)*1)}.py-1\\.5{padding-block:calc(var(--spacing)*1.5)}.py-2{padding-block:calc(var(--spacing)*2)}.py-2\\.5{padding-block:calc(var(--spacing)*2.5)}.py-3{padding-block:calc(var(--spacing)*3)}.py-4{padding-block:calc(var(--spacing)*4)}.py-6{padding-block:calc(var(--spacing)*6)}.py-8{padding-block:calc(var(--spacing)*8)}.py-10{padding-block:calc(var(--spacing)*10)}.py-12{padding-block:calc(var(--spacing)*12)}.pt-2{padding-top:calc(var(--spacing)*2)}.pt-3{padding-top:calc(var(--spacing)*3)}.pt-8{padding-top:calc(var(--spacing)*8)}.pt-\\[4px\\]{padding-top:4px}.pr-0{padding-right:calc(var(--spacing)*0)}.pr-1{padding-right:calc(var(--spacing)*1)}.pr-2{padding-right:calc(var(--spacing)*2)}.pr-3{padding-right:calc(var(--spacing)*3)}.pb-0{padding-bottom:calc(var(--spacing)*0)}.pb-2{padding-bottom:calc(var(--spacing)*2)}.pb-\\[2px\\]{padding-bottom:2px}.pl-2{padding-left:calc(var(--spacing)*2)}.pl-3{padding-left:calc(var(--spacing)*3)}.pl-7{padding-left:calc(var(--spacing)*7)}.text-center{text-align:center}.text-left{text-align:left}.text-right{text-align:right}.text-start{text-align:start}.align-middle{vertical-align:middle}.font-mono{font-family:var(--font-mono)}.text-2xl{font-size:var(--text-2xl);line-height:var(--tw-leading,var(--text-2xl--line-height))}.text-3xl{font-size:var(--text-3xl);line-height:var(--tw-leading,var(--text-3xl--line-height))}.text-4xl{font-size:var(--text-4xl);line-height:var(--tw-leading,var(--text-4xl--line-height))}.text-6xl{font-size:var(--text-6xl);line-height:var(--tw-leading,var(--text-6xl--line-height))}.text-base{font-size:var(--text-base);line-height:var(--tw-leading,var(--text-base--line-height))}.text-lg{font-size:var(--text-lg);line-height:var(--tw-leading,var(--text-lg--line-height))}.text-sm{font-size:var(--text-sm);line-height:var(--tw-leading,var(--text-sm--line-height))}.text-xl{font-size:var(--text-xl);line-height:var(--tw-leading,var(--text-xl--line-height))}.text-xs{font-size:var(--text-xs);line-height:var(--tw-leading,var(--text-xs--line-height))}.text-\\[0\\.6rem\\]{font-size:.6rem}.text-\\[10px\\]{font-size:10px}.text-\\[11px\\]{font-size:11px}.leading-5{--tw-leading:calc(var(--spacing)*5);line-height:calc(var(--spacing)*5)}.leading-none{--tw-leading:1;line-height:1}.leading-relaxed{--tw-leading:var(--leading-relaxed);line-height:var(--leading-relaxed)}.leading-snug{--tw-leading:var(--leading-snug);line-height:var(--leading-snug)}.leading-tight{--tw-leading:var(--leading-tight);line-height:var(--leading-tight)}.font-black{--tw-font-weight:var(--font-weight-black);font-weight:var(--font-weight-black)}.font-bold{--tw-font-weight:var(--font-weight-bold);font-weight:var(--font-weight-bold)}.font-extralight{--tw-font-weight:var(--font-weight-extralight);font-weight:var(--font-weight-extralight)}.font-light{--tw-font-weight:var(--font-weight-light);font-weight:var(--font-weight-light)}.font-medium{--tw-font-weight:var(--font-weight-medium);font-weight:var(--font-weight-medium)}.font-semibold{--tw-font-weight:var(--font-weight-semibold);font-weight:var(--font-weight-semibold)}.tracking-wide{--tw-tracking:var(--tracking-wide);letter-spacing:var(--tracking-wide)}.tracking-wider{--tw-tracking:var(--tracking-wider);letter-spacing:var(--tracking-wider)}.text-nowrap{text-wrap:nowrap}.text-wrap{text-wrap:wrap}.wrap-break-word{overflow-wrap:break-word}.break-all{word-break:break-all}.text-ellipsis{text-overflow:ellipsis}.hyphens-auto{-webkit-hyphens:auto;hyphens:auto}.whitespace-normal{white-space:normal}.whitespace-nowrap{white-space:nowrap}.whitespace-pre-wrap{white-space:pre-wrap}.text-\\[\\#bbbbbb\\]{color:#bbb}.text-amber-400{color:var(--color-amber-400)}.text-amber-500{color:var(--color-amber-500)}.text-black{color:var(--color-black)}.text-blue-200{color:var(--color-blue-200)}.text-blue-300{color:var(--color-blue-300)}.text-blue-400{color:var(--color-blue-400)}.text-blue-500{color:var(--color-blue-500)}.text-blue-600{color:var(--color-blue-600)}.text-borderc{color:var(--color-borderc)}.text-cyan-500{color:var(--color-cyan-500)}.text-draculared{color:var(--color-draculared)}.text-emerald-400{color:var(--color-emerald-400)}.text-emerald-600{color:var(--color-emerald-600)}.text-gray-100{color:var(--color-gray-100)}.text-gray-200{color:var(--color-gray-200)}.text-gray-300{color:var(--color-gray-300)}.text-gray-400{color:var(--color-gray-400)}.text-gray-500{color:var(--color-gray-500)}.text-gray-600{color:var(--color-gray-600)}.text-gray-800{color:var(--color-gray-800)}.text-green-200{color:var(--color-green-200)}.text-green-200\\/90{color:#b9f8cfe6}@supports (color:color-mix(in lab,red,red)){.text-green-200\\/90{color:color-mix(in oklab,var(--color-green-200)90%,transparent)}}.text-green-300{color:var(--color-green-300)}.text-green-400{color:var(--color-green-400)}.text-green-500{color:var(--color-green-500)}.text-green-600{color:var(--color-green-600)}.text-green-700{color:var(--color-green-700)}.text-indigo-400{color:var(--color-indigo-400)}.text-neutral-50{color:var(--color-neutral-50)}.text-orange-400{color:var(--color-orange-400)}.text-purple-200{color:var(--color-purple-200)}.text-purple-500{color:var(--color-purple-500)}.text-red-200\\/90{color:#ffcacae6}@supports (color:color-mix(in lab,red,red)){.text-red-200\\/90{color:color-mix(in oklab,var(--color-red-200)90%,transparent)}}.text-red-300{color:var(--color-red-300)}.text-red-400{color:var(--color-red-400)}.text-red-500{color:var(--color-red-500)}.text-red-700{color:var(--color-red-700)}.text-textcolor,.text-textcolor\\/20{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.text-textcolor\\/20{color:color-mix(in oklab,var(--color-textcolor)20%,transparent)}}.text-textcolor\\/30{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.text-textcolor\\/30{color:color-mix(in oklab,var(--color-textcolor)30%,transparent)}}.text-textcolor\\/40{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.text-textcolor\\/40{color:color-mix(in oklab,var(--color-textcolor)40%,transparent)}}.text-textcolor\\/50{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.text-textcolor\\/50{color:color-mix(in oklab,var(--color-textcolor)50%,transparent)}}.text-textcolor\\/60{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.text-textcolor\\/60{color:color-mix(in oklab,var(--color-textcolor)60%,transparent)}}.text-textcolor\\/70{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.text-textcolor\\/70{color:color-mix(in oklab,var(--color-textcolor)70%,transparent)}}.text-textcolor\\/80{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.text-textcolor\\/80{color:color-mix(in oklab,var(--color-textcolor)80%,transparent)}}.text-textcolor\\/90{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.text-textcolor\\/90{color:color-mix(in oklab,var(--color-textcolor)90%,transparent)}}.text-textcolor2,.text-textcolor2\\/40{color:var(--color-textcolor2)}@supports (color:color-mix(in lab,red,red)){.text-textcolor2\\/40{color:color-mix(in oklab,var(--color-textcolor2)40%,transparent)}}.text-textcolor2\\/50{color:var(--color-textcolor2)}@supports (color:color-mix(in lab,red,red)){.text-textcolor2\\/50{color:color-mix(in oklab,var(--color-textcolor2)50%,transparent)}}.text-textcolor2\\/60{color:var(--color-textcolor2)}@supports (color:color-mix(in lab,red,red)){.text-textcolor2\\/60{color:color-mix(in oklab,var(--color-textcolor2)60%,transparent)}}.text-textcolor2\\/70{color:var(--color-textcolor2)}@supports (color:color-mix(in lab,red,red)){.text-textcolor2\\/70{color:color-mix(in oklab,var(--color-textcolor2)70%,transparent)}}.text-textcolor2\\/80{color:var(--color-textcolor2)}@supports (color:color-mix(in lab,red,red)){.text-textcolor2\\/80{color:color-mix(in oklab,var(--color-textcolor2)80%,transparent)}}.text-transparent{color:#0000}.text-violet-500{color:var(--color-violet-500)}.text-white{color:var(--color-white)}.text-white\\/40{color:#fff6}@supports (color:color-mix(in lab,red,red)){.text-white\\/40{color:color-mix(in oklab,var(--color-white)40%,transparent)}}.text-white\\/50{color:#ffffff80}@supports (color:color-mix(in lab,red,red)){.text-white\\/50{color:color-mix(in oklab,var(--color-white)50%,transparent)}}.text-white\\/70{color:#ffffffb3}@supports (color:color-mix(in lab,red,red)){.text-white\\/70{color:color-mix(in oklab,var(--color-white)70%,transparent)}}.text-white\\/90{color:#ffffffe6}@supports (color:color-mix(in lab,red,red)){.text-white\\/90{color:color-mix(in oklab,var(--color-white)90%,transparent)}}.text-yellow-200{color:var(--color-yellow-200)}.text-yellow-300{color:var(--color-yellow-300)}.text-yellow-400{color:var(--color-yellow-400)}.text-yellow-400\\/70{color:#fac800b3}@supports (color:color-mix(in lab,red,red)){.text-yellow-400\\/70{color:color-mix(in oklab,var(--color-yellow-400)70%,transparent)}}.text-yellow-500{color:var(--color-yellow-500)}.text-yellow-800{color:var(--color-yellow-800)}.text-zinc-100{color:var(--color-zinc-100)}.text-zinc-200{color:var(--color-zinc-200)}.text-zinc-300{color:var(--color-zinc-300)}.text-zinc-400{color:var(--color-zinc-400)}.text-zinc-500{color:var(--color-zinc-500)}.text-zinc-600{color:var(--color-zinc-600)}.capitalize{text-transform:capitalize}.lowercase{text-transform:lowercase}.uppercase{text-transform:uppercase}.italic{font-style:italic}.ordinal{--tw-ordinal:ordinal;font-variant-numeric:var(--tw-ordinal,)var(--tw-slashed-zero,)var(--tw-numeric-figure,)var(--tw-numeric-spacing,)var(--tw-numeric-fraction,)}.overline{text-decoration-line:overline}.underline{text-decoration-line:underline}.placeholder-\\[\\#bbbbbb\\]::placeholder{color:#bbb}.placeholder-white\\/30::placeholder{color:#ffffff4d}@supports (color:color-mix(in lab,red,red)){.placeholder-white\\/30::placeholder{color:color-mix(in oklab,var(--color-white)30%,transparent)}}.placeholder-zinc-500::placeholder{color:var(--color-zinc-500)}.accent-green-500{accent-color:var(--color-green-500)}.opacity-15{opacity:.15}.opacity-20{opacity:.2}.opacity-25{opacity:.25}.opacity-30{opacity:.3}.opacity-40{opacity:.4}.opacity-50{opacity:.5}.opacity-60{opacity:.6}.opacity-70{opacity:.7}.opacity-75{opacity:.75}.shadow{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,#0000001a),0 1px 2px -1px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-2xl{--tw-shadow:0 25px 50px -12px var(--tw-shadow-color,#00000040);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-2xs{--tw-shadow:0 1px var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-lg{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a),0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-md{--tw-shadow:0 4px 6px -1px var(--tw-shadow-color,#0000001a),0 2px 4px -2px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-xl{--tw-shadow:0 20px 25px -5px var(--tw-shadow-color,#0000001a),0 8px 10px -6px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.shadow-xs{--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.ring,.ring-1{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(1px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.ring-2{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(2px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.ring-3{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(3px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.ring-blue-500{--tw-ring-color:var(--color-blue-500)}.ring-red-500{--tw-ring-color:var(--color-red-500)}.ring-white\\/20{--tw-ring-color:#fff3}@supports (color:color-mix(in lab,red,red)){.ring-white\\/20{--tw-ring-color:color-mix(in oklab,var(--color-white)20%,transparent)}}.ring-white\\/50{--tw-ring-color:#ffffff80}@supports (color:color-mix(in lab,red,red)){.ring-white\\/50{--tw-ring-color:color-mix(in oklab,var(--color-white)50%,transparent)}}.ring-zinc-500{--tw-ring-color:var(--color-zinc-500)}.ring-offset-1{--tw-ring-offset-width:1px;--tw-ring-offset-shadow:var(--tw-ring-inset,)0 0 0 var(--tw-ring-offset-width)var(--tw-ring-offset-color)}.ring-offset-bgcolor{--tw-ring-offset-color:var(--color-bgcolor)}.outline-hidden{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.outline-hidden{outline-offset:2px;outline:2px solid #0000}}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.blur{--tw-blur:blur(8px);filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)}.drop-shadow-2xl{--tw-drop-shadow-size:drop-shadow(0 25px 25px var(--tw-drop-shadow-color,#00000026));--tw-drop-shadow:drop-shadow(var(--drop-shadow-2xl));filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)}.drop-shadow-lg{--tw-drop-shadow-size:drop-shadow(0 4px 4px var(--tw-drop-shadow-color,#00000026));--tw-drop-shadow:drop-shadow(var(--drop-shadow-lg));filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)}.grayscale{--tw-grayscale:grayscale(100%);filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)}.invert{--tw-invert:invert(100%);filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)}.filter{filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)}.backdrop-blur{--tw-backdrop-blur:blur(8px);-webkit-backdrop-filter:var(--tw-backdrop-blur,)var(--tw-backdrop-brightness,)var(--tw-backdrop-contrast,)var(--tw-backdrop-grayscale,)var(--tw-backdrop-hue-rotate,)var(--tw-backdrop-invert,)var(--tw-backdrop-opacity,)var(--tw-backdrop-saturate,)var(--tw-backdrop-sepia,);backdrop-filter:var(--tw-backdrop-blur,)var(--tw-backdrop-brightness,)var(--tw-backdrop-contrast,)var(--tw-backdrop-grayscale,)var(--tw-backdrop-hue-rotate,)var(--tw-backdrop-invert,)var(--tw-backdrop-opacity,)var(--tw-backdrop-saturate,)var(--tw-backdrop-sepia,)}.backdrop-blur-sm{--tw-backdrop-blur:blur(var(--blur-sm));-webkit-backdrop-filter:var(--tw-backdrop-blur,)var(--tw-backdrop-brightness,)var(--tw-backdrop-contrast,)var(--tw-backdrop-grayscale,)var(--tw-backdrop-hue-rotate,)var(--tw-backdrop-invert,)var(--tw-backdrop-opacity,)var(--tw-backdrop-saturate,)var(--tw-backdrop-sepia,);backdrop-filter:var(--tw-backdrop-blur,)var(--tw-backdrop-brightness,)var(--tw-backdrop-contrast,)var(--tw-backdrop-grayscale,)var(--tw-backdrop-hue-rotate,)var(--tw-backdrop-invert,)var(--tw-backdrop-opacity,)var(--tw-backdrop-saturate,)var(--tw-backdrop-sepia,)}.backdrop-filter{-webkit-backdrop-filter:var(--tw-backdrop-blur,)var(--tw-backdrop-brightness,)var(--tw-backdrop-contrast,)var(--tw-backdrop-grayscale,)var(--tw-backdrop-hue-rotate,)var(--tw-backdrop-invert,)var(--tw-backdrop-opacity,)var(--tw-backdrop-saturate,)var(--tw-backdrop-sepia,);backdrop-filter:var(--tw-backdrop-blur,)var(--tw-backdrop-brightness,)var(--tw-backdrop-contrast,)var(--tw-backdrop-grayscale,)var(--tw-backdrop-hue-rotate,)var(--tw-backdrop-invert,)var(--tw-backdrop-opacity,)var(--tw-backdrop-saturate,)var(--tw-backdrop-sepia,)}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-\\[width\\]{transition-property:width;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-all{transition-property:all;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-colors{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-shadow{transition-property:box-shadow;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.duration-200{--tw-duration:.2s;transition-duration:.2s}.duration-300{--tw-duration:.3s;transition-duration:.3s}.prose-gray{--tw-prose-body:oklch(37.3% .034 259.733);--tw-prose-headings:oklch(21% .034 264.665);--tw-prose-lead:oklch(44.6% .03 256.802);--tw-prose-links:oklch(21% .034 264.665);--tw-prose-bold:oklch(21% .034 264.665);--tw-prose-counters:oklch(55.1% .027 264.364);--tw-prose-bullets:oklch(87.2% .01 258.338);--tw-prose-hr:oklch(92.8% .006 264.531);--tw-prose-quotes:oklch(21% .034 264.665);--tw-prose-quote-borders:oklch(92.8% .006 264.531);--tw-prose-captions:oklch(55.1% .027 264.364);--tw-prose-kbd:oklch(21% .034 264.665);--tw-prose-kbd-shadows:oklab(21% -.00316127 -.0338527/.1);--tw-prose-code:oklch(21% .034 264.665);--tw-prose-pre-code:oklch(92.8% .006 264.531);--tw-prose-pre-bg:oklch(27.8% .033 256.848);--tw-prose-th-borders:oklch(87.2% .01 258.338);--tw-prose-td-borders:oklch(92.8% .006 264.531);--tw-prose-invert-body:oklch(87.2% .01 258.338);--tw-prose-invert-headings:#fff;--tw-prose-invert-lead:oklch(70.7% .022 261.325);--tw-prose-invert-links:#fff;--tw-prose-invert-bold:#fff;--tw-prose-invert-counters:oklch(70.7% .022 261.325);--tw-prose-invert-bullets:oklch(44.6% .03 256.802);--tw-prose-invert-hr:oklch(37.3% .034 259.733);--tw-prose-invert-quotes:oklch(96.7% .003 264.542);--tw-prose-invert-quote-borders:oklch(37.3% .034 259.733);--tw-prose-invert-captions:oklch(70.7% .022 261.325);--tw-prose-invert-kbd:#fff;--tw-prose-invert-kbd-shadows:#ffffff1a;--tw-prose-invert-code:#fff;--tw-prose-invert-pre-code:oklch(87.2% .01 258.338);--tw-prose-invert-pre-bg:#00000080;--tw-prose-invert-th-borders:oklch(44.6% .03 256.802);--tw-prose-invert-td-borders:oklch(37.3% .034 259.733)}.prose-invert{--tw-prose-body:var(--tw-prose-invert-body);--tw-prose-headings:var(--tw-prose-invert-headings);--tw-prose-lead:var(--tw-prose-invert-lead);--tw-prose-links:var(--tw-prose-invert-links);--tw-prose-bold:var(--tw-prose-invert-bold);--tw-prose-counters:var(--tw-prose-invert-counters);--tw-prose-bullets:var(--tw-prose-invert-bullets);--tw-prose-hr:var(--tw-prose-invert-hr);--tw-prose-quotes:var(--tw-prose-invert-quotes);--tw-prose-quote-borders:var(--tw-prose-invert-quote-borders);--tw-prose-captions:var(--tw-prose-invert-captions);--tw-prose-kbd:var(--tw-prose-invert-kbd);--tw-prose-kbd-shadows:var(--tw-prose-invert-kbd-shadows);--tw-prose-code:var(--tw-prose-invert-code);--tw-prose-pre-code:var(--tw-prose-invert-pre-code);--tw-prose-pre-bg:var(--tw-prose-invert-pre-bg);--tw-prose-th-borders:var(--tw-prose-invert-th-borders);--tw-prose-td-borders:var(--tw-prose-invert-td-borders)}.outline-none{--tw-outline-style:none;outline-style:none}.select-none{-webkit-user-select:none;user-select:none}.\\[animation-delay\\:0ms\\]{animation-delay:0s}.\\[animation-delay\\:150ms\\]{animation-delay:.15s}.\\[animation-delay\\:300ms\\]{animation-delay:.3s}.\\[key\\:string\\]{key:string}.\\[method\\:string\\]{method:string}@media(hover:hover){.group-hover\\:h-\\[10px\\]:is(:where(.group):hover *){height:10px}.group-hover\\:bg-white:is(:where(.group):hover *){background-color:var(--color-white)}.group-hover\\:bg-white\\/10:is(:where(.group):hover *){background-color:#ffffff1a}@supports (color:color-mix(in lab,red,red)){.group-hover\\:bg-white\\/10:is(:where(.group):hover *){background-color:color-mix(in oklab,var(--color-white)10%,transparent)}}.group-hover\\:outline:is(:where(.group):hover *),.group-hover\\:outline-1:is(:where(.group):hover *){outline-style:var(--tw-outline-style);outline-width:1px}.group-hover\\:outline-white\\/15:is(:where(.group):hover *){outline-color:#ffffff26}@supports (color:color-mix(in lab,red,red)){.group-hover\\:outline-white\\/15:is(:where(.group):hover *){outline-color:color-mix(in oklab,var(--color-white)15%,transparent)}}}.peer-focus\\:block:is(:where(.peer):focus~*){display:block}.peer-focus\\:border-textcolor:is(:where(.peer):focus~*){border-color:var(--color-textcolor)}.placeholder\\:text-sm::placeholder{font-size:var(--text-sm);line-height:var(--tw-leading,var(--text-sm--line-height))}.placeholder\\:text-textcolor\\/25::placeholder{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.placeholder\\:text-textcolor\\/25::placeholder{color:color-mix(in oklab,var(--color-textcolor)25%,transparent)}}.first\\:mt-0:first-child{margin-top:calc(var(--spacing)*0)}.first\\:border-0:first-child{border-style:var(--tw-border-style);border-width:0}.first\\:pt-0:first-child{padding-top:calc(var(--spacing)*0)}.last\\:mb-0:last-child{margin-bottom:calc(var(--spacing)*0)}.last\\:border-0:last-child{border-style:var(--tw-border-style);border-width:0}.last\\:pb-0:last-child{padding-bottom:calc(var(--spacing)*0)}.focus-within\\:z-40:focus-within{z-index:40}.focus-within\\:border-borderc:focus-within{border-color:var(--color-borderc)}.focus-within\\:text-textcolor:focus-within{color:var(--color-textcolor)}.focus-within\\:ring-2:focus-within{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(2px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.focus-within\\:ring-borderc:focus-within{--tw-ring-color:var(--color-borderc)}.focus-within\\:outline-hidden:focus-within{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.focus-within\\:outline-hidden:focus-within{outline-offset:2px;outline:2px solid #0000}}@media(hover:hover){.hover\\:block:hover{display:block}.hover\\:cursor-grab:hover{cursor:grab}.hover\\:border-blue-500:hover{border-color:var(--color-blue-500)}.hover\\:border-gray-300:hover{border-color:var(--color-gray-300)}.hover\\:border-neutral-200:hover{border-color:var(--color-neutral-200)}.hover\\:border-white\\/40:hover{border-color:#fff6}@supports (color:color-mix(in lab,red,red)){.hover\\:border-white\\/40:hover{border-color:color-mix(in oklab,var(--color-white)40%,transparent)}}.hover\\:bg-bgcolor:hover,.hover\\:bg-bgcolor\\/50:hover{background-color:var(--color-bgcolor)}@supports (color:color-mix(in lab,red,red)){.hover\\:bg-bgcolor\\/50:hover{background-color:color-mix(in oklab,var(--color-bgcolor)50%,transparent)}}.hover\\:bg-black\\/60:hover{background-color:#0009}@supports (color:color-mix(in lab,red,red)){.hover\\:bg-black\\/60:hover{background-color:color-mix(in oklab,var(--color-black)60%,transparent)}}.hover\\:bg-blue-500:hover{background-color:var(--color-blue-500)}.hover\\:bg-blue-600:hover{background-color:var(--color-blue-600)}.hover\\:bg-blue-700:hover{background-color:var(--color-blue-700)}.hover\\:bg-blue-800:hover{background-color:var(--color-blue-800)}.hover\\:bg-danger-500:hover{background-color:var(--color-danger-500)}.hover\\:bg-darkbg:hover{background-color:var(--color-darkbg)}.hover\\:bg-darkbutton:hover{background-color:var(--color-darkbutton)}.hover\\:bg-gray-600:hover{background-color:var(--color-gray-600)}.hover\\:bg-gray-700:hover{background-color:var(--color-gray-700)}.hover\\:bg-green-700:hover{background-color:var(--color-green-700)}.hover\\:bg-indigo-500:hover{background-color:var(--color-indigo-500)}.hover\\:bg-primary-500:hover{background-color:var(--color-primary-500)}.hover\\:bg-red-500:hover{background-color:var(--color-red-500)}.hover\\:bg-red-600:hover{background-color:var(--color-red-600)}.hover\\:bg-red-700:hover{background-color:var(--color-red-700)}.hover\\:bg-selected:hover{background-color:var(--color-selected)}.hover\\:bg-textcolor\\/8:hover{background-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.hover\\:bg-textcolor\\/8:hover{background-color:color-mix(in oklab,var(--color-textcolor)8%,transparent)}}.hover\\:bg-textcolor\\/10:hover{background-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.hover\\:bg-textcolor\\/10:hover{background-color:color-mix(in oklab,var(--color-textcolor)10%,transparent)}}.hover\\:bg-textcolor\\/15:hover{background-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.hover\\:bg-textcolor\\/15:hover{background-color:color-mix(in oklab,var(--color-textcolor)15%,transparent)}}.hover\\:bg-textcolor2:hover{background-color:var(--color-textcolor2)}.hover\\:bg-white\\/10:hover{background-color:#ffffff1a}@supports (color:color-mix(in lab,red,red)){.hover\\:bg-white\\/10:hover{background-color:color-mix(in oklab,var(--color-white)10%,transparent)}}.hover\\:bg-yellow-700:hover{background-color:var(--color-yellow-700)}.hover\\:bg-zinc-500:hover{background-color:var(--color-zinc-500)}.hover\\:bg-zinc-700:hover{background-color:var(--color-zinc-700)}.hover\\:text-amber-600:hover{color:var(--color-amber-600)}.hover\\:text-blue-300:hover{color:var(--color-blue-300)}.hover\\:text-blue-400:hover{color:var(--color-blue-400)}.hover\\:text-blue-500:hover{color:var(--color-blue-500)}.hover\\:text-draculared:hover{color:var(--color-draculared)}.hover\\:text-green-300:hover{color:var(--color-green-300)}.hover\\:text-green-400:hover{color:var(--color-green-400)}.hover\\:text-green-500:hover{color:var(--color-green-500)}.hover\\:text-orange-300:hover{color:var(--color-orange-300)}.hover\\:text-red-300:hover{color:var(--color-red-300)}.hover\\:text-red-400\\/50:hover{color:#ff656880}@supports (color:color-mix(in lab,red,red)){.hover\\:text-red-400\\/50:hover{color:color-mix(in oklab,var(--color-red-400)50%,transparent)}}.hover\\:text-red-500:hover{color:var(--color-red-500)}.hover\\:text-rose-300:hover{color:var(--color-rose-300)}.hover\\:text-textcolor:hover,.hover\\:text-textcolor\\/50:hover{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.hover\\:text-textcolor\\/50:hover{color:color-mix(in oklab,var(--color-textcolor)50%,transparent)}}.hover\\:text-textcolor\\/90:hover{color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.hover\\:text-textcolor\\/90:hover{color:color-mix(in oklab,var(--color-textcolor)90%,transparent)}}.hover\\:text-white\\/70:hover{color:#ffffffb3}@supports (color:color-mix(in lab,red,red)){.hover\\:text-white\\/70:hover{color:color-mix(in oklab,var(--color-white)70%,transparent)}}.hover\\:text-white\\/80:hover{color:#fffc}@supports (color:color-mix(in lab,red,red)){.hover\\:text-white\\/80:hover{color:color-mix(in oklab,var(--color-white)80%,transparent)}}.hover\\:text-yellow-300:hover{color:var(--color-yellow-300)}.hover\\:text-zinc-200:hover{color:var(--color-zinc-200)}.hover\\:underline:hover{text-decoration-line:underline}.hover\\:opacity-70:hover{opacity:.7}.hover\\:opacity-90:hover{opacity:.9}.hover\\:shadow-lg:hover{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a),0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.hover\\:ring-1:hover{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(1px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.hover\\:ring-2:hover{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(2px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.hover\\:ring-3:hover{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(3px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.hover\\:ring-darkbutton:hover{--tw-ring-color:var(--color-darkbutton)}}.focus\\:border-blue-500:focus{border-color:var(--color-blue-500)}.focus\\:border-borderc:focus{border-color:var(--color-borderc)}.focus\\:border-indigo-400:focus{border-color:var(--color-indigo-400)}.focus\\:border-textcolor:focus,.focus\\:border-textcolor\\/25:focus{border-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.focus\\:border-textcolor\\/25:focus{border-color:color-mix(in oklab,var(--color-textcolor)25%,transparent)}}.focus\\:bg-bgcolor:focus{background-color:var(--color-bgcolor)}.focus\\:bg-selected:focus{background-color:var(--color-selected)}.focus\\:bg-textcolor\\/10:focus{background-color:var(--color-textcolor)}@supports (color:color-mix(in lab,red,red)){.focus\\:bg-textcolor\\/10:focus{background-color:color-mix(in oklab,var(--color-textcolor)10%,transparent)}}.focus\\:bg-white\\/15:focus{background-color:#ffffff26}@supports (color:color-mix(in lab,red,red)){.focus\\:bg-white\\/15:focus{background-color:color-mix(in oklab,var(--color-white)15%,transparent)}}.focus\\:text-draculared:focus{color:var(--color-draculared)}.focus\\:ring-2:focus{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(2px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.focus\\:ring-blue-500:focus{--tw-ring-color:var(--color-blue-500)}.focus\\:ring-borderc:focus{--tw-ring-color:var(--color-borderc)}.focus\\:ring-red-600:focus{--tw-ring-color:var(--color-red-600)}.focus\\:ring-selected:focus{--tw-ring-color:var(--color-selected)}.focus\\:ring-zinc-500:focus{--tw-ring-color:var(--color-zinc-500)}.focus\\:outline-hidden:focus{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.focus\\:outline-hidden:focus{outline-offset:2px;outline:2px solid #0000}}.focus-visible\\:outline-2:focus-visible{outline-style:var(--tw-outline-style);outline-width:2px}.focus-visible\\:outline-offset-2:focus-visible{outline-offset:2px}.focus-visible\\:outline-danger-600:focus-visible{outline-color:var(--color-danger-600)}.focus-visible\\:outline-primary-600:focus-visible{outline-color:var(--color-primary-600)}.focus-visible\\:outline-solid:focus-visible{--tw-outline-style:solid;outline-style:solid}.active\\:cursor-grabbing:active{cursor:grabbing}.disabled\\:pointer-events-none:disabled{pointer-events:none}.disabled\\:cursor-not-allowed:disabled{cursor:not-allowed}.disabled\\:opacity-30:disabled{opacity:.3}.disabled\\:opacity-40:disabled{opacity:.4}.disabled\\:opacity-50:disabled{opacity:.5}@media(min-width:40rem){.sm\\:my-2{margin-block:calc(var(--spacing)*2)}.sm\\:mt-4{margin-top:calc(var(--spacing)*4)}.sm\\:mr-0{margin-right:calc(var(--spacing)*0)}.sm\\:mb-0{margin-bottom:calc(var(--spacing)*0)}.sm\\:mb-4{margin-bottom:calc(var(--spacing)*4)}.sm\\:ml-0{margin-left:calc(var(--spacing)*0)}.sm\\:inline{display:inline}.sm\\:h-28{height:calc(var(--spacing)*28)}.sm\\:h-96{height:var(--height-96)}.sm\\:min-h-56{min-height:calc(var(--spacing)*56)}.sm\\:w-28{width:calc(var(--spacing)*28)}.sm\\:w-72{width:calc(var(--spacing)*72)}.sm\\:min-w-72{min-width:calc(var(--spacing)*72)}.sm\\:flex-row{flex-direction:row}.sm\\:flex-wrap{flex-wrap:wrap}.sm\\:items-center{align-items:center}.sm\\:justify-center{justify-content:center}.sm\\:gap-1{gap:calc(var(--spacing)*1)}.sm\\:gap-4{gap:calc(var(--spacing)*4)}.sm\\:p-2{padding:calc(var(--spacing)*2)}.sm\\:p-3{padding:calc(var(--spacing)*3)}.sm\\:p-4{padding:calc(var(--spacing)*4)}.sm\\:p-6{padding:calc(var(--spacing)*6)}.sm\\:px-3{padding-inline:calc(var(--spacing)*3)}.sm\\:px-4{padding-inline:calc(var(--spacing)*4)}.sm\\:py-2{padding-block:calc(var(--spacing)*2)}.sm\\:py-3{padding-block:calc(var(--spacing)*3)}.sm\\:text-2xl{font-size:var(--text-2xl);line-height:var(--tw-leading,var(--text-2xl--line-height))}}@media(min-width:48rem){.md\\:col-span-2{grid-column:span 2/span 2}.md\\:mt-0{margin-top:calc(var(--spacing)*0)}.md\\:block{display:block}.md\\:flex{display:flex}.md\\:hidden{display:none}.md\\:h-auto{height:auto}.md\\:h-full{height:100%}.md\\:min-h-0{min-height:calc(var(--spacing)*0)}.md\\:w-48{width:calc(var(--spacing)*48)}.md\\:w-96{width:calc(var(--spacing)*96)}.md\\:min-w-138{min-width:var(--min-width-138)}.md\\:flex-1{flex:1}.md\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.md\\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.md\\:flex-col{flex-direction:column}.md\\:flex-row{flex-direction:row}.md\\:overflow-y-auto{overflow-y:auto}.md\\:overflow-y-visible{overflow-y:visible}.md\\:border-r{border-right-style:var(--tw-border-style);border-right-width:1px}.md\\:border-b-0{border-bottom-style:var(--tw-border-style);border-bottom-width:0}.md\\:p-4{padding:calc(var(--spacing)*4)}.md\\:text-lg{font-size:var(--text-lg);line-height:var(--tw-leading,var(--text-lg--line-height))}}@media(min-width:64rem){.lg\\:w-96{width:calc(var(--spacing)*96)}.lg\\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.lg\\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}@media(hover:hover){.lg\\:hover\\:text-green-500:hover{color:var(--color-green-500)}}}}body{background-color:var(--risu-theme-bgcolor);margin:0;padding:0;overflow:hidden}:root{--FontColorStandard:#fafafa;--FontColorBold:#e5e5e5;--FontColorItalic:#8c8d93;--FontColorItalicBold:#8c8d93;--FontColorQuote1:#8c8d93;--FontColorQuote2:#8c8d93;--risu-animation-speed:.2s;--risu-theme-bgcolor:#282a36;--risu-theme-darkbg:#21222c;--risu-theme-borderc:#6272a4;--risu-theme-selected:#44475a;--risu-theme-draculared:#f55;--risu-theme-textcolor:#f5f5f5;--risu-theme-textcolor2:#64748b;--risu-theme-darkborderc:#4b5563;--risu-theme-darkbutton:#374151;--risu-height-size:100%;--risu-font-family:Arial,sans-serif,serif;--risu-theme-neutral-50:#f9fafb;--risu-theme-neutral-100:#f3f4f6;--risu-theme-neutral-200:#e5e7eb;--risu-theme-neutral-300:#d1d5db;--risu-theme-neutral-400:#9ca3af;--risu-theme-neutral-500:#6b7280;--risu-theme-neutral-600:#4b5563;--risu-theme-neutral-700:#374151;--risu-theme-neutral-800:#1f2937;--risu-theme-neutral-900:#111827;--risu-theme-primary-50:#eff6ff;--risu-theme-primary-100:#dbeafe;--risu-theme-primary-200:#bfdbfe;--risu-theme-primary-300:#93c5fd;--risu-theme-primary-400:#60a5fa;--risu-theme-primary-500:#3b82f6;--risu-theme-primary-600:#2563eb;--risu-theme-primary-700:#1d4ed8;--risu-theme-primary-800:#1e40af;--risu-theme-primary-900:#1e3a8a;--risu-theme-secondary-50:#f5f3ff;--risu-theme-secondary-100:#ede9fe;--risu-theme-secondary-200:#ddd6fe;--risu-theme-secondary-300:#c4b5fd;--risu-theme-secondary-400:#a78bfa;--risu-theme-secondary-500:#8b5cf6;--risu-theme-secondary-600:#7c3aed;--risu-theme-secondary-700:#6d28d9;--risu-theme-secondary-800:#5b21b6;--risu-theme-secondary-900:#4c1d95;--risu-theme-danger-50:#fef2f2;--risu-theme-danger-100:#fee2e2;--risu-theme-danger-200:#fecaca;--risu-theme-danger-300:#fca5a5;--risu-theme-danger-400:#f87171;--risu-theme-danger-500:#ef4444;--risu-theme-danger-600:#dc2626;--risu-theme-danger-700:#b91c1c;--risu-theme-danger-800:#991b1b;--risu-theme-danger-900:#7f1d1d;--risu-theme-success-50:#f0fdf4;--risu-theme-success-100:#dcfce7;--risu-theme-success-200:#bbf7d0;--risu-theme-success-300:#86efac;--risu-theme-success-400:#4ade80;--risu-theme-success-500:#22c55e;--risu-theme-success-600:#16a34a;--risu-theme-success-700:#15803d;--risu-theme-success-800:#166534;--risu-theme-success-900:#14532d}.x-risu-language-json{white-space:pre-wrap;overflow-x:hidden}html,body{height:var(--risu-height-size)}.chattext p{color:var(--FontColorStandard)}.chattext2 pre{background-color:var(--risu-theme-bgcolor);padding:.5rem;overflow-x:auto}.chattext em{color:var(--FontColorItalic)}.chattext strong{color:var(--FontColorBold)}.chattext strong em,.chattext em strong{color:var(--FontColorItalicBold)}.chattext x-em{color:var(--FontColorItalicBold);font-style:italic;font-weight:700}.chattext mark[risu-mark=quote1]{color:var(--FontColorQuote1);background-color:#0000}.chattext mark[risu-mark=quote2]{color:var(--FontColorQuote2);background-color:#0000}.chattext mark[risu-mark=blockquote1]{border-left:4px solid var(--FontColorQuote1);background-color:#0000}@supports (color:color-mix(in lab,red,red)){.chattext mark[risu-mark=blockquote1]{background-color:color-mix(in srgb,transparent 90%,var(--FontColorQuote1)10%)}}.chattext mark[risu-mark=blockquote1]{color:var(--FontColorQuote1);padding:.5rem 1rem}.chattext mark[risu-mark=blockquote2]{border-left:4px solid var(--FontColorQuote2);background-color:#0000}@supports (color:color-mix(in lab,red,red)){.chattext mark[risu-mark=blockquote2]{background-color:color-mix(in srgb,transparent 90%,var(--FontColorQuote2)10%)}}.chattext mark[risu-mark=blockquote2]{color:var(--FontColorQuote2);padding:.5rem 1rem}.strokeme{color:#000;text-shadow:-1px -1px #fff,1px -1px #fff,-1px 1px #fff,1px 1px #fff}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:0 0}::-webkit-scrollbar-thumb{background:#88888880}::-webkit-scrollbar-thumb:hover{background:#55555580}.n-scroll::-webkit-scrollbar-thumb{visibility:hidden;opacity:0;transition:visibility .5s,opacity .5s linear}.n-scroll:hover::-webkit-scrollbar-thumb{visibility:visible;opacity:1}.n-scroll:focus::-webkit-scrollbar-thumb{visibility:visible;opacity:1}*{font-family:var(--risu-font-family)}.chattext p:first-child{margin-top:.3rem}#app{width:100%;height:100%}.bgc{border-top:1px solid #6272a4b3}.text-bordered{-webkit-text-stroke:1px #000}.x-risu-risu-file{border:1px solid var(--risu-theme-selected);color:var(--FontColorStandard);white-space:nowrap;text-overflow:ellipsis;border-radius:.5rem;min-width:0;max-width:20rem;padding:1rem;overflow:hidden}.x-risu-button-default{border-radius:var(--radius-md);border-style:var(--tw-border-style);border-width:1px;border-color:var(--color-darkborderc);background-color:var(--color-darkbutton);padding-inline:calc(var(--spacing)*4);padding-block:calc(var(--spacing)*2);color:var(--color-textcolor);--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow);transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration));--tw-duration:.2s;transition-duration:.2s}@media(hover:hover){.x-risu-button-default:hover{background-color:var(--color-borderc)}}.x-risu-button-default:focus{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(2px + var(--tw-ring-offset-width))var(--tw-ring-color,#3b82f680);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow);--tw-ring-color:var(--color-borderc);--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.x-risu-button-default:focus{outline-offset:2px;outline:2px solid #0000}}.loadmove{border:.4rem solid #0000;border-top:.4rem solid var(--risu-theme-borderc);border-left:.4rem solid var(--risu-theme-borderc);border-radius:50%;width:1rem;height:1rem;transition:border-color .5s;animation:1s linear infinite spin}.x-risu-risu-comment{min-width:calc(var(--spacing)*0);border-radius:var(--radius-md);border-style:var(--tw-border-style);border-width:1px;border-color:var(--color-darkborderc);background-color:var(--color-darkbg);padding-inline:calc(var(--spacing)*4);padding-block:calc(var(--spacing)*2);color:var(--color-textcolor);--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow);transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration));--tw-duration:.2s;transition-duration:.2s}.x-risu-risu-comment:focus{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.x-risu-risu-comment:focus{outline-offset:2px;outline:2px solid #0000}}::highlight(cbsnest3){color:var(--color-amber-500)}::highlight(cbsnest2){color:var(--color-green-500)}::highlight(cbsnest1){color:var(--color-blue-500)}::highlight(cbsnest0){color:var(--color-purple-500)}::highlight(cbsnest4){color:var(--color-pink-500)}::highlight(cbsdisplay){color:var(--color-cyan-500)}::highlight(comment){color:var(--risu-theme-textcolor2)}::highlight(decorator){color:var(--risu-theme-draculared)}::highlight(deprecated){color:var(--risu-theme-textcolor2);text-decoration:line-through}.prose pre{background-color:var(--tw-prose-pre-bg);color:var(--tw-prose-pre-code)}.prose :where(pre code) *{font-family:inherit}.prose :where(code):not(:where([class~=not-prose],[class~=not-prose] *)):before,.prose :where(code):not(:where([class~=not-prose],[class~=not-prose] *)):after{content:\"\"}.prose :where(code):not(:where([class~=not-prose],[class~=not-prose] *)):not(pre code){background-color:var(--tw-prose-pre-bg);color:var(--tw-prose-pre-code);border-radius:.25rem;padding:.125rem .25rem}.x-risu-risu-inlay-image{justify-content:center;width:100%;display:flex}.x-risu-risu-inlay-image img{width:100%;max-width:calc(var(--spacing)*80);border-radius:var(--radius-lg)}.x-risu-risu-inlay-image img:focus{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.x-risu-risu-inlay-image img:focus{outline-offset:2px;outline:2px solid #0000}}.x-risu-risu-inlay-image video{width:100%;max-width:calc(var(--spacing)*80);border-radius:var(--radius-lg)}.x-risu-risu-inlay-image video:focus{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.x-risu-risu-inlay-image video:focus{outline-offset:2px;outline:2px solid #0000}}.x-risu-risu-inlay-image audio{width:100%;max-width:calc(var(--spacing)*80);border-radius:var(--radius-lg)}.x-risu-risu-inlay-image audio:focus{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.x-risu-risu-inlay-image audio:focus{outline-offset:2px;outline:2px solid #0000}}.x-risu-risu-error{min-width:calc(var(--spacing)*0);border-radius:var(--radius-md);border-style:var(--tw-border-style);border-width:2px;border-color:var(--color-red-700);background-color:var(--color-red-500);padding-inline:calc(var(--spacing)*4);padding-block:calc(var(--spacing)*2);overflow-wrap:break-word;color:var(--color-white);--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow);transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration));--tw-duration:.2s;transition-duration:.2s}.x-risu-risu-error:focus{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.x-risu-risu-error:focus{outline-offset:2px;outline:2px solid #0000}}.x-risu-risu-error h1{margin-bottom:calc(var(--spacing)*2);font-size:var(--text-xl);line-height:var(--tw-leading,var(--text-xl--line-height))}.z-100{z-index:100}.saving-animation{background-size:200%;animation:1s infinite saving-anime}@keyframes saving-anime{0%{background-position:0 0}50%{background-position:100% 100%}to{background-position:0 0}}.flexium{flex-direction:row;justify-content:flex-start;display:flex}.chat-width{word-break:normal;overflow-wrap:anywhere;max-width:calc(100% - .5rem)}.chat-message-container .dyna-icon{display:none}.chat-message-container:first-of-type .dyna-icon{display:block}.x-risu-tool-call{min-width:calc(var(--spacing)*0);border-radius:var(--radius-md);border-style:var(--tw-border-style);border-width:1px;border-color:var(--color-darkborderc);background-color:var(--color-darkbg);padding-inline:calc(var(--spacing)*4);padding-block:calc(var(--spacing)*2);color:var(--color-textcolor);--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow);transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration));--tw-duration:.2s;transition-duration:.2s}.x-risu-tool-call:focus{--tw-outline-style:none;outline-style:none}@media(forced-colors:active){.x-risu-tool-call:focus{outline-offset:2px;outline:2px solid #0000}}.root-loaded-image{border-radius:.5rem;width:calc(100% - 1rem);max-width:20rem;height:auto;margin-left:auto;margin-right:auto;display:block;box-shadow:0 2px 4px #8989891a}.root-loaded-image-dynamic{object-fit:cover;object-position:top;max-height:14rem;transition:max-height .5s}.root-loaded-image-dynamic:hover{max-height:30rem}annotation{display:none}@property --tw-translate-x{syntax:\"*\";inherits:false;initial-value:0}@property --tw-translate-y{syntax:\"*\";inherits:false;initial-value:0}@property --tw-translate-z{syntax:\"*\";inherits:false;initial-value:0}@property --tw-scale-x{syntax:\"*\";inherits:false;initial-value:1}@property --tw-scale-y{syntax:\"*\";inherits:false;initial-value:1}@property --tw-scale-z{syntax:\"*\";inherits:false;initial-value:1}@property --tw-rotate-x{syntax:\"*\";inherits:false}@property --tw-rotate-y{syntax:\"*\";inherits:false}@property --tw-rotate-z{syntax:\"*\";inherits:false}@property --tw-skew-x{syntax:\"*\";inherits:false}@property --tw-skew-y{syntax:\"*\";inherits:false}@property --tw-space-y-reverse{syntax:\"*\";inherits:false;initial-value:0}@property --tw-space-x-reverse{syntax:\"*\";inherits:false;initial-value:0}@property --tw-border-style{syntax:\"*\";inherits:false;initial-value:solid}@property --tw-gradient-position{syntax:\"*\";inherits:false}@property --tw-gradient-from{syntax:\"<color>\";inherits:false;initial-value:#0000}@property --tw-gradient-via{syntax:\"<color>\";inherits:false;initial-value:#0000}@property --tw-gradient-to{syntax:\"<color>\";inherits:false;initial-value:#0000}@property --tw-gradient-stops{syntax:\"*\";inherits:false}@property --tw-gradient-via-stops{syntax:\"*\";inherits:false}@property --tw-gradient-from-position{syntax:\"<length-percentage>\";inherits:false;initial-value:0%}@property --tw-gradient-via-position{syntax:\"<length-percentage>\";inherits:false;initial-value:50%}@property --tw-gradient-to-position{syntax:\"<length-percentage>\";inherits:false;initial-value:100%}@property --tw-leading{syntax:\"*\";inherits:false}@property --tw-font-weight{syntax:\"*\";inherits:false}@property --tw-tracking{syntax:\"*\";inherits:false}@property --tw-ordinal{syntax:\"*\";inherits:false}@property --tw-slashed-zero{syntax:\"*\";inherits:false}@property --tw-numeric-figure{syntax:\"*\";inherits:false}@property --tw-numeric-spacing{syntax:\"*\";inherits:false}@property --tw-numeric-fraction{syntax:\"*\";inherits:false}@property --tw-shadow{syntax:\"*\";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:\"*\";inherits:false}@property --tw-shadow-alpha{syntax:\"<percentage>\";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:\"*\";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:\"*\";inherits:false}@property --tw-inset-shadow-alpha{syntax:\"<percentage>\";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:\"*\";inherits:false}@property --tw-ring-shadow{syntax:\"*\";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:\"*\";inherits:false}@property --tw-inset-ring-shadow{syntax:\"*\";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:\"*\";inherits:false}@property --tw-ring-offset-width{syntax:\"<length>\";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:\"*\";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:\"*\";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:\"*\";inherits:false;initial-value:solid}@property --tw-blur{syntax:\"*\";inherits:false}@property --tw-brightness{syntax:\"*\";inherits:false}@property --tw-contrast{syntax:\"*\";inherits:false}@property --tw-grayscale{syntax:\"*\";inherits:false}@property --tw-hue-rotate{syntax:\"*\";inherits:false}@property --tw-invert{syntax:\"*\";inherits:false}@property --tw-opacity{syntax:\"*\";inherits:false}@property --tw-saturate{syntax:\"*\";inherits:false}@property --tw-sepia{syntax:\"*\";inherits:false}@property --tw-drop-shadow{syntax:\"*\";inherits:false}@property --tw-drop-shadow-color{syntax:\"*\";inherits:false}@property --tw-drop-shadow-alpha{syntax:\"<percentage>\";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:\"*\";inherits:false}@property --tw-backdrop-blur{syntax:\"*\";inherits:false}@property --tw-backdrop-brightness{syntax:\"*\";inherits:false}@property --tw-backdrop-contrast{syntax:\"*\";inherits:false}@property --tw-backdrop-grayscale{syntax:\"*\";inherits:false}@property --tw-backdrop-hue-rotate{syntax:\"*\";inherits:false}@property --tw-backdrop-invert{syntax:\"*\";inherits:false}@property --tw-backdrop-opacity{syntax:\"*\";inherits:false}@property --tw-backdrop-saturate{syntax:\"*\";inherits:false}@property --tw-backdrop-sepia{syntax:\"*\";inherits:false}@property --tw-duration{syntax:\"*\";inherits:false}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{50%{opacity:.5}}@keyframes bounce{0%,to{animation-timing-function:cubic-bezier(.8,0,1,1);transform:translateY(-25%)}50%{animation-timing-function:cubic-bezier(0,0,.2,1);transform:none}}pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}.hljs{color:#abb2bf;background:#282c34}.hljs-comment,.hljs-quote{color:#5c6370;font-style:italic}.hljs-doctag,.hljs-formula,.hljs-keyword{color:#c678dd}.hljs-deletion,.hljs-name,.hljs-section,.hljs-selector-tag,.hljs-subst{color:#e06c75}.hljs-literal{color:#56b6c2}.hljs-addition,.hljs-attribute,.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#98c379}.hljs-attr,.hljs-number,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-pseudo,.hljs-template-variable,.hljs-type,.hljs-variable{color:#d19a66}.hljs-bullet,.hljs-link,.hljs-meta,.hljs-selector-id,.hljs-symbol,.hljs-title{color:#61aeee}.hljs-built_in,.hljs-class .hljs-title,.hljs-title.class_{color:#e6c07b}.hljs-emphasis{font-style:italic}.hljs-strong{font-weight:700}.hljs-link{text-decoration:underline}.ico.svelte-2mmmg5{cursor:pointer;border-radius:.375rem;height:3.5rem;width:3.5rem;min-height:3.5rem;--tw-shadow-color: 0, 0, 0;--tw-shadow: 0 10px 15px -3px rgba(var(--tw-shadow-color), .1), 0 4px 6px -2px rgba(var(--tw-shadow-color), .05);-webkit-box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000),var(--tw-ring-shadow, 0 0 #0000),var(--tw-shadow);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000),var(--tw-ring-shadow, 0 0 #0000),var(--tw-shadow);--tw-bg-opacity: 1;background-color:rgba(107,114,128,var(--tw-bg-opacity));display:flex;justify-content:center;align-items:center;transition-property:background-color,border-color,color,fill,stroke;transition-duration:.15s;transition-timing-function:cubic-bezier(.4,0,.2,1)}.ico.svelte-2mmmg5:hover{--tw-bg-opacity: 1;background-color:rgba(16,185,129,var(--tw-bg-opacity))}.numinput.svelte-klij55::-webkit-outer-spin-button,.numinput.svelte-klij55::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}.numinput.svelte-klij55{-moz-appearance:textfield;appearance:textfield}.hide-text.svelte-tfapsj:not(:focus):not(:hover){text-indent:-9999px}.valuer.svelte-2flc86:hover{color:#10b981;cursor:pointer}.endflex.svelte-2flc86{display:flex;flex-grow:1;cursor:pointer}.risu-chosen-item{padding-bottom:.5rem;margin-bottom:.5rem;border-bottom:1px solid;border-bottom-color:var(--risu-theme-selected);opacity:.7}.risu-ghost-item{background-color:rgba(var(--risu-theme-selected-rgb),.2)}.valuer.svelte-yxerf1:hover{color:#10b981;cursor:pointer}.endflex.svelte-yxerf1{display:flex;flex-grow:1;cursor:pointer}.seperator.svelte-yxerf1{border:none;outline:0;width:100%;display:flex;flex-direction:column;margin-bottom:.5rem}.segmented-control-container.svelte-1wetomt{position:relative;display:inline-flex;width:fit-content;align-items:center;border-radius:.5rem;background-color:var(--risu-theme-darkbg);border:1px solid var(--risu-theme-darkborderc);padding:4px;gap:2px;-webkit-user-select:none;user-select:none;margin-bottom:1rem}.segmented-indicator.no-transition.svelte-1wetomt{transition:none!important}.segmented-indicator.svelte-1wetomt{position:absolute;left:0;top:4px;bottom:4px;border-radius:.375rem;background-color:var(--risu-theme-borderc);transition:transform .3s cubic-bezier(.4,0,.2,1),width .3s cubic-bezier(.4,0,.2,1);will-change:transform,width;pointer-events:none;z-index:0}.segmented-btn.svelte-1wetomt{position:relative;z-index:1;border:none;background:transparent;color:var(--risu-theme-textcolor2);font-weight:500;border-radius:.375rem;cursor:pointer;white-space:nowrap;transition:color .2s ease;line-height:1.4}.segmented-btn.svelte-1wetomt:hover:not(.segmented-btn-active){color:var(--risu-theme-textcolor)}.segmented-btn-active.svelte-1wetomt{color:#fff}.segmented-btn.svelte-1wetomt:focus-visible{outline:2px solid var(--risu-theme-borderc);outline-offset:-2px}.slider.svelte-1sehvhy{---track-width: var(--track-width, unset);---track-height: var(--track-height, 6px);---track-background: var(--track-background, #949494);---track-border: var(--track-border, none);---thumb-size: var(--thumb-size, 16px);---thumb-background: var(--thumb-background, #2d2d2d);---thumb-border: var(--thumb-border, none);---position: var(--position, 0px);---margin-inline-thumb-bigger: max(var(---thumb-size) - var(---track-height), 0px);---margin-inline-thumb-smaller: max(var(---track-height) - var(---thumb-size), 0px);position:relative;margin:auto;user-select:none;-webkit-user-select:none;background-color:transparent;cursor:pointer}.slider.svelte-1sehvhy:before{background-color:transparent}[aria-orientation=horizontal].svelte-1sehvhy{width:var(---track-width);max-width:calc(100% - 2 * var(---margin-inline-thumb-bigger));height:calc(max(var(---track-height),var(---thumb-size)) + 4px);height:max(var(---track-height),var(---thumb-size));margin-inline:var(---margin-inline-thumb-bigger);margin-block:var(--margin-block, 8px)}[aria-orientation=vertical].svelte-1sehvhy{width:max(var(---track-height),var(---thumb-size));height:var(---track-width);max-height:calc(100% - 2 * var(---margin-inline-thumb-bigger));margin-block:var(---margin-inline-thumb-bigger);margin-inline:var(--margin-block, 8px)}.track.svelte-1sehvhy{position:absolute;pointer-events:none;background:var(---track-background);border:var(---track-border);border-radius:calc(var(---track-height) / 2);box-sizing:border-box}[aria-orientation=horizontal].svelte-1sehvhy .track:where(.svelte-1sehvhy){height:var(---track-height);top:50%;transform:translateY(-50%);left:0;right:0}[aria-orientation=vertical].svelte-1sehvhy .track:where(.svelte-1sehvhy){width:var(---track-height);left:50%;transform:translate(-50%);top:0;bottom:0}.thumb.svelte-1sehvhy{pointer-events:none;position:absolute;height:var(---thumb-size);width:var(---thumb-size);border-radius:calc(var(---thumb-size) / 2);background:var(---thumb-background);border:var(---thumb-border);box-sizing:border-box;transform:translate(-50%,-50%);--margin-left: (2 * var(---track-height) - var(---thumb-size) - var(---margin-inline-thumb-smaller)) / 2;--left: calc(var(---position) * (100% - 2 * var(--margin-left)) + var(--margin-left))}[aria-orientation=horizontal].svelte-1sehvhy:not(.reverse) .thumb:where(.svelte-1sehvhy){top:50%;left:var(--left)}[aria-orientation=vertical].svelte-1sehvhy:not(.reverse) .thumb:where(.svelte-1sehvhy){left:50%;bottom:calc(var(--left) - var(---thumb-size))}[aria-orientation=horizontal].reverse.svelte-1sehvhy .thumb:where(.svelte-1sehvhy){top:50%;right:calc(var(--left) - var(---thumb-size))}[aria-orientation=vertical].reverse.svelte-1sehvhy .thumb:where(.svelte-1sehvhy){left:50%;top:calc(var(--left))}.slider.svelte-1sehvhy:focus-visible{outline:none}.slider.svelte-1sehvhy:focus-visible .track:where(.svelte-1sehvhy){outline:2px solid var(--focus-color, red);outline-offset:2px}.picker.svelte-1msexid{position:relative;display:inline-block;width:var(--picker-width, 200px);height:var(--picker-height, 200px);background:linear-gradient(#fff0,#000),linear-gradient(.25turn,#fff,#0000),var(--picker-color-bg);border-radius:var(--picker-radius, 8px);outline:none;-webkit-user-select:none;user-select:none;cursor:pointer}.s.svelte-1msexid,.v.svelte-1msexid{position:absolute;--track-background: none;--track-border: none;--thumb-background: none;--thumb-border: none;--thumb-size: 2px;--margin-block: 0;--track-height: var(--picker-indicator-size, 10px);user-select:none;-webkit-user-select:none}.s.svelte-1msexid{top:calc(var(--pos-y) * (var(--picker-height, 200px) - var(--picker-indicator-size, 10px) - 4px) / 100 + 2px);left:2px;--track-width: calc(var(--picker-width, 200px) - 4px)}.v.svelte-1msexid{top:2px;left:calc(var(--pos-x) * (var(--picker-width, 200px) - var(--picker-indicator-size, 10px) - 4px) / 100 + 2px);--track-width: calc(var(--picker-height, 200px) - 4px)}label.svelte-up8mhv{display:inline-flex;align-items:center;gap:8px;cursor:pointer;border-radius:3px;margin:4px;height:var(--input-size, 25px);-webkit-user-select:none;user-select:none}.container.svelte-up8mhv{position:relative;display:block;display:flex;align-items:center;justify-content:center;width:var(--input-size, 25px)}input.svelte-up8mhv{margin:0;padding:0;border:none;width:1px;height:1px;flex-shrink:0;opacity:0}.alpha.svelte-up8mhv{clip-path:circle(50%);background:var(--alpha-grid-bg)}.alpha.svelte-up8mhv,.color.svelte-up8mhv{position:absolute;width:var(--input-size, 25px);height:var(--input-size, 25px);border-radius:50%;-webkit-user-select:none;user-select:none}input.svelte-up8mhv:focus-visible~.color:where(.svelte-up8mhv){outline:2px solid var(--focus-color, red);outline-offset:2px}label.svelte-hwq23{display:flex;justify-content:center;margin-bottom:4px;grid-area:nullable;-webkit-user-select:none;user-select:none}input.svelte-hwq23{margin:0}input.svelte-hwq23:focus-visible{outline:none}input.svelte-hwq23:focus-visible+span:where(.svelte-hwq23){width:14px;height:14px;border-radius:2px;outline:2px solid var(--focus-color, red);outline-offset:2px}div.svelte-hwq23{width:32px;aspect-ratio:2;position:relative}div.svelte-hwq23 :where(.svelte-hwq23){position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}div.svelte-9d4bqy{position:absolute;left:calc(var(--pos-x) * (var(--picker-width, 200px) - 2px) / 100 - var(--picker-indicator-size, 10px) / 2 + 1px);top:calc(var(--pos-y) * (var(--picker-height, 200px) - 2px) / 100 - var(--picker-indicator-size, 10px) / 2 + 1px);width:var(--picker-indicator-size, 10px);height:var(--picker-indicator-size, 10px);background-color:#fff;box-shadow:0 0 4px #000;border-radius:50%;pointer-events:none;z-index:1;transition:box-shadow .2s}.swatches.svelte-183vb3n{display:grid;grid-template-columns:var(--cp-swatch-grid-template-columns, repeat(auto-fit, minmax(24px, 1fr)));gap:8px;width:100%;height:100%;margin-top:8px;margin-bottom:8px}.swatch.svelte-183vb3n{cursor:pointer;margin:0;padding:0;border:none;width:100%;aspect-ratio:1 / 1;height:auto;display:block}.swatch.svelte-183vb3n:focus{outline:2px solid var(--focus-color, red);outline-offset:2px}.text-input.svelte-1vscq08{margin:var(--text-input-margin, 5px 0 0)}.input-container.svelte-1vscq08{display:flex;flex:1;gap:10px}input.svelte-1vscq08,button.svelte-1vscq08,.button-like.svelte-1vscq08{flex:1;border:none;background-color:var(--cp-input-color, #eee);color:var(--cp-text-color, var(--cp-border-color));padding:0;border-radius:5px;height:30px;line-height:30px;text-align:center}input.svelte-1vscq08{width:5px;font-family:inherit}button.svelte-1vscq08,.button-like.svelte-1vscq08{position:relative;flex:1;margin:8px 0 0;height:30px;width:100%;transition:background-color .2s;cursor:pointer;font-family:inherit}.button-like.svelte-1vscq08{cursor:default}.appear.svelte-1vscq08,.disappear.svelte-1vscq08{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:100%;transition:all .5s}button.svelte-1vscq08:hover .disappear:where(.svelte-1vscq08),.appear.svelte-1vscq08{opacity:0}.disappear.svelte-1vscq08,button.svelte-1vscq08:hover .appear:where(.svelte-1vscq08){opacity:1}button.svelte-1vscq08:hover{background-color:var(--cp-button-hover-color, #ccc)}input.svelte-1vscq08:focus,button.svelte-1vscq08:focus{outline:none}input.svelte-1vscq08:focus-visible,button.svelte-1vscq08:focus-visible{outline:2px solid var(--focus-color, red);outline-offset:2px}div.svelte-ohommi{padding:8px;background-color:var(--cp-bg-color, white);margin:0 10px 10px;border:1px solid var(--cp-border-color, black);border-radius:12px;display:none;width:max-content}.is-open.svelte-ohommi{display:inline-block}[role=dialog].svelte-ohommi{position:absolute;top:calc(var(--input-size, 25px) + 12px);left:0;z-index:var(--picker-z-index, 2)}span.svelte-hcuewk{position:relative;color:var(--cp-text-color, var(--cp-border-color));--alpha-grid-bg: linear-gradient(45deg, #eee 25%, #0000 25%, #0000 75%, #eee 75%) 0 0 / 10px 10px, linear-gradient(45deg, #eee 25%, #0000 25%, #0000 75%, #eee 75%) 5px 5px / 10px 10px}.h.svelte-hcuewk,.a.svelte-hcuewk{display:inline-flex;justify-content:center;--track-height: var(--slider-width, 10px);--track-width: var(--picker-height, 200px);--track-border: none;--thumb-size: calc(var(--slider-width, 10px) - 3px);--thumb-background: white;--thumb-border: 1px solid black;--margin-block: 0;--gradient-direction: .5turn}.horizontal.svelte-hcuewk .h:where(.svelte-hcuewk),.horizontal.svelte-hcuewk .a:where(.svelte-hcuewk){--track-width: calc(var(--picker-width, 200px) - 12px);--gradient-direction: .25turn;margin:4px 6px}.horizontal.svelte-hcuewk .h:where(.svelte-hcuewk){margin-top:8px}.vertical.svelte-hcuewk .h:where(.svelte-hcuewk),.vertical.svelte-hcuewk .a:where(.svelte-hcuewk){margin-left:3px}.h.svelte-hcuewk{grid-area:hue;--gradient-hue: #ff1500fb, #ffff00 17.2%, #ffff00 18.2%, #00ff00 33.3%, #00ffff 49.5%, #00ffff 51.5%, #0000ff 67.7%, #ff00ff 83.3%, #ff0000;--track-background: linear-gradient(var(--gradient-direction), var(--gradient-hue))}.a.svelte-hcuewk{grid-area:alpha;margin-top:2px;--alpha-grid-bg: linear-gradient(45deg, #eee 25%, #0000 25%, #0000 75%, #eee 75%) 0 0 / 10px 10px, linear-gradient(45deg, #eee 25%, #0000 25%, #0000 75%, #eee 75%) 5px 5px / 10px 10px;--track-background: linear-gradient(var(--gradient-direction), rgba(0, 0, 0, 0), var(--alphaless-color)), var(--alpha-grid-bg)}span.svelte-hcuewk .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}.cl.svelte-1x5cxw5{--cp-bg-color: var(--risu-theme-bgcolor);--cp-border-color: var(--risu-theme-darkborderc);--cp-text-color: var(--risu-theme-textcolor);--cp-input-color: #555;--cp-button-hover-color: #777}.tabler.svelte-cdrlzn{table-layout:fixed}.tabler.svelte-cdrlzn td:where(.svelte-cdrlzn){overflow:hidden;text-overflow:ellipsis}.char-grid.svelte-cdrlzn{display:grid;grid-template-columns:auto 1fr auto}.tippy-box[data-animation=fade][data-state=hidden]{opacity:0}[data-tippy-root]{max-width:calc(100vw - 10px)}.tippy-box{position:relative;background-color:#333;color:#fff;border-radius:4px;font-size:14px;line-height:1.4;white-space:normal;outline:0;transition-property:transform,visibility,opacity}.tippy-box[data-placement^=top]>.tippy-arrow{bottom:0}.tippy-box[data-placement^=top]>.tippy-arrow:before{bottom:-7px;left:0;border-width:8px 8px 0;border-top-color:initial;transform-origin:center top}.tippy-box[data-placement^=bottom]>.tippy-arrow{top:0}.tippy-box[data-placement^=bottom]>.tippy-arrow:before{top:-7px;left:0;border-width:0 8px 8px;border-bottom-color:initial;transform-origin:center bottom}.tippy-box[data-placement^=left]>.tippy-arrow{right:0}.tippy-box[data-placement^=left]>.tippy-arrow:before{border-width:8px 0 8px 8px;border-left-color:initial;right:-7px;transform-origin:center left}.tippy-box[data-placement^=right]>.tippy-arrow{left:0}.tippy-box[data-placement^=right]>.tippy-arrow:before{left:-7px;border-width:8px 8px 8px 0;border-right-color:initial;transform-origin:center right}.tippy-box[data-inertia][data-state=visible]{transition-timing-function:cubic-bezier(.54,1.5,.38,1.11)}.tippy-arrow{width:16px;height:16px;color:#333}.tippy-arrow:before{content:\"\";position:absolute;border-color:transparent;border-style:solid}.tippy-content{position:relative;padding:5px 9px;z-index:1}.tippy-box[data-theme~=translucent]{background-color:#000000b3}.tippy-box[data-theme~=translucent]>.tippy-arrow{width:14px;height:14px}.tippy-box[data-theme~=translucent][data-placement^=top]>.tippy-arrow:before{border-width:7px 7px 0;border-top-color:#000000b3}.tippy-box[data-theme~=translucent][data-placement^=bottom]>.tippy-arrow:before{border-width:0 7px 7px;border-bottom-color:#000000b3}.tippy-box[data-theme~=translucent][data-placement^=left]>.tippy-arrow:before{border-width:7px 0 7px 7px;border-left-color:#000000b3}.tippy-box[data-theme~=translucent][data-placement^=right]>.tippy-arrow:before{border-width:7px 7px 7px 0;border-right-color:#000000b3}.tippy-box[data-theme~=translucent]>.tippy-backdrop{background-color:#000000b3}.tippy-box[data-theme~=translucent]>.tippy-svg-arrow{fill:#000000b3}.editMode.svelte-yklqh{min-width:6rem}@keyframes svelte-yklqh-sidebar-transition{0%{width:0rem}to{width:var(--sidebar-size)}}@keyframes svelte-yklqh-sidebar-transition-close{0%{width:var(--sidebar-size);right:0rem}to{width:0rem;right:10rem}}@keyframes svelte-yklqh-sidebar-transition-non-dynamic{0%{width:0rem;min-width:0rem}to{width:var(--sidebar-size);min-width:var(--sidebar-size)}}@keyframes svelte-yklqh-sidebar-transition-close-non-dynamic{0%{width:var(--sidebar-size);min-width:var(--sidebar-size);right:0rem}to{width:0rem;min-width:0rem;right:3rem}}@keyframes svelte-yklqh-sub-sidebar-transition{0%{width:0rem;min-width:0rem}to{width:5rem;min-width:5rem}}@keyframes svelte-yklqh-sub-sidebar-transition-close{0%{width:5rem;min-width:5rem;max-width:5rem;right:0rem}to{width:0rem;min-width:0rem;max-width:0rem;right:10rem}}@keyframes svelte-yklqh-sidebar-dark-animation{0%{background-color:#0000!important}to{background-color:#00000080!important}}@keyframes svelte-yklqh-sidebar-dark-closing-animation{0%{background-color:#00000080!important}to{background-color:#0000!important}}.risu-sidebar.svelte-yklqh:not(.dynamic-sidebar){animation-name:svelte-yklqh-sidebar-transition-non-dynamic;animation-duration:var(--risu-animation-speed)}.risu-sidebar-close.svelte-yklqh:not(.dynamic-sidebar){animation-name:svelte-yklqh-sidebar-transition-close-non-dynamic;animation-duration:var(--risu-animation-speed);position:relative}.risu-sidebar.dynamic-sidebar.svelte-yklqh{animation-name:svelte-yklqh-sidebar-transition;animation-duration:var(--risu-animation-speed)}.risu-sidebar-close.dynamic-sidebar.svelte-yklqh{animation-name:svelte-yklqh-sidebar-transition-close;animation-duration:var(--risu-animation-speed);position:relative;right:3rem}.risu-sub-sidebar.svelte-yklqh{animation-name:svelte-yklqh-sub-sidebar-transition;animation-duration:var(--risu-animation-speed)}.risu-sub-sidebar-close.svelte-yklqh{animation-name:svelte-yklqh-sub-sidebar-transition-close;animation-duration:var(--risu-animation-speed);position:relative}.sidebar-dark-animation.svelte-yklqh{animation-name:sidebar-dark-transition;animation-duration:var(--risu-animation-speed);background-color:#00000080}.sidebar-dark-close-animation.svelte-yklqh{animation-name:sidebar-dark-closing-transition;animation-duration:var(--risu-animation-speed);background-color:#0000}.image-container.svelte-1j5xluv{position:relative;overflow:hidden}.image-container.svelte-1j5xluv img:where(.svelte-1j5xluv){position:absolute;bottom:0;left:0;width:100%;height:100%;object-fit:scale-down;object-position:50% 100%}.old-image.svelte-1j5xluv{animation:svelte-1j5xluv-fadeOutFromNone .5s ease-out}.new-image.svelte-1j5xluv{animation:svelte-1j5xluv-fadeInFromNone .5s ease-out}.img-waifu.svelte-1j5xluv{width:100%;height:90vh;margin-top:10vh}.img-mobile.svelte-1j5xluv{width:100%;height:100%}.img-risu.svelte-1j5xluv{width:100%;position:absolute;bottom:0;left:0;height:100%}@keyframes svelte-1j5xluv-fadeInFromNone{0%{opacity:0}to{opacity:1}}@keyframes svelte-1j5xluv-fadeOutFromNone{0%{opacity:1}to{opacity:0}}.box.svelte-19v45g0{position:absolute;right:0;top:0;border-bottom:1px solid var(--risu-theme-borderc);border-left:1px solid var(--risu-theme-borderc);width:12rem;height:12rem;z-index:5}.resize-handle.svelte-19v45g0{position:absolute;width:16px;height:16px;border-top:1px solid var(--risu-theme-borderc);border-right:1px solid var(--risu-theme-borderc);cursor:sw-resize;bottom:0;left:0;z-index:10}.loadmove.svelte-aad0hf{animation:svelte-aad0hf-spin 1s linear infinite;border-radius:50%;border:.4rem solid rgba(0,0,0,0);width:1rem;height:1rem;border-top:.4rem solid var(--risu-theme-textcolor);border-left:.4rem solid var(--risu-theme-textcolor)}@keyframes svelte-aad0hf-spin{0%{transform:rotate(0)}to{transform:rotate(360deg)}}.partial-edit-btn-wrapper{display:none}.partial-edit-btn{display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:8px;background:#fffffff2;border:1px solid rgba(0,0,0,.15);border-radius:6px;cursor:pointer;box-shadow:0 2px 8px #00000026;transition:all .15s ease;color:#666}.partial-edit-btn-edit:hover{background:#e0f2fe;border-color:#3b82f6;color:#3b82f6}.partial-edit-btn-delete:hover{background:#fee2e2;border-color:#ef4444;color:#ef4444}.partial-match-failed-modal.svelte-102kq8{background:var(--risu-theme-bgcolor, #fff);border-radius:12px;padding:20px;width:50vw;max-width:500px;min-width:320px;display:flex;flex-direction:column;gap:16px;box-shadow:0 8px 32px #0003}.partial-match-failed-header.svelte-102kq8{display:flex;align-items:center;gap:8px}.partial-match-failed-title.svelte-102kq8{font-weight:600;font-size:16px;color:var(--risu-theme-textcolor, #000)}.partial-match-failed-message.svelte-102kq8{font-size:14px;color:var(--risu-theme-textcolor, #000);margin:0;line-height:1.5}.partial-delete-modal.svelte-102kq8{background:var(--risu-theme-bgcolor, #fff);border-radius:12px;padding:20px;width:50vw;max-width:1600px;min-width:400px;display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 32px #0003}.partial-delete-header.svelte-102kq8{display:flex;justify-content:space-between;align-items:center}.partial-delete-title.svelte-102kq8{font-weight:600;font-size:16px;color:var(--risu-theme-textcolor, #000)}.partial-delete-message.svelte-102kq8{font-size:14px;color:var(--risu-theme-textcolor, #000);margin:0}.partial-delete-preview.svelte-102kq8{padding:12px;background:var(--risu-theme-darkbg, #f5f5f5);border-radius:8px;font-size:13px;color:var(--risu-theme-textcolor, #000);max-height:100px;overflow:hidden;text-overflow:ellipsis}.partial-delete-confirm-btn.svelte-102kq8{display:flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:all .15s ease;background:#ef4444;color:#fff}.partial-delete-confirm-btn.svelte-102kq8:hover{background:#dc2626}.partial-edit-overlay.svelte-102kq8{position:fixed;inset:0;background:#0006;display:flex;align-items:center;justify-content:center;z-index:10000}.partial-edit-modal.svelte-102kq8{background:var(--risu-theme-bgcolor, #fff);border-radius:12px;padding:20px;width:50vw;max-width:1600px;min-width:400px;max-height:80vh;display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 32px #0003}.partial-edit-header.svelte-102kq8{display:flex;justify-content:space-between;align-items:center}.partial-edit-title.svelte-102kq8{font-weight:600;font-size:16px;color:var(--risu-theme-textcolor, #000)}.partial-match-meta.svelte-102kq8{display:flex;align-items:center;gap:8px}.partial-match-hint.svelte-102kq8{font-size:12px;color:var(--risu-theme-textcolor, #000)}.partial-match-confidence.svelte-102kq8{font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;background:#10b981;color:#fff}.partial-match-confidence.low-confidence.svelte-102kq8{background:#f59e0b}.partial-edit-textarea.svelte-102kq8{width:100%;min-height:120px;max-height:50vh;padding:12px;border:1px solid var(--risu-theme-darkborderc, #ddd);border-radius:8px;background:var(--risu-theme-darkbg, #f5f5f5);color:var(--risu-theme-textcolor, #000);font-family:inherit;resize:vertical;box-sizing:border-box}.partial-edit-textarea.svelte-102kq8:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px #3b82f626}.partial-edit-buttons.svelte-102kq8{display:flex;gap:8px;justify-content:flex-end}.partial-edit-save-btn.svelte-102kq8,.partial-edit-cancel-btn.svelte-102kq8{display:flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:all .15s ease}.partial-edit-save-btn.svelte-102kq8{background:#3b82f6;color:#fff}.partial-edit-save-btn.svelte-102kq8:hover{background:#2563eb}.partial-edit-cancel-btn.svelte-102kq8{background:#6b7280;color:#fff}.partial-edit-cancel-btn.svelte-102kq8:hover{background:#4b5563}.partial-match-selection-modal.svelte-102kq8{background:var(--risu-theme-bgcolor, #fff);border-radius:12px;padding:20px;width:50vw;max-width:1200px;min-width:400px;max-height:80vh;display:flex;flex-direction:column;gap:16px;box-shadow:0 8px 32px #0003}.match-selection-header.svelte-102kq8{display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--risu-theme-darkborderc, #ddd)}.match-selection-title.svelte-102kq8{font-weight:600;font-size:16px;color:var(--risu-theme-textcolor, #000)}.match-count.svelte-102kq8{font-size:13px;font-weight:500;padding:4px 10px;border-radius:12px;background:var(--risu-theme-darkbg, #f5f5f5);color:var(--risu-theme-textcolor, #000)}.match-list.svelte-102kq8{display:flex;flex-direction:column;gap:12px;overflow-y:auto;max-height:calc(80vh - 160px);padding:4px}.match-item.svelte-102kq8{display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--risu-theme-darkborderc, #ddd);border-radius:8px;background:var(--risu-theme-darkbg, #f9f9f9);cursor:pointer;transition:all .15s ease}.match-item.svelte-102kq8:hover{background:var(--risu-theme-bgcolor, #fff);border-color:#3b82f6;box-shadow:0 2px 8px #3b82f633;transform:translateY(-1px)}.match-meta.svelte-102kq8{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.match-line.svelte-102kq8{font-size:12px;font-weight:500;color:var(--risu-theme-textcolor, #000);background:var(--risu-theme-bgcolor, #fff);padding:2px 8px;border-radius:4px}.match-confidence.svelte-102kq8{font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;color:#fff}.match-confidence.high-confidence.svelte-102kq8{background:#10b981}.match-confidence.medium-confidence.svelte-102kq8{background:#3b82f6}.match-confidence.low-confidence.svelte-102kq8{background:#f59e0b}.match-method.svelte-102kq8{font-size:11px;font-weight:500;padding:2px 6px;border-radius:4px;background:var(--risu-theme-bgcolor, #fff);color:var(--risu-theme-textcolor, #000);font-family:monospace}.match-context-before.svelte-102kq8,.match-context-after.svelte-102kq8{font-size:12px;color:var(--risu-theme-textcolor, #000);padding:8px 12px;background:var(--risu-theme-bgcolor, #fff);border-radius:6px;border-left:3px solid var(--risu-theme-darkborderc, #ddd);line-height:1.5;font-style:italic;white-space:pre-line}.match-text.svelte-102kq8{font-size:13px;color:var(--risu-theme-textcolor, #000);padding:10px 12px;background:var(--risu-theme-bgcolor, #fff);border-radius:6px;border-left:3px solid #3b82f6;line-height:1.5;font-weight:500;white-space:pre-line}.cc.svelte-5jfnvs{width:88px;height:31px;border-width:0}.chat-process-stage-1.svelte-vtw7ku{border-top:.4rem solid #60a5fa;border-left:.4rem solid #60a5fa}.chat-process-stage-2.svelte-vtw7ku{border-top:.4rem solid #db2777;border-left:.4rem solid #db2777}.chat-process-stage-3.svelte-vtw7ku{border-top:.4rem solid #34d399;border-left:.4rem solid #34d399}.chat-process-stage-4.svelte-vtw7ku{border-top:.4rem solid #8b5cf6;border-left:.4rem solid #8b5cf6}.autoload.svelte-vtw7ku{border-top:.4rem solid #10b981;border-left:.4rem solid #10b981}@keyframes svelte-vtw7ku-spin{0%{transform:rotate(0)}to{transform:rotate(360deg)}}.break-any.svelte-1t3c4d5,.break-any.svelte-1co5ci7{word-break:normal;overflow-wrap:anywhere}.halfw.svelte-1px1wn1,.halfwp.svelte-1px1wn1{max-width:calc(50% - 5rem)}.per33.svelte-1px1wn1{height:33.333333%}.plugin-confirm-content.svelte-1gfqgzq .plugin-name:where(.svelte-1gfqgzq){font-size:1.25rem;font-weight:700;color:#fff}.plugin-confirm-content.svelte-1gfqgzq .warnings-list:where(.svelte-1gfqgzq){list-style-type:disc;list-style-position:inside;margin-top:.5rem;margin-bottom:.5rem;padding-left:1rem;color:#f87171}.plugin-confirm-content.svelte-1gfqgzq .warning-item:where(.svelte-1gfqgzq){margin-bottom:.25rem}.plugin-confirm-content.svelte-1gfqgzq .confirm-message:where(.svelte-1gfqgzq){margin-top:1rem;color:#d1d5db}.break-any.svelte-1gfqgzq{word-break:normal;overflow-wrap:anywhere}@keyframes svelte-1gfqgzq-toastAnime{0%{opacity:0}50%{opacity:1}to{opacity:0}}.toast-anime.svelte-1gfqgzq{animation:svelte-1gfqgzq-toastAnime 1s ease-out}.vis.svelte-1gfqgzq{opacity:1!important;--tw-bg-opacity: 1 !important}.stack-trace-wrap.svelte-1gfqgzq{position:relative;margin-top:.5rem}.stack-trace.svelte-1gfqgzq{background-color:var(--risu-theme-bgcolor);color:var(--risu-theme-textcolor2);border:1px solid var(--risu-theme-darkborderc);border-radius:.25rem;padding:.75rem 2.75rem .75rem .75rem;font-family:monospace;font-size:.75rem;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto}.stack-trace-copy.svelte-1gfqgzq{position:absolute;top:.5rem;right:.5rem;display:inline-flex;align-items:center;justify-content:center;width:1.75rem;height:1.75rem;border:1px solid var(--risu-theme-darkborderc);border-radius:.375rem;background-color:var(--risu-theme-darkbg);color:var(--risu-theme-textcolor2);transition:background-color .2s ease,color .2s ease,border-color .2s ease}.stack-trace-copy.svelte-1gfqgzq:hover{background-color:var(--risu-theme-bgcolor);color:var(--risu-theme-textcolor)}.request-log-code.svelte-1gfqgzq{background-color:#1a1a2e;color:#e0e0e0;border:1px solid var(--risu-theme-darkborderc);border-radius:.375rem;padding:.75rem;font-family:Consolas,Monaco,Courier New,monospace;font-size:.75rem;line-height:1.5;white-space:pre-wrap;word-break:break-all;max-height:12rem;overflow:auto}.welcome-bg.svelte-ngd78m{background-size:cover;position:relative}@keyframes svelte-ngd78m-darkness{0%{opacity:0}50%{opacity:.2}to{opacity:0}}.logo-animation.svelte-ngd78m{animation:svelte-ngd78m-logo-animation 3s ease-in-out;opacity:0}@keyframes svelte-ngd78m-logo-animation{0%{opacity:0}80%{opacity:1}to{opacity:0}}.chat-animation.svelte-ngd78m{animation:svelte-ngd78m-chat-animation 3s ease-in-out}@keyframes svelte-ngd78m-chat-animation{0%{top:100vh}to{top:0}}.break-any.svelte-1mqgnup{word-break:normal;overflow-wrap:anywhere}.prism-font-silver.svelte-1lxg8z1{background:linear-gradient(to right,#777,#fff,#777,#fff,#777)}.prism-font-gold.svelte-1lxg8z1{background:linear-gradient(to right,#d4af32,#fff,#d4af32,#fff,#d4af32)}.prism-font-copper.svelte-1lxg8z1{background:linear-gradient(to right,#b87333,#fff,#b87333,#fff,#b87333)}.prism-font.svelte-1lxg8z1{text-align:center;color:transparent;background-size:150px 100%;-webkit-background-clip:text;background-clip:text;animation-name:svelte-1lxg8z1-shimmer;animation-duration:2s;animation-iteration-count:infinite;background-repeat:no-repeat;background-position:0 0;background-color:#222}@keyframes svelte-1lxg8z1-shimmer{0%{background-position:top left}50%{background-position:top right}0%{background-position:top left}}.setting-bg.svelte-a6j5ff{background:linear-gradient(to right,var(--risu-theme-darkbg) 50%,var(--risu-theme-bgcolor) 50%)}.break-any.svelte-12htwcw{word-break:normal;overflow-wrap:anywhere}.draggable-preset.svelte-12htwcw:hover{cursor:grab}.draggable-preset.svelte-12htwcw:active{cursor:grabbing}.h-0\\.5.svelte-12htwcw{min-height:2px;height:2px}.h-1.svelte-12htwcw{min-height:4px;height:4px}.break-any.svelte-r72h1n,.break-any.svelte-1gqw8co{word-break:normal;overflow-wrap:anywhere}\n";
 
@@ -45861,6 +40449,7 @@ function setupBgHtmlRenderer(ctx, flog) {
         const cleanCss = (css) => unprefixCssClassSelectors(stripCssImports(css));
         islandStyles.setStylesheets([cleanCss(islandBundle.css)]);
         const imgReset = `[data-message-id] img { max-width: 100%; max-height: none; }
+` + '[data-message-id] :where([data-component="MessageContent"] img)' + `:not(:where(.not-prose,.not-prose *)){margin-top:2em;margin-bottom:2em}
 `;
         const bubbleContainment = `[data-message-id] { overflow: visible !important; contain: none !important; }
 `;
@@ -45966,11 +40555,14 @@ function setupImportOverlay(log, sendToBackend) {
     const clamped = Math.max(0, Math.min(1, frac));
     progressInner.style.width = `${clamped * 100}%`;
   }
-  function showOverlay(newLabel) {
+  function cancelHide() {
     if (hideTimer) {
       clearTimeout(hideTimer);
       hideTimer = undefined;
     }
+  }
+  function showOverlay(newLabel) {
+    cancelHide();
     label = newLabel;
     visible = true;
     lastPhase = "";
@@ -46002,23 +40594,20 @@ function setupImportOverlay(log, sendToBackend) {
     hideNow();
   });
   function hideNow() {
-    if (hideTimer) {
-      clearTimeout(hideTimer);
-      hideTimer = undefined;
-    }
+    cancelHide();
     visible = false;
     overlay.hidden = true;
     log.info("import-overlay: hidden");
   }
   function scheduleHide() {
-    if (hideTimer)
-      clearTimeout(hideTimer);
+    cancelHide();
     hideTimer = setTimeout(() => {
       hideTimer = undefined;
       hideNow();
     }, AUTO_HIDE_DELAY_MS);
   }
   function applyProgress(phase, message, fraction) {
+    cancelHide();
     phaseEl.textContent = PHASE_LABEL[phase] ?? phase;
     messageEl.textContent = message || "";
     lastPhase = phase;
@@ -46047,10 +40636,7 @@ function setupImportOverlay(log, sendToBackend) {
   let activeOperationId = null;
   function applyOperationProgress(msg) {
     activeOperationId = msg.operationId;
-    if (hideTimer) {
-      clearTimeout(hideTimer);
-      hideTimer = undefined;
-    }
+    cancelHide();
     if (msg.phase === "started" || !visible) {
       visible = true;
       lastPhase = "";
@@ -46086,21 +40672,22 @@ function setupImportOverlay(log, sendToBackend) {
       setIndeterminate();
     }
   }
-  function showConsent(prompt2) {
+  function showConsent(prompt) {
+    cancelHide();
     if (!visible)
       showOverlay(label || "character");
-    pendingConsentRequestId = prompt2.requestId;
-    titleEl.textContent = prompt2.title;
+    pendingConsentRequestId = prompt.requestId;
+    titleEl.textContent = prompt.title;
     phaseEl.textContent = "Awaiting consent";
     messageEl.textContent = "";
-    consentMsg.textContent = prompt2.message;
-    grantBtn.textContent = prompt2.confirmLabel;
-    declineBtn.textContent = prompt2.cancelLabel;
+    consentMsg.textContent = prompt.message;
+    grantBtn.textContent = prompt.confirmLabel;
+    declineBtn.textContent = prompt.cancelLabel;
     grantBtn.disabled = false;
     declineBtn.disabled = false;
     consentEl.hidden = false;
     setIndeterminate();
-    log.info(`import-overlay: consent prompt requestId=${prompt2.requestId}`);
+    log.info(`import-overlay: consent prompt requestId=${prompt.requestId}`);
   }
   function resolveConsent(confirmed) {
     const requestId = pendingConsentRequestId;
@@ -46182,8 +40769,7 @@ function setupImportOverlay(log, sendToBackend) {
     }
   }
   function destroy() {
-    if (hideTimer)
-      clearTimeout(hideTimer);
+    cancelHide();
     overlay.remove();
   }
   return { handleBackendMessage, notifyImportStart, setUploadProgress, destroy };
@@ -47949,13 +42535,13 @@ function setupPickModal(opts) {
     root.classList.add("lr-pick-modal");
     const list = document.createElement("div");
     list.className = "lr-pick-list";
-    for (const opt of msg.options) {
+    for (const [index, opt] of msg.options.entries()) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "lr-pick-option";
       btn.textContent = opt;
       btn.addEventListener("click", () => {
-        chosen = opt;
+        chosen = String(index);
         try {
           modal.dismiss();
         } catch {}
@@ -48462,6 +43048,11 @@ function installConsoleCapture() {
         originalConsole[m]?.(...args);
       } catch {}
       try {
+        const level = methodToLevel(m);
+        if (!logStore.shouldEmit(level))
+          return;
+        if (typeof args[0] === "string" && (args[0].startsWith("[lumirealm] ") || args[0] === "[lumirealm]" && args.length > 1))
+          return;
         if (args[0] === "[WS] ←" && args[1] === "SPINDLE_FRONTEND_MSG") {
           const payload = args[2];
           if (payload?.identifier === "lumirealm" && isLogTransportNoise(payload.data?.type ?? ""))
@@ -48470,7 +43061,7 @@ function installConsoleCapture() {
         const text = args.map(formatArg).join(" ");
         if (text.startsWith("[lumirealm] "))
           return;
-        logStore.push(methodToLevel(m), "console", text);
+        logStore.push(level, "console", text);
       } catch {}
     };
   }
@@ -48602,7 +43193,20 @@ function buildBundle(args) {
   };
 }
 function downloadBundle(bundle) {
-  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+  const { events, ...metadata } = bundle;
+  const parts = [JSON.stringify(metadata, null, 2).slice(0, -1), ',"events":{'];
+  const encoder = new TextEncoder;
+  for (const [index, source] of ["backend", "frontend"].entries()) {
+    parts.push(`${index ? "," : ""}"${source}":[`);
+    for (const [i, event] of events[source].entries()) {
+      if (i)
+        parts.push(",");
+      parts.push(encoder.encode(JSON.stringify(event, null, 2)));
+    }
+    parts.push("]");
+  }
+  parts.push("}}");
+  const blob = new Blob(parts, { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const a = document.createElement("a");
@@ -49653,7 +44257,7 @@ function downloadBlob(blob, fileName) {
 
 // src/frontend.ts
 var HANDSHAKE_RETRY_MS = 3000;
-var flog3 = {
+var flog2 = {
   error(msg, ...rest) {
     console.error("[lumirealm]", msg, ...rest);
     logStore.push("error", "frontend", formatLine2(msg, rest));
@@ -49718,7 +44322,7 @@ function persistLogStateToLocalStorage(state) {
 }
 function setup(ctx) {
   hydrateLogStateFromLocalStorage();
-  flog3.info("frontend setup: begin");
+  flog2.info("frontend setup: begin");
   const cleanups = [];
   ctx.deferReady();
   const display = ctx.display;
@@ -49730,18 +44334,29 @@ function setup(ctx) {
     if (activationPatterns.invalidate(chatId, changed))
       changed.push(ACTIVATION_INPUT_DEP_KEY);
   };
-  cleanups.push(display.registerResolver(createDisplayResolver((chatId, vars) => {
-    applyVarDelta(chatId, "local", vars);
-    ctx.sendToBackend({ type: "display_writeback", chatId, vars });
+  let auxCaptureId = 0;
+  const frontendLua = setupFrontendLua(ctx, (chatId, changed, resetScripts) => {
+    if (resetScripts)
+      displayResolver.resetScriptCache();
+    invalidateActivationVars(chatId, changed);
+    if (isVisibleChat(chatId))
+      display.invalidate(changed);
+  }, (error) => flog2.error("Frontend Lua failed", error), (chatId, event) => {
+    auxDebug?.handleBackendMessage({ type: "aux_debug_capture", id: ++auxCaptureId, ts: Date.now(), chatId, ...event });
+  });
+  cleanups.push(() => frontendLua.dispose());
+  const displayResolver = createDisplayResolver((chatId, vars) => {
+    frontendLua.writeback(chatId, vars);
   }, (effect) => {
     if (effect.kind === "set-expression") {
       display.setExpression(effect);
       return;
     }
     ctx.chats.updateMessage(effect.chatId, effect.messageId, { content: effect.content }).catch((err) => {
-      flog3.warn(`display action message update failed chat=${effect.chatId} ` + `message=${effect.messageId}: ${String(err)}`);
+      flog2.warn(`display action message update failed chat=${effect.chatId} ` + `message=${effect.messageId}: ${String(err)}`);
     });
-  }, activationPatterns)));
+  }, activationPatterns);
+  cleanups.push(display.registerResolver(displayResolver));
   const sendDisplayAuthority = (chatId) => {
     if (!chatId)
       return;
@@ -49755,21 +44370,11 @@ function setup(ctx) {
     const mode = m === "shadow" || m === "on" ? m : "off";
     setDisplayResolutionMode(mode);
     sendDisplayAuthority(activeRisuChatId);
-    flog3.info(`display resolution mode='${mode}'`);
+    flog2.info(`display resolution mode='${mode}'`);
   };
   cleanups.push(() => {
     try {
       delete window.__lumirealmDisplayMode;
-    } catch {}
-  });
-  window.__lumirealmWasmoon = (on) => {
-    const enabled = on !== false;
-    setWasmoonEnabled(enabled);
-    flog3.info(`wasmoon editDisplay engine ${enabled ? "ENABLED (wasmoon)" : "DISABLED (fengari fallback)"} — reopen the chat to apply`);
-  };
-  cleanups.push(() => {
-    try {
-      delete window.__lumirealmWasmoon;
     } catch {}
   });
   const originalFetch = window.fetch.bind(window);
@@ -49794,7 +44399,7 @@ function setup(ctx) {
           preview = `scripts=${parsed.scripts?.length ?? 0} content_len=${parsed.content?.length ?? 0} preFind=${findKeys.length} preReplace=${replaceKeys.length} dyn=[${dynKeys.join(",")}]`;
         }
       } catch {}
-      flog3.trace(`[macro-tap] → POST regex-scripts/apply ${preview}`);
+      flog2.trace(`[macro-tap] → POST regex-scripts/apply ${preview}`);
       const resp = await originalFetch(input, init);
       try {
         const clone = resp.clone();
@@ -49808,19 +44413,19 @@ function setup(ctx) {
         })();
         if (parsed && typeof parsed.result === "string") {
           const stillRaw = /\{\{(?!\s*(?:user|char|bot|notChar|not_char|charName)\s*\}\})/i.test(parsed.result);
-          flog3.trace(`[macro-tap] ← regex-scripts/apply 200 in ${Math.round(performance.now() - t0)}ms result_len=${parsed.result.length} touched=${parsed.touched_vars?.length ?? 0} cacheable=${parsed.cacheable} still_has_raw_cbs=${stillRaw} result[0..200]=${JSON.stringify(parsed.result.slice(0, 200))}`);
+          flog2.trace(`[macro-tap] ← regex-scripts/apply 200 in ${Math.round(performance.now() - t0)}ms result_len=${parsed.result.length} touched=${parsed.touched_vars?.length ?? 0} cacheable=${parsed.cacheable} still_has_raw_cbs=${stillRaw} result[0..200]=${JSON.stringify(parsed.result.slice(0, 200))}`);
         } else {
-          flog3.warn(`[macro-tap] ← regex-scripts/apply HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
+          flog2.warn(`[macro-tap] ← regex-scripts/apply HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
         }
       } catch (err) {
-        flog3.warn("[macro-tap] regex-scripts/apply clone/parse failed:", err);
+        flog2.warn("[macro-tap] regex-scripts/apply clone/parse failed:", err);
       }
       return resp;
     }
     if (isDisplayPreprocess) {
-      flog3.trace(`[macro-tap] → POST display-preprocess`);
+      flog2.trace(`[macro-tap] → POST display-preprocess`);
       const resp = await originalFetch(input, init);
-      flog3.trace(`[macro-tap] ← display-preprocess HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms`);
+      flog2.trace(`[macro-tap] ← display-preprocess HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms`);
       return resp;
     }
     let reqPreview = "";
@@ -49834,7 +44439,7 @@ function setup(ctx) {
         reqPreview = `templates=${keys.length} chat_id=${parsed.chat_id ?? "?"} character_id=${parsed.character_id ?? "?"} first_template[0..200]=${JSON.stringify((firstTmpl ?? "").slice(0, 200))}`;
       }
     } catch {}
-    flog3.trace(`[macro-tap] → POST resolve-batch ${reqPreview}`);
+    flog2.trace(`[macro-tap] → POST resolve-batch ${reqPreview}`);
     const resp = await originalFetch(input, init);
     try {
       const clone = resp.clone();
@@ -49850,20 +44455,20 @@ function setup(ctx) {
         const entries = Object.entries(parsed.resolved);
         const leaksRaw = entries.filter(([, v]) => /\{\{/.test(v));
         const emptyKeys = entries.filter(([, v]) => v.length === 0).length;
-        flog3.trace(`[macro-tap] ← resolve-batch 200 in ${Math.round(performance.now() - t0)}ms keys=${entries.length} leaks_with_raw_macros=${leaksRaw.length} empty_keys=${emptyKeys}`);
+        flog2.trace(`[macro-tap] ← resolve-batch 200 in ${Math.round(performance.now() - t0)}ms keys=${entries.length} leaks_with_raw_macros=${leaksRaw.length} empty_keys=${emptyKeys}`);
         if (leaksRaw.length > 0) {
           for (const [k, v] of leaksRaw.slice(0, 3)) {
-            flog3.warn(`[macro-tap]   leak id=${k} resolved[0..300]=${JSON.stringify(v.slice(0, 300))}`);
+            flog2.warn(`[macro-tap]   leak id=${k} resolved[0..300]=${JSON.stringify(v.slice(0, 300))}`);
           }
         }
         for (const [k, v] of entries) {
-          flog3.trace(`[macro-tap]   id=${k} len=${v.length} resolved[0..200]=${JSON.stringify(v.slice(0, 200))}`);
+          flog2.trace(`[macro-tap]   id=${k} len=${v.length} resolved[0..200]=${JSON.stringify(v.slice(0, 200))}`);
         }
       } else {
-        flog3.warn(`[macro-tap] ← resolve-batch HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
+        flog2.warn(`[macro-tap] ← resolve-batch HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
       }
     } catch (err) {
-      flog3.warn("[macro-tap] clone/parse failed:", err);
+      flog2.warn("[macro-tap] clone/parse failed:", err);
     }
     return resp;
   };
@@ -49935,28 +44540,32 @@ function setup(ctx) {
     } catch {}
   });
   cleanups.push(ctx.dom.addStyle(STYLES));
-  flog3.info("frontend setup: styles injected");
+  flog2.info("frontend setup: styles injected");
   const sendToBackend = (msg) => {
+    if (msg.type === "manual_trigger" || msg.type === "manual_button_click") {
+      frontendLua.manual(msg.chatId, msg.type === "manual_trigger" ? { kind: "manual", name: msg.triggerName } : { kind: "button", value: msg.btn }).catch((error) => flog2.error("Frontend Lua action failed", error));
+      return;
+    }
     if (!isLogTransportNoise(msg.type))
-      flog3.trace(`frontend send: ${msg.type}`, msg);
+      flog2.trace(`frontend send: ${msg.type}`, msg);
     ctx.sendToBackend(msg);
   };
-  const importOverlay = setupImportOverlay(flog3, sendToBackend);
+  const importOverlay = setupImportOverlay(flog2, sendToBackend);
   cleanups.push(() => importOverlay.destroy());
   let sidebar = null;
   try {
     sidebar = createSidebar({
       ctx,
       sendToBackend,
-      log: flog3,
+      log: flog2,
       onImportStart: (fileName, onCancel, totalBytes) => importOverlay.notifyImportStart(fileName, "drawer", onCancel, totalBytes),
       onUploadProgress: (sent, total) => importOverlay.setUploadProgress(sent, total),
       onModuleImportStart: (fileName, onCancel, totalBytes) => importOverlay.notifyImportStart(fileName, "module", onCancel, totalBytes)
     });
     cleanups.push(() => sidebar?.destroy());
-    flog3.info("frontend setup: unified sidebar registered");
+    flog2.info("frontend setup: unified sidebar registered");
   } catch (err) {
-    flog3.error("createSidebar failed:", err);
+    flog2.error("createSidebar failed:", err);
     return () => {
       for (const fn of cleanups) {
         try {
@@ -49965,28 +44574,28 @@ function setup(ctx) {
       }
     };
   }
-  const bgRenderer = setupBgHtmlRenderer(ctx, flog3);
+  const bgRenderer = setupBgHtmlRenderer(ctx, flog2);
   cleanups.push(() => bgRenderer.destroy());
-  const bgmPlayer = setupBgmPlayer(flog3);
+  const bgmPlayer = setupBgmPlayer(flog2);
   cleanups.push(() => bgmPlayer.destroy());
   let auxDebug = null;
   try {
-    auxDebug = createAuxDebugPanel(flog3);
+    auxDebug = createAuxDebugPanel(flog2);
     cleanups.push(() => auxDebug?.destroy());
   } catch (err) {
-    flog3.error("createAuxDebugPanel failed:", err);
+    flog2.error("createAuxDebugPanel failed:", err);
   }
-  const alertModal = setupAlertModal({ ctx, sendToBackend, log: flog3 });
+  const alertModal = setupAlertModal({ ctx, sendToBackend, log: flog2 });
   cleanups.push(() => alertModal.destroy());
-  const pickModal = setupPickModal({ ctx, sendToBackend, log: flog3 });
+  const pickModal = setupPickModal({ ctx, sendToBackend, log: flog2 });
   cleanups.push(() => pickModal.destroy());
-  const legacyReimportModal = setupLegacyReimportModal({ ctx, sendToBackend, log: flog3 });
+  const legacyReimportModal = setupLegacyReimportModal({ ctx, sendToBackend, log: flog2 });
   cleanups.push(() => legacyReimportModal.destroy());
-  const hostVersionModal = setupHostVersionModal({ ctx, sendToBackend, log: flog3 });
+  const hostVersionModal = setupHostVersionModal({ ctx, sendToBackend, log: flog2 });
   cleanups.push(() => hostVersionModal.destroy());
-  const permissionsModal = setupPermissionsModal({ ctx, sendToBackend, log: flog3 });
+  const permissionsModal = setupPermissionsModal({ ctx, sendToBackend, log: flog2 });
   cleanups.push(() => permissionsModal.destroy());
-  const bridgeBanner = setupBridgeStatusBanner({ ctx, log: flog3 });
+  const bridgeBanner = setupBridgeStatusBanner({ ctx, log: flog2 });
   cleanups.push(() => bridgeBanner.destroy());
   let realm = null;
   try {
@@ -49995,26 +44604,26 @@ function setup(ctx) {
     realm = setupRealmModal({
       ctx,
       sendToBackend,
-      log: flog3,
+      log: flog2,
       mountTarget: sidebar.headerRoot,
       onImportStart: (label) => importOverlay.notifyImportStart(label, "realm")
     });
     cleanups.push(() => realm?.destroy());
-    flog3.info("frontend setup: realm modal registered");
+    flog2.info("frontend setup: realm modal registered");
   } catch (err) {
-    flog3.error("setupRealmModal failed:", err);
+    flog2.error("setupRealmModal failed:", err);
   }
   const translateToggle = setupTranslateToggle({
     mountTarget: sidebar.headerRoot,
     sendToBackend,
-    log: flog3
+    log: flog2
   });
   cleanups.push(() => translateToggle.destroy());
-  const translateOrchestrator = initTranslateOrchestrator({ sendToBackend, log: flog3 });
+  const translateOrchestrator = initTranslateOrchestrator({ sendToBackend, log: flog2 });
   cleanups.push(() => translateOrchestrator.destroy());
-  const svgRasterizer = setupSvgRasterizer({ log: flog3, sendToBackend });
+  const svgRasterizer = setupSvgRasterizer({ log: flog2, sendToBackend });
   let activeRisuChatId = null;
-  const isVisibleChat = (chatId) => activeRisuChatId === null || chatId === activeRisuChatId;
+  const isVisibleChat = (chatId) => ctx.getActiveChat().chatId === chatId;
   const onClickCapture = (e) => {
     const path = typeof e.composedPath === "function" ? e.composedPath() : [];
     const t = path[0] ?? e.target;
@@ -50028,16 +44637,16 @@ function setup(ctx) {
     if (!triggerName && !btn)
       return;
     const idAttr = el.getAttribute("risu-id") ?? undefined;
-    const chatId = activeRisuChatId;
+    const chatId = ctx.getActiveChat().chatId;
     if (!chatId) {
       const label = triggerName ?? `btn=${btn}`;
-      flog3.warn(`manual click: active chat isn't a lumirealm chat, ignoring ${label}`);
+      flog2.warn(`manual click: active chat isn't a lumirealm chat, ignoring ${label}`);
       return;
     }
     e.preventDefault();
     e.stopPropagation();
     if (triggerName) {
-      flog3.info(`manual-trigger click: triggerName=${triggerName} triggerId=${idAttr ?? "<none>"} chatId=${chatId}`);
+      flog2.info(`manual-trigger click: triggerName=${triggerName} triggerId=${idAttr ?? "<none>"} chatId=${chatId}`);
       sendToBackend({
         type: "manual_trigger",
         triggerName,
@@ -50045,7 +44654,7 @@ function setup(ctx) {
         chatId
       });
     } else if (btn) {
-      flog3.info(`manual-button click: btn=${btn} btnId=${idAttr ?? "<none>"} chatId=${chatId}`);
+      flog2.info(`manual-button click: btn=${btn} btnId=${idAttr ?? "<none>"} chatId=${chatId}`);
       sendToBackend({
         type: "manual_button_click",
         btn,
@@ -50063,11 +44672,11 @@ function setup(ctx) {
     fire(triggerName, triggerId) {
       const chatId = activeRisuChatId;
       if (!chatId) {
-        flog3.warn(`__riCompat.fire: active chat isn't a lumirealm chat; open one first. triggerName=${triggerName}`);
+        flog2.warn(`__riCompat.fire: active chat isn't a lumirealm chat; open one first. triggerName=${triggerName}`);
         return false;
       }
       if (typeof triggerName !== "string" || triggerName.length === 0) {
-        flog3.warn("__riCompat.fire: triggerName must be a non-empty string");
+        flog2.warn("__riCompat.fire: triggerName must be a non-empty string");
         return false;
       }
       sendToBackend({
@@ -50080,11 +44689,11 @@ function setup(ctx) {
     },
     requestVariablesSnapshot() {
       if (!activeRisuChatId) {
-        flog3.warn("__riCompat.requestVariablesSnapshot: no active Risu chat");
+        flog2.warn("__riCompat.requestVariablesSnapshot: no active Risu chat");
         return false;
       }
       sendToBackend({ type: "request_variables_snapshot", chatId: activeRisuChatId });
-      flog3.info(`__riCompat.requestVariablesSnapshot: requested for chatId=${activeRisuChatId}`);
+      flog2.info(`__riCompat.requestVariablesSnapshot: requested for chatId=${activeRisuChatId}`);
       return true;
     }
   };
@@ -50101,7 +44710,7 @@ function setup(ctx) {
       } catch {}
     });
   } catch (err) {
-    flog3.warn(`__riCompat install failed: ${err.message}`);
+    flog2.warn(`__riCompat install failed: ${err.message}`);
   }
   let lastSentW = -1;
   let lastSentH = -1;
@@ -50112,7 +44721,7 @@ function setup(ctx) {
       return;
     lastSentW = w;
     lastSentH = h;
-    flog3.debug(`screen_dims: reporting reason=${reason} w=${w} h=${h}`);
+    flog2.debug(`screen_dims: reporting reason=${reason} w=${w} h=${h}`);
     sendToBackend({ type: "screen_dims", width: w, height: h });
   };
   let resizeTimer;
@@ -50129,9 +44738,11 @@ function setup(ctx) {
   });
   let ready = false;
   const unsub = ctx.onBackendMessage((raw) => {
+    if (frontendLua.receive(raw))
+      return;
     const msg = raw;
     if (!isLogTransportNoise(msg.type))
-      flog3.trace(`frontend recv: ${msg.type}`, msg);
+      flog2.trace(`frontend recv: ${msg.type}`, msg);
     if (msg.type === "log_state_pushed") {
       const level = isLogThreshold(msg.level) ? msg.level : DEFAULT_LOG_LEVEL;
       logStore.setState({ enabled: msg.enabled, includeChatData: msg.includeChatData, level });
@@ -50155,7 +44766,9 @@ function setup(ctx) {
         });
         downloadBundle(bundle);
       } catch (err) {
-        flog3.error("log_export_pushed: bundle/download failed", err);
+        flog2.error("log_export_pushed: bundle/download failed", err);
+        window.alert(`Log export failed: ${err instanceof Error ? err.message : String(err)}. The captured logs have been kept.`);
+        return;
       }
       sendToBackend({ type: "log_set_state", enabled: false, includeChatData: false });
     }
@@ -50163,86 +44776,50 @@ function setup(ctx) {
       const plan = msg.plan;
       (async () => {
         try {
-          const result = await buildArchive(plan, flog3);
+          const result = await buildArchive(plan, flog2);
           downloadBlob(result.blob, result.fileName);
           const skipped = result.skippedAssets.length;
-          flog3.info(`export_archive: wrote ${result.fileName} entries=${plan.entries.length}` + (skipped > 0 ? ` skipped=${skipped}` : ""));
+          flog2.info(`export_archive: wrote ${result.fileName} entries=${plan.entries.length}` + (skipped > 0 ? ` skipped=${skipped}` : ""));
           if (skipped > 0) {
             window.alert(`Exported ${result.fileName}, but ${skipped} asset(s) could not be read ` + `and were left out. The archive is incomplete.`);
           }
         } catch (err) {
-          flog3.error("export_archive: archive build failed", err);
+          flog2.error("export_archive: archive build failed", err);
           window.alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       })();
       return;
     }
     if (msg.type === "display_snapshot") {
-      if (getDisplayResolutionMode() !== "off") {
-        const prev = getDisplaySnapshot(msg.snapshot.chatId);
-        setDisplaySnapshot(msg.snapshot);
-        const changed = prev ? diffSnapshotVars(prev, msg.snapshot) : [];
-        invalidateActivationVars(msg.snapshot.chatId, changed);
-        if (!isVisibleChat(msg.snapshot.chatId))
-          return;
+      if (!isVisibleChat(msg.snapshot.chatId) && !frontendLua.owns(msg.snapshot.chatId))
+        return;
+      frontendLua.snapshot(msg.snapshot).then(() => {
         if (msg.reason === "gui-reload") {
-          display.invalidate(["*"]);
-          return;
-        }
-        if (prev) {
-          const ns = msg.snapshot;
-          if (prev.userName !== ns.userName || prev.charName !== ns.charName || prev.personaText !== ns.personaText || prev.personaImage !== ns.personaImage) {
-            activationPatterns.invalidate(msg.snapshot.chatId);
+          displayResolver.resetScriptCache();
+          if (isVisibleChat(msg.snapshot.chatId))
             display.invalidate(["*"]);
-            return;
-          }
-          const pc = prev.chat, nc = msg.snapshot.chat;
-          if (pc.lastMessageId !== nc.lastMessageId || pc.messageCount !== nc.messageCount || pc.lastMessage !== nc.lastMessage || pc.lastUserMessage !== nc.lastUserMessage || pc.lastCharMessage !== nc.lastCharMessage) {
-            changed.push(MSG_DEP_KEY);
-          }
-          if (changed.length > 0)
-            display.invalidate(changed);
-        } else {
-          display.invalidate(["*"]);
         }
-      }
+      }).catch((error) => flog2.error("Frontend Lua snapshot failed", error));
       return;
     }
-    if (msg.type === "set_variables") {
-      if (getDisplayResolutionMode() !== "off" && typeof msg.characterId === "string") {
-        const snap = getDisplaySnapshot(msg.chatId);
-        const changed = [];
-        for (const scope of ["local", "global", "chat"]) {
-          const incoming = msg.scopes[scope] ?? {};
-          const cur = { ...snap?.vars[scope] ?? {} };
-          for (const [k, v] of Object.entries(incoming)) {
-            if (cur[k] !== v)
-              changed.push(`${scope}:${k}`);
-          }
-          for (const k of Object.keys(cur)) {
-            if (!(k in incoming))
-              changed.push(`${scope}:${k}`);
-          }
-          applyVarDelta(msg.chatId, scope, { ...incoming });
-        }
-        invalidateActivationVars(msg.chatId, changed);
-        if (changed.length > 0 && isVisibleChat(msg.chatId))
-          display.invalidate(changed);
-      }
-    }
+    if (msg.type === "settings_pushed")
+      frontendLua.settings(msg.settings);
     if (msg.type === "cards_updated") {
       if (!ready) {
-        flog3.info("handshake complete on first cards_updated");
+        flog2.info("handshake complete on first cards_updated");
         reportDims("cards_updated", true);
       }
       ready = true;
     }
     if (msg.type === "set_active_chat") {
+      if (msg.chatId !== ctx.getActiveChat().chatId)
+        return;
       const prevChatId = activeRisuChatId;
       activeRisuChatId = msg.chatId;
       bgRenderer.setActiveChat(msg.chatId);
       sendDisplayAuthority(msg.chatId);
       if (activeRisuChatId !== prevChatId) {
+        displayResolver.resetScriptCache();
         activationPatterns.invalidate();
         if (sidebar)
           sidebar.setActiveChatId(activeRisuChatId);
@@ -50255,13 +44832,13 @@ function setup(ctx) {
     }
     if (msg.type === "render_bg_html" || msg.type === "clear_bg_html") {
       if (!isVisibleChat(msg.chatId)) {
-        flog3.info(`bg-html dispatch: ignoring ${msg.type} for background chat=${msg.chatId} (visible=${activeRisuChatId})`);
+        flog2.info(`bg-html dispatch: ignoring ${msg.type} for background chat=${msg.chatId} (visible=${activeRisuChatId})`);
         return;
       }
       try {
         bgRenderer.handleMessage(msg);
       } catch (err) {
-        flog3.error("bg-html dispatch failed:", err);
+        flog2.error("bg-html dispatch failed:", err);
       }
       return;
     }
@@ -50302,25 +44879,25 @@ function setup(ctx) {
       try {
         importOverlay.handleBackendMessage(msg);
       } catch (err) {
-        flog3.warn("importOverlay realm dispatch threw:", err);
+        flog2.warn("importOverlay realm dispatch threw:", err);
       }
       return;
     }
     try {
       importOverlay.handleBackendMessage(msg);
     } catch (err) {
-      flog3.warn("importOverlay dispatch threw:", err);
+      flog2.warn("importOverlay dispatch threw:", err);
     }
     try {
       translateToggle.handleBackendMessage(msg);
     } catch (err) {
-      flog3.warn("translateToggle dispatch threw:", err);
+      flog2.warn("translateToggle dispatch threw:", err);
     }
     sidebar?.handleBackendMessage(msg);
   });
   cleanups.push(unsub);
   function handshake() {
-    flog3.info("handshake: sending get_cards + screen_dims + log_request_state");
+    flog2.info("handshake: sending get_cards + screen_dims + log_request_state");
     sendToBackend({ type: "get_cards" });
     sendToBackend({ type: "log_request_state" });
     reportDims("handshake", true);
@@ -50331,14 +44908,14 @@ function setup(ctx) {
       window.clearInterval(retry);
       return;
     }
-    flog3.debug(`handshake retry (ready=${ready})`);
+    flog2.debug(`handshake retry (ready=${ready})`);
     handshake();
   }, HANDSHAKE_RETRY_MS);
   cleanups.push(() => window.clearInterval(retry));
   ctx.ready();
-  flog3.info("frontend setup: done");
+  flog2.info("frontend setup: done");
   return () => {
-    flog3.info("frontend teardown");
+    flog2.info("frontend teardown");
     for (const fn of cleanups) {
       try {
         fn();
@@ -50347,6 +44924,6 @@ function setup(ctx) {
   };
 }
 export {
-  flog3 as flog,
+  flog2 as flog,
   setup
 };
