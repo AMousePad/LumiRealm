@@ -950,3 +950,7 @@ test.each([false, true])('removes complete CSS imports only after display script
   const result = await applyRules(withScripts ? [displayRule({ replace_string: html })] : [], withScripts ? 'TOKEN' : html);
   expect(result?.content).toBe('<style>\n.panel * { margin: 0; padding: 0; }</style><div class="panel"><img src="/image"></div>');
 });
+
+test('owned card output opts out of host formatting repairs', () => {
+  expect(createDisplayResolver().skipFormattingHealing).toBe(true);
+});

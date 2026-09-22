@@ -41,7 +41,7 @@ bun install
 bun run build
 ```
 
-This typechecks, bundles `src/backend.ts` / `src/regex-runner.ts` / `src/frontend.ts` into `dist/`, applies sandbox-compatibility patches, and runs a static safety check mirroring the host's dangerous-capability scan. `dist/` is committed: Lumiverse installs from the committed bundles, so commits that change `src/` must include the rebuilt `dist/`.
+This typechecks, bundles `src/backend.ts` / `src/regex-runner.ts` / `src/frontend.ts` into `dist/`, applies sandbox-compatibility patches, and runs a static safety check mirroring the host's dangerous-capability scan. Run the build to validate source changes, but leave generated `dist/` changes out of source commits. Deployment uses the local built bundles; build a source checkout before installing unpublished changes.
 
 ## Tests
 

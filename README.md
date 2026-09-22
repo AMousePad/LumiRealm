@@ -55,13 +55,15 @@ The baseline requirement is **Lumiverse 1.2.0 or later**, as declared in [spindl
 Pick the branch that matches the Lumiverse you're running.
 
 - **`main`** is the default for released Lumiverse versions.
-- **`staging`** currently requires the companion Lumiverse frontend runtime changes, including document routing, runtime state, required generation hooks, and display/macro processing contracts. The baseline version alone is insufficient. Features move to `main` when their host dependencies are released.
+- **`staging`** currently requires the companion Lumiverse frontend runtime changes, including active-browser execution routing, runtime state, required generation hooks, and display/macro processing contracts. The baseline version alone is insufficient. Features move to `main` when their host dependencies are released. Build a source checkout before deploying staging; source commits do not include rebuilt bundles.
 
 To switch branches after installing, go to the extensions tab and use the **Branch** button on the LumiRealm entry.
 
 ## Compatibility
 
 RisuAI's behavior is the reference, but compatibility is not complete. Lumiverse still handles Markdown, HTML sanitization, and HTML islands (isolated sections of a message). Cards whose CSS or controls rely on elements outside an island can render or behave differently from RisuAI.
+
+With the host formatting-healing opt-out, LumiRealm preserves authored whitespace and font tags instead of applying automatic prose repairs. Older hosts ignore this option and may still alter card output. Markdown rendering and HTML sanitization remain enabled.
 
 ## Reporting bugs
 

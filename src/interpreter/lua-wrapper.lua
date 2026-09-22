@@ -154,4 +154,3 @@ callListenMain = async(function(type, id, value, meta)
 
     return json.encode(realValue)
 end)
-
