@@ -182,35 +182,35 @@ describe('Lua request() — failure paths never reject', () => {
 });
 
 describe('Lua request() — rate limit and lowLevelAccess gate', () => {
-  test('allows 5 requests per minute; the 6th resolves 429 and no fetch is attempted', async () => {
+  test('matches Risu: the 6th request succeeds and the 7th resolves 429 and no fetch is attempted', async () => {
     const { calls, corsFetch } = makeCorsHarness();
     const api = baseApi({ corsFetch });
     const results: unknown[] = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       const out = await runRequest(api, `https://example.com/r${i}`);
       results.push(JSON.parse(out.res));
       expect(out.after).toBe('alive');
     }
 
-    expect(results.slice(0, 5)).toEqual(
-      [0, 1, 2, 3, 4].map((i) => ({ status: 200, data: 'hello' })),
+    expect(results.slice(0, 6)).toEqual(
+      [0, 1, 2, 3, 4, 5].map((i) => ({ status: 200, data: 'hello' })),
     );
-    expect(results[5]).toEqual({
+    expect(results[6]).toEqual({
       status: 429,
       data: 'Too many requests. you can request 5 times per minute',
     });
-    expect(calls.length).toBe(5);
+    expect(calls.length).toBe(6);
   });
 
   test('guardrail rejections consume quota before the 429 (upstream order)', async () => {
     const { calls, corsFetch } = makeCorsHarness();
     const api = baseApi({ corsFetch });
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const out = await runRequest(api, 'http://example.com/not-https');
       expect(JSON.parse(out.res)).toEqual({ status: 400, data: 'Only https requests are allowed' });
     }
-    const sixth = await runRequest(api, 'https://example.com/now');
-    expect(JSON.parse(sixth.res)).toEqual({
+    const seventh = await runRequest(api, 'https://example.com/now');
+    expect(JSON.parse(seventh.res)).toEqual({
       status: 429,
       data: 'Too many requests. you can request 5 times per minute',
     });
@@ -223,7 +223,7 @@ describe('Lua request() — rate limit and lowLevelAccess gate', () => {
     const { corsFetch } = makeCorsHarness();
     const api = baseApi({ corsFetch });
 
-    for (let i = 0; i < 5; i++) await runRequest(api, `https://example.com/w${i}`);
+    for (let i = 0; i < 6; i++) await runRequest(api, `https://example.com/w${i}`);
     const blocked = await runRequest(api, 'https://example.com/blocked');
     expect(JSON.parse(blocked.res)).toEqual({
       status: 429,

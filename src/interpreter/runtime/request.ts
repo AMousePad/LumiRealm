@@ -65,7 +65,7 @@ export function makeLuaRequest(deps: LuaRequestDeps): (url: unknown) => Promise<
       _requestsInWindow = 0;
       _windowStartMs = nowMs;
     }
-    if (_requestsInWindow >= REQUEST_RATE_LIMIT) {
+    if (_requestsInWindow > REQUEST_RATE_LIMIT) {
       return payload(429, 'Too many requests. you can request 5 times per minute');
     }
     _requestsInWindow += 1;
