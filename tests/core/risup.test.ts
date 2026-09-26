@@ -294,7 +294,7 @@ describe('Risu preset translator', () => {
       promptTemplate: [
         {
           type: 'persona',
-          role: 'user',
+          role2: 'user',
           name: '## {{user}}',
           innerFormat: '{{#if {{? {{getglobalvar::toggle_topbotpersona}}=0}}}}\n---\n<Frame>\n{{slot}}\n{{/if}}',
         },
@@ -302,17 +302,17 @@ describe('Risu preset translator', () => {
         { type: 'chat', name: 'Chat Area' },
         {
           type: 'persona',
-          role: 'system',
+          role2: 'system',
           name: 'Top Placement',
           innerFormat: '{{#if_pure {{? {{getglobalvar::toggle_topbotpersona}}=2}}}}\n{{slot}}\n{{/if}}',
         },
         {
           type: 'persona',
-          role: 'system',
+          role2: 'system',
           name: 'Bottom Placement',
           innerFormat: '{{#if {{? {{getglobalvar::toggle_topbotpersona}}=3}}}}\n{{slot}}\n{{/if}}',
         },
-        { type: 'description', role: 'user', name: 'Card Body', innerFormat: '{{slot}}' },
+        { type: 'description', role2: 'user', name: 'Card Body', innerFormat: '{{slot}}' },
       ],
     };
 

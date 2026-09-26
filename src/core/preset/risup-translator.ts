@@ -339,7 +339,8 @@ export function translateRisuPromptBlocks(
   if (Array.isArray(template)) {
     for (const item of template) {
       const type = typeof item['type'] === 'string' ? item['type'] : 'plain';
-      const rawRole = typeof item['role'] === 'string' ? item['role'] : 'system';
+      const roleField = ['persona', 'description', 'authornote'].includes(type) ? 'role2' : 'role';
+      const rawRole = typeof item[roleField] === 'string' ? item[roleField] : 'system';
       const role: 'system' | 'user' | 'assistant' =
         rawRole === 'bot' || rawRole === 'assistant' || rawRole === 'char'
           ? 'assistant'
