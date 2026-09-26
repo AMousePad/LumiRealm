@@ -406,6 +406,7 @@ export function createDisplayResolver(
   return {
     finalizeWithoutScripts: true,
     skipFormattingHealing: true,
+    skipInlineCardWrapping: true,
     resetScriptCache() { scriptCache.clear(); },
     ready(chatId: string): boolean {
       return isDisplayResolutionReady(chatId);

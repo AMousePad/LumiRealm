@@ -954,3 +954,8 @@ test.each([false, true])('removes complete CSS imports only after display script
 test('owned card output opts out of host formatting repairs', () => {
   expect(createDisplayResolver().skipFormattingHealing).toBe(true);
 });
+
+
+test('requests authored sibling structure from the host renderer', () => {
+  expect(createDisplayResolver().skipInlineCardWrapping).toBe(true);
+});

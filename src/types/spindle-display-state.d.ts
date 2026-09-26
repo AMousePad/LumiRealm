@@ -5,6 +5,7 @@ declare module 'lumiverse-spindle-types' {
   interface SpindleDisplayResolver {
     finalizeWithoutScripts?: boolean;
     skipFormattingHealing?: boolean;
+    skipInlineCardWrapping?: boolean;
   }
   interface SpindleDisplayResolveResult { processingState?: string }
   interface SpindleDisplayScriptsArgs { processingState?: string }
