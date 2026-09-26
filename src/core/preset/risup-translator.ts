@@ -267,10 +267,10 @@ export function transformPresetTemplate(template: string): string {
   result = result.replace(/\{\{or::/g, '{{risuOr::');
   result = result.replace(/\{\{any::/g, '{{risuAny::');
   result = result.replace(/\{\{not::/g, '{{risuNot::');
-  result = result.replace(/\{\{equal::/g, '{{eq::');
+  result = result.replace(/\{\{equal::/g, '{{risuEqual::');
   // Risu's primary name and its alias both mean the same macro (cbs.ts notequal).
-  result = result.replace(/\{\{notequal::/g, '{{ne::');
-  result = result.replace(/\{\{not_equal::/g, '{{ne::');
+  result = result.replace(/\{\{notequal::/g, '{{risuNotEqual::');
+  result = result.replace(/\{\{not_equal::/g, '{{risuNotEqual::');
 
   return result;
 }

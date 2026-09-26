@@ -427,10 +427,10 @@ describe('Risu preset translator', () => {
     expect(block.content).toBe(
       '{{setvar::genre_check::0}}' +
         '{{#each toggle_genre1,toggle_genre2 genreVar}}' +
-        '{{#if {{risuAny::{{eq::{{risuGlobalVar::{{getvar::genreVar}}}}::1}}}}}}' +
+        '{{#if {{risuAny::{{risuEqual::{{risuGlobalVar::{{getvar::genreVar}}}}::1}}}}}}' +
         '{{setvar::genre_check::1}}{{/if}}{{/each}}' +
-        '{{#if {{eq::{{getvar::genre_check}}::1}}}}HIT{{/if}}' +
-        '{{#if {{risuAnd::{{ne::{{getvar::custom}}::null}}::1}}}}CHECKED{{/if}}',
+        '{{#if {{risuEqual::{{getvar::genre_check}}::1}}}}HIT{{/if}}' +
+        '{{#if {{risuAnd::{{risuNotEqual::{{getvar::custom}}::null}}::1}}}}CHECKED{{/if}}',
     );
     for (const unresolved of [
       '{{array::',

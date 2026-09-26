@@ -4,6 +4,9 @@ declare const spindle: any;
 // Allows Lumiverse native prompt assembly and Loom blocks to evaluate Risu-style expressions,
 // calculations, boolean operators, and string utilities.
 
+import '../risu-compat/handlers/logic.js';
+import { registry } from '../risu-compat/registry.js';
+import { buildEvaluatorContext } from './evaluator/context.js';
 import { calcString } from '../risu-compat/risu-helpers.js';
 import { collectLegacyGlobals, mergeEffectiveGlobals, readTogglePreferences } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
@@ -38,11 +41,6 @@ function getArgs(ctx: unknown): string[] {
     return args.map((a) => (a == null ? '' : String(a)));
   }
   return [];
-}
-
-function isTruthy(val: string): boolean {
-  const s = String(val == null ? '' : val).trim().toLowerCase();
-  return s === '1' || s === 'true';
 }
 
 function evalRisuCalc(ctx: unknown): string {
@@ -250,46 +248,18 @@ export function registerSpindleMacros(): void {
         return String(getArg(ctx, 0).length);
       },
     },
-    {
-      name: 'risuNot',
-      aliases: ['littleDevilNot'],
-      category: MACRO_CATEGORY,
-      description: 'Boolean negation (returns 1 or 0).',
-      returnType: 'integer',
-      handler: (ctx: unknown) => {
-        return isTruthy(getArg(ctx, 0)) ? '0' : '1';
-      },
-    },
-    {
-      name: 'risuAnd',
-      aliases: ['littleDevilAnd'],
-      category: MACRO_CATEGORY,
-      description: 'Variadic boolean AND (returns 1 or 0).',
-      returnType: 'integer',
-      handler: (ctx: unknown) => {
-        const args = getArgs(ctx);
-        return args.length === 0 || args.every(isTruthy) ? '1' : '0';
-      },
-    },
-    {
-      name: 'risuOr',
-      aliases: ['littleDevilOr'],
-      category: MACRO_CATEGORY,
-      description: 'Variadic boolean OR (returns 1 or 0).',
-      returnType: 'integer',
-      handler: (ctx: unknown) => {
-        return getArgs(ctx).some(isTruthy) ? '1' : '0';
-      },
-    },
-    {
-      name: 'risuAny',
-      category: MACRO_CATEGORY,
-      description: 'Variadic boolean OR / any truthy (returns 1 or 0).',
-      returnType: 'integer',
-      handler: (ctx: unknown) => {
-        return getArgs(ctx).some(isTruthy) ? '1' : '0';
-      },
-    },
+    ...[
+      ['risuEqual', 'equal'], ['risuNotEqual', 'notequal'],
+      ['risuNot', 'not'], ['risuAnd', 'and'], ['risuOr', 'or'], ['risuAny', 'any'],
+    ].map(([name, source]) => ({
+      name: name!, category: MACRO_CATEGORY, returnType: 'integer',
+      description: `Risu ${source} comparison returning 1 or 0.`,
+      aliases: ['risuNot', 'risuAnd', 'risuOr'].includes(name!) ? [name!.replace('risu', 'littleDevil')] : [],
+      handler: (ctx: unknown) => registry.get(source!)!.handler(
+        buildEvaluatorContext({ chatId: '', userName: '', charName: '', character: {}, chat: {}, variables: {}, commit: false }),
+        getArgs(ctx), '',
+      ),
+    })),
     {
       name: 'previous_chat_log',
       // Risu's primary spelling for the same macro (cbs.ts previouschatlog).

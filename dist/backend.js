@@ -13956,9 +13956,9 @@ function transformPresetTemplate(template) {
   result = result.replace(/\{\{or::/g, "{{risuOr::");
   result = result.replace(/\{\{any::/g, "{{risuAny::");
   result = result.replace(/\{\{not::/g, "{{risuNot::");
-  result = result.replace(/\{\{equal::/g, "{{eq::");
-  result = result.replace(/\{\{notequal::/g, "{{ne::");
-  result = result.replace(/\{\{not_equal::/g, "{{ne::");
+  result = result.replace(/\{\{equal::/g, "{{risuEqual::");
+  result = result.replace(/\{\{notequal::/g, "{{risuNotEqual::");
+  result = result.replace(/\{\{not_equal::/g, "{{risuNotEqual::");
   return result;
 }
 function translateRisuPromptBlocks(template, toggleGroups) {
@@ -31013,6 +31013,8 @@ async function translatePresetLabels(preset, opts, deps) {
 }
 
 // src/interpreter/spindle-macros.ts
+init_logic();
+init_registry();
 init_risu_helpers();
 var log7 = makeSafeLogger("spindle-macros");
 function getArg(ctx, index) {
@@ -31028,10 +31030,6 @@ function getArgs(ctx) {
     return args.map((a) => a == null ? "" : String(a));
   }
   return [];
-}
-function isTruthy2(val) {
-  const s = String(val == null ? "" : val).trim().toLowerCase();
-  return s === "1" || s === "true";
 }
 function evalRisuCalc(ctx) {
   const expr = getArg(ctx, 0);
@@ -31178,46 +31176,21 @@ function registerSpindleMacros() {
         return String(getArg(ctx, 0).length);
       }
     },
-    {
-      name: "risuNot",
-      aliases: ["littleDevilNot"],
+    ...[
+      ["risuEqual", "equal"],
+      ["risuNotEqual", "notequal"],
+      ["risuNot", "not"],
+      ["risuAnd", "and"],
+      ["risuOr", "or"],
+      ["risuAny", "any"]
+    ].map(([name, source]) => ({
+      name,
       category: MACRO_CATEGORY,
-      description: "Boolean negation (returns 1 or 0).",
       returnType: "integer",
-      handler: (ctx) => {
-        return isTruthy2(getArg(ctx, 0)) ? "0" : "1";
-      }
-    },
-    {
-      name: "risuAnd",
-      aliases: ["littleDevilAnd"],
-      category: MACRO_CATEGORY,
-      description: "Variadic boolean AND (returns 1 or 0).",
-      returnType: "integer",
-      handler: (ctx) => {
-        const args = getArgs(ctx);
-        return args.length === 0 || args.every(isTruthy2) ? "1" : "0";
-      }
-    },
-    {
-      name: "risuOr",
-      aliases: ["littleDevilOr"],
-      category: MACRO_CATEGORY,
-      description: "Variadic boolean OR (returns 1 or 0).",
-      returnType: "integer",
-      handler: (ctx) => {
-        return getArgs(ctx).some(isTruthy2) ? "1" : "0";
-      }
-    },
-    {
-      name: "risuAny",
-      category: MACRO_CATEGORY,
-      description: "Variadic boolean OR / any truthy (returns 1 or 0).",
-      returnType: "integer",
-      handler: (ctx) => {
-        return getArgs(ctx).some(isTruthy2) ? "1" : "0";
-      }
-    },
+      description: `Risu ${source} comparison returning 1 or 0.`,
+      aliases: ["risuNot", "risuAnd", "risuOr"].includes(name) ? [name.replace("risu", "littleDevil")] : [],
+      handler: (ctx) => registry.get(source).handler(buildEvaluatorContext({ chatId: "", userName: "", charName: "", character: {}, chat: {}, variables: {}, commit: false }), getArgs(ctx), "")
+    })),
     {
       name: "previous_chat_log",
       aliases: ["previouschatlog"],
