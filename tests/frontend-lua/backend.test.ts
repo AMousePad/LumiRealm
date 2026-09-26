@@ -50,6 +50,35 @@ test('state refresh carries current user toggle preferences and preserves unrela
   } finally { backend.dispose(); }
 });
 
+test('image and request services reach the authenticated host adapters', async () => {
+  const f = fixture();
+  const calls: unknown[] = [];
+  Object.assign(f.host, {
+    imageGen: { generate: async (input: unknown) => { calls.push(input); return { imageId: 'generated' }; } },
+    images: { uploadFromDataUrl: async (...args: unknown[]) => { calls.push(args); return { id: 'uploaded' }; } },
+    cors: async (...args: unknown[]) => { calls.push(args); return { status: 201, text: async () => 'response' }; },
+  });
+  const backend = createFrontendLuaBackend(f.host, f.bootstrap);
+  const call = { type: 'lua_service', requestId: 'request', chatId: 'chat', characterId: 'character' };
+  try {
+    for (const request of [
+      { kind: 'image.generate', prompt: 'scene', options: { connectionId: 'image-profile', parameters: { steps: 12 } } },
+      { kind: 'image.upload', dataUrl: 'data:image/png;base64,AA==', name: 'image' },
+      { kind: 'request', url: 'https://example.test' },
+    ]) await backend.receive({ ...call, request }, 'owner', 'document');
+    expect(calls).toEqual([
+      { prompt: 'scene', owner_chat_id: 'chat', negativePrompt: undefined, connection_id: 'image-profile', parameters: { steps: 12 }, userId: 'owner' },
+      ['data:image/png;base64,AA==', { originalFilename: 'image', owner_chat_id: 'chat', userId: 'owner' }],
+      ['https://example.test', { method: 'GET' }],
+    ]);
+    expect(f.sent.map(message => message.payload)).toEqual([
+      { type: 'lua_service_reply', requestId: 'request', ok: true, value: { imageId: 'generated' } },
+      { type: 'lua_service_reply', requestId: 'request', ok: true, value: 'uploaded' },
+      { type: 'lua_service_reply', requestId: 'request', ok: true, value: { status: 201, body: 'response' } },
+    ]);
+  } finally { backend.dispose(); }
+});
+
 test('production backend refuses missing host contracts and unowned invocations', async () => {
   const f = fixture();
   for (const capability of Object.keys(f.capabilities)) {

@@ -24967,6 +24967,8 @@ function createOrphanOrchestrator(deps) {
     }
     const orphans = [];
     for (const img of ownedById.values()) {
+      if (img.owner_chat_id)
+        continue;
       if (live.liveIds.has(img.id))
         continue;
       orphans.push({
@@ -27294,7 +27296,7 @@ function createOrphanHandlers(deps) {
         for (const id of msg.imageIds) {
           if (typeof id !== "string" || id.length === 0)
             continue;
-          if (live.liveIds.has(id)) {
+          if (live.liveIds.has(id) || (await deps.getImage(id, ctx.userId))?.owner_chat_id) {
             skippedIds.push(id);
             continue;
           }
@@ -29354,6 +29356,7 @@ ${instruction}` }
       async generate(prompt, opts) {
         const input = {
           prompt,
+          owner_chat_id: chatId,
           negativePrompt: opts?.negativePrompt,
           ...opts?.connectionId ? { connection_id: opts.connectionId } : {},
           ...opts?.model ? { model: opts.model } : {},
@@ -29369,7 +29372,11 @@ ${instruction}` }
   if (typeof spindle !== "undefined" && spindle.images) {
     host.images = {
       async uploadFromDataUrl(dataUrl, name) {
-        const res = await spindle.images.uploadFromDataUrl(dataUrl, name, uid);
+        const res = await spindle.images.uploadFromDataUrl(dataUrl, {
+          ...name ? { originalFilename: name } : {},
+          owner_chat_id: chatId,
+          ...uid !== undefined ? { userId: uid } : {}
+        });
         return typeof res === "string" ? res : res.id;
       },
       getUrl(id) {
@@ -38308,6 +38315,7 @@ var importHandlers = createImportHandlers({
   errMsg
 });
 var orphanHandlers = createOrphanHandlers({
+  getImage: (id, userId) => spindle.images.get(id, userId),
   assetUploadsInFlightRef: { get current() {
     return assetUploadsInFlight;
   } },

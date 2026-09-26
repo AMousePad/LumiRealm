@@ -429,6 +429,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       async generate(prompt: string, opts) {
         const input: Record<string, unknown> = {
           prompt,
+          owner_chat_id: chatId,
           negativePrompt: opts?.negativePrompt,
           ...(opts?.connectionId ? { connection_id: opts.connectionId } : {}),
           ...(opts?.model ? { model: opts.model } : {}),
@@ -445,7 +446,10 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   if (typeof spindle !== 'undefined' && spindle.images) {
     (host as { images?: HostApi['images'] }).images = {
       async uploadFromDataUrl(dataUrl: string, name?: string): Promise<string | { id: string }> {
-        const res = await spindle.images.uploadFromDataUrl(dataUrl, name, uid);
+        const res = await spindle.images.uploadFromDataUrl(dataUrl, {
+          ...(name ? { originalFilename: name } : {}), owner_chat_id: chatId,
+          ...(uid !== undefined ? { userId: uid } : {}),
+        });
         return typeof res === 'string' ? res : res.id;
       },
       getUrl(id: string): string {

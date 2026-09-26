@@ -1824,6 +1824,7 @@ const importHandlers = createImportHandlers({
   errMsg,
 });
 const orphanHandlers = createOrphanHandlers({
+  getImage: (id, userId) => spindle.images.get(id, userId),
   assetUploadsInFlightRef: { get current() { return assetUploadsInFlight; } } as { current: number },
   scanOrphanedImages,
   buildOrphanDetectDeps,

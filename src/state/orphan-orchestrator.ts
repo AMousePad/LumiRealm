@@ -34,6 +34,7 @@ export interface SpindleImageDTOLike {
   readonly height?: number | null;
   readonly url?: string;
   readonly owner_character_id?: string | null;
+  readonly owner_chat_id?: string | null;
   readonly created_at?: number;
 }
 
@@ -176,6 +177,8 @@ export function createOrphanOrchestrator(
 
     const orphans: OrphanAssetEntry[] = [];
     for (const img of ownedById.values()) {
+      // Chat assets belong to the host's chat lifecycle, outside imported asset cleanup.
+      if (img.owner_chat_id) continue;
       if (live.liveIds.has(img.id)) continue;
       orphans.push({
         id: img.id,
