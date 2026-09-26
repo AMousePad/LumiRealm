@@ -98,13 +98,6 @@ export function parseRisuToggleSyntax(template: string | undefined): ParsedToggl
 
 // Risu's risuChatParser closes the innermost block regardless of the closing label.
 // The host instead requires a closing macro whose name matches its opener.
-// A structural marker block is resolved from its marker macro alone, so any
-// conditional inside its content would be silently dropped. Detect the scoped
-// and inline conditional forms the host can evaluate.
-function hasConditional(content: string): boolean {
-  return /\{\{(?:#|if::|unless::)/.test(content);
-}
-
 function namePresetBlockClosers(template: string): string {
   const blocks: string[] = [];
   const openings: number[] = [];
@@ -410,12 +403,8 @@ export function translateRisuPromptBlocks(
         const personaContent = rawInner
           ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{persona}}') : rawInner)
           : (text || '{{persona}}');
-        // The host resolves a persona_description block from {{persona}} alone: it
-        // drops the item's gate and framing text entirely. The marker is only
-        // equivalent while the item is unconditional, so a gated item becomes a
-        // content block and its own placement gate decides whether {{persona}} is
-        // emitted. Only the first persona item may carry the marker.
-        const personaMarker: PromptBlockDTO['marker'] = !seenPersona && !hasConditional(personaContent)
+        // Host structural markers ignore content, including wrappers and placement gates.
+        const personaMarker: PromptBlockDTO['marker'] = !seenPersona && personaContent === '{{persona}}'
           ? 'persona_description'
           : null;
         seenPersona = true;
@@ -445,7 +434,7 @@ export function translateRisuPromptBlocks(
           enabled,
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
-          marker: 'char_description',
+          marker: descContent === '{{description}}' ? 'char_description' : null,
           content: descContent,
           isLocked: false,
           color: null,

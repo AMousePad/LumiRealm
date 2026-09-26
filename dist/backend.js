@@ -13824,9 +13824,6 @@ function parseRisuToggleSyntax(template) {
   }
   return groups.filter((g) => g.variables.length > 0);
 }
-function hasConditional(content) {
-  return /\{\{(?:#|if::|unless::)/.test(content);
-}
 function namePresetBlockClosers(template) {
   const blocks = [];
   const openings = [];
@@ -14070,7 +14067,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
       } else if (type === "persona") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
         const personaContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{persona}}") : rawInner) : text || "{{persona}}";
-        const personaMarker = !seenPersona && !hasConditional(personaContent) ? "persona_description" : null;
+        const personaMarker = !seenPersona && personaContent === "{{persona}}" ? "persona_description" : null;
         seenPersona = true;
         blocks.push({
           id: newUuid(),
@@ -14096,7 +14093,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           enabled,
           position: seenChat ? "post_history" : "pre_history",
           depth: 0,
-          marker: "char_description",
+          marker: descContent === "{{description}}" ? "char_description" : null,
           content: descContent,
           isLocked: false,
           color: null,

@@ -254,7 +254,7 @@ describe('Risu preset translator', () => {
     );
 
     const description = blocks.find((b) => b.name === 'Char Body')!;
-    expect(description.marker).toBe('char_description');
+    expect(description.marker).toBeNull();
     expect(description.content).toBe(
       '{{#if {{risuContains::{{risuGlobalVar::toggle_tags}}::ship}}}}{{description}}{{/if}}',
     );
@@ -364,7 +364,7 @@ describe('Risu preset translator', () => {
     expect(blocks.find((b) => b.name === 'Card Body')!.marker).toBe('char_description');
   });
 
-  test('keeps the persona marker for an unconditional persona item', () => {
+  test('retains framing text for an unconditional persona item', () => {
     const raw = {
       name: 'Plain Persona Preset',
       promptTemplate: [
@@ -376,12 +376,10 @@ describe('Risu preset translator', () => {
     const { preset } = translateRisuPreset(raw);
     const blocks = preset.prompt_order ?? [];
 
-    // With no conditional inside it the marker is behaviourally equivalent to the
-    // block content, so the host's native persona carrier is kept.
     const carrier = blocks.find((b) => b.name === '## {{user}}')!;
-    expect(carrier.marker).toBe('persona_description');
+    expect(carrier.marker).toBeNull();
     expect(carrier.content).toBe('---\n{{persona}}\n---');
-    expect(blocks.filter((b) => b.marker === 'persona_description').length).toBe(1);
+    expect(blocks.filter((b) => b.marker === 'persona_description').length).toBe(0);
   });
 
   test('emits the Risu authornote slot macro for authornote items', () => {
