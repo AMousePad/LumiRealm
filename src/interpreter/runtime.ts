@@ -1410,55 +1410,15 @@ export async function makeRisuTriggerRuntime(
         });
         return Promise.resolve(JSON.stringify(out));
       },
-      getLoreBooksMain: (_id: unknown, search: unknown) => {
-        const searchStr = typeof search === 'string' ? search.trim() : '';
-        const matches = searchStr
-          ? lorebook.entries.filter((e) => {
-              if (toStr(e.comment) === searchStr) return true;
-              if (toStr(e.id) === searchStr) return true;
-              const keys = keyToArray(e.key);
-              return keys.some((k) => k === searchStr);
-            })
-          : lorebook.entries;
-
-        const evalCtx = buildEvaluatorContext({
-          chatId: portalChatId ?? '',
-          commit: false,
-          suppressVarPersist: true,
-          userName: 'User',
-          charName: 'Char',
-          character: { description: '' },
-          chat: {
-            messages: messagesCache.map((m) => ({
-              role: m.role === 'user' ? ('user' as const) : m.role === 'system' ? ('system' as const) : ('assistant' as const),
-              content: m.content,
-              createdAt: m.createdAt ?? Date.now(),
-            })),
-          },
-          variables: {
-            global: { ...globalVarsCache },
-            local: { ...varsCache },
-            chat: { ...varsCache },
-          },
-        });
-
-        const out = matches.map((e) => {
-          let content = toStr(e.content);
-          if (content.includes('{{')) {
-            try { content = evaluate(content, evalCtx); } catch { /* skip */ }
-          }
-          return {
-            ...e,
-            id: e.id,
-            comment: toStr(e.comment),
-            content,
-            key: Array.isArray(e.key) ? e.key.join(', ') : toStr(e.key),
-            order: e.orderValue ?? 100,
-            alwaysActive: !e.disabled,
-          };
-        });
-        return JSON.stringify(out);
-      },
+      getLoreBooksMain: (_id: unknown, search: unknown) => JSON.stringify(
+        lorebook.entries.filter(entry => entry.comment === search).map(entry => ({
+          ...entry,
+          content: toStr(entry.content).includes('{{') ? luaCbs(entry.content) : toStr(entry.content),
+          key: Array.isArray(entry.key) ? entry.key.join(', ') : toStr(entry.key),
+          insertorder: entry.orderValue ?? entry.insertorder ?? 100,
+          alwaysActive: entry.constant ?? entry.alwaysActive ?? false,
+        })),
+      ),
       upsertLocalLoreBook: (_id: unknown, name: unknown, content: unknown, opts?: Record<string, unknown>) => {
         const o = opts || {};
         createLorebook(name, o['key'] || name, content, o['order'] || 0);

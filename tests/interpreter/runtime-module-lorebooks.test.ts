@@ -63,6 +63,7 @@ describe('Runtime Module Lorebooks and getLoreBooks', () => {
       characterId: 'char-1',
       lowLevelAccess: true,
       moduleLorebooks,
+      templateContext: async () => ({ variables: {}, character: {}, chat: {}, commit: false, chatId: 'chat', charName: 'TestChar', userName: 'User' }),
     });
 
     await runtime.runLua(`
