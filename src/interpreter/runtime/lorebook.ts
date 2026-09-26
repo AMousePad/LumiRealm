@@ -8,6 +8,30 @@ export interface LorebookCache {
   primaryBookId: string | null;
 }
 
+export function withModuleLorebooks(
+  entries: readonly HostWorldInfoEntry[], modules: readonly unknown[], bookIds: readonly string[] = [],
+): HostWorldInfoEntry[] {
+  const loadedBooks = new Set([...bookIds, ...entries.map(entry => entry.worldBookId)]);
+  const out = [...entries];
+  for (const raw of modules) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Record<string, unknown>;
+    // An attached module's installed worldbook is already present in the live host state.
+    if (typeof row.worldBookId === 'string' && loadedBooks.has(row.worldBookId)) continue;
+    out.push({
+      ...row,
+      id: typeof row.id === 'string' ? row.id : `module-lore-${out.length}`,
+      key: Array.isArray(row.key) ? row.key : typeof row.key === 'string' ? row.key : [],
+      content: typeof row.content === 'string' ? row.content : '',
+      comment: typeof row.comment === 'string' ? row.comment : '',
+      orderValue: typeof row.orderValue === 'number' ? row.orderValue : typeof row.insertorder === 'number' ? row.insertorder : 100,
+      disabled: row.disabled === true,
+      constant: typeof row.constant === 'boolean' ? row.constant : row.alwaysActive === true,
+    });
+  }
+  return out;
+}
+
 export interface LorebookApi {
   getLorebookCount(): number;
   getLorebookEntry(index: unknown): string;

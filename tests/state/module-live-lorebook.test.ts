@@ -31,7 +31,7 @@ describe('installed module lorebook runtime source', () => {
   test('reads locally added and edited presets and respects deletion without changing the import', async () => {
     const fixture = setup();
     fixture.setRows([{ comment: 'Preset 2', content: 'neutral blue ink', key: [] }]);
-    expect(await fixture.load()).toMatchObject([{ comment: 'Preset 2', content: 'neutral blue ink' }]);
+    expect(await fixture.load()).toMatchObject([{ comment: 'Preset 2', content: 'neutral blue ink', worldBookId: 'book' }]);
     fixture.setRows([{ comment: 'Preset 2', content: 'neutral pencil', key: [] }]);
     expect(await fixture.load()).toMatchObject([{ comment: 'Preset 2', content: 'neutral pencil' }]);
     fixture.setRows([]);

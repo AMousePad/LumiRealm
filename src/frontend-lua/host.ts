@@ -1,7 +1,7 @@
 import { v4 } from 'uuid';
 import type { HostApi, HostWorldInfoEntry, TriggerRuntimeOpts } from '../interpreter/host.js';
 import type { DisplaySnapshot } from '../display/snapshot.js';
-import { sortLorebookEntriesBySourceOrder } from '../interpreter/runtime/lorebook.js';
+import { sortLorebookEntriesBySourceOrder, withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
 import type { FrontendRuntimeState } from './state.js';
 import { runtimeLore, type RuntimeService, type RuntimeSettings } from './state-contract.js';
 import { createLuaTemplateParser, createTriggerTemplateParser } from '../interpreter/runtime/template.js';
@@ -106,7 +106,8 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
         preloaded: {
           varsCache: Object.fromEntries(Object.entries(state.variables()).map(([name, value]) => ['$' + name, value])),
           globalVars: state.globalVariables(), scriptstateDefaults: snap.scriptstateDefaults, messagesRaw: state.hostMessages(),
-          lorebook: { entries: sortLorebookEntriesBySourceOrder(state.lore()), primaryBookId: state.character().worldBookIds?.[0] ?? null },
+          lorebook: { entries: withModuleLorebooks(sortLorebookEntriesBySourceOrder(state.lore()), snap.lorebookHost, state.character().worldBookIds),
+            primaryBookId: state.character().worldBookIds?.[0] ?? null },
           luaState: {
             get character() { return state.character(); }, get persona() { return state.persona(); },
             get authorsNote() { const note = state.metadata('authors_note'); return typeof note === 'string' ? note : (note as { content?: string } | null)?.content ?? ''; },

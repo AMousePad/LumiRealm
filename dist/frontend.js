@@ -17692,6 +17692,28 @@ function makeCharacterNoteApi(api, state, vars) {
 }
 
 // src/interpreter/runtime/lorebook.ts
+function withModuleLorebooks(entries, modules, bookIds = []) {
+  const loadedBooks = new Set([...bookIds, ...entries.map((entry) => entry.worldBookId)]);
+  const out = [...entries];
+  for (const raw of modules) {
+    if (!raw || typeof raw !== "object")
+      continue;
+    const row = raw;
+    if (typeof row.worldBookId === "string" && loadedBooks.has(row.worldBookId))
+      continue;
+    out.push({
+      ...row,
+      id: typeof row.id === "string" ? row.id : `module-lore-${out.length}`,
+      key: Array.isArray(row.key) ? row.key : typeof row.key === "string" ? row.key : [],
+      content: typeof row.content === "string" ? row.content : "",
+      comment: typeof row.comment === "string" ? row.comment : "",
+      orderValue: typeof row.orderValue === "number" ? row.orderValue : typeof row.insertorder === "number" ? row.insertorder : 100,
+      disabled: row.disabled === true,
+      constant: typeof row.constant === "boolean" ? row.constant : row.alwaysActive === true
+    });
+  }
+  return out;
+}
 function keyToArray(k) {
   if (Array.isArray(k))
     return k.map(toStr).filter(Boolean);
@@ -18795,26 +18817,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   }
   const rawExtra = preloaded?.lorebook ? opts.moduleLorebooks ?? [] : opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
   const extraLorebooks = Array.isArray(rawExtra) ? rawExtra : rawExtra && typeof rawExtra === "object" ? Object.values(rawExtra).flat() : [];
-  if (extraLorebooks.length > 0) {
-    if (preloaded?.lorebook && lorebook.entries === preloaded.lorebook.entries) {
-      lorebook.entries = [...lorebook.entries];
-    }
-    for (const raw of extraLorebooks) {
-      if (!raw || typeof raw !== "object")
-        continue;
-      const r = raw;
-      lorebook.entries.push({
-        id: typeof r.id === "string" ? r.id : `module-lore-${lorebook.entries.length}`,
-        ...typeof r.worldBookId === "string" ? { worldBookId: r.worldBookId } : {},
-        key: Array.isArray(r.key) ? r.key : typeof r.key === "string" ? r.key : [],
-        content: typeof r.content === "string" ? r.content : "",
-        comment: typeof r.comment === "string" ? r.comment : "",
-        orderValue: typeof r.orderValue === "number" ? r.orderValue : typeof r.insertorder === "number" ? r.insertorder : 100,
-        disabled: typeof r.disabled === "boolean" ? r.disabled : false,
-        constant: typeof r.constant === "boolean" ? r.constant : false
-      });
-    }
-  }
+  lorebook.entries = withModuleLorebooks(lorebook.entries, extraLorebooks);
   const _factoryTotal = Date.now() - _factoryStart;
   _logMake.info(`factory.timing total=${_factoryTotal}ms vars=${_tVars}ms (src=${_varsSrc}) ` + `msgs=${_tMsgs}ms (n=${_msgsCount} src=${_msgsSrc}) chars.get=${_tCharGet}ms ` + `lore=${_tLore}ms (books=${_bookCount} entries=${_entryCount} src=${_loreSrc}) ` + `inherited=${isInheritedVarsCache} chatId=${portalChatId ?? "<none>"} ` + `binding=${binding} characterId=${characterId ?? "<none>"}`);
   const pendingSendIds = new WeakMap;
@@ -24798,7 +24801,10 @@ function createFrontendHost(state, snapshot, settings, services) {
           globalVars: state.globalVariables(),
           scriptstateDefaults: snap.scriptstateDefaults,
           messagesRaw: state.hostMessages(),
-          lorebook: { entries: sortLorebookEntriesBySourceOrder(state.lore()), primaryBookId: state.character().worldBookIds?.[0] ?? null },
+          lorebook: {
+            entries: withModuleLorebooks(sortLorebookEntriesBySourceOrder(state.lore()), snap.lorebookHost, state.character().worldBookIds),
+            primaryBookId: state.character().worldBookIds?.[0] ?? null
+          },
           luaState: {
             get character() {
               return state.character();

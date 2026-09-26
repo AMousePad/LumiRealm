@@ -361,7 +361,8 @@ export function createModulePushes(deps: ModulePushesDeps): ModulePushes {
           if (page.data.length < 200) break;
         }
         // Installed rows are editable; the import envelope is only the source for back-projection.
-        lorebook = reconcileLoreEntries(lorebook as readonly LoreBook[], live, () => '').entries;
+        lorebook = reconcileLoreEntries(lorebook as readonly LoreBook[], live, () => '').entries
+          .map(entry => ({ ...entry, worldBookId: env.installed_world_book_id }));
       }
       const namespace =
         typeof m.namespace === 'string' && m.namespace.length > 0

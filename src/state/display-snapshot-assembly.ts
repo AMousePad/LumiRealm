@@ -14,6 +14,7 @@ import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import type { RisuChatView } from '../interpreter/risu-chat-view.js';
 import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import type { TriggerScript } from '../core/schemas/triggerscript.js';
+import { withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
 import { hostMessageTime } from '../util/message-time.js';
 
 export interface DisplaySnapshotAssemblyDeps {
@@ -206,20 +207,7 @@ export async function assembleDisplaySnapshot(
   const moduleLorebooks = Object.values(
     (active.card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {},
   ).flat();
-  for (const raw of moduleLorebooks) {
-    if (!raw || typeof raw !== 'object') continue;
-    const row = raw as Record<string, unknown>;
-    lorebookHost.push({
-      id: typeof row.id === 'string' ? row.id : `module-lore-${lorebookHost.length}`,
-      ...(typeof row.worldBookId === 'string' ? { worldBookId: row.worldBookId } : {}),
-      key: Array.isArray(row.key) ? row.key : typeof row.key === 'string' ? row.key : [],
-      content: typeof row.content === 'string' ? row.content : '',
-      comment: typeof row.comment === 'string' ? row.comment : '',
-      orderValue: typeof row.orderValue === 'number' ? row.orderValue : typeof row.insertorder === 'number' ? row.insertorder : 100,
-      disabled: typeof row.disabled === 'boolean' ? row.disabled : false,
-      constant: typeof row.constant === 'boolean' ? row.constant : false,
-    });
-  }
+  const combinedLorebook = withModuleLorebooks(lorebookHost, moduleLorebooks, bookIds);
 
   const chatView = buildRisuChatView({ messages: messagesHost });
   const chatState = buildDisplayChatStateFromView(chatView);
@@ -281,7 +269,7 @@ export async function assembleDisplaySnapshot(
     hasEditAtActions,
     luaTriggers,
     messagesHost,
-    lorebookHost,
+    lorebookHost: combinedLorebook,
     atActions: coerceAtActions(active.card.risuPayload.at_actions as readonly unknown[]),
   };
 }

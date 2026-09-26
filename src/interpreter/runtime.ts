@@ -23,6 +23,7 @@ import { makeCharacterNoteApi } from './runtime/character-note.js';
 import {
   makeLorebookApi,
   sortLorebookEntriesBySourceOrder,
+  withModuleLorebooks,
   keyToArray,
   type LorebookCache,
 } from './runtime/lorebook.js';
@@ -404,27 +405,7 @@ export async function makeRisuTriggerRuntime(
     : (rawExtra && typeof rawExtra === 'object')
     ? Object.values(rawExtra as unknown as Record<string, unknown>).flat()
     : [];
-  if (extraLorebooks.length > 0) {
-    // The preloaded entries array is shared by every trigger in the chain, so
-    // copy it before appending.
-    if (preloaded?.lorebook && lorebook.entries === preloaded.lorebook.entries) {
-      lorebook.entries = [...lorebook.entries];
-    }
-    for (const raw of extraLorebooks) {
-      if (!raw || typeof raw !== 'object') continue;
-      const r = raw as Record<string, unknown>;
-      lorebook.entries.push({
-        id: typeof r.id === 'string' ? r.id : `module-lore-${lorebook.entries.length}`,
-        ...(typeof r.worldBookId === 'string' ? { worldBookId: r.worldBookId } : {}),
-        key: Array.isArray(r.key) ? r.key : typeof r.key === 'string' ? r.key : [],
-        content: typeof r.content === 'string' ? r.content : '',
-        comment: typeof r.comment === 'string' ? r.comment : '',
-        orderValue: typeof r.orderValue === 'number' ? r.orderValue : typeof r.insertorder === 'number' ? r.insertorder : 100,
-        disabled: typeof r.disabled === 'boolean' ? r.disabled : false,
-        constant: typeof r.constant === 'boolean' ? r.constant : false,
-      });
-    }
-  }
+  lorebook.entries = withModuleLorebooks(lorebook.entries, extraLorebooks);
 
   const _factoryTotal = Date.now() - _factoryStart;
   // Always emit so we capture per-trigger factory cost in editDisplay chains.

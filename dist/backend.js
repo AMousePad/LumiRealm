@@ -22489,6 +22489,30 @@ async function readChatAuthorsNote(chatId, userId) {
   return value;
 }
 
+// src/interpreter/runtime/lorebook.ts
+function withModuleLorebooks(entries, modules, bookIds = []) {
+  const loadedBooks = new Set([...bookIds, ...entries.map((entry) => entry.worldBookId)]);
+  const out = [...entries];
+  for (const raw of modules) {
+    if (!raw || typeof raw !== "object")
+      continue;
+    const row = raw;
+    if (typeof row.worldBookId === "string" && loadedBooks.has(row.worldBookId))
+      continue;
+    out.push({
+      ...row,
+      id: typeof row.id === "string" ? row.id : `module-lore-${out.length}`,
+      key: Array.isArray(row.key) ? row.key : typeof row.key === "string" ? row.key : [],
+      content: typeof row.content === "string" ? row.content : "",
+      comment: typeof row.comment === "string" ? row.comment : "",
+      orderValue: typeof row.orderValue === "number" ? row.orderValue : typeof row.insertorder === "number" ? row.insertorder : 100,
+      disabled: row.disabled === true,
+      constant: typeof row.constant === "boolean" ? row.constant : row.alwaysActive === true
+    });
+  }
+  return out;
+}
+
 // src/interpreter/evaluator/index.ts
 init_scanner();
 init_dispatch();
@@ -34325,21 +34349,7 @@ async function assembleDisplaySnapshot(deps, active, chatId, userId, vars) {
     fetchChatRuntimeState(chatId, userId)
   ]);
   const moduleLorebooks = Object.values(active.card.risuPayload.extra?.runtime_module_lorebooks ?? {}).flat();
-  for (const raw of moduleLorebooks) {
-    if (!raw || typeof raw !== "object")
-      continue;
-    const row = raw;
-    lorebookHost.push({
-      id: typeof row.id === "string" ? row.id : `module-lore-${lorebookHost.length}`,
-      ...typeof row.worldBookId === "string" ? { worldBookId: row.worldBookId } : {},
-      key: Array.isArray(row.key) ? row.key : typeof row.key === "string" ? row.key : [],
-      content: typeof row.content === "string" ? row.content : "",
-      comment: typeof row.comment === "string" ? row.comment : "",
-      orderValue: typeof row.orderValue === "number" ? row.orderValue : typeof row.insertorder === "number" ? row.insertorder : 100,
-      disabled: typeof row.disabled === "boolean" ? row.disabled : false,
-      constant: typeof row.constant === "boolean" ? row.constant : false
-    });
-  }
+  const combinedLorebook = withModuleLorebooks(lorebookHost, moduleLorebooks, bookIds);
   const chatView = buildRisuChatView({ messages: messagesHost });
   const chatState = buildDisplayChatStateFromView(chatView);
   const triggers = active.card.risuPayload.triggers;
@@ -34393,7 +34403,7 @@ async function assembleDisplaySnapshot(deps, active, chatId, userId, vars) {
     hasEditAtActions,
     luaTriggers,
     messagesHost,
-    lorebookHost,
+    lorebookHost: combinedLorebook,
     atActions: coerceAtActions(active.card.risuPayload.at_actions)
   };
 }
@@ -35600,7 +35610,7 @@ function createModulePushes(deps) {
           if (page.data.length < 200)
             break;
         }
-        lorebook = reconcileLoreEntries(lorebook, live, () => "").entries;
+        lorebook = reconcileLoreEntries(lorebook, live, () => "").entries.map((entry) => ({ ...entry, worldBookId: env.installed_world_book_id }));
       }
       const namespace = typeof m.namespace === "string" && m.namespace.length > 0 ? m.namespace : null;
       const attachmentHandles = attachedIds.filter((handle) => handle === env.id || handle === namespace);

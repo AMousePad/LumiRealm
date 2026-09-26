@@ -58,6 +58,13 @@ function assemble(card: ActiveCard) {
 }
 
 describe('display snapshot module lore', () => {
+  test('an attached module worldbook appears once in the display snapshot', async () => {
+    host(['module-book']);
+    const snapshot = await assemble(active('owner', {
+      module: [{ worldBookId: 'module-book', comment: 'shared', content: 'module copy' }],
+    }));
+    expect(snapshot.lorebookHost.map(entry => entry.content)).toEqual(['host']);
+  });
   test('loads a synthetic module library in the frontend editDisplay hook', async () => {
     host();
     const snap = await assemble(active('owner-a', {
