@@ -587,32 +587,21 @@ export function translateRisuPreset(raw: RisuPresetRaw, fallbackName = 'Imported
     return val;
   };
 
-  let temp: number | null = cleanSampler(raw.temperature);
-  if (temp !== null) {
-    if (temp < 0) temp = null;
-    else if (temp > 10) temp = temp / 100;
-  }
-
-  let topP: number | null = cleanSampler(raw.top_p);
-  if (topP !== null && topP > 1) {
-    topP = topP / 100;
-  }
-
-  let minP: number | null = cleanSampler(raw.min_p);
-  if (minP !== null && minP > 1) {
-    minP = minP / 100;
-  }
+  const percentageSampler = (val: unknown): number | null => {
+    const value = cleanSampler(val);
+    return value === null ? null : value / 100;
+  };
 
   const samplerOverrides = {
     enabled: true,
-    temperature: temp,
+    temperature: percentageSampler(raw.temperature),
     maxTokens: cleanSampler(raw.maxResponse),
     contextSize: cleanSampler(raw.maxContext),
-    topP,
+    topP: cleanSampler(raw.top_p),
     topK: cleanSampler(raw.top_k),
-    minP,
-    frequencyPenalty: cleanSampler(raw.frequencyPenalty),
-    presencePenalty: cleanSampler(raw.PresensePenalty),
+    minP: cleanSampler(raw.min_p),
+    frequencyPenalty: percentageSampler(raw.frequencyPenalty),
+    presencePenalty: percentageSampler(raw.PresensePenalty),
     repetitionPenalty: cleanSampler(raw.repetition_penalty),
     streaming: true,
   };

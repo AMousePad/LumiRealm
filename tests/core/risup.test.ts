@@ -117,11 +117,11 @@ describe('Risu preset translator', () => {
       temperature: 70, // 70 -> 0.7
       maxResponse: 3000,
       maxContext: 64000,
-      top_p: 95, // 95 -> 0.95
+      top_p: 0.95,
       top_k: 40,
-      min_p: 5, // 5 -> 0.05
+      min_p: 0.05,
       frequencyPenalty: -1000, // disabled -> null
-      PresensePenalty: 20, // 20
+      PresensePenalty: 20,
       repetition_penalty: 1.1,
       customPromptTemplateToggle: '=Main Config=group\nmode=RPG Mode',
       promptTemplate: [
@@ -159,7 +159,7 @@ describe('Risu preset translator', () => {
       topK: 40,
       minP: 0.05,
       frequencyPenalty: null,
-      presencePenalty: 20,
+      presencePenalty: 0.2,
       repetitionPenalty: 1.1,
       streaming: true,
     });
