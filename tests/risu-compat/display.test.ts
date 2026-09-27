@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { makeMockContext } from "../../src/core/cbs/index.js";
 import { registry } from "../../src/risu-compat/index.js";
+import { runPipeline } from "../../src/interpreter/evaluator/pipeline.js";
 import "../../src/risu-compat/handlers/index.js";
 
 // Display/markup macros. Most are doc_only in Risu and shim to '' here; a
@@ -29,15 +30,33 @@ describe("PUA bracket sentinels (cbs.ts:1397-1485)", () => {
   });
 });
 
-describe("cbr (cbs.ts:1384)", () => {
-  test("no args → literal '\\n'", () => {
-    expect(call("cbr")).toBe("\\n");
-  });
-  test("numeric arg repeats", () => {
-    expect(call("cbr", ["3"])).toBe("\\n\\n\\n");
-  });
-  test("minimum 1 repetition", () => {
-    expect(call("cbr", ["0"])).toBe("\\n");
+describe("cbr raw repetition (Risu registerCBS)", () => {
+  test.each([
+    ["{{cbr}}", "\\n"],
+    ["{{cnl}}", "\\n"],
+    ["{{cbr::2}}", "cbr::2cbr::2"],
+    ["{{cnl::2}}", "cnl::2cnl::2"],
+    ["{{C_NEWLINE::2}}", "C_NEWLINE::2C_NEWLINE::2"],
+    ["{{cbr::0}}", "cbr::0"],
+    ["{{cbr::-1}}", "cbr::-1"],
+    ["{{cbr::0.4}}", "cbr::0.4"],
+    ["{{cbr::2.7}}", "cbr::2.7cbr::2.7"],
+    ["{{cbr::nope}}", ""],
+    ["{{cbr::Infinity}}", "{{cbr::Infinity}}"],
+    ["{{cbr::}}", "cbr::"],
+    ["{{cbr::2::extra}}", "cbr::2::extracbr::2::extra"],
+  ])("%s", (template, expected) => {
+    expect(runPipeline({
+      template,
+      phase: "display",
+      chatId: "counted-cbr",
+      userName: "User",
+      charName: "Character",
+      character: {},
+      chat: {},
+      variables: {},
+      suppressVarPersist: true,
+    })).toBe(expected);
   });
 });
 

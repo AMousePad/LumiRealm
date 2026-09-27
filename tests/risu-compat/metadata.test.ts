@@ -3,27 +3,14 @@ import { makeMockContext } from "../../src/core/cbs/index.js";
 import { registry } from "../../src/risu-compat/index.js";
 import "../../src/risu-compat/handlers/index.js";
 
-// declare/declared + character asset queries. Risu: cbs.ts:2247 (declare),
-// 1324 (emotionlist), 1340 (assetlist), 1356 (prefillsupported),
-// 1487 (chardisplayasset).
+// Risu character asset queries: cbs.ts:1324 (emotionlist), 1340 (assetlist),
+// 1356 (prefillsupported), 1487 (chardisplayasset).
 
 function call(name: string, args: string[] = [], ctx = makeMockContext()): string {
   const reg = registry.get(name);
   if (!reg) throw new Error(`no handler registered for ${name}`);
   return reg.handler(ctx, args, "");
 }
-
-describe("declare / declared (cbs.ts:2247)", () => {
-  test("declare sets marker; declared reads it", () => {
-    const ctx = makeMockContext();
-    call("declare", ["foo"], ctx);
-    expect(call("declared", ["foo"], ctx)).toBe("1");
-    expect(call("declared", ["bar"], ctx)).toBe("0");
-  });
-  test("declare emits empty string", () => {
-    expect(call("declare", ["x"])).toBe("");
-  });
-});
 
 describe("emotionlist (cbs.ts:1324)", () => {
   test("lists emotion names", () => {

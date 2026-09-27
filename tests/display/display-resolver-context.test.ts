@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createDisplayResolver } from '../../src/display/resolver.js';
 import {
   clearDisplaySnapshot,
@@ -6,6 +6,24 @@ import {
   type DisplaySnapshot,
 } from '../../src/display/snapshot.js';
 import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
+import type { FeRegexScript } from '../../src/display/regex-apply.js';
+import { createActivationPatternCache } from '../../src/display/activation-patterns.js';
+
+function displayRule(overrides: Partial<FeRegexScript> = {}): FeRegexScript {
+  return {
+    id: 'rule', find_regex: 'TOKEN', replace_string: '{{char}}', flags: 'g',
+    placement: ['ai_output'], substitute_macros: 'none', trim_strings: [],
+    min_depth: null, max_depth: null, ...overrides,
+  };
+}
+
+
+async function applyRules(scripts: readonly FeRegexScript[], content = 'TOKEN') {
+  return createDisplayResolver().applyScripts({
+    content, scripts: [...scripts],
+    context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+  });
+}
 
 function snapshot(luaCode = ''): DisplaySnapshot {
   return {
@@ -100,14 +118,319 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
-  test('passes raw display content to Lua before the CBS parser pass', async () => {
+  test('Lua display hooks cannot emit saved-message edits but retain variable writeback', async () => {
+    setWasmoonEnabled(false);
+    setDisplaySnapshot(paginatedSnapshot(`
+      listenEdit('editDisplay', function(id, value)
+        setChat(id, 0, 'changed')
+        setChatVar(id, 'display_flag', 'yes')
+        return getChatData(id, 0)
+      end)
+    `));
+    const effects: unknown[] = [];
+    const writes: unknown[] = [];
+    const result = await createDisplayResolver(
+      (_chatId, values) => { writes.push(values); },
+      effect => { effects.push(effect); },
+    ).resolveBody({
+      content: 'Input',
+      context: { chatId: 'chat-1', characterId: 'char-1', messageIndex: 32, role: 'assistant', isUser: false, depth: 0 },
+    });
+    expect(result?.content).toBe('message 1');
+    expect(effects).toEqual([]);
+    expect(writes).toEqual([{ display_flag: 'yes' }]);
+  });
+
+  test.each(['none', 'escaped'] as const)('Risu %s rules parse moved panel macros even without a match', async (mode) => {
+    const moved = displayRule({
+      id: 'panel', replace_string: '<div class="panel {{getvar::panel_open}}">Settings</div>',
+      metadata: { _risu: { phase: 'editdisplay' }, match_actions: ['move_bottom'] },
+    });
+    const following = displayRule({
+      id: 'ordinary', find_regex: 'ABSENT', replace_string: 'unused', substitute_macros: mode,
+      metadata: { _risu: { phase: 'editdisplay' } },
+    });
+    for (const state of ['', 'opened', '']) {
+      setDisplaySnapshot({ ...snapshot(), vars: { local: { panel_open: state }, global: {}, chat: {} } });
+      const result = await applyRules([moved, following]);
+      expect(result?.content).toBe(`\n<div class="panel ${state}">Settings</div>`);
+      expect(result?.touchedVars).toContain('local:panel_open');
+    }
+  });
+
+  test('native nonmatching rules do not parse macros left by a moved Risu fragment', async () => {
+    setDisplaySnapshot(snapshot());
+    const result = await applyRules([
+      displayRule({
+        id: 'panel', replace_string: '<div>{{char}}</div>',
+        metadata: { _risu: { phase: 'editdisplay' }, match_actions: ['move_bottom'] },
+      }),
+      displayRule({ id: 'native', find_regex: 'ABSENT', replace_string: 'unused' }),
+    ]);
+    expect(result?.content).toBe('\n<div>{{char}}</div>');
+  });
+
+  test('global native after rules run before character panels despite overlapping UI sort orders', async () => {
+    const scripts = [
+      displayRule({
+        id: 'panel', scope: 'character',
+        replace_string: '<div class="panel {{getvar::panel_open}}">Settings</div>',
+        metadata: { _risu: { phase: 'editdisplay' }, match_actions: ['move_bottom'] },
+      }),
+      displayRule({ id: 'preset', scope: 'global', preset_id: 'preset', find_regex: 'ABSENT', substitute_macros: 'after' }),
+      displayRule({ id: 'ordinary', scope: 'character', find_regex: 'ABSENT', metadata: { _risu: { phase: 'editdisplay' } } }),
+      displayRule({ id: 'chat', scope: 'chat', find_regex: 'Settings', replace_string: 'Chat settings' }),
+    ];
+    for (const state of ['', 'opened', '']) {
+      setDisplaySnapshot({ ...snapshot(), vars: { local: { panel_open: state }, chat: {}, global: {} } });
+      expect((await applyRules(scripts))?.content).toBe(`\n<div class="panel ${state}">Chat settings</div>`);
+    }
+    expect(scripts.map(script => script.id)).toEqual(['panel', 'preset', 'ordinary', 'chat']);
+  });
+
+  test.each(['none', 'after', 'escaped'] as const)('flagged Risu %s rules require a match before parsing moved macros', async (mode) => {
+    setDisplaySnapshot(snapshot());
+    const moved = displayRule({
+      id: 'panel', replace_string: '{{char}}',
+      metadata: { _risu: { phase: 'editdisplay' }, match_actions: ['move_bottom'] },
+    });
+    const flagged = displayRule({
+      id: 'flagged', find_regex: 'ABSENT', substitute_macros: mode,
+      metadata: { _risu: { phase: 'editdisplay', has_meta: true, flag_actions: ['no_end_nl'] } },
+    });
+    expect((await applyRules([moved, flagged]))?.content).toBe('\n{{char}}');
+    expect((await applyRules([moved, { ...flagged, find_regex: '$', replace_string: '!' }]))?.content).toBe('\nCharacter!');
+  });
+
+  test.each([
+    'Narration with **bold** and *italics*.',
+    '```html\n</div>\n```',
+    '<div class="scene"><section>Unfinished',
+    '</div><p>After a stray close</p>',
+    '<style>.panel { color: red }</style><div class="panel">Panel</div>',
+    '<input id="toggle" type="checkbox"><label for="toggle">Open</label><div>Panel</div>',
+  ])('returns display output verbatim for host rendering: %s', async (html) => {
+    setDisplaySnapshot(snapshot());
+    expect((await applyRules([displayRule({ replace_string: html })]))?.content).toBe(html);
+  });
+
+  test('assembles Risu regex fragments without adding render boundaries', async () => {
+    setDisplaySnapshot(snapshot());
+    const metadata = { _risu: { origin: 'module' } };
+    const result = await applyRules([
+      displayRule({ find_regex: 'OPEN', replace_string: '<div class="scene">', metadata }),
+      displayRule({ find_regex: 'LINE', replace_string: '<p>{{char}}</p>', metadata }),
+      displayRule({ find_regex: 'CLOSE', replace_string: '</div>', metadata }),
+    ], 'OPENLINECLOSE');
+    expect(result?.content).toBe('<div class="scene"><p>Character</p></div>');
+  });
+
+  test('missing native activation input rejects only its rule and recovers after a persisted update', async () => {
+    setDisplaySnapshot(snapshot());
+    let value: string | undefined;
+    const cache = createActivationPatternCache(async (_preset, patterns) => patterns.map(source => value
+      ? { source, resolved: value } : { source, error: 'Missing activation input' }));
+    const resolver = createDisplayResolver(undefined, undefined, cache);
+    const args = {
+      content: 'TOKEN', context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+      scripts: [displayRule({ id: 'native', preset_id: 'preset', find_regex: '{{getchatvar::mode}}', replace_string: 'NATIVE',
+        metadata: { prompt_activation: { source: 'ai_output', lifetime: 'latest', mappings: [
+          { capture: '0', value: 'TOKEN', enabled: true, block_ids: ['block'] },
+        ] } } }),
+      displayRule({ id: 'risu', metadata: { _risu: { origin: 'module' } }, replace_string: '{{char}}' })],
+    };
+    const missing = await resolver.applyScripts(args);
+    expect(missing?.content).toBe('Character');
+    expect(missing?.touchedVars).toContain('chat:mode');
+    value = 'TOKEN';
+    cache.invalidate('chat-1', ['local:mode']);
+    expect((await resolver.applyScripts(args))?.content).toBe('NATIVE');
+  });
+
+  test('native activation finds use prepared literal patterns in every macro mode', async () => {
+    setDisplaySnapshot({ ...snapshot(), charName: 'A.B' });
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+      requests++;
+      const body = JSON.parse(String(init.body));
+      expect(body.patterns).toEqual(['^{{char}}$']);
+      expect(body.content).toBeUndefined();
+      return Response.json({ patterns: [{ source: '^{{char}}$', resolved: '^(?:A\\.B)$' }] });
+    }) as typeof fetch;
+    try {
+      const resolver = createDisplayResolver();
+      for (const mode of ['none', 'find', 'escaped', 'raw', 'after'] as const) {
+        const scripts = [displayRule({ preset_id: 'preset', find_regex: '^{{char}}$', replace_string: 'MATCH', substitute_macros: mode,
+          metadata: { prompt_activation: { source: 'ai_output', lifetime: 'latest', mappings: [
+            { capture: '0', value: 'A.B', enabled: true, block_ids: ['block'] },
+          ] } },
+        })];
+        for (const content of ['A.B', 'AXB']) {
+          const result = await resolver.applyScripts({ content, scripts,
+            context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+          });
+          expect(result?.content).toBe(content === 'A.B' ? 'MATCH' : 'AXB');
+        }
+      }
+      expect(requests).toBe(1);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test('native local variables start empty instead of reading persisted Risu state', async () => {
+    const base = snapshot();
+    setDisplaySnapshot({ ...base, vars: { local: { route: 'CHAT' }, global: { route: 'GLOBAL' }, chat: {} }, scriptstateDefaults: { fallback: 'DEFAULT' } });
+    for (const mode of ['raw', 'after', 'escaped'] as const) {
+      const result = await applyRules([displayRule({ substitute_macros: mode,
+        replace_string: '{{getvar::route}}|{{getchatvar::route}}|{{getgvar::route}}|{{getvar::fallback}}',
+      })]);
+      expect(result?.content).toBe('|CHAT|GLOBAL|');
+      expect(result?.touchedVars).toContain('local:route');
+      expect(result?.touchedVars).toContain('global:route');
+    }
+  });
+
+  test('null snapshot values use Risu defaults while native rules retain present keys', async () => {
+    const base = snapshot();
+    setDisplaySnapshot({ ...base, vars: { local: { missing: null, empty: '', literal: 'null' }, global: { missing: null }, chat: {} }, scriptstateDefaults: { missing: 'DEFAULT', empty: 'DEFAULT', literal: 'DEFAULT' } });
+    expect((await applyRules([displayRule({ substitute_macros: 'raw', metadata: { _risu: {} },
+      replace_string: '{{getvar::missing}}|{{getvar::empty}}|{{getvar::literal}}|{{getglobalvar::missing}}',
+    })]))?.content).toBe('DEFAULT||null|null');
+    expect((await applyRules([displayRule({ substitute_macros: 'raw',
+      replace_string: '{{getchatvar::missing}}|{{haschatvar::missing}}|{{getgvar::missing}}|{{hasgvar::missing}}',
+    })]))?.content).toBe('null|true|null|true');
+  });
+
+  test('frontend Lua reads null through defaults without rewriting it during an unrelated save', async () => {
+    setWasmoonEnabled(false);
+    const base = snapshot(`
+      listenEdit("editDisplay", function(triggerId, data)
+        setChatVar(triggerId, "changed", "yes")
+        return getChatVar(triggerId, "missing") .. "|" .. getGlobalVar(triggerId, "missing")
+      end)
+    `);
+    setDisplaySnapshot({ ...base, vars: { local: { missing: null }, global: { missing: null }, chat: {} }, scriptstateDefaults: { missing: 'DEFAULT' } });
+    const writes: unknown[] = [];
+    const result = await createDisplayResolver((_chatId, vars) => { writes.push(vars); }).resolveBody({
+      content: 'text', context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+    });
+    expect(result?.content).toBe('DEFAULT|null');
+    expect(writes).toEqual([{ changed: 'yes' }]);
+  });
+
+  test('native scratch writes survive rules and matches without leaking into Risu or later renders', async () => {
+    const base = snapshot();
+    setDisplaySnapshot({ ...base, vars: { local: { n: '40' }, global: {}, chat: {} } });
+    const rules = [
+      displayRule({ find_regex: '^', replace_string: '{{setvar::n::1}}', substitute_macros: 'raw' }),
+      displayRule({ find_regex: 'x', replace_string: '{{incvar::n}}', substitute_macros: 'raw' }),
+      displayRule({ find_regex: '$', replace_string: '|{{getvar::n}}', substitute_macros: 'raw', metadata: { _risu: {} } }),
+    ];
+    expect((await applyRules(rules, 'xx'))?.content).toBe('23|40');
+    expect((await applyRules(rules, 'xx'))?.content).toBe('23|40');
+  });
+
+  test('native find macros and captured replacements share their own variable state', async () => {
+    setDisplaySnapshot(snapshot());
+    const result = await applyRules([
+      displayRule({ find_regex: '^', replace_string: '{{setvar::pattern::(TOKEN)}}', substitute_macros: 'raw' }),
+      displayRule({ find_regex: '{{getvar::pattern}}', replace_string: '{{setvar::value::$1}}{{getvar::value}}!', substitute_macros: 'raw' }),
+    ]);
+    expect(result?.content).toBe('TOKEN!');
+  });
+
+  test('native persisted-variable reads track refreshes without persisting display writes', async () => {
+    const base = snapshot();
+    const rules = [displayRule({ substitute_macros: 'after', replace_string:
+      '{{getchatvar::route}}|{{setchatvar::route::DISPLAY}}{{getchatvar::route}}',
+    })];
+    for (const route of ['before', 'after']) {
+      setDisplaySnapshot({ ...base, vars: { local: { route }, global: {}, chat: {} } });
+      const result = await applyRules(rules);
+      expect(result?.content).toBe(`${route}|DISPLAY`);
+      expect(result?.touchedVars).toContain('local:route');
+      expect(result?.touchedVars).toContain('chat:route');
+      expect((await applyRules([displayRule({ substitute_macros: 'raw', replace_string: '{{getchatvar::route}}' })]))?.content).toBe(route);
+    }
+  });
+
+  for (const mode of ['none', 'find', 'escaped'] as const) {
+    test(`native ${mode} rules do not add a Risu parse of the resulting body`, async () => {
+      setDisplaySnapshot(snapshot());
+      const result = await applyRules([displayRule({ substitute_macros: mode })], 'TOKEN|{{user}}');
+      expect(result?.content).toBe(mode === 'escaped' ? 'Character|{{user}}' : '{{char}}|{{user}}');
+    });
+  }
+
+  for (const origin of ['character', 'module']) {
+    test(`Risu ${origin} rules retain processScriptFull post-replacement parsing`, async () => {
+      setDisplaySnapshot(snapshot());
+      expect((await applyRules([displayRule({ metadata: { _risu: { origin } } })]))?.content).toBe('Character');
+    });
+  }
+
+  test('interleaved native and Risu rows retain their order and shared text', async () => {
+    setDisplaySnapshot(snapshot());
+    expect((await applyRules([
+      displayRule(),
+      displayRule({ find_regex: '\\{\\{char\\}\\}', replace_string: '{{user}}', metadata: { _risu: {} } }),
+      displayRule({ find_regex: 'User', replace_string: '{{char}}' }),
+    ]))?.content).toBe('{{char}}');
+    expect((await applyRules([
+      displayRule(),
+      displayRule({ find_regex: '$', replace_string: '!', metadata: { _risu: {} } }),
+    ]))?.content).toBe('Character!');
+  });
+
+  test('malformed provenance does not enable Risu parsing', async () => {
+    setDisplaySnapshot(snapshot());
+    for (const value of [null, false, 'module', []]) {
+      expect((await applyRules([displayRule({ metadata: { _risu: value } })]))?.content).toBe('{{char}}');
+    }
+  });
+
+  test('attaches native action payloads to each display match without resolving action macros', async () => {
+    setDisplaySnapshot(snapshot());
+    const result = await createDisplayResolver().applyScripts({
+      content: '<choice>Left</choice> <choice align="good">Right</choice>',
+      context: { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 },
+      scripts: [{
+        id: 'choices', find_regex: '<choice(?: align="(?<align>[^"]+)")?>(?<label>[^<]+)</choice>',
+        replace_string: '<button data-align="$<align>" data-regex-action="pick">$<label></button>',
+        flags: 'g', placement: ['ai_output'], substitute_macros: 'after',
+        trim_strings: [], min_depth: null, max_depth: null,
+        actions: [{
+          id: 'pick', type: 'send', multi_select: false, cost: '1', limit: '3',
+          title: 'Choose $<label>', subtitle: '', content: 'My choice: $<label>. {{char}}',
+        }],
+      }],
+    });
+    const payloads = [...(result?.content ?? '').matchAll(/data-lumiverse-regex-action="([^"]+)"/g)]
+      .map((match) => JSON.parse(decodeURIComponent(match[1]!)));
+    expect(payloads).toEqual([
+      {
+        id: 'pick', type: 'send', multi_select: false, cost: 1, limit: 0,
+        title: 'Choose Left', subtitle: '', content: 'My choice: Left. {{char}}',
+        scriptId: 'choices', instanceId: 'choices:0:21',
+      },
+      {
+        id: 'pick', type: 'send', multi_select: false, cost: 1, limit: 0,
+        title: 'Choose Right', subtitle: '', content: 'My choice: Right. {{char}}',
+        scriptId: 'choices', instanceId: 'choices:22:57',
+      },
+    ]);
+    expect(result?.content).toContain('data-align=""');
+    expect(result?.content).toContain('data-align="good"');
+  });
+
+  test('expands the message before Lua and expands macros emitted by the hook afterward', async () => {
     setWasmoonEnabled(false);
     setDisplaySnapshot(snapshot(`
       listenEdit("editDisplay", function(triggerId, data)
         if data == "{{user}}" then
           return data .. "|raw"
         end
-        return data .. "|parsed"
+        return data .. "|parsed|{{char}}"
       end)
     `));
 
@@ -124,7 +447,129 @@ describe('frontend display resolver message context', () => {
       },
     });
 
-    expect(result?.content).toBe('User|raw');
+    expect(result?.content).toBe('User|parsed|Character');
+  });
+
+  test.each([-1, 15, 31])('uses the full snapshot index before hooks while preserving raw message %s', async (index) => {
+    setWasmoonEnabled(false);
+    const content = '{{chatindex}}|{{getvar::panel}}';
+    const base = paginatedSnapshot(`
+      listenEdit("editDisplay", function(id, data, meta)
+        local row = getChat(id, meta.index)
+        local raw = meta.index == -1 or row.data == "${content}"
+        return (data == "${index}|open" and "parsed" or "raw") .. ":" .. meta.index .. ":" .. tostring(raw)
+      end)
+    `);
+    const messageId = index === -1 ? 'greeting' : `message-${index + 1}`;
+    const snap = { ...base, vars: { ...base.vars, local: { panel: 'open' } } };
+    setDisplaySnapshot(snap);
+    const stored = structuredClone(snap.messagesHost);
+    const result = await createDisplayResolver().resolveBody({ content, context: {
+      chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 31 - index,
+      messageId, messageIndex: 0, role: 'assistant',
+    } });
+    expect(result?.content).toBe(`parsed:${index}:true`);
+    expect(result?.touchedVars).toContain('local:panel');
+    expect(snap.messagesHost).toEqual(stored);
+  });
+
+  test('records initial reads even when Lua consumes their text, without fetching or persisting', async () => {
+    setWasmoonEnabled(false);
+    const network = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected network request'));
+    try {
+      const base = snapshot(`listenEdit("editDisplay", function(id, data)
+        return data == "open" and "visible" or "hidden"
+      end)`);
+      const writes: unknown[] = [];
+      const resolver = createDisplayResolver((_chatId, vars) => { writes.push(vars); });
+      const args = { content: '{{setvar::panel::wrong}}{{getvar::panel}}', context: {
+        chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0,
+      } };
+      for (const [value, expected] of [['open', 'visible'], ['closed', 'hidden']] as const) {
+        const snap = { ...base, vars: { ...base.vars, local: { panel: value } } };
+        setDisplaySnapshot(snap);
+        const result = await resolver.resolveBody(args);
+        expect(result?.content).toBe(expected);
+        expect(result?.touchedVars).toContain('local:panel');
+        expect(result?.cacheable).toBe(true);
+        expect(snap.vars.local.panel).toBe(value);
+      }
+      expect(writes).toEqual([]);
+      expect(network).not.toHaveBeenCalled();
+    } finally { network.mockRestore(); }
+  });
+
+  test('runs caller parsing, Lua, structured display triggers, then native regex in order', async () => {
+    setWasmoonEnabled(false);
+    const base = snapshot(`listenEdit("editDisplay", function(id, data)
+      return data == "User" and "from Lua" or "unexpanded"
+    end)`);
+    setDisplaySnapshot({ ...base, luaTriggers: [...base.luaTriggers, { luaCode: '', source: {
+      type: 'display', comment: '', conditions: [], effect: [
+        { type: 'v2GetDisplayState', outputVar: 'body' },
+        { type: 'v2RegexTest', value: 'body', valueType: 'var', regex: '^from Lua$', regexType: 'value', flags: '', flagsType: 'value', outputVar: 'matched' },
+        { type: 'v2SetDisplayState', value: 'matched', valueType: 'var' },
+      ],
+    } }] });
+    const resolver = createDisplayResolver();
+    const context = { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 };
+    const body = await resolver.resolveBody({ content: '{{user}}', context });
+    expect(body?.content).toBe('1');
+    const result = await resolver.applyScripts({ content: body!.content, context, scripts: [
+      displayRule({ find_regex: '^1$', replace_string: '{{user}}', substitute_macros: 'none' }),
+    ] });
+    expect(result?.content).toBe('{{user}}');
+  });
+
+  test.each([
+    ['{{getvar::indirect}}', '{{user}}'],
+    ['{{getvar::{{getvar::key}}}}', '{{user}}'],
+    ['{{#pure}}{{user}}{{/pure}}', '{{user}}'],
+  ])('preserves one caller parse before hooks for %s', async (content, expected) => {
+    setWasmoonEnabled(false);
+    const base = snapshot(`listenEdit("editDisplay", function(id, data)
+      return data == "${expected}" and "one pass" or "wrong input"
+    end)`);
+    setDisplaySnapshot({ ...base, vars: { ...base.vars, local: { key: 'indirect', indirect: '{{user}}' } } });
+    const result = await createDisplayResolver().resolveBody({ content, context: {
+      chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0,
+    } });
+    expect(result?.content).toBe('one pass');
+  });
+
+  test.each([
+    ['{{img::portrait}}', true],
+    ['{{getvar::asset}}', true],
+    ['{{#pure}}{{img::portrait}}{{/pure}}', true],
+    ['{{img:portrait}}', false],
+    ['{{inlay::portrait}}', false],
+  ])('resolves the caller asset stage before hooks for %s', async (content, imageExpected) => {
+    setWasmoonEnabled(false);
+    const base = snapshot(`listenEdit("editDisplay", function(id, data)
+      return string.find(data, '<img src="/api/v1/images/portrait"', 1, true) and "image" or "literal"
+    end)`);
+    setDisplaySnapshot({ ...base,
+      character: { ...base.character, additionalAssets: { portrait: { imageIds: ['portrait'] } } },
+      vars: { ...base.vars, local: { asset: '{{img::portrait}}' } },
+    });
+    const result = await createDisplayResolver().resolveBody({ content, context: {
+      chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0,
+    } });
+    expect(result?.content).toBe(imageExpected ? 'image' : 'literal');
+  });
+
+  test('retains initial message dependencies and randomness when a hook replaces the body', async () => {
+    setWasmoonEnabled(false);
+    setDisplaySnapshot(snapshot('listenEdit("editDisplay", function() return "fixed" end)'));
+    const resolver = createDisplayResolver();
+    const context = { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 };
+    const message = await resolver.resolveBody({ content: '{{lastmessage}}', context });
+    expect(message?.content).toBe('fixed');
+    expect(message?.touchedVars).toContain('__msg__');
+    expect(message?.cacheable).toBe(true);
+    const random = await resolver.resolveBody({ content: '{{random::a::b}}', context });
+    expect(random?.content).toBe('fixed');
+    expect(random?.cacheable).toBe(false);
   });
 
   test('preloads frontend Lua global variables from the global scope', async () => {
@@ -496,4 +941,21 @@ describe('frontend display resolver message context', () => {
     }]);
     expect(result?.cacheable).toBe(false);
   });
+});
+
+test.each([false, true])('removes complete CSS imports only after display scripts (with scripts: %s)', async (withScripts) => {
+  setDisplaySnapshot(snapshot());
+  const css = `@import url('https://fonts.example.test/css?wght=400;700&display=swap');\n.panel * { margin: 0; padding: 0; }`;
+  const html = `<style>${css}</style><div class="panel"><img src="/image"></div>`;
+  const result = await applyRules(withScripts ? [displayRule({ replace_string: html })] : [], withScripts ? 'TOKEN' : html);
+  expect(result?.content).toBe('<style>\n.panel * { margin: 0; padding: 0; }</style><div class="panel"><img src="/image"></div>');
+});
+
+test('owned card output opts out of host formatting repairs', () => {
+  expect(createDisplayResolver().skipFormattingHealing).toBe(true);
+});
+
+
+test('requests authored sibling structure from the host renderer', () => {
+  expect(createDisplayResolver().skipInlineCardWrapping).toBe(true);
 });

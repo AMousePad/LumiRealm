@@ -81,7 +81,7 @@ function emitShowAlert(op: TriggerEffect, ctx: EmitContext): EmitResult {
     return { code: line(ctx, `/* showAlert skipped — requires lowLevelAccess */`), needsAwait: false };
   }
   if (ctx.displayMode) {
-    return { code: line(ctx, `return;`), needsAwait: false };
+    return { code: line(ctx, `return 'abort';`), needsAwait: false };
   }
   const value = resolveCall(effect.value, "value");
   const inputVar = resolveCall(effect.inputVar, "value");
@@ -153,7 +153,7 @@ function emitExtractRegex(op: TriggerEffect, ctx: EmitContext): EmitResult {
     ctx,
     `${setVarCall(
       effect.inputVar,
-      `__risu.extractRegex(${resolveCall(effect.value, "value")}, ${JSON.stringify(effect.regex)}, ${JSON.stringify(effect.flags)}, ${JSON.stringify(effect.result)})`,
+      `__risu.extractRegex(${resolveCall(effect.value, "value")}, ${JSON.stringify(effect.regex)}, ${JSON.stringify(effect.flags)}, ${JSON.stringify(effect.result)}, true)`,
     )};`,
   );
   return { code, needsAwait: false };

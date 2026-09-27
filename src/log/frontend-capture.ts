@@ -3,6 +3,7 @@
 
 import { logStore, redact } from './store.js';
 import type { LogEventWire } from '../types/messages.js';
+import { isLogTransportNoise } from './transport.js';
 
 const CONSOLE_METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const;
 type ConsoleMethod = (typeof CONSOLE_METHODS)[number];
@@ -26,9 +27,17 @@ export function installConsoleCapture(): void {
     (console as unknown as Record<string, (...args: unknown[]) => void>)[m] = (...args: unknown[]) => {
       try { originalConsole[m]?.(...args); } catch { /* */ }
       try {
+        const level = methodToLevel(m);
+        if (!logStore.shouldEmit(level)) return;
+        if (typeof args[0] === 'string' && (args[0].startsWith('[lumirealm] ')
+          || (args[0] === '[lumirealm]' && args.length > 1))) return;
+        if (args[0] === '[WS] ←' && args[1] === 'SPINDLE_FRONTEND_MSG') {
+          const payload = args[2] as { identifier?: string; data?: { type?: string } } | undefined;
+          if (payload?.identifier === 'lumirealm' && isLogTransportNoise(payload.data?.type ?? '')) return;
+        }
         const text = args.map(formatArg).join(' ');
         if (text.startsWith('[lumirealm] ')) return;
-        logStore.push(methodToLevel(m), 'console', text);
+        logStore.push(level, 'console', text);
       } catch { /* never throw from console */ }
     };
   }
@@ -178,7 +187,20 @@ export function buildBundle(args: {
 }
 
 export function downloadBundle(bundle: LogBundle): void {
-  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+  const { events, ...metadata } = bundle;
+  const parts: BlobPart[] = [JSON.stringify(metadata, null, 2).slice(0, -1), ',"events":{'];
+  const encoder = new TextEncoder();
+  // Encode each record separately so the export need not fit in one JavaScript string.
+  for (const [index, source] of (['backend', 'frontend'] as const).entries()) {
+    parts.push(`${index ? ',' : ''}"${source}":[`);
+    for (const [i, event] of events[source].entries()) {
+      if (i) parts.push(',');
+      parts.push(encoder.encode(JSON.stringify(event, null, 2)));
+    }
+    parts.push(']');
+  }
+  parts.push('}}');
+  const blob = new Blob(parts, { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const a = document.createElement('a');

@@ -141,6 +141,7 @@ export function makeMockContext(opts: MockContextOptions = {}): RisuRuntimeConte
   return {
     chatId: opts.chatId ?? "",
     vars: new MockVariableStore(),
+    tempVars: {},
     identity: { ...DEFAULT_IDENTITY, ...opts.identity },
     character: { ...DEFAULT_CHARACTER, ...opts.character },
     messages: new MockMessageHistory(opts.messages ?? []),

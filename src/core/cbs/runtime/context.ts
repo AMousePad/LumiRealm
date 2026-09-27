@@ -90,6 +90,7 @@ export interface Clock {
 export interface RisuRuntimeContext {
   readonly chatId: string;
   readonly vars: VariableStore;
+  readonly tempVars: Record<string, string | undefined>;
   readonly identity: IdentityFields;
   readonly character: CharacterFields;
   readonly messages: MessageHistory;
@@ -121,6 +122,8 @@ export interface RisuRuntimeContext {
   /** Set when built for a Lua `cbs(value)` call. Handlers branch to match
    *  Risu output (setvar/asset return literal, chatindex returns "-1"). */
   readonly cbsContext?: boolean;
+  /** Explicit Risu visualize flag; other callers retain their existing mode. */
+  readonly visualize?: boolean;
   /** Set for the inline prompt-regex (editprocess/editinput) pass. Risu's
    *  editprocess runs risuChatParser WITHOUT runVar, so the setvar family
    *  returns null -> the macro is re-emitted LITERAL and never executes */

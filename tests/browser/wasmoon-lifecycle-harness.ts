@@ -49,18 +49,18 @@ async function main(): Promise<void> {
       return name .. "|" .. description .. "|" .. firstMessage .. "|" .. persona .. "|" .. note
     end)
   `, {
-    getNameMain: async () => 'name',
-    setNameMain: async (_id: unknown, value: unknown) => {
+    getName: () => 'name',
+    setName: (_id: unknown, value: unknown) => {
       updatedName = String(value);
     },
-    getDescriptionMain: async () => 'description',
-    setDescriptionMain: async (_id: unknown, value: unknown) => {
+    getDescription: () => 'description',
+    setDescription: (_id: unknown, value: unknown) => {
       updatedDescription = String(value);
     },
-    getPersonaDescriptionMain: async () => 'persona',
-    getAuthorsNoteMain: async () => 'note',
-    getCharacterFirstMessageMain: async () => 'greeting',
-    setCharacterFirstMessageMain: async (_id: unknown, value: unknown) => {
+    getPersonaDescription: () => 'persona',
+    getAuthorsNote: () => 'note',
+    getCharacterFirstMessage: () => 'greeting',
+    setCharacterFirstMessage: (_id: unknown, value: unknown) => {
       updatedFirstMessage = String(value);
     },
   }, {

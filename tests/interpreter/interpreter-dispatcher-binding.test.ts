@@ -107,15 +107,16 @@ describe('triggerMatchesBinding: triggerlua/triggercode type-bypass (Risu parity
   });
 });
 
-describe('triggerMatchesBinding: non-trigger types never match', () => {
-  test('library entries (manual-trigger globals) never fire on dispatchBinding', () => {
-    // `library` entries are invoked by name via `dispatchManualTrigger`,
-    // NOT by binding-broadcast. They should never appear in a binding
-    // sweep regardless of what's in source.effect[0].
-    const lib = entry({ type: 'library', firstEffectType: 'triggerlua' });
+describe('triggerMatchesBinding: manual libraries', () => {
+  test.each(['triggerlua', 'triggercode'])('a leading %s bypasses the compiled library type', firstEffectType => {
+    const lib = entry({ type: 'library', binding: 'manual', firstEffectType });
+    expect(triggerMatchesBinding(lib, 'start')).toBe(true);
+    expect(triggerMatchesBinding(lib, 'output')).toBe(true);
+  });
+  test('declarative libraries stay out of binding dispatch', () => {
+    const lib = entry({ type: 'library', binding: 'manual', firstEffectType: 'setvar' });
     expect(triggerMatchesBinding(lib, 'start')).toBe(false);
     expect(triggerMatchesBinding(lib, 'output')).toBe(false);
-    expect(triggerMatchesBinding(lib, 'manual')).toBe(false);
   });
 });
 

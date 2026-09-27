@@ -66,12 +66,12 @@ describe('Runtime Module Lorebooks and getLoreBooks', () => {
     });
 
     await runtime.runLua(`
-      function onRun(triggerId)
+      onRun = async(function(triggerId)
         local core = getLoreBooks(triggerId, 'Card.Core.axLLM')
         local img = getLoreBooks(triggerId, 'Card.Image.axLLM')
         local out = core[1].comment .. '|' .. core[1].content .. '|' .. img[1].content
         setChatVar(triggerId, 'result', out)
-      end
+      end)
     `);
 
     expect(runtime.getVar('result')).toBe('Card.Core.axLLM|NORMAL_PROMPT|IMAGE_PROMPT_CONTENT');
@@ -100,11 +100,11 @@ describe('Runtime Module Lorebooks and getLoreBooks', () => {
     });
 
     await runtime.runLua(`
-      function onRun(triggerId)
+      onRun = async(function(triggerId)
         local allBooks = loadLoreBooks(triggerId)
         local out = #allBooks .. '|' .. allBooks[1].name .. '|' .. allBooks[1].content
         setChatVar(triggerId, 'result', out)
-      end
+      end)
     `);
 
     expect(runtime.getVar('result')).toBe('2|Card.Core.axLLM|CORE_CONTENT');
@@ -124,7 +124,7 @@ describe('Runtime Module Lorebooks and getLoreBooks', () => {
       moduleLorebooks: [{ id: 'lore-1', content: 'Oak {{user}}' }],
     });
     await runtime.runLua(`
-      function onRun(id)
+      onRun = async(function(id)
         local worker = async(function()
           local books = loadLoreBooks(id, 100)
           local prompt = {}
@@ -136,7 +136,7 @@ describe('Runtime Module Lorebooks and getLoreBooks', () => {
           setChatVar(id, 'result', response.result)
         end)
         Promise.all({worker()}):await()
-      end
+      end)
     `);
     expect(requests).toEqual([{ messages: [{ role: 'user', content: 'Pine User' }] }]);
     expect(runtime.getVar('result')).toBe('Synthetic result');

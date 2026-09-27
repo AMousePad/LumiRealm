@@ -9,35 +9,63 @@ const _log = makeSafeLogger('runtime.setVar');
 
 export interface VarsState {
   // Keys are $-prefixed; loadVars/saveVars strip on persist.
-  readonly varsCache: Record<string, string>;
+  readonly varsCache: Record<string, string | null>;
   readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   readonly tempVars?: Record<string, string>;
   // indent -> name -> value; deepest indent wins over varsCache.
-  readonly localScopes: Map<number, Map<string, string>>;
+  readonly localScopes: Map<string, Map<string, string>>;
+  readonly currentIndent?: { value: number };
   // Boxed so reference is shared across module boundaries.
   readonly dirty: { value: boolean };
+  readonly storedVars?: () => Readonly<Record<string, string | null>>;
+  readonly onStoredWrite?: () => void;
   readonly characterId: string | null;
   // FE display dep recording: Lua var reads are invisible to the CBS recorder.
   readonly onVarRead?: (name: string) => void;
+  readonly parseTemplate?: (text: string) => string;
 }
 
 export interface VarsApi {
   getVar(name: string): string;
+  getStoredVar(name: string): string;
   setVar(name: string, value: unknown): void;
   resolve(value: unknown, kind: string): string;
   declareLocalVar(name: string, value: unknown, indent: unknown): void;
   setvarV1(name: string, op: string, rawValue: unknown): void;
   setvarV2(name: string, op: string, value: unknown): void;
   getLocal(name: string): string | undefined;
+  setIndent(indent: unknown): void;
+  clearLocalVars(indent: number): void;
+}
+
+export type TriggerLocalState = Required<Pick<VarsState, 'localScopes' | 'currentIndent'>>;
+
+export function createTriggerLocalState(): TriggerLocalState {
+  return { localScopes: new Map(), currentIndent: { value: 0 } };
 }
 
 export function makeVarsApi(state: VarsState): VarsApi {
-  function getLocal(name: string): string | undefined {
-    const scopes = [...state.localScopes.values()].reverse();
-    for (const scope of scopes) {
-      if (scope.has(name)) return scope.get(name);
+  const currentIndent = state.currentIndent ?? { value: 0 };
+  function setIndent(indent: unknown): void {
+    if (typeof indent === 'number' && indent >= 0) currentIndent.value = indent;
+  }
+
+  function localScope(name: string, indent: unknown): Map<string, string> | undefined {
+    for (let i = indent as number; i >= 0; i--) {
+      const scope = state.localScopes.get(String(i));
+      if (scope?.has(name)) return scope;
     }
     return undefined;
+  }
+
+  function getLocal(name: string): string | undefined {
+    return localScope(name, currentIndent.value)?.get(name);
+  }
+
+  function clearLocalVars(indent: number): void {
+    for (const depth of state.localScopes.keys()) {
+      if (Number(depth) >= indent) state.localScopes.delete(depth);
+    }
   }
 
   function getVar(name: string): string {
@@ -45,16 +73,23 @@ export function makeVarsApi(state: VarsState): VarsApi {
     state.onVarRead?.(n);
     const local = getLocal(n);
     if (local !== undefined) return toStr(local);
-    const fromCache = state.varsCache['$' + n];
-    if (fromCache !== undefined) return toStr(fromCache);
+    return storedVar(n) ?? state.tempVars?.[n] ?? 'null';
+  }
+
+  function storedVar(n: string, cache = state.varsCache): string | undefined {
+    const fromCache = cache['$' + n];
+    if (fromCache != null) return toStr(fromCache);
     // Risu chatVar.svelte.ts: consult defaultVariables before returning 'null'.
     const defaults = state.scriptstateDefaults
       ?? getScriptstateDefaultsByCharacter(state.characterId);
     const fromDefaults = defaults?.[n];
     if (fromDefaults !== undefined) return toStr(fromDefaults);
-    const fromTemp = state.tempVars?.[n];
-    if (fromTemp !== undefined) return toStr(fromTemp);
-    return 'null';
+    return undefined;
+  }
+
+  function getStoredVar(name: string): string {
+    state.onVarRead?.(name);
+    return storedVar(name, state.storedVars?.() ?? state.varsCache) ?? 'null';
   }
 
   function setVar(name: string, value: unknown): void {
@@ -64,60 +99,56 @@ export function makeVarsApi(state: VarsState): VarsApi {
       state.tempVars[n] = v;
       return;
     }
+    const local = localScope(n, currentIndent.value);
+    if (local) { local.set(n, v); return; }
+    // Risu runTrigger only marks stored state as changed when the value differs.
+    if (state.varsCache['$' + n] === v) return;
     state.varsCache['$' + n] = v;
+    state.onStoredWrite?.();
     state.dirty.value = true;
     _log.info(`$${n}=${JSON.stringify(v.slice(0, 80))}`);
   }
 
   function resolve(value: unknown, kind: string): string {
-    if (kind === 'value' || kind === 'regex') return toStr(value);
-    if (kind === 'var') return getVar(toStr(value));
-    return toStr(value);
+    const text = toStr(value);
+    const parsed = state.parseTemplate ? state.parseTemplate(text) : text;
+    return kind === 'var' ? getVar(parsed) : parsed;
   }
 
   function declareLocalVar(name: string, value: unknown, indent: unknown): void {
-    const n = Number(indent) || 0;
-    if (!state.localScopes.has(n)) state.localScopes.set(n, new Map());
-    state.localScopes.get(n)!.set(toStr(name), toStr(value));
+    const n = String(indent);
+    let scope = localScope(toStr(name), indent) ?? state.localScopes.get(n);
+    if (!scope) { scope = new Map(); state.localScopes.set(n, scope); }
+    scope.set(toStr(name), value == null ? 'null' : toStr(value));
   }
 
   function setvarV1(name: string, op: string, rawValue: unknown): void {
-    const rendered = toStr(resolve(rawValue, 'value'));
-    if (op === '=' || !op) { setVar(name, rendered); return; }
-    const pN = Number(getVar(name));
-    const pBase = Number.isFinite(pN) ? pN : 0;
-    const nN = Number(rendered);
-    const nBase = Number.isFinite(nN) ? nN : 0;
-    let result: number | string;
+    const value = resolve(rawValue, 'value');
+    assign(resolve(name, 'value'), op, value, false);
+  }
+
+  function setvarV2(name: string, op: string, value: unknown): void {
+    assign(name, op, value, true);
+  }
+
+  function assign(name: string, op: string, value: unknown, allowRemainder: boolean): void {
+    const previous = Number(getVar(name));
+    const base = Number.isNaN(previous) ? 0 : previous;
+    const valueStr = toStr(value);
+    const number = Number(valueStr);
+    let result: string | number = '';
     switch (op) {
-      case '+=': result = pBase + nBase; break;
-      case '-=': result = pBase - nBase; break;
-      case '*=': result = pBase * nBase; break;
-      case '/=': result = nBase === 0 ? 0 : pBase / nBase; break;
-      default: result = rendered; break;
+      case '=': result = valueStr; break;
+      case '+=': result = base + number; break;
+      case '-=': result = base - number; break;
+      case '*=': result = base * number; break;
+      case '/=': result = base / number; break;
+      case '%=': if (allowRemainder) result = base % number; break;
     }
     setVar(name, String(result));
   }
 
-  function setvarV2(name: string, op: string, value: unknown): void {
-    const prev = getVar(name);
-    const valueStr = toStr(value);
-    let result: string;
-    if (op === '=') result = valueStr;
-    else if (op === '+=') {
-      const nP = Number(prev), nV = Number(valueStr);
-      if (Number.isFinite(nP) && Number.isFinite(nV)) result = String(nP + nV);
-      else result = toStr(prev) + valueStr;
-    }
-    else if (op === '-=') result = String(Number(prev) - Number(valueStr));
-    else if (op === '*=') result = String(Number(prev) * Number(valueStr));
-    else if (op === '/=') result = Number(valueStr) === 0 ? '0' : String(Number(prev) / Number(valueStr));
-    else if (op === '%=') result = Number(valueStr) === 0 ? '0' : String(Number(prev) % Number(valueStr));
-    else result = valueStr;
-    setVar(name, result);
-  }
-
   return {
-    getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal,
+    getVar, getStoredVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal, setIndent, clearLocalVars,
   };
 }

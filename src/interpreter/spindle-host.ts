@@ -25,6 +25,8 @@ import { makeSafeLogger } from '../util/safe-log.js';
 import { filterSamplerParamsForProvider } from '../util/samplers-wire.js';
 import { awaitAlertDismissal } from './alert-bridge.js';
 import { awaitPickResolution } from './pick-bridge.js';
+import { backendLuaStateScope, hostCharacterState } from './runtime/lua-state.js';
+import { hostMessageTime } from '../util/message-time.js';
 
 const log = makeSafeLogger('spindle-host.llm.generate');
 
@@ -44,6 +46,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       id: m.id,
       content: typeof m.content === 'string' ? m.content : '',
       role: m.role,
+      createdAt: hostMessageTime(m),
     }));
   }
 
@@ -98,15 +101,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   async function charGet(id: string): Promise<HostCharacter> {
     const ch = await spindle.characters.get(id, uid) as Record<string, unknown> | null;
     if (!ch) return { id, description: '' };
-    const rawImageId = ch['image_id'];
-    return {
-      id,
-      name: typeof ch['name'] === 'string' ? ch['name'] as string : '',
-      description: typeof ch['description'] === 'string' ? ch['description'] as string : '',
-      firstMessage: typeof ch['first_mes'] === 'string' ? ch['first_mes'] as string : '',
-      worldBookIds: Array.isArray(ch['world_book_ids']) ? ch['world_book_ids'] as string[] : [],
-      imageId: typeof rawImageId === 'string' && rawImageId.length > 0 ? rawImageId : null,
-    };
+    return hostCharacterState({ ...ch, id });
   }
 
   async function charUpdate(id: string, patch: Partial<HostCharacter>): Promise<void> {
@@ -167,6 +162,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   };
 
   const host: HostApi = {
+    luaStateScope: backendLuaStateScope(userId),
     ...(uid !== undefined ? { userId: uid } : {}),
     // Permission-gated CORS proxy (`spindle.cors`; `cors_proxy` is declared in
     // spindle.json and the host enforces the grant). Backs Lua `request`, and is

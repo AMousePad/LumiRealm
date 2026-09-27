@@ -1,3 +1,4 @@
+import { basicTriggerContext } from '../helpers/trigger-runtime.js';
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   createLumiInterceptors,
@@ -41,6 +42,7 @@ function activeCard(): ActiveCard {
 function deps(active: ActiveCard): CreateLumiInterceptorsDeps {
   return {
     activeCardByChat: new Map([[CHAT_ID, active]]),
+    executeFrontend: async () => { throw new Error('Unexpected Lua call in asset macro test'); },
     captureUserId: () => undefined,
     isFeDisplayAuthoritative: () => false,
     isPromptRegexAuthoritative: () => false,
@@ -52,6 +54,7 @@ function deps(active: ActiveCard): CreateLumiInterceptorsDeps {
     ensureActiveCardForChat: async () => active,
     getCachedSettingsSync: () => DEFAULT_SETTINGS,
     modulesByNamespaceFromCard: () => null,
+    prepareTriggerContext: basicTriggerContext,
     resolveReadonly: async (template) => template,
     resolveReadonlyMany: async (templates) => templates,
     runMessageVarPass: async () => undefined,

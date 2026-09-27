@@ -1,5 +1,6 @@
 import type { RisuCompatSettings } from './settings-store.js';
 import type { AuxDebugCaptureEvent } from '../interpreter/runtime/dispatch-context.js';
+import type { TriggerTemplateContext } from '../interpreter/runtime/template.js';
 
 export type DispatchAuxDebugCapture = (event: AuxDebugCaptureEvent) => void;
 
@@ -18,6 +19,7 @@ export interface DispatchSeams {
   readonly submodelPrefillCompat: boolean;
   readonly auxDebugCapture?: DispatchAuxDebugCapture;
   readonly resolveTemplate: (text: string) => Promise<string>;
+  readonly templateContext: TriggerTemplateContext;
   readonly imageConnectionId: string | null;
   readonly imageModelOverride: string | null;
   readonly naiSettings: RisuCompatSettings['naiSettings'];
@@ -32,6 +34,7 @@ export interface BuildDispatchSeamsArgs {
   readonly stateChanged: () => void;
   readonly auxDebugCapture: DispatchAuxDebugCapture | undefined;
   readonly resolveTemplate: (text: string) => Promise<string>;
+  readonly templateContext: TriggerTemplateContext;
   readonly moduleLorebooks?: readonly unknown[];
 }
 
@@ -39,6 +42,7 @@ export interface BuildDispatchSeamsArgs {
 // `withDispatchContext`, `makeRisuTriggerRuntime`, and listenEdit chains share.
 // Adding a new sampler or routing field touches one place instead of four.
 export function buildDispatchSeams(args: BuildDispatchSeamsArgs): DispatchSeams {
+  let templateContext: ReturnType<TriggerTemplateContext> | undefined;
   const seams: {
     chatId: string;
     binding: string;
@@ -54,6 +58,7 @@ export function buildDispatchSeams(args: BuildDispatchSeamsArgs): DispatchSeams 
     submodelPrefillCompat: boolean;
     auxDebugCapture?: DispatchAuxDebugCapture;
     resolveTemplate: (text: string) => Promise<string>;
+    templateContext: TriggerTemplateContext;
     imageConnectionId: string | null;
     imageModelOverride: string | null;
     naiSettings: RisuCompatSettings['naiSettings'];
@@ -71,6 +76,7 @@ export function buildDispatchSeams(args: BuildDispatchSeamsArgs): DispatchSeams 
     auxPrefillCompat: args.settings.auxPrefillCompat,
     submodelPrefillCompat: args.settings.submodelPrefillCompat,
     resolveTemplate: args.resolveTemplate,
+    templateContext: () => templateContext ??= args.templateContext(),
     imageConnectionId: args.settings.imageConnectionId,
     imageModelOverride: args.settings.imageModelOverride,
     naiSettings: args.settings.naiSettings,

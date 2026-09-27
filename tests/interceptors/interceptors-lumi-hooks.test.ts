@@ -1,3 +1,5 @@
+import { basicTriggerContext } from '../helpers/trigger-runtime.js';
+import { frontendExecutorFor } from '../helpers/frontend-executor.js';
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   createLumiInterceptors,
@@ -13,6 +15,7 @@ import { resetListenEditPreloadCache } from '../../src/interpreter/listenedit-pr
 interface CapturedHandlers {
   macroInterceptor: ((ctx: unknown) => Promise<unknown>) | null;
   macroPriority: number | undefined;
+  macroOptions?: Readonly<Record<string, unknown>> | undefined;
   messageContentProcessor: ((ctx: unknown) => Promise<{ content?: string } | void>) | null;
   mcpPriority: number | undefined;
   interceptor: ((messages: unknown[], context: unknown) => Promise<unknown>) | null;
@@ -34,9 +37,10 @@ interface SpindleStub {
 function setupSpindle(stub: SpindleStub, captured: CapturedHandlers): void {
   (globalThis as unknown as { spindle: unknown }).spindle = {
     userStorage: { getJson: async () => null },
-    registerMacroInterceptor(handler: typeof captured.macroInterceptor, priority?: number) {
+    registerMacroInterceptor(handler: typeof captured.macroInterceptor, priority?: number, options?: Readonly<Record<string, unknown>>) {
       captured.macroInterceptor = handler;
       captured.macroPriority = priority;
+      captured.macroOptions = options;
     },
     registerMessageContentProcessor(handler: typeof captured.messageContentProcessor, priority?: number) {
       captured.messageContentProcessor = handler;
@@ -214,6 +218,7 @@ function makeMockDeps(overrides?: Partial<CreateLumiInterceptorsDeps>): {
     messageVarCalls: [],
   };
   const deps: CreateLumiInterceptorsDeps = {
+    executeFrontend: frontendExecutorFor(chatId => deps.activeCardByChat.get(chatId)),
     activeCardByChat: new Map(),
     captureUserId: (userId, where) => {
       state.captureCalls.push({ userId, where });
@@ -224,6 +229,7 @@ function makeMockDeps(overrides?: Partial<CreateLumiInterceptorsDeps>): {
     },
     getCachedSettingsSync: () => DEFAULT_SETTINGS,
     modulesByNamespaceFromCard: () => null,
+    prepareTriggerContext: basicTriggerContext,
     resolveReadonly: async (template, chatId, _characterId, _userId, opts) => {
       state.resolveCalls.push({ template, chatId, ...(opts ? { opts } : {}) });
       return template;
@@ -274,6 +280,7 @@ describe('createLumiInterceptors', () => {
     createLumiInterceptors(deps).registerAll();
     expect(captured.macroInterceptor).not.toBeNull();
     expect(captured.macroPriority).toBe(100);
+    expect(captured.macroOptions).toEqual({ handlesOwnedSources: true });
     expect(captured.messageContentProcessor).not.toBeNull();
     expect(captured.mcpPriority).toBe(100);
     expect(captured.interceptor).not.toBeNull();
@@ -282,7 +289,7 @@ describe('createLumiInterceptors', () => {
     expect(captured.worldInfoPriority).toBe(100);
     expect(captured.contextHandler).not.toBeNull();
     expect(captured.contextPriority).toBe(100);
-    expect(captured.contextOptions).toEqual({ timeoutMs: 30_000 });
+    expect(captured.contextOptions).toEqual({ timeoutMs: 30_000, required: true });
   });
 
   test('macroInterceptor: passthrough when template lacks {{', async () => {
@@ -483,6 +490,21 @@ describe('createLumiInterceptors', () => {
       chatMetadata: {},
     });
     expect(stub.chatsUpdateCalls.length).toBe(0);
+  });
+
+  test('worldInfoInterceptor: requests insertion output order only for imported lore', async () => {
+    setupSpindle(stub, captured);
+    const { deps } = makeMockDeps();
+    createLumiInterceptors(deps).registerAll();
+    const imported = { id: 'imported', disabled: false, comment: '', content: 'Profile',
+      key: [], keysecondary: [], priority: 300, extensions: { _risu_source_hash: 'source' } };
+    const result = await captured.worldInfoInterceptor!({
+      chatId: 'chat-1', entries: [imported, { ...imported, id: 'native', extensions: {} }],
+      messages: [], chatTurn: 0, chatMetadata: {},
+      activationSettings: { globalScanDepth: null, maxRecursionPasses: 0 },
+    });
+    expect(result).toEqual({ mutated: [{ id: 'imported', outputOrder: 'insertion' }] });
+    expect(imported).not.toHaveProperty('outputOrder');
   });
 
   test('worldInfoInterceptor: handles missing userId cleanly', async () => {

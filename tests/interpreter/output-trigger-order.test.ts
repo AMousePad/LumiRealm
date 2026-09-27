@@ -1,3 +1,5 @@
+import { frontendExecutorFor } from '../helpers/frontend-executor.js';
+import { basicTriggerContext } from '../helpers/trigger-runtime.js';
 import { describe, expect, test } from 'bun:test';
 import { prepareTriggers } from '../../src/interpreter/dispatcher.js';
 import { createTriggerDispatcher } from '../../src/state/trigger-dispatch.js';
@@ -38,6 +40,7 @@ describe('output lifecycle order', () => {
       },
       // makeSpindleHost dereferences generate.raw eagerly (newest-host-only contract).
       generate: { raw: async () => ({ content: '' }) },
+      personas: { getActive: async () => null },
     };
 
     const lua = `
@@ -69,20 +72,10 @@ describe('output lifecycle order', () => {
     } as unknown as ActiveCard;
 
     const dispatcher = createTriggerDispatcher({
-      compiledByCharacter: new Map([['character', compiled]]),
-      getCachedSettingsSync: () => ({
-        enabled: true,
-        legacyMediaFindings: false,
-      }) as never,
-      makeStateChangedCallback: () => () => {},
-      makeAuxDebugCapture: () => undefined,
-      resolveReadonly: async (text) => text,
+      execute: frontendExecutorFor(() => active),
       ensureActiveCardForChat: async () => active,
       refreshBgHtml: async () => {},
       refreshVariables: async () => {},
-      toastFor: () => {},
-      log: { info: () => {}, warn: () => {}, error: () => {} },
-      errMsg: (error) => error instanceof Error ? error.message : String(error),
     });
 
     await dispatcher.runBinding(active, 'chat', 'output', 'user');

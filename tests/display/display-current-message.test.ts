@@ -1,16 +1,9 @@
-import { describe, expect, mock, test } from 'bun:test';
-import { dirname, join } from 'node:path';
+import { describe, expect, test } from 'bun:test';
 import type { DisplaySnapshot } from '../../src/display/snapshot.js';
 import { withCurrentDisplayMessage } from '../../src/display/host-shim.js';
 import { runEditDisplayChain } from '../../src/display/lua-runner.js';
 import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
 import { clearWasmoonEngine } from '../../src/interpreter/lua-wasmoon.js';
-
-// Bun routes emscripten wasm loading through fs, where the inlined data URI
-// is not an openable path, so feed the factory the on-disk wasmoon glue.
-mock.module('../../src/display/_glue-wasm-b64.js', () => ({
-  GLUE_WASM_DATA_URI: join(dirname(Bun.resolveSync('wasmoon', import.meta.dir)), 'glue.wasm'),
-}));
 
 function snapshot(luaCode = ''): DisplaySnapshot {
   return {
@@ -207,7 +200,7 @@ describe('frontend display current-message view', () => {
           role: 'assistant',
           dynamicMacros: { chat_index: '24' },
         },
-        async (value) => value,
+        (value) => value,
         () => {},
       );
 
@@ -252,7 +245,7 @@ describe('frontend display current-message view', () => {
           messageIndex: 2,
           role: 'assistant',
         },
-        async (value) => value,
+        (value) => value,
         () => {},
       );
       expect(rendered).toBe(`${raw}|Character inventory`);
@@ -309,7 +302,7 @@ describe('frontend display current-message view', () => {
           messageId: 'latest',
           role: 'assistant',
         },
-        async (value) => value,
+        (value) => value,
         () => {},
       );
 
@@ -355,7 +348,7 @@ describe('frontend display current-message view', () => {
         messageId: 'latest',
         role: 'assistant',
       },
-      async (value) => value,
+      (value) => value,
       () => {},
     );
 
@@ -392,7 +385,7 @@ describe('frontend display current-message view', () => {
       snap,
       value,
       { ...context, characterId: snap.characterId },
-      async (template) => template,
+      (template) => template,
       () => {},
     );
 

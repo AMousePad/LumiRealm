@@ -41,7 +41,7 @@ bun install
 bun run build
 ```
 
-This typechecks, bundles `src/backend.ts` / `src/regex-runner.ts` / `src/frontend.ts` into `dist/`, applies sandbox-compatibility patches, and runs a static safety check mirroring the host's dangerous-capability scan. `dist/` is committed: Lumiverse installs from the committed bundles, so commits that change `src/` must include the rebuilt `dist/`.
+This typechecks, bundles `src/backend.ts` / `src/regex-runner.ts` / `src/frontend.ts` into `dist/`, applies sandbox-compatibility patches, and runs a static safety check mirroring the host's dangerous-capability scan. Run the build to validate source changes, but leave generated `dist/` changes out of source commits. Deployment uses the local built bundles; build a source checkout before installing unpublished changes.
 
 ## Tests
 
@@ -50,7 +50,11 @@ bun run test            # fast suite (excludes *.slow.test.ts) — must pass bef
 bun run test:slow       # corpus sweeps; need a populated card library
 bun run test:all        # everything
 bun run test:parallel   # fast suite on all cores
+bun run test:browser:islands # native island layout and style lifecycle
 ```
+
+The island browser checks use synthetic fixtures and require Playwright's browsers:
+run `bunx playwright install chromium firefox` once before running them.
 
 Tests live under `tests/`, organized to mirror `src/` (`tests/core`, `tests/interpreter`, `tests/state`, `tests/display`, ...).
 

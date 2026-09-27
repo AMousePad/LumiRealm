@@ -551,7 +551,6 @@ export type BackendToFrontend =
       type: 'render_bg_html';
       chatId: string;
       bgHtml: string;
-      crossRuleStyles?: readonly string[];
     }
   | {
       type: 'clear_bg_html';
@@ -971,9 +970,9 @@ export interface AuxSamplersWire {
 }
 
 export interface VariableScopes {
-  readonly local: Readonly<Record<string, string>>;
-  readonly global: Readonly<Record<string, string>>;
-  readonly chat: Readonly<Record<string, string>>;
+  readonly local: Readonly<Record<string, string | null>>;
+  readonly global: Readonly<Record<string, string | null>>;
+  readonly chat: Readonly<Record<string, string | null>>;
 }
 
 export interface ModuleSummary {

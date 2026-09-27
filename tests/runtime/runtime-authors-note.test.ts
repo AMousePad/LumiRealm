@@ -237,9 +237,9 @@ describe('Lua character data APIs use the host state', () => {
     );
 
     await rt.runLua(`
-      function onRun()
-        setChatVar("trigger", "description_result", getDescription("trigger"))
-        setDescription("trigger", "updated description")
+      function onRun(id)
+        setChatVar(id, "description_result", getDescription(id))
+        setDescription(id, "updated description")
       end
     `);
     await rt.flush();
@@ -263,14 +263,15 @@ describe('Lua character data APIs use the host state', () => {
     );
 
     await rt.runLua(`
-      function onRun()
-        setChatVar("trigger", "name_result", getName("trigger"))
-        setChatVar("trigger", "greeting_result", getCharacterFirstMessage("trigger"))
-        setName("trigger", "Updated Name")
-        setCharacterFirstMessage("trigger", "Updated greeting")
+      function onRun(id)
+        setChatVar(id, "name_result", getName(id))
+        setChatVar(id, "greeting_result", getCharacterFirstMessage(id))
+        setName(id, "Updated Name")
+        setCharacterFirstMessage(id, "Updated greeting")
       end
     `);
 
+    await rt.flush();
     expect(rt.getVar('name_result')).toBe('Host Name');
     expect(rt.getVar('greeting_result')).toBe('Host greeting');
     expect(updates).toEqual([
@@ -288,12 +289,12 @@ describe('Lua character data APIs use the host state', () => {
       makeMockHostApi(state),
       { ...dispatchData, userName: 'Alice' },
       makeMockScriptNS(),
-      { resolveTemplate: async (text) => text.replace('{{user}}', 'Alice') },
+      { luaTemplate: (text) => text.replace('{{user}}', 'Alice') },
     );
 
     await rt.runLua(`
-      function onRun()
-        setChatVar("trigger", "persona_result", getPersonaDescription("trigger"))
+      function onRun(id)
+        setChatVar(id, "persona_result", getPersonaDescription(id))
       end
     `);
     expect(rt.getVar('persona_result')).toBe('Hello Alice');
@@ -312,8 +313,8 @@ describe('Lua character data APIs use the host state', () => {
     );
 
     await rt.runLua(`
-      function onRun()
-        setChatVar("trigger", "note_result", getAuthorsNote("trigger"))
+      function onRun(id)
+        setChatVar(id, "note_result", getAuthorsNote(id))
       end
     `);
     expect(rt.getVar('note_result')).toBe('host author note');

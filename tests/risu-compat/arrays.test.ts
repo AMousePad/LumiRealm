@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { makeMockContext } from "../../src/core/cbs/index.js";
 import { registry } from "../../src/risu-compat/index.js";
+import { runPipeline } from "../../src/interpreter/evaluator/pipeline.js";
 import "../../src/risu-compat/handlers/index.js";
 
 // Array / dict helpers. Risu source: cbs.ts:1064-1294 + 1639-1665.
@@ -113,10 +114,40 @@ describe("makearray / makedict (cbs.ts:1294, 1303)", () => {
     expect(call("makearray", ["a", "b", "c"])).toBe('["a","b","c"]');
     expect(call("makearray", [])).toBe("[]");
   });
-  test("makedict from interleaved pairs", () => {
-    expect(call("makedict", ["a", "1", "b", "2"])).toBe('{"a":"1","b":"2"}');
+  test("makedict from key=value arguments", () => {
+    expect(call("makedict", ["a=1", "b=2"])).toBe('{"a":"1","b":"2"}');
     expect(call("makedict", [])).toBe("{}");
   });
+  test("makedict splits only at the first equals sign", () => {
+    expect(call("makedict", ["a=1=2"])).toBe('{"a":"1=2"}');
+  });
+  test("makedict ignores unpaired arguments and replaces duplicate keys", () => {
+    expect(call("makedict", ["ignored", "a=first", "also ignored", "a=last"]))
+      .toBe('{"a":"last"}');
+    expect(call("makedict", ["a", "1", "b", "2"])).toBe("{}");
+  });
+  test("makedict preserves empty keys, empty values and pair whitespace", () => {
+    expect(call("makedict", ["=value", "empty=", " spaced = value "]))
+      .toBe('{"":"value","empty":""," spaced ":" value "}');
+  });
+  test("makedict JSON-escapes values", () => {
+    expect(call("makedict", ['quoted="text"', "line=one\ntwo", "unicode=雪"]))
+      .toBe('{"quoted":"\\"text\\"","line":"one\\ntwo","unicode":"雪"}');
+  });
+  test("makedict retains ordinary object key and prototype semantics", () => {
+    expect(call("makedict", ["__proto__=ignored", "constructor=value", "toString=text", "2=two", "1=one"]))
+      .toBe('{"1":"one","2":"two","constructor":"value","toString":"text"}');
+  });
+
+  for (const name of ["dict", "d", "makedict", "makeobject", "object", "o"]) {
+    test(`${name} resolves key=value pairs through the CBS pipeline`, () => {
+      expect(runPipeline({
+        template: `{{${name}::name={{char}}::state=ready=now}}`,
+        phase: "display", chatId: "", userName: "User", charName: "Character",
+        character: {}, chat: {}, variables: {},
+      })).toBe('{"name":"Character","state":"ready=now"}');
+    });
+  }
 });
 
 describe("range (cbs.ts:1544)", () => {

@@ -10,6 +10,7 @@ import type {
 import { runPipeline, type RunPipelineInput } from '../interpreter/evaluator/pipeline.js';
 import {
   MSG_DEP_KEY,
+  buildEvaluatorContext,
   type VarReadRecorder,
 } from '../interpreter/evaluator/context.js';
 import {
@@ -24,9 +25,11 @@ import {
   waitForSnapshot,
   type DisplaySnapshot,
 } from './snapshot.js';
-import { type FeRegexScript } from './regex-apply.js';
+import { isRisuRegexScript, type FeRegexScript, type FeRegexMatch } from './regex-apply.js';
+import { ActivationPatternError, createActivationPatternCache, type ActivationPatternCache } from './activation-patterns.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
-import { wrapResolvedContentAsIsland } from './fragment-assembly.js';
+import { decorateNativeRegexActions } from './regex-actions.js';
+import { createNativeVariableMacros } from './native-variable-macros.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
 import {
@@ -36,6 +39,9 @@ import {
   type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import { buildModuleDisplayPlan } from './module-action-plan.js';
+import { deferDisplayAssets, displayAssetBaseline, finalizeDisplayAssets, parseDisplayCaller } from './caller-parser.js';
+import { evaluate } from '../interpreter/evaluator/scanner.js';
+import { stripDisplayStyleImports } from './style-imports.js';
 const log = makeSafeLogger('display-resolver');
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
@@ -68,7 +74,7 @@ function buildInput(
   return {
     template: content,
     phase: 'display',
-    // Risu renders display with rmVar: the setvar family hides, never executes.
+    // Risu's initial display caller removes inactive variable writes.
     rmVar: true,
     chatId: snap.chatId,
     characterId: snap.characterId,
@@ -96,7 +102,9 @@ function evalTemplate(
   context: SpindleDisplayContext,
   recorder: VarReadRecorder,
 ): string {
-  return runPipeline(buildInput(snap, text, context), { recorder });
+  return runPipeline({
+    ...buildInput(snap, text, context), visualize: false, rmVar: false, reparseMacroResults: false,
+  }, { recorder, resolveLeaf: deferDisplayAssets });
 }
 
 async function fetchBackendBody(
@@ -200,18 +208,35 @@ function scriptApplies(
   return true;
 }
 
-function toCoreScript(script: FeRegexScript): RegexCoreScript {
+function toCoreScript(script: FeRegexScript, nativeEval: (text: string) => string, prepared: ReadonlyMap<string, string | ActivationPatternError>): RegexCoreScript {
   const matchActions = readRegexMatchActions(script.metadata);
+  const actions = script.actions;
+  const isRisu = isRisuRegexScript(script);
+  const risu = script.metadata?.['_risu'] as Record<string, unknown> | undefined;
+  const unicodeFlags = risu?.['unicode_flags'];
   return {
     find_regex: script.find_regex,
     replace_string: script.replace_string,
-    flags: script.flags,
+    flags: isRisu && typeof unicodeFlags === 'string'
+      && script.flags === (unicodeFlags.replace(/u/g, '') || 'u')
+      ? unicodeFlags : script.flags,
     substitute_macros: script.substitute_macros,
     placement: script.placement,
     target: 'display',
     min_depth: script.min_depth,
     max_depth: script.max_depth,
     trim_strings: script.trim_strings,
+    // Only Risu's processScriptFull adds a CBS pass after ordinary replacement.
+    reResolveAfterRule: isRisu,
+    ...(isRisu ? { risuActions: Array.isArray(risu?.['flag_actions'])
+      ? risu['flag_actions'].filter((action): action is string => typeof action === 'string')
+      : [] } : {}),
+    ...(typeof prepared.get(script.id) === 'string' ? { preResolvedFind: prepared.get(script.id) as string } : {}),
+    ...(!isRisu ? { evalTemplate: nativeEval } : {}),
+    ...(actions && actions.length > 0 ? {
+      decorateReplacement: (replacement: string, match: FeRegexMatch, input: string) =>
+        decorateNativeRegexActions(replacement, script.id, actions, match, input),
+    } : {}),
     ...(script.disabled !== undefined ? { disabled: script.disabled } : {}),
     ...(matchActions.length > 0 ? { matchActions } : {}),
     ...(typeof script.metadata?.['repeat_position'] === 'string'
@@ -269,12 +294,26 @@ async function runApply(
   snap: DisplaySnapshot,
   args: SpindleDisplayScriptsArgs,
   recorder: VarReadRecorder,
+  activationPatterns: ActivationPatternCache,
+  cache: Map<string, SpindleDisplayResolveResult>,
   onEffect?: DisplayRuntimeEffectSink,
 ): Promise<string> {
   const ctx = args.context;
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
-  const scripts = args.scripts as readonly FeRegexScript[];
-  const plan = buildModuleDisplayPlan(scripts, snap.atActions);
+  // Match the host execution pipeline's scope order; UI list sort numbers
+  // overlap between global presets and character rules.
+  const scopeOrder = { global: 0, character: 1, chat: 2 };
+  const scripts = [...args.scripts as readonly FeRegexScript[]].sort(
+    (a, b) => scopeOrder[a.scope ?? 'global'] - scopeOrder[b.scope ?? 'global'],
+  );
+  const prepared = await activationPatterns.resolve(scripts.filter(script => scriptApplies(script, ctx)), ctx, recorder.touched);
+  // Lumiverse's compiler rejects invalid activation inputs per rule, leaving other rules runnable.
+  const plan = buildModuleDisplayPlan(scripts.filter(script => {
+    const result = prepared.get(script.id);
+    if (!(result instanceof ActivationPatternError)) return true;
+    log.error(`applyScripts: activation input failed for rule=${script.id}: ${String(result)}`);
+    return false;
+  }), snap.atActions);
   const hasRepeatBack = plan.some(
     (step) =>
       step.kind === 'script'
@@ -285,50 +324,75 @@ async function runApply(
     : {};
   if (hasRepeatBack) recorder.touched.add(MSG_DEP_KEY);
   let content = args.content;
+  let nativeVariables: ReturnType<typeof createNativeVariableMacros> | undefined;
+  const nativeEval = (text: string): string => {
+    nativeVariables ??= createNativeVariableMacros(snap.vars, recorder.touched);
+    return runPipeline(buildInput(snap, text, ctx), { recorder, resolveLeaf: nativeVariables });
+  };
 
-  for (let index = 0; index < plan.length; index++) {
-    const step = plan[index]!;
-    if (step.kind === 'skip') {
-      warnActionBinding(step.script.id, step.reason);
-      continue;
-    }
-    if (step.kind === 'action') {
-      if (!scriptApplies(step.script, ctx)) continue;
-      const dependencies = getRuntimeAtActionDependencies(step.action);
-      if (dependencies.messages) recorder.touched.add(MSG_DEP_KEY);
-      if (dependencies.effects) recorder.volatile = true;
-      content = await runEditDisplayAtActions(
-        snap,
-        content,
-        ctx,
-        [step.action],
-        {
-          resolveTemplate: (text) =>
-            evalTemplate(snap, text, ctx, recorder),
-          ...(onEffect ? { onEffect } : {}),
-        },
-      );
-      continue;
-    }
-    const coreScripts = [toCoreScript(step.script)];
-    while (plan[index + 1]?.kind === 'script') {
-      const next = plan[++index]!;
-      if (next.kind === 'script') coreScripts.push(toCoreScript(next.script));
-    }
-    content = applyRegexScriptsCore(content, coreScripts, {
-      placement,
-      depth: ctx.depth,
-      ...behaviorContext,
-      evalTemplate: (text) => {
-        try {
-          return evalTemplate(snap, text, ctx, recorder);
-        } catch (err) {
-          recorder.volatile = true;
-          throw err;
+  // Risu processScriptFull caches after Lua/CBS, including evaluated <cbs> inputs.
+  // Native rows stay live and split cache batches without changing execution order.
+  for (let start = 0; start < plan.length;) {
+    const risu = isRisuRegexScript(plan[start]!.script);
+    let end = start + 1;
+    while (end < plan.length && isRisuRegexScript(plan[end]!.script) === risu) end++;
+    const reads: VarReadRecorder = risu ? { touched: new Set<string>(), volatile: false } : recorder;
+    const key = risu ? JSON.stringify([
+      snap.chatId, snap.characterId, resolveRisuDisplayMessageIndex(snap, ctx), start, content,
+      plan.slice(start, end).map(step => [step.script, scriptApplies(step.script, ctx),
+        (step.script.metadata?.['_risu'] as { flag_actions?: string[] } | undefined)?.flag_actions?.includes('cbs')
+          ? evalTemplate(snap, step.script.find_regex, ctx, reads) : step.script.find_regex,
+        step.kind === 'action' ? step.action : step.kind === 'skip' ? step.reason : null]),
+    ]) : undefined;
+    const cached = key === undefined ? undefined : cache.get(key);
+    if (cached?.content) {
+      content = cached.content;
+      for (const dependency of cached.touchedVars ?? []) reads.touched.add(dependency);
+      if (cached.cacheable === false) reads.volatile = true;
+    } else {
+      for (let index = start; index < end; index++) {
+        const step = plan[index]!;
+        if (step.kind === 'skip') {
+          warnActionBinding(step.script.id, step.reason);
+          continue;
         }
-      },
-      reResolveAfterRule: true,
-    });
+        if (step.kind === 'action') {
+          if (!scriptApplies(step.script, ctx)) continue;
+          const dependencies = getRuntimeAtActionDependencies(step.action);
+          if (dependencies.messages) reads.touched.add(MSG_DEP_KEY);
+          if (dependencies.effects) reads.volatile = true;
+          content = await runEditDisplayAtActions(snap, content, ctx, [step.action], {
+            resolveTemplate: text => evalTemplate(snap, text, ctx, reads),
+            ...(onEffect ? { onEffect } : {}),
+          });
+          continue;
+        }
+        const coreScripts = [toCoreScript(step.script, nativeEval, prepared)];
+        while (index + 1 < end && plan[index + 1]?.kind === 'script') {
+          const next = plan[++index]!;
+          if (next.kind === 'script') coreScripts.push(toCoreScript(next.script, nativeEval, prepared));
+        }
+        content = applyRegexScriptsCore(content, coreScripts, {
+          placement,
+          depth: ctx.depth,
+          ...behaviorContext,
+          evalTemplate: text => {
+            try { return evalTemplate(snap, text, ctx, reads); }
+            catch (err) { reads.volatile = true; throw err; }
+          },
+          reResolveAfterRule: true,
+        });
+      }
+      if (key !== undefined) {
+        cache.set(key, { content, touchedVars: [...reads.touched], cacheable: !reads.volatile });
+        if (cache.size > 1000) cache.delete(cache.keys().next().value!);
+      }
+    }
+    if (reads !== recorder) {
+      for (const dependency of reads.touched) recorder.touched.add(dependency);
+      if (reads.volatile) recorder.volatile = true;
+    }
+    start = end;
   }
   return content;
 }
@@ -336,8 +400,14 @@ async function runApply(
 export function createDisplayResolver(
   writeback?: DisplayWritebackSink,
   onEffect?: DisplayRuntimeEffectSink,
-): SpindleDisplayResolver {
+  activationPatterns: ActivationPatternCache = createActivationPatternCache(),
+): SpindleDisplayResolver & { resetScriptCache(): void } {
+  const scriptCache = new Map<string, SpindleDisplayResolveResult>();
   return {
+    finalizeWithoutScripts: true,
+    skipFormattingHealing: true,
+    skipInlineCardWrapping: true,
+    resetScriptCache() { scriptCache.clear(); },
     ready(chatId: string): boolean {
       return isDisplayResolutionReady(chatId);
     },
@@ -348,19 +418,32 @@ export function createDisplayResolver(
       if (!snap) return null;
 
       let feContent: string;
+      let processingState: string | undefined;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
         const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
-        const liveSnap = (snap.luaTriggers.length > 0 || rowlessAtActions.length > 0)
+        let liveSnap = (snap.luaTriggers.length > 0 || rowlessAtActions.length > 0)
           ? withCurrentDisplayMessage(snap, args.context, args.content)
           : snap;
-        let body = args.content;
+        let body = parseDisplayCaller(buildInput(liveSnap, args.content, args.context), recorder);
+        processingState = displayAssetBaseline(body);
         if (liveSnap.luaTriggers.length > 0) {
+          // Risu ChatBody reruns parsing on input changes and GUI reloads, not persistence echoes.
+          // Keep the host's outer render cache; every actual resolution still executes Lua.
           body = await runEditDisplayChain(
             liveSnap,
             body,
             args.context,
-            (t) => Promise.resolve(runPipeline(buildInput(liveSnap, t, args.context), { recorder })),
+            (t) => {
+              const current = getDisplaySnapshot(chatId);
+              const source = current?.characterId === liveSnap.characterId ? current : liveSnap;
+              const { currentMessageRoleOverride: _messageRole, ...input } = buildInput(source, t, args.context);
+              return evaluate(t, buildEvaluatorContext({
+                ...input,
+                recorder, commit: false, rmVar: false, runVar: false, cbsContext: true, visualize: false,
+                reparseMacroResults: false, currentMessageIndexOverride: -1,
+              }));
+            },
             (vars) => writeback?.(chatId, vars),
             onEffect,
             // Same key shape as the CBS recorder so snapshot-diff invalidation
@@ -372,12 +455,17 @@ export function createDisplayResolver(
                 recorder.touched.add(`local:${name}`);
               }
             },
+            () => recorder.touched.add(MSG_DEP_KEY),
           );
+          const current = getDisplaySnapshot(chatId);
+          if (current?.characterId === liveSnap.characterId) {
+            liveSnap = withCurrentDisplayMessage(current, args.context, args.content);
+          }
         }
         const displayTriggerResult = await runDisplayTriggerChain(liveSnap, body);
         body = displayTriggerResult.content;
         if (displayTriggerResult.ran) recorder.volatile = true;
-        body = runPipeline(buildInput(liveSnap, body, args.context), { recorder });
+        body = evalTemplate(liveSnap, body, args.context, recorder);
         if (rowlessAtActions.length > 0) {
           for (const action of rowlessAtActions) {
             const dependencies = getRuntimeAtActionDependencies(action);
@@ -427,6 +515,7 @@ export function createDisplayResolver(
 
       return {
         content: feContent,
+        ...(processingState !== undefined ? { processingState } : {}),
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile,
       };
@@ -479,10 +568,11 @@ export function createDisplayResolver(
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
-        feContent = await runApply(snap, args, recorder, onEffect);
-        // The wrap must stay after runApply: its at-action effects persist the
-        // in-flight string, and island markup must never reach storage.
-        feContent = wrapResolvedContentAsIsland(feContent);
+        feContent = args.scripts.length === 0 ? args.content
+          : await runApply(snap, args, recorder, activationPatterns, scriptCache, onEffect);
+        if (args.processingState !== feContent) {
+          feContent = finalizeDisplayAssets(buildInput(snap, feContent, args.context), recorder);
+        }
       } catch (err) {
         log.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
@@ -494,7 +584,7 @@ export function createDisplayResolver(
       if (mode === 'shadow') {
         const beContent = await fetchBackendApply(args);
         if (beContent === null) {
-          return { content: feContent, touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
+          return { content: stripDisplayStyleImports(feContent), touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
         }
         if (beContent !== feContent) {
           log.warn(
@@ -506,11 +596,11 @@ export function createDisplayResolver(
         } else {
           log.trace(`[shadow] apply match chat=${chatId} msg=${args.context.messageId ?? '?'} len=${feContent.length}`);
         }
-        return { content: beContent };
+        return { content: stripDisplayStyleImports(beContent) };
       }
 
       return {
-        content: feContent,
+        content: stripDisplayStyleImports(feContent),
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile,
       };

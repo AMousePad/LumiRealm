@@ -6,6 +6,7 @@ export interface HostMessage {
   readonly id: string;
   readonly content: string;
   readonly role: 'user' | 'assistant' | 'system' | string;
+  /** Milliseconds since the Unix epoch, matching Risu chat.message.time. */
   readonly createdAt?: number;
   readonly speaker?: string;
   readonly greetingIndex?: number;
@@ -23,6 +24,7 @@ export interface HostCharacter {
 }
 
 export interface HostPersona {
+  readonly name?: string;
   readonly id: string;
   readonly description?: string;
   readonly imageId?: string | null;
@@ -73,12 +75,13 @@ export type HostCorsFetch = (
 ) => Promise<HostCorsResponse>;
 
 export interface HostApi {
+  readonly luaStateScope?: object;
   readonly userId?: string;
   readonly getGlobalVariables?: () => Promise<Record<string, string>>;
   readonly chat: {
     getChatId?: () => string | null;
     getMessages(): Promise<readonly HostMessage[]>;
-    sendMessage(content: string, opts?: { role?: string }): Promise<{ id: string }>;
+    sendMessage(content: string, opts?: { role?: string; messageId?: string }): Promise<{ id: string }>;
     editMessage(id: string, content: string): Promise<void>;
     deleteMessage(id: string): Promise<void>;
     getMetadata(key: string): Promise<unknown>;
@@ -109,6 +112,7 @@ export interface HostApi {
     alert?: (msg: string, kind?: 'info' | 'error' | 'warning' | 'success') => Promise<void>;
     prompt?: (message: string, defaultValue?: string) => Promise<string | null>;
     confirm?: (message: string, defaultValue?: string) => Promise<boolean>;
+    // Returns the zero-based index as a string, or null on dismissal.
     pick?: (title: string, options: readonly string[]) => Promise<string | null>;
     dom?: {
       inject: (selector: string, html: string, opts?: { id?: string }) => HostDomHandle;
@@ -186,18 +190,28 @@ export interface HostApi {
  */
 export interface TriggerRuntimePreloaded {
   /** Output of `loadVars(api)` — `$`-prefixed internal key shape. */
-  readonly varsCache?: Record<string, string>;
+  readonly varsCache?: Record<string, string | null>;
   /** Risu's application-global chat variables (Lumiverse macro_variables.global). */
-  readonly globalVars?: Readonly<Record<string, string>>;
+  readonly globalVars?: Readonly<Record<string, string | null>>;
   readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   /** Output of `api.chat.getMessages()` — pre-Risu-frame-shift. Same shape
    *  the runtime would receive from Spindle directly. */
   readonly messagesRaw?: readonly HostMessage[];
   /** Pre-built lorebook cache — { entries, primaryBookId }. */
   readonly lorebook?: import('./runtime/lorebook.js').LorebookCache;
+  readonly luaState?: import('./runtime/lua-state.js').LuaHostState;
 }
 
 export interface TriggerRuntimeOpts {
+  readonly luaSignal?: AbortSignal;
+  /** runScripted shares its chat across modes; runTrigger supplies a copied invocation instead. */
+  readonly luaChat?: {
+    readonly messages: HostMessage[];
+    readonly firstMessage?: string | undefined;
+    enqueue?: (operation: () => Promise<void>) => Promise<void>;
+    persistence?: Pick<HostApi['chat'], 'sendMessage' | 'editMessage' | 'deleteMessage'>;
+  };
+  readonly invocationState?: import('./runtime/invocation.js').TriggerInvocationState;
   readonly displayMode?: boolean;
   readonly displayData?: string;
   readonly requestData?: readonly {
@@ -210,10 +224,17 @@ export interface TriggerRuntimeOpts {
   readonly chatId?: string;
   /** Pre-fetched chat-state snapshot — see `TriggerRuntimePreloaded`. */
   readonly preloaded?: TriggerRuntimePreloaded;
+  /** Frontend display hooks use live chat state, as in Risu's runScripted. */
+  readonly luaVariables?: {
+    get(name: string, scope: 'chat' | 'global'): string;
+    set(name: string, value: string): boolean | void;
+    flush(): void | Promise<void>;
+  };
+  readonly localState?: import('./runtime/vars.js').TriggerLocalState;
   readonly moduleLorebooks?: readonly unknown[];
   // Backend uses this to filter MESSAGE_EDITED self-echoes from Lua setChat.
   readonly rememberOurWrite?: (chatId: string, msgId: string, content: string) => void;
-  readonly stateChanged?: () => void;
+  readonly stateChanged?: (source?: string) => void;
   readonly auxConnectionId?: string | null;
   readonly auxModelOverride?: string | null;
   readonly auxSamplers?: {
@@ -249,9 +270,12 @@ export interface TriggerRuntimeOpts {
   /** Backs Lua `cbs(value)`. Used by listenEdit chains that don't run
    *  inside a dispatch-context window. */
   readonly resolveTemplate?: (text: string) => Promise<string>;
+  readonly templateContext?: import('./runtime/template.js').TriggerTemplateContext;
+  readonly luaTemplate?: (text: string) => string;
   /** FE display dep recording: reports Lua-side var reads (getChatVar/getState/
    *  getGlobalVar) that the CBS recorder cannot see. */
   readonly onVarRead?: (name: string, scope: 'chat' | 'global') => void;
+  readonly onMessageRead?: () => void;
 }
 
 export interface RegexRuntimeOpts {

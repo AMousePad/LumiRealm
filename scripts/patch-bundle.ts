@@ -1,38 +1,9 @@
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const distBackend = join(import.meta.dir, '..', 'dist', 'backend.js');
 const distRunner = join(import.meta.dir, '..', 'dist', 'regex-runner.js');
-
-interface Patch {
-  readonly name: string;
-  readonly from: RegExp;
-  readonly to: string;
-}
-
-const patches: readonly Patch[] = [
-  {
-    name: 'fengari (0, eval)("this") global-object polyfill',
-    from: /\(0,\s*eval\)\("this"\)/g,
-    to: 'globalThis',
-  },
-  {
-    name: 'fengari Function("t","k","delete t[k]") delete-prop helper',
-    from: /Function\(\s*"t"\s*,\s*"k"\s*,\s*"delete\s+t\[k\]"\s*\)/g,
-    to: '((t,k)=>{delete t[k]})',
-  },
-  {
-    name: 'fengari Function("return ()=>void 0;") noop factory',
-    from: /Function\(\s*"return\s*\(\)=>void\s+0;?"\s*\)/g,
-    to: '(()=>()=>void 0)',
-  },
-  {
-    name: 'fengari Function("fengari", X) XHR library loader',
-    from: /Function\(\s*"fengari"\s*,\s*\w+\s*\)/g,
-    to: '(()=>{throw new Error("Function-constructor-disabled-in-extension-context")})()',
-  },
-];
 
 interface Check {
   readonly label: string;
@@ -71,25 +42,7 @@ const checks: readonly Check[] = [
 ];
 
 function processBundle(label: string, path: string): void {
-  const original = readFileSync(path, 'utf-8');
-  let patched = original;
-  let totalHits = 0;
-  for (const p of patches) {
-    const before = patched;
-    let hits = 0;
-    patched = patched.replace(p.from, () => { hits += 1; return p.to; });
-    if (hits > 0) {
-      console.log(`[${label}] patched ${hits} x ${p.name}`);
-      totalHits += hits;
-    }
-    if (patched === before && hits > 0) {
-      throw new Error(`internal: counted ${hits} hits but content unchanged for ${p.name}`);
-    }
-  }
-  if (patched !== original) {
-    writeFileSync(path, patched, 'utf-8');
-    console.log(`[${label}] wrote ${totalHits} patch(es)`);
-  }
+  const patched = readFileSync(path, 'utf-8');
 
   let failed = false;
   for (const c of checks) {
@@ -108,7 +61,7 @@ function processBundle(label: string, path: string): void {
   }
   if (failed) {
     console.error(`\n[${label}] Lumi's detectDangerousBackendCapabilities (commit 5195652) would block this bundle.`);
-    console.error("Fix the source (or extend patches above) before committing dist/.");
+    console.error("Fix the source before committing dist/.");
     process.exit(1);
   }
   console.log(`[${label}] static safety check passed (${checks.length} patterns clean)`);

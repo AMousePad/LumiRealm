@@ -165,17 +165,20 @@ describe('vars.declareLocalVar + getLocal precedence', () => {
   test('declared local shadows chat-scope', () => {
     const state = makeState({ varsCache: { '$x': 'chat-value' } });
     const api = makeVarsApi(state);
+    api.setIndent(1);
     api.declareLocalVar('x', 'local-value', 1);
     expect(api.getVar('x')).toBe('local-value');
   });
 
-  test('deeper local indent wins (reverse iteration)', () => {
+  test('a deeper declaration updates the existing outer binding', () => {
     const state = makeState();
     const api = makeVarsApi(state);
+    api.setIndent(3);
     api.declareLocalVar('x', 'shallow', 1);
     api.declareLocalVar('x', 'deep', 3);
     expect(api.getLocal('x')).toBe('deep');
     expect(api.getVar('x')).toBe('deep');
+    expect(state.localScopes.has('3')).toBe(false);
   });
 
   test('local miss falls through to chat scope', () => {
@@ -185,12 +188,12 @@ describe('vars.declareLocalVar + getLocal precedence', () => {
     expect(api.getVar('y')).toBe('chat-y');
   });
 
-  test('non-numeric indent → 0', () => {
+  test('a nonnumeric indent does not create a visible depth-zero local', () => {
     const state = makeState();
     const api = makeVarsApi(state);
     api.declareLocalVar('x', 'v', 'not-a-number');
-    expect(state.localScopes.has(0)).toBe(true);
-    expect(api.getLocal('x')).toBe('v');
+    expect(state.localScopes.has('not-a-number')).toBe(true);
+    expect(api.getLocal('x')).toBeUndefined();
   });
 });
 
@@ -202,11 +205,11 @@ describe('vars.setvarV1', () => {
     api = makeVarsApi(state);
   });
 
-  test("'=' or empty op assigns", () => {
+  test("'=' assigns and an empty operator writes an empty result", () => {
     api.setvarV1('x', '=', '5');
     expect(api.getVar('x')).toBe('5');
     api.setvarV1('y', '', '10');
-    expect(api.getVar('y')).toBe('10');
+    expect(api.getVar('y')).toBe('');
   });
 
   test('+= adds numerically', () => {
@@ -227,10 +230,10 @@ describe('vars.setvarV1', () => {
     expect(api.getVar('m')).toBe('42');
   });
 
-  test('/= zero divisor → 0 (Risu parity)', () => {
+  test('/= zero divisor preserves Infinity from Risu arithmetic', () => {
     api.setVar('q', '10');
     api.setvarV1('q', '/=', '0');
-    expect(api.getVar('q')).toBe('0');
+    expect(api.getVar('q')).toBe('Infinity');
   });
 
   test('non-numeric prev → treated as 0 base', () => {
@@ -239,10 +242,10 @@ describe('vars.setvarV1', () => {
     expect(api.getVar('x')).toBe('5');
   });
 
-  test('unknown op → assign rendered value', () => {
+  test('unknown operator writes an empty result', () => {
     api.setVar('x', 'old');
     api.setvarV1('x', 'wat', 'new');
-    expect(api.getVar('x')).toBe('new');
+    expect(api.getVar('x')).toBe('');
   });
 });
 
@@ -265,22 +268,22 @@ describe('vars.setvarV2', () => {
     expect(api.getVar('n')).toBe('12');
   });
 
-  test('+= non-numeric → string concat', () => {
+  test('+= nonnumeric operand produces NaN', () => {
     api.setVar('s', 'hello ');
     api.setvarV2('s', '+=', 'world');
-    expect(api.getVar('s')).toBe('hello world');
+    expect(api.getVar('s')).toBe('NaN');
   });
 
-  test('+= one-side numeric → still string concat (both must be numeric)', () => {
+  test('+= numeric state does not turn addition into concatenation', () => {
     api.setVar('s', '5');
     api.setvarV2('s', '+=', 'abc');
-    expect(api.getVar('s')).toBe('5abc');
+    expect(api.getVar('s')).toBe('NaN');
   });
 
-  test('%= zero divisor → 0', () => {
+  test('%= zero divisor produces NaN', () => {
     api.setVar('m', '10');
     api.setvarV2('m', '%=', '0');
-    expect(api.getVar('m')).toBe('0');
+    expect(api.getVar('m')).toBe('NaN');
   });
 
   test('%= non-zero', () => {

@@ -1,3 +1,4 @@
+import { runLuaCallback } from '../helpers/trigger-runtime.js';
 import { expect, test } from "bun:test";
 import { makeRisuTriggerRuntime, makeRisuRegexRuntime } from "../../src/interpreter/runtime.js";
 import { execute as luaExecute } from "../../src/interpreter/lua-bridge.js";
@@ -47,8 +48,8 @@ test("role replacement keeps the host row order aligned with the runtime cache",
   const data: DispatchData = { characterId: "c", chatId: "chat" };
   const runtime = await makeRisuTriggerRuntime(api, data, scriptNs());
 
-  await runtime.runLua(`
-    setFullChat("trigger", {
+  await runLuaCallback(runtime, `
+    setFullChat(id, {
       { role = "char", data = "replacement" },
       { role = "user", data = "keep second" }
     })
@@ -89,12 +90,12 @@ test("successive setFullChat edits cannot complete out of order", async () => {
   const data: DispatchData = { characterId: "c", chatId: "chat" };
   const runtime = await makeRisuTriggerRuntime(api, data, scriptNs());
 
-  await runtime.runLua(`
-    setFullChat("trigger", {
+  await runLuaCallback(runtime, `
+    setFullChat(id, {
       { role = "user", data = "keep" },
       { role = "char", data = "first edit" }
     })
-    setFullChat("trigger", {
+    setFullChat(id, {
       { role = "user", data = "keep" },
       { role = "char", data = "second edit" }
     })

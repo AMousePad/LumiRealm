@@ -96,9 +96,8 @@ end)
     const trigger = warns('slow trigger[0]');
     expect(trigger.length).toBe(1);
     expect(trigger[0]).toContain('mode=editRequest');
-    // The hook makes no host call of its own, so the time is Lua execution:
-    // api wait must stay at 0 ms and no cbs() resolution may be counted.
-    expect(trigger[0]).toContain('api=0ms');
+    // Only the runtime's character-state read is counted; the hook makes no API call.
+    expect(trigger[0]).toMatch(/api=\d+ms\/1calls/);
     expect(trigger[0]).toContain('cbs=0ms/0calls');
     expect(warns('slow chain').length).toBe(1);
   });
@@ -111,9 +110,9 @@ end)
         source: { effect: [{ type: 'triggerlua' }] },
         luaCode: `
 listenEdit('editRequest', function(id, v, m)
-  alertInput('one'):await()
-  alertInput('two'):await()
-  alertInput('three'):await()
+  alertInput(id, 'one'):await()
+  alertInput(id, 'two'):await()
+  alertInput(id, 'three'):await()
   return v
 end)
 `,

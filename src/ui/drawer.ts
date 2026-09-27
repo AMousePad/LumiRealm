@@ -2,6 +2,7 @@ import * as tus from 'tus-js-client';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend, CardSummary, ImportProgress } from '../types/messages.js';
 import { errMsg } from '../util/coerce.js';
+import { isLogTransportNoise } from '../log/transport.js';
 import { recoverModuleRegexScriptIds } from '../state/module-artifact-project.js';
 import {
   planCardRegexCleanup,
@@ -588,7 +589,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   }
 
   function handleBackendMessage(msg: BackendToFrontend): void {
-    log.info(`drawer.handle: ${msg.type}`);
+    if (!isLogTransportNoise(msg.type)) log.info(`drawer.handle: ${msg.type}`);
     switch (msg.type) {
       case 'cards_updated':
         log.info(`drawer.cards_updated: count=${msg.cards.length}`);

@@ -10,8 +10,7 @@ export function parseArray(s: string): unknown[] {
 
 export function parseDict(s: string): Record<string, unknown> {
   try {
-    const v = JSON.parse(s);
-    if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+    return JSON.parse(s);
   } catch { /* fall through */ }
   return {};
 }

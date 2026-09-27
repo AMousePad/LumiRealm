@@ -13,9 +13,7 @@ test('does not publish background output from a stale refresh', async () => {
     },
     lastSentBgHtmlByChat: lastSent,
     send: (message) => { sent.push(message); },
-    listLiveCharacterCrossRuleRules: async () => [],
     log: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
-    errMsg: String,
   });
 
   await refresher.refresh({

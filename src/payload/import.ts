@@ -1,3 +1,4 @@
+import { makeLowLevelAccessConsentMessage } from "./codec.js";
 import { translateFromCharxBundle } from '../core/pipeline/index.js';
 import { readCharx } from '../core/charx/reader.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
@@ -42,18 +43,6 @@ export interface ImportResult {
 
 export type PendingRegexScript = ProjectedCharacterRegexScript;
 
-function makeLowLevelAccessConsentMessage(characterName: string): string {
-  return (
-    `"${characterName}" requests low-level access. With this granted the card may:\n\n` +
-    `  • Make additional LLM API calls (uses your tokens / billing)\n` +
-    `  • Run helper / classifier prompts in the background\n` +
-    `  • Trigger image generation (if your provider supports it)\n` +
-    `  • Inspect message similarity / embeddings\n\n` +
-    `Only grant access for cards from sources you trust. ` +
-    `Decline to import the card without low-level features (some panels / ` +
-    `auto-updates may not work).`
-  );
-}
 
 const MIME_BY_EXT: Readonly<Record<string, string>> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',

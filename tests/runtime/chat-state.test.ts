@@ -67,25 +67,23 @@ describe('loadVars', () => {
     expect(out).toEqual({ '$__phase': '"A"', '$user_set': 'value' });
   });
 
-  test('non-string values coerced to string', async () => {
+  test('non-string values coerce to strings while null stays unset', async () => {
     const { api } = makeMockApi({
       chat_variables: { num: 42, bool: true, nil: null },
     });
     const out = await loadVars(api);
-    // toStr contract: null/undefined coerce to ''.
     expect(out['$num']).toBe('42');
     expect(out['$bool']).toBe('true');
-    expect(out['$nil']).toBe('');
+    expect(out['$nil']).toBeNull();
   });
 
-  test('throw in getMetadata → empty record (graceful)', async () => {
+  test('failed reads do not pretend the chat has no saved variables', async () => {
     const api = {
       chat: {
         async getMetadata() { throw new Error('boom'); },
       },
     } as unknown as HostApi;
-    const out = await loadVars(api);
-    expect(out).toEqual({});
+    await expect(loadVars(api)).rejects.toThrow('Could not read chat_variables: boom');
   });
 
   test('non-object chat_variables → empty record', async () => {
@@ -123,14 +121,14 @@ describe('saveVars', () => {
     expect(mock.metadata[VAR_STORE_KEY]).toEqual({ __phase: '"A"', regular: 'val' });
   });
 
-  test('throw in setMetadata → swallowed (chat-metadata write may be unauthorized)', async () => {
+  test('failed writes do not report success', async () => {
     const api = {
       chat: {
         async getMetadata() { return {}; },
         async setMetadata() { throw new Error('not permitted'); },
       },
     } as unknown as HostApi;
-    await expect(saveVars(api, { '$foo': 'bar' })).resolves.toBeUndefined();
+    await expect(saveVars(api, { '$foo': 'bar' })).rejects.toThrow('Could not write chat_variables: not permitted');
   });
 
   test('empty input still writes (clears the store)', async () => {

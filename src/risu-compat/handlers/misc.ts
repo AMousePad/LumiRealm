@@ -14,14 +14,14 @@ register("u", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)),
 register("ue", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)),
   "Alias for {{u}}.");
 
-register("unicodeencode", (_c, a) => (a[0] ?? "").charCodeAt(a[1] ? Number(a[1]) : 0).toString(),
+register("unicodeencode", (_c, a) => a[0]!.charCodeAt(a[1] ? Number(a[1]) : 0).toString(),
   "Returns the Unicode code point of a character at the given index (default 0).");
 register("unicodedecode", (_c, a) => String.fromCharCode(Number(a[0] ?? "0")),
   "Converts a Unicode code point back to a character.");
 
-register("fromhex", (_c, a) => Number.parseInt(a[0] ?? "0", 16).toString(),
+register("fromhex", (_c, a) => Number.parseInt(a[0]!, 16).toString(),
   "Converts a hex string to decimal.");
-register("tohex", (_c, a) => Number.parseInt(a[0] ?? "0").toString(16),
+register("tohex", (_c, a) => Number.parseInt(a[0]!).toString(16),
   "Converts a decimal number to hex.");
 
 register("xor", (_c, a) => {
@@ -39,7 +39,7 @@ register("xordecrypt", (_c, a) => {
 register("crypt", (_c, a) => {
   let shift = a[1] ? Number(a[1]) : 32768;
   if (isNaN(shift)) shift = 32768;
-  const input = a[0] ?? "";
+  const input = a[0]!;
   let result = "";
   for (let i = 0; i < input.length; i++) {
     const code = input.charCodeAt(i);
@@ -72,13 +72,12 @@ register("datetimeformat", (ctx, a) => {
 register("hiddenkey", () => "",
   "A key that activates lorebook entries without being sent to the model.");
 
-// Risu: cbs (displaying=false) and prompt-assembly (commit=true) both return ''. Only the display path renders the div.
 register("comment", (ctx, a) => {
-  if (ctx.commit || ctx.cbsContext) return "";
-  // Both class forms so card-authored CSS (unprefixed by LumiRealm) and the shipped
-  // risu-environment.css baseline (.x-risu-risu-comment) both match, matching Risu.
+  const visualize = ctx.visualize ?? !(ctx.commit || ctx.cbsContext);
+  if (!visualize) return "";
+  // Preserve both authored and Risu-prefixed class selectors.
   return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
-}, "Comment macro. Empty at prompt time and in cbs; displays as <div class=\"risu-comment\">…</div> at render time.");
+}, "Comment macro. Shown only when the parser caller enables visualization.");
 
 // `//` inline comment.
 registry.register({
@@ -106,10 +105,6 @@ register("risu", (_c, a) => {
   return `<img src="/logo2.png" style="height:${size}px;width:${size}px" />`;
 }, "Embeds the RisuAI logo image.");
 
-// Unprefixed `button-default` matches card-authored CSS (LumiRealm unprefixes card
-// HTML+CSS), `x-risu-button-default` matches the shipped risu-environment.css baseline.
-// Risu prefixes HTML and card CSS together, so emitting both keeps card overrides and
-// the baseline applying, matching Risu's cascade.
 // Risu emits the label raw, so card-authored HTML entity glyphs must survive (only
 // escape a bare ampersand that does not start a valid entity). Angle brackets stay
 // escaped for Lumi-sanitizer safety, matching cards that use angle-bracket
@@ -153,7 +148,7 @@ register("moduleassetlist", (ctx, a) => {
 // Subset: model fields read from ctx.aiModel, platform fields default to non-native.
 // modelformat/modelprovider/modeltokenizer still error, Lumi exposes no equivalent.
 register("metadata", (ctx, a) => {
-  const key = (a[0] ?? "").toLocaleLowerCase();
+  const key = a[0]!.toLocaleLowerCase();
   switch (key) {
     case "imateapot": return "🫖";
     case "mobile": case "local": case "node": return "0";

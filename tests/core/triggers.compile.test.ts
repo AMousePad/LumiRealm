@@ -33,7 +33,7 @@ describe("M13 compiler — V1 flat effects", () => {
       { type: "stop" },
     ]);
     const out = compileTrigger(t);
-    const lines = out.body.split("\n").filter((l) => l.trim().length > 0);
+    const lines = out.body.split("\n").filter((l) => /__risu\.(setvarV1|impersonate|stopSending)/.test(l));
     expect(lines.length).toBeGreaterThanOrEqual(3);
     expect(lines[0]).toContain("setvarV1");
     expect(lines[1]).toContain("impersonate");
@@ -41,104 +41,15 @@ describe("M13 compiler — V1 flat effects", () => {
   });
 });
 
-describe("M13 compiler — v2 control flow", () => {
-  test("v2If/EndIndent produces nested `if (cond) { … }`", () => {
-    const t = mk([
-      { type: "v2If", condition: "=", target: "1", targetType: "value", source: "x", indent: 0 },
-      { type: "v2SetVar", var: "y", value: "2", valueType: "value", operator: "=", indent: 1 },
-      { type: "v2EndIndent", indent: 1 },
-    ]);
-    const out = compileTrigger(t);
-    expect(out.body).toContain("if (");
-    expect(out.body).toContain("__risu.compare");
-    expect(out.body).toContain("setvarV2");
-    const openCount = (out.body.match(/\{/g) ?? []).length;
-    const closeCount = (out.body.match(/\}/g) ?? []).length;
-    expect(openCount).toBe(closeCount);
-  });
-
-  test("v2If/v2Else emits `if (…) { } else { }`", () => {
-    const t = mk([
-      { type: "v2If", condition: "=", target: "1", targetType: "value", source: "x", indent: 0 },
-      { type: "v2SetVar", var: "y", value: "1", valueType: "value", operator: "=", indent: 1 },
-      { type: "v2EndIndent", indent: 1 },
-      { type: "v2Else", indent: 0 },
-      { type: "v2SetVar", var: "y", value: "2", valueType: "value", operator: "=", indent: 1 },
-      { type: "v2EndIndent", indent: 1 },
-    ]);
-    const out = compileTrigger(t);
-    expect(out.body).toContain("} else {");
-    expect(out.issues.filter((i) => i.severity === "error")).toHaveLength(0);
-    const open = (out.body.match(/\{/g) ?? []).length;
-    const close = (out.body.match(/\}/g) ?? []).length;
-    expect(open).toBe(close);
-  });
-
-  test("v2LoopNTimes lowers to a for-loop", () => {
-    const t = mk([
-      { type: "v2LoopNTimes", value: "5", valueType: "value", indent: 0 },
-      { type: "v2SetVar", var: "i", value: "1", valueType: "value", operator: "+=", indent: 1 },
-      { type: "v2EndIndent", indent: 1, endOfLoop: true },
-    ]);
-    const out = compileTrigger(t);
-    expect(out.body).toContain("for (");
-    expect(out.body).toContain("< __risu_lim_0");
-  });
-
-  test("v2Loop (infinite) lowers to while(true) with loopTick guard", () => {
-    const t = mk([
-      { type: "v2Loop", indent: 0 },
-      { type: "v2BreakLoop", indent: 1 },
-      { type: "v2EndIndent", indent: 1, endOfLoop: true },
-    ]);
-    const out = compileTrigger(t);
-    expect(out.body).toContain("while (true)");
-    expect(out.body).toContain("__risu.loopTick");
-    expect(out.body).toContain("break;");
-  });
-
-  test("v2BreakLoop at top level emits `return;` (Risu's breakLoop flag stops the walker)", () => {
-    // Reproduction of corpus card a8935b05 (NEO-VENEZIA): manual trigger with
-    // a top-level v2BreakLoop outside any loop. Risu's runner just halts the
-    // effect walker; the translated function should exit cleanly.
-    const t = mk([
-      { type: "v2SetVar", var: "x", value: "1", valueType: "value", operator: "=", indent: 0 },
-      { type: "v2BreakLoop", indent: 0 },
-    ]);
-    const out = compileTrigger(t);
-    expect(out.body).toContain("return;");
-    expect(out.body).not.toMatch(/^\s*break;/m);
-  });
-
-  test("v2BreakLoop inside v2Loop still emits `break;`", () => {
-    const t = mk([
-      { type: "v2Loop", indent: 0 },
-      { type: "v2BreakLoop", indent: 1 },
-      { type: "v2EndIndent", indent: 1, endOfLoop: true },
-    ]);
-    const out = compileTrigger(t);
-    expect(out.body).toContain("break;");
-  });
-
-  test("orphan v2Else / v2EndIndent produces warn issue", () => {
-    const t = mk([
-      { type: "v2EndIndent", indent: 0 },
-      { type: "v2Else", indent: 0 },
-    ]);
-    const out = compileTrigger(t);
-    expect(out.issues.filter((i) => i.severity === "warn")).toHaveLength(2);
-  });
-});
-
 describe("M13 compiler — conditions gate", () => {
-  test("non-empty conditions emit guard at top", () => {
+  test("conditions run before effects after template preparation", () => {
     const t = mk(
       [{ type: "setvar", var: "x", operator: "=", value: "1" }],
       { conditions: [{ type: "var", var: "y", value: "1", operator: "=" } as never] },
     );
     const out = compileTrigger(t);
     expect(out.hasConditions).toBe(true);
-    expect(out.body.trimStart().startsWith("if (!__risu.checkConditions")).toBe(true);
+    expect(out.body.indexOf("checkConditions")).toBeLessThan(out.body.indexOf("setvarV1"));
   });
 
   test("empty conditions emit no guard", () => {

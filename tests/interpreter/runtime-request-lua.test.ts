@@ -66,11 +66,11 @@ function baseApi(overrides: Partial<HostApi> = {}): HostApi {
 /** Runs `local res = request(triggerId, url):await()` plus a liveness marker. */
 function requestLua(url: string): string {
   return `
-    function onRun(triggerId)
+    onRun = async(function(triggerId)
       local res = request(triggerId, ${JSON.stringify(url)}):await()
       setChatVar(triggerId, "res", res)
       setChatVar(triggerId, "after", "alive")
-    end
+    end)
   `;
 }
 
@@ -244,11 +244,11 @@ describe('Lua request() — rate limit and lowLevelAccess gate', () => {
       { lowLevelAccess: false },
     );
     await runtime.runLua(`
-      function onRun(triggerId)
+      onRun = async(function(triggerId)
         local res = request(triggerId, "https://example.com/gated"):await()
         setChatVar(triggerId, "res", tostring(res))
         setChatVar(triggerId, "after", "alive")
-      end
+      end)
     `);
 
     expect(calls).toEqual([]);

@@ -224,10 +224,7 @@ export function projectModuleRegexEntries(
     }
     const ruleType = typeof eo['type'] === 'string' ? eo['type'] : 'editdisplay';
     const { placement, target, disabled } = riskCustomScriptTypeToLumi(ruleType);
-    const ableFlagRaw = eo['ableFlag'];
-    const ableFlag = ableFlagRaw === undefined || ableFlagRaw === null
-      ? true
-      : !!ableFlagRaw;
+    const ableFlag = !!eo['ableFlag'];
     const rawFlag = typeof eo['flag'] === 'string' ? eo['flag'] : undefined;
     const normalisedFlag = normaliseRisuFlag(rawFlag, ableFlag);
     const directAction = detectAtAction(replaceString);
@@ -267,6 +264,7 @@ export function projectModuleRegexEntries(
       flags = flags.replace(/g/g, '');
     }
     if (flags.length === 0) flags = 'u';
+    const unicodeFlags = movesMatch ? normalisedFlag.flag.replace(/g/g, '') || 'u' : normalisedFlag.flag;
     const baseSubstitute = movesMatch
       ? 'none'
       : pickSubstituteMacroMode(replaceString, false);
@@ -305,6 +303,7 @@ export function projectModuleRegexEntries(
           phase: ruleType,
           source_index: sourceIndex,
           source_row_index: sortBase,
+          ...(target === 'display' && unicodeFlags !== flags ? { unicode_flags: unicodeFlags } : {}),
           ...(normalisedFlag.order !== undefined ? { order_flag: normalisedFlag.order } : {}),
           ...(normalisedFlag.actions.length > 0
             ? { flag_actions: normalisedFlag.actions }

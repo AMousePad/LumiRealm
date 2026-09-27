@@ -169,18 +169,18 @@ describe('projectModuleRegexEntries', () => {
     expect(out[0]!.find_regex).toBe('/match/');
   });
 
-  test('default flag is g; empty-string flag falls back to u (Risu char-filter default)', () => {
+  test('default and empty-string flags use global matching', () => {
     const out = projectModuleRegexEntries('mod', 'M', 'char-1', [
       { in: '/x/', out: 'y' },
       { in: '/x/', out: 'y', flag: '' },
     ], idGen);
     expect(out[0]!.flags).toBe('g');
-    expect(out[1]!.flags).toBe('u');
+    expect(out[1]!.flags).toBe('g');
   });
 
   test('drops u flag when a CBS-enabled find contains macro braces', () => {
     const out = projectModuleRegexEntries('mod', 'M', 'char-1', [
-      { in: '{{cbs}}', out: 'y', flag: 'gu<cbs>' },
+      { in: '{{cbs}}', out: 'y', flag: 'gu<cbs>', ableFlag: true },
     ], idGen);
     expect(out[0]!.flags).toBe('g');
     expect(out[0]!.substitute_macros).toBe('find');
@@ -188,23 +188,23 @@ describe('projectModuleRegexEntries', () => {
 
   test('keeps u flag when find_regex has no CBS', () => {
     const out = projectModuleRegexEntries('mod', 'M', 'char-1', [
-      { in: '/match/', out: 'y', flag: 'gu' },
+      { in: '/match/', out: 'y', flag: 'gu', ableFlag: true },
     ], idGen);
     expect(out[0]!.flags).toContain('u');
   });
 
   test('strips invalid flag chars (Risu set [dgimsuvy])', () => {
     const out = projectModuleRegexEntries('mod', 'M', 'char-1', [
-      { in: '/x/', out: 'y', flag: 'gXyZ%qi' },
+      { in: '/x/', out: 'y', flag: 'gXyZ%qi', ableFlag: true },
     ], idGen);
     expect([...out[0]!.flags].sort().join('')).toEqual([...'giy'].sort().join(''));
   });
 
   test('strips Risu flag-meta brackets; <move_top> force-strips g (Risu parity)', () => {
     const out = projectModuleRegexEntries('mod', 'M', 'char-1', [
-      { in: '/a/', out: 'b', flag: 'g<order -1>' },
-      { in: '/c/', out: 'd', flag: '<move_top>g' },
-      { in: '/e/', out: 'f', flag: 'g<no_end_nl>i' },
+      { in: '/a/', out: 'b', flag: 'g<order -1>', ableFlag: true },
+      { in: '/c/', out: 'd', flag: '<move_top>g', ableFlag: true },
+      { in: '/e/', out: 'f', flag: 'g<no_end_nl>i', ableFlag: true },
     ], idGen);
     expect(out[0]!.flags).toBe('g');
     expect(out[1]!.flags).toBe('u');
@@ -213,7 +213,7 @@ describe('projectModuleRegexEntries', () => {
 
   test('dedup flag chars', () => {
     const out = projectModuleRegexEntries('mod', 'M', 'char-1', [
-      { in: '/x/', out: 'y', flag: 'gggii' },
+      { in: '/x/', out: 'y', flag: 'gggii', ableFlag: true },
     ], idGen);
     expect([...out[0]!.flags].sort().join('')).toEqual([...'gi'].sort().join(''));
   });

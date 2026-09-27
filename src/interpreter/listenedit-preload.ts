@@ -4,10 +4,7 @@
 // of render-MCP calls (e.g. 14 visible messages on chat-open with a
 // listenEdit-heavy card) shares a single fetch.
 //
-// Risu invariant: each trigger still gets a fresh Lua VM (preserved). Only
-// the *data* the Lua reads is shared. editDisplay listeners can't write
-// chat state (commit:false gates writes), so the snapshot can be safely
-// reused across the chain.
+// Lua engines live per mode, while frontend variable accessors read live state.
 
 import type { HostApi, HostMessage, TriggerRuntimePreloaded } from './host.js';
 import {
@@ -96,11 +93,11 @@ export async function preloadForListenEditChain(
   ]);
   const tParallel = Date.now() - t0;
 
-  let varsCache: Record<string, string> | undefined;
+  let varsCache: Record<string, string | null> | undefined;
   if (varsResult.status === 'fulfilled') varsCache = varsResult.value;
   else log.warn(`loadVars failed — ${(varsResult.reason as { message?: string })?.message ?? varsResult.reason}`);
 
-  let globalVars: Record<string, string> | undefined;
+  let globalVars: Record<string, string | null> | undefined;
   if (globalVarsResult.status === 'rejected' && api.getGlobalVariables) throw globalVarsResult.reason;
   if (globalVarsResult.status === 'fulfilled') globalVars = globalVarsResult.value;
   else log.warn(`loadGlobalVars failed — ${(globalVarsResult.reason as { message?: string })?.message ?? globalVarsResult.reason}`);

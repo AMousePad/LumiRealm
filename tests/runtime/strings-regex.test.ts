@@ -5,11 +5,42 @@ import {
   replaceString,
   random,
   setCharAt,
-  calculate,
   splitString,
+  runRegexEffect,
 } from '../../src/interpreter/runtime/strings-regex.js';
+import { makeVarsApi } from '../../src/interpreter/runtime/vars.js';
+
+describe('Risu runTrigger regex catch boundaries', () => {
+  for (const type of ['v2RegexTest', 'v2ReplaceString']) {
+    test(`${type} catches operand template failure`, () => {
+      const cache: Record<string, string | null> = {};
+      let sourceReads = 0;
+      const vars = makeVarsApi({
+        varsCache: cache, localScopes: new Map(), dirty: { value: false }, characterId: null,
+        parseTemplate: text => {
+          if (text === 'pattern') throw new Error('template failure');
+          if (text === 'source') return String(++sourceReads);
+          return text;
+        },
+      });
+      runRegexEffect(vars, {
+        type, outputVar: 'out', value: 'source', valueType: 'value', source: 'source', sourceType: 'value',
+        regex: 'pattern', regexType: 'value', result: '$0', resultType: 'value',
+        replacement: 'x', replacementType: 'value', flags: '', flagsType: 'value',
+      });
+      expect(cache.$out).toBe(type === 'v2RegexTest' ? '0' : '2');
+      expect(sourceReads).toBe(type === 'v2RegexTest' ? 1 : 2);
+    });
+  }
+});
 
 describe('extractRegex', () => {
+  test('invalid patterns fail before evaluating a V2 result template', () => {
+    let evaluated = false;
+    expect(() => extractRegex('abc', '[', '', () => { evaluated = true; return '$0'; })).toThrow(SyntaxError);
+    expect(evaluated).toBe(false);
+  });
+
   test('matches first group + applies template', () => {
     expect(extractRegex('hello world', '(\\w+) (\\w+)', '', '$2-$1')).toBe('world-hello');
   });
@@ -18,8 +49,8 @@ describe('extractRegex', () => {
     expect(extractRegex('hello', '(\\d+)', '', '$1')).toBe('');
   });
 
-  test('invalid regex → empty string (no throw)', () => {
-    expect(extractRegex('x', '(', '', '$0')).toBe('');
+  test('invalid extraction regex throws', () => {
+    expect(() => extractRegex('x', '(', '', '$0')).toThrow(SyntaxError);
   });
 
   test('empty result template still triggers match', () => {
@@ -42,7 +73,7 @@ describe('regexTest', () => {
   });
 
   test('invalid regex → false', () => {
-    expect(regexTest('x', '(', '')).toBe(false);
+    expect(() => regexTest('x', '(', '')).toThrow(SyntaxError);
   });
 });
 
@@ -51,17 +82,17 @@ describe('replaceString', () => {
     expect(replaceString('hello world', '\\w+', '[match]', '', '')).toBe('[match] world');
   });
 
-  test('replacement param wins over result param', () => {
-    expect(replaceString('a', 'a', 'OLD', 'NEW', '')).toBe('NEW');
-    expect(replaceString('a', 'a', 'OLD', '', '')).toBe('OLD'); // empty replacement falls through
+  test('replacement is used only when the result selects a capture', () => {
+    expect(replaceString('a', 'a', 'OLD', 'NEW', '')).toBe('OLD');
+    expect(replaceString('a', 'a', '$0', '', '')).toBe('');
   });
 
   test('flags g works for multi-replace', () => {
-    expect(replaceString('aaa', 'a', '', 'b', 'g')).toBe('bbb');
+    expect(replaceString('aaa', 'a', '$0', 'b', 'g')).toBe('bbb');
   });
 
   test('invalid regex → original source', () => {
-    expect(replaceString('hello', '(', '', '', '')).toBe('hello');
+    expect(() => replaceString('hello', '(', '', '', '')).toThrow(SyntaxError);
   });
 });
 
@@ -78,8 +109,8 @@ describe('random', () => {
     }
   });
 
-  test('non-numeric inputs → 0', () => {
-    expect(random('x', 'y')).toBe(0);
+  test('non-numeric inputs produce NaN', () => {
+    expect(random('x', 'y')).toBeNaN();
   });
 });
 
@@ -88,8 +119,8 @@ describe('setCharAt', () => {
     expect(setCharAt('hello', 1, 'a')).toBe('hallo');
   });
 
-  test('out-of-range index → unchanged', () => {
-    expect(setCharAt('abc', 99, 'x')).toBe('abc');
+  test('an array index past the end appends while a negative index does not', () => {
+    expect(setCharAt('abc', 99, 'x')).toBe('abcx');
     expect(setCharAt('abc', -1, 'x')).toBe('abc');
   });
 
@@ -97,23 +128,8 @@ describe('setCharAt', () => {
     expect(setCharAt('abc', 1, 'XYZ')).toBe('aXYZc');
   });
 
-  test('non-numeric index treated as 0', () => {
-    expect(setCharAt('abc', 'foo', 'X')).toBe('Xbc');
-  });
-});
-
-describe('calculate', () => {
-  test('arithmetic delegates to calcString', () => {
-    expect(calculate('1+2')).toBe('3');
-    expect(calculate('10/2')).toBe('5');
-  });
-
-  test('non-arithmetic → NaN', () => {
-    expect(calculate('foo')).toBe('NaN');
-  });
-
-  test('coerces non-string input', () => {
-    expect(calculate(42)).toBe('42');
+  test('non-numeric index leaves the text unchanged', () => {
+    expect(setCharAt('abc', 'foo', 'X')).toBe('abc');
   });
 });
 

@@ -6,6 +6,7 @@ import type {
 import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ModuleEnvelope } from './modules-store.js';
 import type { CharacterRetranslateResult } from './character-retranslate.js';
+import { RisuConsentRequiredError } from '../payload/codec.js';
 
 type OperationPhase = 'started' | 'progress' | 'done' | 'error';
 
@@ -216,9 +217,11 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
             } else if (result.kind === 'needs_reimport') {
               skippedLegacy++;
             } else {
+              if (result.consentRequired) throw new RisuConsentRequiredError(charName);
               log.warn(`forceRetranslateAll: retranslateCharacter(${charId}) failed: ${result.error}`);
             }
           } catch (err) {
+            if (err instanceof RisuConsentRequiredError) throw err;
             log.warn(`forceRetranslateAll: retranslateCharacter(${charId}) threw: ${errMsg(err)}`);
           }
         }
@@ -324,6 +327,10 @@ export function createRepairOrchestrator(deps: RepairOrchestratorDeps): RepairOr
         modulesReattached = r.modulesReattached;
         modulesScrubbed = r.modulesScrubbed;
       } catch (err) {
+        if (err instanceof RisuConsentRequiredError) {
+          emitOperationProgress(userId, opId, 'error', opTitle, err.message, null, err.message);
+          throw err;
+        }
         log.warn(`applyRepair: force retranslate failed: ${errMsg(err)}`);
       }
     }

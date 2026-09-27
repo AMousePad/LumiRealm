@@ -1,15 +1,14 @@
 import { strict as assert } from 'node:assert';
 import { chromium } from 'playwright';
 import { rescopeRisuEnvironment } from '../../src/bghtml/island-styles.js';
-import { wrapResolvedContentAsIsland } from '../../src/display/fragment-assembly.js';
 
 // Run with bun tests/bghtml/island-typography.browser.ts after playwright install chromium.
 const bundle = await Bun.file(new URL('../../src/bghtml/risu-environment.css', import.meta.url)).text();
-const css = rescopeRisuEnvironment(bundle).css;
-const html = wrapResolvedContentAsIsland(`<div><p id="plain">Plain <span id="nested">nested</span></p>
+const css = rescopeRisuEnvironment(bundle);
+const html = `<div><p id="plain">Plain <span id="nested">nested</span></p>
 <div class="card"><span id="card-child">Card</span></div>
 <div style="font-family:monospace;font-size:22px;line-height:44px"><span id="inline-child">Inline</span></div>
-<div style="--risu-font-family:cursive"><span id="variable">Variable</span></div></div>`);
+<div style="--risu-font-family:cursive"><span id="variable">Variable</span></div></div>`;
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage();

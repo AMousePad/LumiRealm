@@ -1,3 +1,4 @@
+import { runLuaCallback } from '../helpers/trigger-runtime.js';
 import { describe, test, expect } from 'bun:test';
 import { makeRisuTriggerRuntime, makeRisuRegexRuntime } from '../../src/interpreter/runtime.js';
 import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
@@ -59,7 +60,7 @@ describe('runtime addChat + removeChat — Risu show-then-clear parity', () => {
       dispatchData,
       makeMockScriptNS(),
     );
-    await rt.runLua('addChat("t", "char", "TEMP")\nremoveChat("t", -1)');
+    await runLuaCallback(rt, 'addChat(id, "char", "TEMP")\nremoveChat(id, -1)');
     await rt.flush();
     expect(chat.sends.length).toBe(1);
     expect(chat.sends[0]!.content).toBe('TEMP');
@@ -71,7 +72,7 @@ describe('runtime addChat + removeChat — Risu show-then-clear parity', () => {
     const chat: MockChat = { sends: [], deletes: [] };
     const initial: HostMessage[] = [{ id: 'only', role: 'user', content: 'x' }];
     const rt = await makeRisuTriggerRuntime(makeMockHostApi(initial, chat), dispatchData, makeMockScriptNS());
-    await rt.runLua('removeChat("t", -2)');
+    await runLuaCallback(rt, 'removeChat(id, -2)');
     await rt.flush();
     // JS splice(-2,1) on len 1 → start=max(1-2,0)=0 → removes the only message.
     expect(chat.deletes).toEqual(['only']);
@@ -81,24 +82,24 @@ describe('runtime addChat + removeChat — Risu show-then-clear parity', () => {
     const chat: MockChat = { sends: [], deletes: [] };
     const initial: HostMessage[] = [{ id: 'a', role: 'user', content: 'x' }];
     const rt = await makeRisuTriggerRuntime(makeMockHostApi(initial, chat), dispatchData, makeMockScriptNS());
-    await rt.runLua('removeChat("t", 5)');
+    await runLuaCallback(rt, 'removeChat(id, 5)');
     await rt.flush();
     expect(chat.deletes).toEqual([]);
   });
 
-  test('removeChat(NaN) is a defensive no-op (does NOT delete message 0)', async () => {
+  test('removeChat coerces NaN to zero as Risu splice does', async () => {
     const chat: MockChat = { sends: [], deletes: [] };
     const initial: HostMessage[] = [{ id: 'keep', role: 'user', content: 'x' }];
     const rt = await makeRisuTriggerRuntime(makeMockHostApi(initial, chat), dispatchData, makeMockScriptNS());
-    await rt.runLua('removeChat("t", "not-a-number")');
+    await runLuaCallback(rt, 'removeChat(id, "not-a-number")');
     await rt.flush();
-    expect(chat.deletes).toEqual([]);
+    expect(chat.deletes).toEqual(['keep']);
   });
 
   test('addChat → setChat(-1) → removeChat(-1): created row still gets deleted (no leak)', async () => {
     const chat: MockChat = { sends: [], deletes: [], edits: [] };
     const rt = await makeRisuTriggerRuntime(makeMockHostApi([], chat), dispatchData, makeMockScriptNS());
-    await rt.runLua('addChat("t","char","TEMP")\nsetChat("t",-1,"EDITED")\nremoveChat("t",-1)');
+    await runLuaCallback(rt, 'addChat(id,"char","TEMP")\nsetChat(id,-1,"EDITED")\nremoveChat(id,-1)');
     await rt.flush();
     expect(chat.sends.length).toBe(1);
     const id = chat.sends[0]!.id;
@@ -110,7 +111,7 @@ describe('runtime addChat + removeChat — Risu show-then-clear parity', () => {
   test('addChat → (await) → setChat(-1) keep: row created then edited with the new content', async () => {
     const chat: MockChat = { sends: [], deletes: [], edits: [] };
     const rt = await makeRisuTriggerRuntime(makeMockHostApi([], chat), dispatchData, makeMockScriptNS());
-    await rt.runLua('addChat("t","char","LOADING")\nsetChat("t",-1,"FINAL")');
+    await runLuaCallback(rt, 'addChat(id,"char","LOADING")\nsetChat(id,-1,"FINAL")');
     await rt.flush();
     expect(chat.sends.length).toBe(1);
     const id = chat.sends[0]!.id;
@@ -129,7 +130,7 @@ describe('runtime addChat + removeChat — Risu show-then-clear parity', () => {
       dispatchData,
       makeMockScriptNS(),
     );
-    await rt.runLua('removeChat("t", -1)');
+    await runLuaCallback(rt, 'removeChat(id, -1)');
     await rt.flush();
     // Negative index resolves from the end: -1 is the last message 'm-asst'.
     expect(chat.deletes).toEqual(['m-asst']);
@@ -149,7 +150,7 @@ describe('runtime setFullChat persistence', () => {
       makeMockScriptNS(),
     );
 
-    await runtime.runLua('setChatRole("trigger", 0, "char")');
+    await runLuaCallback(runtime, 'setChatRole(id, 0, "char")');
     await runtime.flush();
 
     expect(chat.deletes).toEqual(['m-user', 'm-asst']);
@@ -171,7 +172,7 @@ describe('runtime setFullChat persistence', () => {
       makeMockScriptNS(),
     );
 
-    await runtime.runLua('insertChat("trigger", 1, "user", "inserted")');
+    await runLuaCallback(runtime, 'insertChat(id, 1, "user", "inserted")');
     await runtime.flush();
 
     expect(chat.deletes).toEqual(['m-asst']);
@@ -195,10 +196,10 @@ describe('runtime setFullChat persistence', () => {
       makeMockScriptNS(),
     );
 
-    await runtime.runLua(`
-      local full = getFullChat("trigger")
+    await runLuaCallback(runtime, `
+      local full = getFullChat(id)
       full[#full].data = "after"
-      setFullChat("trigger", full)
+      setFullChat(id, full)
     `);
     await runtime.flush();
 
@@ -219,10 +220,10 @@ describe('runtime setFullChat persistence', () => {
       makeMockScriptNS(),
     );
 
-    await runtime.runLua(`
-      local full = getFullChat("trigger")
+    await runLuaCallback(runtime, `
+      local full = getFullChat(id)
       table.insert(full, { role = "char", data = "new reply" })
-      setFullChat("trigger", full)
+      setFullChat(id, full)
     `);
     await runtime.flush();
 
@@ -233,7 +234,7 @@ describe('runtime setFullChat persistence', () => {
     expect(chat.deletes).toEqual([]);
     expect(runtime.getMessageCount()).toBe(2);
 
-    await runtime.runLua('removeChat("trigger", -1)');
+    await runLuaCallback(runtime, 'removeChat(id, -1)');
     await runtime.flush();
     expect(chat.deletes).toEqual(['real-1']);
   });
@@ -250,10 +251,10 @@ describe('runtime setFullChat persistence', () => {
       makeMockScriptNS(),
     );
 
-    await runtime.runLua(`
-      local full = getFullChat("trigger")
+    await runLuaCallback(runtime, `
+      local full = getFullChat(id)
       table.remove(full, #full)
-      setFullChat("trigger", full)
+      setFullChat(id, full)
     `);
     await runtime.flush();
 

@@ -37,13 +37,13 @@ export function setupPickModal(opts: {
 
     const list = document.createElement('div');
     list.className = 'lr-pick-list';
-    for (const opt of msg.options) {
+    for (const [index, opt] of msg.options.entries()) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'lr-pick-option';
       btn.textContent = opt;
       btn.addEventListener('click', () => {
-        chosen = opt;
+        chosen = String(index);
         try { modal.dismiss(); } catch { /* */ }
       });
       list.appendChild(btn);

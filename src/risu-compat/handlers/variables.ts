@@ -2,7 +2,7 @@ import type { MacroHandler } from "../../core/cbs/index.js";
 import { registry } from "../registry.js";
 
 // Variable accessors. Risu source: cbs.ts.
-// `getvar`/`setvar`/`addvar` use scope "local"; `getglobalvar` uses "global"; temp vars use "temp".
+// `getvar`/`setvar`/`addvar` use scope "local"; `getglobalvar` uses "global".
 // Mutations always run; no dry-parse mode in this model.
 
 function register(name: string, handler: MacroHandler, description: string): void {
@@ -29,27 +29,27 @@ function leaveVarLiteral(ctx: { commit: boolean; promptRegexLiteralVars?: boolea
 register("getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""),
   "Reads a local chat variable. Empty string if unset.");
 
-register("setvar", (ctx, a) => {
+register("setvar", (ctx, a, raw) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
-  if (mode === "literal") return `{{setvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  if (mode === "literal") return `{{${raw}}}`;
   ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
   return "";
 }, "Sets a local chat variable.");
 
-register("addvar", (ctx, a) => {
+register("addvar", (ctx, a, raw) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
-  if (mode === "literal") return `{{addvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  if (mode === "literal") return `{{${raw}}}`;
   // Risu passes args[1] raw to Number, a missing arg adds NaN.
   ctx.vars.add("local", a[0] ?? "", Number(a[1]));
   return "";
 }, "Adds delta to a local chat variable (coerces current value to number).");
 
-register("setdefaultvar", (ctx, a) => {
+register("setdefaultvar", (ctx, a, raw) => {
   const mode = setvarMode(ctx);
   if (mode === "hide") return "";
-  if (mode === "literal") return `{{setdefaultvar::${(a[0] ?? "")}::${(a[1] ?? "")}}}`;
+  if (mode === "literal") return `{{${raw}}}`;
   // Risu cbs.ts: missing variables read as the literal "null", which
   // setdefaultvar explicitly treats as unset alongside an empty value.
   const name = a[0] ?? "";
@@ -64,12 +64,11 @@ register("setdefaultvar", (ctx, a) => {
 register("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""),
   "Reads a global chat variable.");
 
-// cbs.ts. Per-parser-run scope in Risu; backed by "temp" scope here.
-register("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""),
+register("tempvar", (ctx, a) => ctx.tempVars[String(a[0])] ?? "",
   "Reads a temporary variable (per-evaluation scope).");
 
 register("settempvar", (ctx, a) => {
-  ctx.vars.set("temp", a[0] ?? "", a[1] ?? "");
+  ctx.tempVars[String(a[0])] = a[1];
   return "";
 }, "Sets a temporary variable.");
 
@@ -95,9 +94,8 @@ register("setchatvar", (ctx, a) => {
   return "";
 }, "Sets a chat-scoped variable.");
 
-// Risu cbs.ts: writes __force_return__/__return__ to tempvar so parser short-circuits on next macro. Scanner check at leaf-dispatch site mirrors parser.svelte.ts.
 register("return", (ctx, a) => {
-  ctx.vars.set("temp", "__force_return__", "1");
-  ctx.vars.set("temp", "__return__", a[0] ?? "");
+  ctx.tempVars.__return__ = a[0];
+  ctx.tempVars.__force_return__ = "1";
   return "";
 }, "Halts further macro resolution, returns the given value as the entire parser output (Risu parity).");

@@ -600,7 +600,7 @@ export function mountVariablesPanel(
   };
 }
 
-function sortedKeys(rec: Readonly<Record<string, string>>): string[] {
+function sortedKeys(rec: Readonly<Record<string, string | null>>): string[] {
   return Object.keys(rec).sort((a, b) => a.localeCompare(b));
 }
 

@@ -33,7 +33,7 @@ function baseApi(overrides: Partial<HostApi> = {}): HostApi {
 }
 
 describe('generateImage Lua bridge & inlay resolution', () => {
-  test('returns error when lowLevelAccess is not granted', async () => {
+  test('returns nil when lowLevelAccess is not granted', async () => {
     const api = baseApi({
       imageGen: {
         generate: async () => ({ imageId: 'img-1' }),
@@ -45,12 +45,12 @@ describe('generateImage Lua bridge & inlay resolution', () => {
 
     let result: string | undefined;
     await runtime.runLua(`
-      function onRun(triggerId)
+      onRun = async(function(triggerId)
         local res = generateImage(triggerId, "prompt"):await()
-        setChatVar(triggerId, "res", res)
-      end
+        setChatVar(triggerId, "res", tostring(res))
+      end)
     `);
-    expect(runtime.getVar('res')).toBe('Error: lowLevelAccess required');
+    expect(runtime.getVar('res')).toBe('nil');
   });
 
   test('returns error when host imageGen is unavailable', async () => {
@@ -60,10 +60,10 @@ describe('generateImage Lua bridge & inlay resolution', () => {
     });
 
     await runtime.runLua(`
-      function onRun(triggerId)
+      onRun = async(function(triggerId)
         local res = generateImage(triggerId, "prompt"):await()
         setChatVar(triggerId, "res", res)
-      end
+      end)
     `);
     expect(runtime.getVar('res')).toBe('Error: image generation not available on this host');
   });
@@ -89,11 +89,11 @@ describe('generateImage Lua bridge & inlay resolution', () => {
     });
 
     await runtime.runLua(`
-      function onRun(triggerId)
+      onRun = async(function(triggerId)
         local opts = '{"steps":30,"sampler":"euler"}'
         local res = generateImage(triggerId, "beautiful scenery", "low quality", opts):await()
         setChatVar(triggerId, "res", res)
-      end
+      end)
     `);
 
     expect(runtime.getVar('res')).toBe('{{inlay::uuid-1234-5678}}');
@@ -123,10 +123,10 @@ describe('generateImage Lua bridge & inlay resolution', () => {
     });
 
     await runtime.runLua(`
-      function onRun(triggerId)
+      onRun = async(function(triggerId)
         local res = generateImage(triggerId, "a cat"):await()
         setChatVar(triggerId, "res", res)
-      end
+      end)
     `);
 
     expect(runtime.getVar('res')).toBe('{{inlay::img-uploaded-999}}');
@@ -147,10 +147,10 @@ describe('generateImage Lua bridge & inlay resolution', () => {
     });
 
     await runtime.runLua(`
-      function onRun(triggerId)
+      onRun = async(function(triggerId)
         local res = generateImage(triggerId, "a huge scene"):await()
         setChatVar(triggerId, "res", res)
-      end
+      end)
     `);
 
     expect(runtime.getVar('res')).toBe('Error: image generation failed: GPU out of memory');

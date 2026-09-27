@@ -38,11 +38,11 @@ async function read(userId: string): Promise<Record<string, string> | null> {
   }
 }
 
-function toggles(legacy: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(legacy).filter(([key]) => key.startsWith('toggle_')));
+function toggles(legacy: Record<string, string | null>): Record<string, string> {
+  return Object.fromEntries(Object.entries(legacy).filter((entry): entry is [string, string] => entry[0].startsWith('toggle_') && typeof entry[1] === 'string'));
 }
 
-export async function initializeTogglePreferences(userId: string, legacy: Record<string, string>): Promise<void> {
+export async function initializeTogglePreferences(userId: string, legacy: Record<string, string | null>): Promise<void> {
   await exclusive(userId, async () => {
     if (await read(userId) === null) {
       await spindle.userStorage.setJson(PATH, toggles(legacy), { userId });
@@ -85,11 +85,11 @@ export function collectLegacyGlobals(sources: {
  * hide a legacy toggle, so deleting one cannot resurrect an old chat value, and
  * a key no store defines stays missing.
  */
-export function mergeEffectiveGlobals(
-  legacy: Record<string, string>,
+export function mergeEffectiveGlobals<T extends string | null>(
+  legacy: Record<string, T>,
   preferences: Record<string, string> | null,
   presetToggles: Readonly<Record<string, string>> = {},
-): Record<string, string> {
+): Record<string, T | string> {
   if (preferences === null) return { ...presetToggles, ...legacy };
   return {
     ...presetToggles,
@@ -103,15 +103,15 @@ export async function readTogglePreferences(userId: string): Promise<Record<stri
   return read(userId);
 }
 
-export async function readEffectiveGlobals(
+export async function readEffectiveGlobals<T extends string | null>(
   userId: string,
-  legacy: Record<string, string>,
+  legacy: Record<string, T>,
   presetToggles: Readonly<Record<string, string>> = {},
-): Promise<Record<string, string>> {
+): Promise<Record<string, T | string>> {
   return exclusive(userId, async () => mergeEffectiveGlobals(legacy, await read(userId), presetToggles));
 }
 
-export async function writeTogglePreference(userId: string, key: string, value: string | null, legacy: Record<string, string>): Promise<void> {
+export async function writeTogglePreference(userId: string, key: string, value: string | null, legacy: Record<string, string | null>): Promise<void> {
   if (!key.startsWith('toggle_')) throw new TypeError('Invalid toggle preference key');
   await exclusive(userId, async () => {
     const preferences = await read(userId) ?? toggles(legacy);

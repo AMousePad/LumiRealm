@@ -467,6 +467,21 @@ describe('coerceAtActions', () => {
 });
 
 describe('coerceAtActionsFromScripts', () => {
+  test('empty enabled flags retain global non-Unicode matching in both source projections', async () => {
+    const script = { in: 'a\\-b', out: '@@emo joy', type: 'editoutput', ableFlag: true, flag: '' };
+    const actions = [
+      ...coerceAtActions([{ script, phase: 'editoutput' }]),
+      ...coerceAtActionsFromScripts([script], 'module:m1'),
+    ];
+    expect(actions.map((action) => action.flag)).toEqual(['g', 'g']);
+    for (const action of actions) {
+      expect('a-b a-b'.match(new RegExp(action.findRegex, action.flag))).toEqual(['a-b', 'a-b']);
+      const { api, state } = makeMockApi();
+      await runAtActionsForPhase([action], 'editoutput', 'a-b', { api, chatIndex: 0 });
+      expect(state.expressionsSet).toEqual(['joy']);
+    }
+  });
+
   test('projects every direct action and supported flag-meta action', () => {
     const out = coerceAtActionsFromScripts([
       { in: 'a', out: '@@emo joy', type: 'editdisplay' },

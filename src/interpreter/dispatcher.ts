@@ -6,37 +6,42 @@ import {
   makeRisuTriggerRuntime,
   makeRisuRegexRuntime,
 } from './runtime.js';
-import { execute as luaExecute } from './lua-bridge.js';
+import type { ExecuteOpts } from './lua-engine.js';
+import { FrontendLuaUnavailableError } from '../frontend-lua/protocol.js';
 import type { HostApi, DispatchData, ScriptNS, TriggerRuntimeOpts } from './host.js';
 import type { RisuBinding } from './runtime.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import { interpretTrigger, type InterpConsole } from './trigger-interpreter.js';
 import { withTriggerDepth } from './runtime/als.js';
+import { createTriggerLocalState, type TriggerLocalState } from './runtime/vars.js';
+import { commitInvocation, type TriggerInvocationState } from './runtime/invocation.js';
+
+type ManualRunner = (name: string, ctx: { api: HostApi; data: DispatchData; invocationState?: TriggerInvocationState }) => Promise<{ aborted?: boolean } | void>;
 
 export interface DispatcherScriptNS extends ScriptNS {
-  /** Manual triggers registered by name — v2RunTrigger resolves through here. */
-  registerManual(name: string, runner: (ctx: { api: HostApi; data: DispatchData }) => Promise<void>): void;
+  registerManual(runner: ManualRunner): void;
 }
 
-export function makeDispatcherScriptNS(): DispatcherScriptNS {
+export type LuaExecutor = (code: string, globals: Record<string, unknown>, opts?: ExecuteOpts) => Promise<unknown>;
+
+export function makeDispatcherScriptNS(execute: LuaExecutor = async () => { throw new FrontendLuaUnavailableError('Lua execution requires a frontend executor'); }): DispatcherScriptNS {
   const nlog = makeSafeLogger('scriptNS').info;
-  const manuals = new Map<string, { run: (ctx: unknown) => Promise<unknown> }>();
+  let manual: ManualRunner | undefined;
   const risuCompat = { makeRisuTriggerRuntime, makeRisuRegexRuntime };
-  const risuCompatLua = { execute: luaExecute };
+  const risuCompatLua = { execute };
   return {
     async require(name: string): Promise<unknown> {
       if (name === 'risu-compat') { nlog(`require('risu-compat') → OK`); return risuCompat; }
       if (name === 'risu-compat-lua') { nlog(`require('risu-compat-lua') → OK`); return risuCompatLua; }
-      if (manuals.has(name)) { nlog(`require('${name}') → manual OK`); return manuals.get(name); }
-      const stripped = name.replace(/^risu-manual-/, '');
-      if (manuals.has(stripped)) { nlog(`require('${name}') → manual(stripped='${stripped}') OK`); return manuals.get(stripped); }
-      nlog(`require('${name}') → NULL (not found; manuals=${JSON.stringify([...manuals.keys()])})`);
+      if (manual && name.startsWith('risu-manual-')) {
+        const runner = manual;
+        nlog(`require('${name}') → manual OK`);
+        return { run: (ctx: Parameters<ManualRunner>[1]) => runner(name.slice('risu-manual-'.length), ctx) };
+      }
+      nlog(`require('${name}') → NULL (not found)`);
       return null;
     },
-    registerManual(name: string, runner) {
-      manuals.set('risu-manual-' + name, { run: async (ctx) => runner(ctx as { api: HostApi; data: DispatchData }) });
-      manuals.set(name, { run: async (ctx) => runner(ctx as { api: HostApi; data: DispatchData }) });
-    },
+    registerManual(runner) { manual = runner; },
   };
 }
 
@@ -62,6 +67,10 @@ export function prepareTriggers(
   characterId: string,
 ): readonly CompiledTriggerEntry[] {
   const rawTriggers = payload.triggers as readonly TriggerScript[];
+  return prepareTriggerSources(rawTriggers, characterId);
+}
+
+export function prepareTriggerSources(rawTriggers: readonly TriggerScript[], characterId: string): readonly CompiledTriggerEntry[] {
   const compiled = compileTriggers(rawTriggers, { characterId });
   const out: CompiledTriggerEntry[] = [];
   for (let i = 0; i < compiled.files.length; i++) {
@@ -101,10 +110,10 @@ export function triggerMatchesBinding(
   t: CompiledTriggerEntry,
   binding: RisuBinding,
 ): boolean {
-  if (t.type !== 'trigger') return false;
   const firstEffect = t.source?.effect?.[0];
   const isLuaOrCode = firstEffect?.type === 'triggerlua' || firstEffect?.type === 'triggercode';
   if (isLuaOrCode) return true;
+  if (t.type !== 'trigger') return false;
   return t.binding === binding;
 }
 
@@ -122,30 +131,39 @@ export async function dispatchBinding(
   const matches = ctx.compiledTriggers.filter((t) => triggerMatchesBinding(t, binding));
   dlog(`dispatchBinding: binding=${binding} matches=${matches.length}/${ctx.compiledTriggers.length} data=${JSON.stringify(ctx.data).slice(0, 200)}`);
   let stopSending = false;
+  let varsFlushed = false;
+  const localState = createTriggerLocalState();
+  const invocationState = ctx.opts.invocationState ?? { stopSending: false };
+  let aborted = false;
   for (const entry of matches) {
     const tStart = Date.now();
     dlog(`→ trigger START name=${entry.name} binding=${entry.binding} triggers=${JSON.stringify(entry.triggers)} effects=${entry.source?.effect?.length ?? 0}`);
-    // Out-param: a stopChat() issued before a later crash still counts.
-    const flags = { stopSending: false };
+    const flags = { stopSending: false, varsFlushed: false };
     try {
-      await runInterpretedTrigger(
+      const result = await runInterpretedTrigger(
         entry,
         ctx.api,
         ctx.data,
         ctx.scriptNS,
-        { binding, displayMode: binding === 'display', moduleLorebooks: ctx.opts?.moduleLorebooks },
+        { ...ctx.opts, binding, displayMode: binding === 'display', localState, invocationState },
         flags,
       );
+      if (result === 'abort') { aborted = true; break; }
       dlog(`← trigger DONE name=${entry.name} elapsed=${Date.now() - tStart}ms stopSending=${flags.stopSending}`);
     } catch (err) {
       dlog(`× trigger ERROR name=${entry.name} elapsed=${Date.now() - tStart}ms msg=${(err as Error).message} stopSending=${flags.stopSending}`);
+      aborted = true;
       if (onError) onError(err, entry.name);
       else throw err;
+      break;
     } finally {
       if (flags.stopSending) stopSending = true;
+      if (flags.varsFlushed) varsFlushed = true;
     }
   }
-  return { stopSending };
+  if (!aborted && !ctx.opts.invocationState) await commitInvocation(invocationState, ctx.opts.chatId, binding === 'start');
+  if (!aborted && varsFlushed) ctx.opts.stateChanged?.('variables');
+  return { stopSending: !aborted && stopSending };
 }
 
 function makeMirroredConsole(name: string): InterpConsole {
@@ -167,10 +185,11 @@ function makeMirroredConsole(name: string): InterpConsole {
 
 // Risu's `arg.displayMode`: set by a render pass only, never derived from the
 // declared type. Deriving it would make variables ephemeral on manual clicks.
-interface TriggerInvocation {
+interface TriggerInvocation extends TriggerRuntimeOpts {
   readonly binding: RisuBinding;
   readonly displayMode: boolean;
-  readonly moduleLorebooks?: readonly unknown[] | undefined;
+  readonly localState: TriggerLocalState;
+  readonly invocationState: TriggerInvocationState;
 }
 
 async function runInterpretedTrigger(
@@ -180,23 +199,27 @@ async function runInterpretedTrigger(
   scriptNS: DispatcherScriptNS,
   invocation: TriggerInvocation,
   outFlags?: { stopSending: boolean; varsFlushed?: boolean },
-): Promise<void> {
-  await withTriggerDepth(async () => {
+): Promise<'abort' | void> {
+  return await withTriggerDepth(async () => {
     const rLog = makeSafeLogger(`runTrigger[${entry.name}]`);
     const t0 = Date.now();
     const rt = await makeRisuTriggerRuntime(api, data, scriptNS, {
+      ...invocation,
       displayMode: invocation.displayMode,
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
       binding: invocation.binding,
       characterId: entry.rtOpts.characterId,
+      localState: invocation.localState,
+      invocationState: invocation.invocationState,
       ...(invocation.moduleLorebooks ? { moduleLorebooks: invocation.moduleLorebooks } : {}),
     });
     try {
-      await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {
+      const result = await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {
         displayMode: invocation.displayMode,
         lowLevelAccess: entry.rtOpts.lowLevelAccess,
       });
       rLog.info(`RETURN OK elapsed=${Date.now() - t0}ms`);
+      return result;
     } catch (err) {
       rLog.error(`THREW elapsed=${Date.now() - t0}ms — ${(err as Error).message}\n${(err as Error).stack ?? ''}`);
       throw err;
@@ -212,33 +235,50 @@ export async function dispatchByManualName(
   ctx: DispatchCtx,
   manualName: string,
   onError?: (err: unknown, triggerName: string) => void,
-  outFlags?: { stopSending: boolean; varsFlushed?: boolean },
+  outFlags?: { stopSending: boolean; varsFlushed?: boolean; aborted?: boolean },
 ): Promise<number> {
   const dlog = makeSafeLogger('dispatcher').info;
   const matches = ctx.compiledTriggers.filter((t) => {
     const firstEffect = t.source?.effect?.[0];
     const isLuaOrCode = firstEffect?.type === 'triggerlua' || firstEffect?.type === 'triggercode';
-    if (isLuaOrCode) return false;
-    return t.source?.comment === manualName;
+    if (isLuaOrCode) return true;
+    return manualName ? t.source?.comment === manualName : t.binding === 'manual';
   });
   dlog(`dispatchByManualName: name="${manualName}" matches=${matches.length}/${ctx.compiledTriggers.length}`);
   let fired = 0;
+  const flags = { stopSending: false, varsFlushed: false };
+  const localState = createTriggerLocalState();
+  const invocationState = ctx.opts.invocationState ?? { stopSending: false };
+  let aborted = false;
   for (const entry of matches) {
     try {
-      await runInterpretedTrigger(
+      const result = await runInterpretedTrigger(
         entry,
         ctx.api,
-        ctx.data,
+        { ...ctx.data, manualName },
         ctx.scriptNS,
-        { binding: 'manual', displayMode: false },
-        outFlags,
+        { ...ctx.opts, binding: 'manual', displayMode: false, localState, invocationState },
+        flags,
       );
       fired++;
+      if (result === 'abort') { aborted = true; break; }
       dlog(`dispatchByManualName: fired entry name=${entry.name} type=${entry.type} binding=${entry.binding}`);
     } catch (err) {
-      onError?.(err, entry.name);
+      aborted = true;
+      if (onError) onError(err, entry.name);
+      else throw err;
+      break;
     }
   }
+  if (outFlags) {
+    outFlags.aborted = aborted;
+    outFlags.stopSending ||= flags.stopSending;
+    if (flags.varsFlushed) outFlags.varsFlushed = true;
+    if (aborted) outFlags.stopSending = false;
+  }
+  if (!aborted && !ctx.opts.invocationState) await commitInvocation(invocationState, ctx.opts.chatId);
+  if (!aborted && flags.varsFlushed) ctx.opts.stateChanged?.('variables');
+  if (outFlags && invocationState.live?.varsFlushed) outFlags.varsFlushed = true;
   return fired;
 }
 
@@ -246,17 +286,17 @@ export function registerManualTriggers(
   scriptNS: DispatcherScriptNS,
   compiled: readonly CompiledTriggerEntry[],
   api: HostApi,
+  opts: TriggerRuntimeOpts = {},
 ): void {
-  for (const entry of compiled) {
-    if (entry.type !== 'library') continue;
-    scriptNS.registerManual(entry.name, async (ctx) => {
-      await runInterpretedTrigger(
-        entry,
-        ctx.api ?? api,
-        ctx.data,
-        scriptNS,
-        { binding: 'manual', displayMode: false },
-      );
-    });
-  }
+  // Risu also resolves Lua function names that are absent from trigger comments.
+  scriptNS.registerManual(async (name, ctx) => {
+    const flags = { stopSending: false, aborted: false };
+    await dispatchByManualName(
+      { compiledTriggers: compiled, api: ctx.api ?? api, data: ctx.data, scriptNS, opts: { ...opts, binding: 'manual', ...(ctx.invocationState ? { invocationState: ctx.invocationState } : {}) } },
+      name,
+      (err) => { throw err; },
+      flags,
+    );
+    return { aborted: flags.aborted };
+  });
 }

@@ -66,7 +66,7 @@ describe('display snapshot module lore', () => {
     setWasmoonEnabled(false);
     expect(await runEditDisplayChain(
       snap, 'panel', { chatId: 'chat', isUser: false, depth: 0 },
-      async value => value, () => {},
+      value => value, () => {},
     )).toBe('panel<controls>');
   });
 

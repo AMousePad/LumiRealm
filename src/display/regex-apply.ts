@@ -1,3 +1,5 @@
+import type { NativeRegexAction } from './regex-actions.js';
+
 export type FeRegexMode = 'none' | 'find' | 'raw' | 'after' | 'escaped';
 
 export interface FeRegexScript {
@@ -7,19 +9,27 @@ export interface FeRegexScript {
   readonly replace_string: string;
   readonly flags: string;
   readonly placement: readonly string[];
+  readonly scope?: 'global' | 'character' | 'chat';
   readonly substitute_macros: FeRegexMode;
   readonly trim_strings: readonly string[];
   readonly min_depth: number | null;
   readonly max_depth: number | null;
   readonly disabled?: boolean;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly preset_id?: string | null;
+  readonly actions?: readonly NativeRegexAction[];
 }
 
 export interface FeRegexMatch {
   readonly fullMatch: string;
   readonly index: number;
   readonly groups: (string | undefined)[];
-  readonly namedGroups?: Record<string, string>;
+  readonly namedGroups?: Record<string, string | undefined>;
+}
+
+export function isRisuRegexScript(script: FeRegexScript): boolean {
+  const source = script.metadata?.['_risu'];
+  return source !== null && typeof source === 'object' && !Array.isArray(source);
 }
 
 export function compileRegex(pattern: string, flags: string): RegExp | null {
@@ -60,7 +70,7 @@ export function substituteRegexCaptures(
   groups: (string | undefined)[],
   offset: number,
   input: string,
-  namedGroups?: Record<string, string>,
+  namedGroups?: Record<string, string | undefined>,
 ): string {
   return template.replace(
     /\$(?:(\$)|(&)|(`)|(')|(\d{1,2})|<([^>]*)>)/g,
@@ -74,7 +84,11 @@ export function substituteRegexCaptures(
         if (idx >= 1 && idx <= groups.length) return groups[idx - 1] ?? '';
         return token;
       }
-      if (name !== undefined && namedGroups) return namedGroups[name] ?? token;
+      if (name !== undefined && namedGroups) {
+        return Object.prototype.hasOwnProperty.call(namedGroups, name)
+          ? namedGroups[name] ?? ''
+          : token;
+      }
       return token;
     },
   );

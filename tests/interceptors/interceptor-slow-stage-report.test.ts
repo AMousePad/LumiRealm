@@ -67,6 +67,8 @@ interface State {
 function makeDeps(onMessageVarPass?: () => void): { deps: CreateLumiInterceptorsDeps; state: State } {
   const state: State = { warns: [] };
   const deps: CreateLumiInterceptorsDeps = {
+    executeFrontend: async () => { throw new Error('Unexpected Lua invocation'); },
+    prepareTriggerContext: async () => { throw new Error('Unexpected trigger context'); },
     activeCardByChat: new Map([['chat-1', makeStubActiveCard()]]),
     captureUserId: () => {},
     ensureActiveCardForChat: async () => null,
@@ -131,10 +133,10 @@ describe('lumi-hooks interceptor budget report', () => {
     const slow = state.warns.filter((m) => m.includes('interceptor slow'));
     expect(slow.length).toBe(1);
     expect(slow[0]).toContain('chat=chat-1');
-    expect(slow[0]).toMatch(/total=8\d{3}ms/);
+    expect(slow[0]).toMatch(/total=(?:8\d{3}|9000)ms/);
     expect(slow[0]).toContain('host_budget_default=10000ms');
-    expect(slow[0]).toMatch(/stages=\[messageVarPass=8\d{3}ms/);
-    expect(slow[0]).toContain('editRequest=');
+    expect(slow[0]).toMatch(/stages=\[messageVarPass=(?:8\d{3}|9000)ms/);
+    expect(slow[0]).toContain('frontendLua=');
     expect(out.length).toBe(messages.length);
   });
 

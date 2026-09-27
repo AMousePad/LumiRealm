@@ -1,6 +1,6 @@
 {
   "name": "lumirealm",
-  "version": "0.9.1",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-or-later",
@@ -19,18 +19,19 @@
     "test:slow": "bun scripts/run-tests.ts --slow",
     "test:all": "bun scripts/run-tests.ts --all",
     "test:parallel": "bun scripts/test-parallel.ts",
+    "test:browser:islands": "bun tests/browser/run-island-styles-harness.ts",
     "deploy": "powershell.exe -File scripts/deploy.ps1"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",
-    "fengari-web": "^0.1.4",
     "fflate": "^0.8.2",
     "tus-js-client": "^4.3.1",
+    "uuid": "9.0.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "fengari": "^0.1.5",
+    "@types/uuid": "9.0.8",
     "happy-dom": "^15.0.0",
     "juice": "^11.0.0",
     "lumiverse-spindle-types": "0.6.25",

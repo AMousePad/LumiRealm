@@ -39,6 +39,7 @@ export interface DisplayChatAuthorsNote {
 }
 
 export interface DisplaySnapshot {
+  readonly configVersion?: number;
   readonly chatId: string;
   readonly characterId: string;
   readonly userName: string;
@@ -57,9 +58,9 @@ export interface DisplaySnapshot {
     readonly messages: readonly Message[];
   };
   readonly vars: {
-    readonly local: Record<string, string>;
-    readonly global: Record<string, string>;
-    readonly chat: Record<string, string>;
+    readonly local: Record<string, string | null>;
+    readonly global: Record<string, string | null>;
+    readonly chat: Record<string, string | null>;
   };
   readonly scriptstateDefaults: Record<string, string>;
   readonly screenWidth: number;
@@ -67,9 +68,7 @@ export interface DisplaySnapshot {
   readonly legacyMediaFindings: boolean;
   readonly modulesByNamespace: Readonly<Record<string, readonly string[]>>;
   readonly lorebook: readonly LorebookEntry[];
-  /** Card uses editDisplay Lua hooks; FE defers body-resolve to the backend until P4. */
   readonly hasEditDisplayLua: boolean;
-  /** Card uses @@emo/@@repeat_back editdisplay actions; FE defers until P4/P5. */
   readonly hasEditAtActions: boolean;
   readonly luaTriggers: readonly DisplayLuaTrigger[];
   readonly messagesHost: readonly HostMessage[];
@@ -116,7 +115,7 @@ export function getDisplaySnapshot(chatId: string): DisplaySnapshot | undefined 
 export function applyVarDelta(
   chatId: string,
   scope: 'local' | 'global' | 'chat',
-  values: Record<string, string>,
+  values: Record<string, string | null>,
 ): void {
   const prev = snapshots.get(chatId);
   if (!prev) return;
@@ -141,6 +140,13 @@ export function diffSnapshotVars(prev: DisplaySnapshot, next: DisplaySnapshot): 
     }
   }
   return changed;
+}
+
+export function snapshotMessagesChanged(prev: DisplaySnapshot, next: DisplaySnapshot): boolean {
+  return prev.messagesHost.length !== next.messagesHost.length || prev.messagesHost.some((message, index) => {
+    const other = next.messagesHost[index]!;
+    return message.content !== other.content || message.role !== other.role || message.createdAt !== other.createdAt;
+  });
 }
 
 export function isDisplayResolutionReady(chatId: string): boolean {

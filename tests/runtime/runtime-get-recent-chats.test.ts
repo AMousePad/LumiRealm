@@ -47,11 +47,10 @@ type RecentRow = { role: string; data: string; time: number };
 async function readRecent(code: string): Promise<unknown> {
   const rt = await makeRisuTriggerRuntime(makeApi(history), dispatchData, makeMockScriptNS());
   await rt.runLua(`
-    function probe()
-      local got = getRecentChats('t', ${code})
-      setChatVar('t', 'out', json.encode(got))
+    function onRun(id)
+      local got = getRecentChats(id, ${code})
+      setChatVar(id, 'out', json.encode(got))
     end
-    probe()
   `);
   return JSON.parse(String(rt.getVar('out'))) as unknown;
 }

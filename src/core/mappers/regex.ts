@@ -114,8 +114,8 @@ export function normalizeMatchActionDisplayReplaceString(
 }
 
 // Display rows store the author's raw fragment (Risu parity): the display
-// resolver wraps the whole resolved message in one island, so no per-rule
-// island wrapper exists and cross-rule tag balance survives storage.
+// resolver assembles the resolved message in one tree, preserving tag balance
+// across rules without adding per-rule wrappers.
 export function normalizeDisplayReplaceString(
   replaceString: string,
   options: {
@@ -242,6 +242,7 @@ export function mapRegex(
       baseFlags = baseFlags.replace(/g/g, "");
     }
     if (baseFlags.length === 0) baseFlags = "u";
+    const unicodeFlags = movesMatch ? normalised.flag.replace(/g/g, "") || "u" : normalised.flag;
 
     let baseReplace = outNormalised;
     if (baseReplace.endsWith(">") && !hasNoEndNl) baseReplace += "\n";
@@ -282,6 +283,8 @@ export function mapRegex(
         origin,
         order_index: i,
         has_meta: normalised.actions.length > 0,
+        // Preserve execution flags while the host validates unresolved CBS without u.
+        ...(effectivePhase.target === "display" && unicodeFlags !== baseFlags ? { unicode_flags: unicodeFlags } : {}),
         ...(normalised.order !== undefined ? { order_flag: normalised.order } : {}),
         ...(action ? { at_action: action } : {}),
         ...(normalised.actions.length > 0 ? { flag_actions: normalised.actions } : {}),
@@ -379,7 +382,7 @@ export interface NormalisedFlag {
 
 // Port of Risu's flag-meta parser + char-filter from scripts.ts.
 export function normaliseRisuFlag(rawFlag: string | undefined, ableFlag: boolean): NormalisedFlag {
-  let raw = ableFlag ? (rawFlag ?? "g") : "g";
+  let raw = ableFlag ? (rawFlag || "g") : "g";
   const actions: string[] = [];
   let order: number | undefined;
 

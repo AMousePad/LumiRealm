@@ -43,58 +43,8 @@ bun run build
 if ($LASTEXITCODE -ne 0) { throw "bun run build failed" }
 Pop-Location
 
-# --- Patch: fengari sandbox-incompatible primitives -------------------
-# fengari (vendored both as the npm package fengari-web AND as the
-# shipped fengari-bundle.js text content, both end up in dist/backend.js)
-# uses two pre-sandbox-era JS patterns that Lumi commit a474ef5 freezes
-# at extension boot: `(0, eval)("this")` for global-object detection,
-# and `Function(...)` constructor calls for utility-function init +
-# dynamic XHR-based library loading. Both throw under the sandbox at
-# module init, killing the extension before it can register any handlers
-# ("Failed to load extension: eval is disabled / Function constructor
-# is disabled in extension context").
-#
-# Replacements are functionally identical for the fengari init paths:
-# `(0, eval)("this")` -> `globalThis` (W3C standard, same return value)
-# `Function("t","k","delete t[k]")` -> equivalent arrow function
-# `Function("return ()=>void 0;")` -> equivalent factory
-# `Function("fengari", u)` (XHR library loader at fengari-web's
-#   __tostring metamethod) -> immediate throw, caught by fengari's own
-#   try/catch around the call. We don't use HTTP-loaded Lua libraries
-#   in lumirealm so this path is never taken in normal operation.
-#
-# Patches handle BOTH the spaced (npm-package) and minified (shipped
-# bundle.js text) forms via flexible whitespace + identifier matching.
-# Idempotent (post-replacement strings don't match again).
 $bundle = Join-Path $Src 'dist\backend.js'
 $bundleText = Get-Content $bundle -Raw
-$patches = @(
-  @{ name = 'fengari (0, eval)("this") global-object polyfill';
-     from = '\(0,\s*eval\)\("this"\)';
-     to   = 'globalThis' },
-  @{ name = 'fengari Function("t","k","delete t[k]") delete-prop helper';
-     from = 'Function\(\s*"t"\s*,\s*"k"\s*,\s*"delete\s+t\[k\]"\s*\)';
-     to   = '((t,k)=>{delete t[k]})' },
-  @{ name = 'fengari Function("return ()=>void 0;") noop factory';
-     from = 'Function\(\s*"return\s*\(\)=>void\s+0;?"\s*\)';
-     to   = '(()=>()=>void 0)' },
-  @{ name = 'fengari Function("fengari", X) XHR library loader';
-     from = 'Function\(\s*"fengari"\s*,\s*\w+\s*\)';
-     to   = '(()=>{throw new Error("Function-constructor-disabled-in-extension-context")})()' }
-)
-$totalPatched = 0
-foreach ($p in $patches) {
-  $hits = ([regex]::Matches($bundleText, $p.from)).Count
-  if ($hits -gt 0) {
-    $bundleText = [regex]::Replace($bundleText, $p.from, $p.to)
-    Write-Host "Patched $hits x $($p.name)"
-    $totalPatched += $hits
-  }
-}
-if ($totalPatched -gt 0) {
-  [System.IO.File]::WriteAllText($bundle, $bundleText, (New-Object System.Text.UTF8Encoding $false))
-  Write-Host "Wrote $totalPatched total patch(es) to dist\backend.js"
-}
 
 # --- Static safety check -------------------------------------------
 # Mirrors Lumiverse's detectDangerousBackendCapabilities regex set

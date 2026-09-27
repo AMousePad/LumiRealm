@@ -315,8 +315,10 @@ export function mergeAttachedModulesIntoPayload(
     }
     for (let i = 0; i < m.triggers.length; i++) {
       const trig = m.triggers[i];
-      if (m.low_level_access && trig && typeof trig === 'object') {
-        triggers.push({ ...(trig as Record<string, unknown>), lowLevelAccess: true });
+      if (trig && typeof trig === 'object') {
+        const source = trig as Record<string, unknown>;
+        triggers.push(source.lowLevelAccess === m.low_level_access
+          ? trig : { ...source, lowLevelAccess: m.low_level_access });
       } else {
         triggers.push(trig);
       }

@@ -2,7 +2,7 @@ import type { SpindleDisplayContext } from 'lumiverse-spindle-types';
 import type { HostApi, HostMessage, HostCharacter, HostPersona, HostDomHandle } from '../interpreter/host.js';
 import type { TriggerRuntimePreloaded } from '../interpreter/host.js';
 import type { LorebookCache } from '../interpreter/runtime/lorebook.js';
-import type { DisplaySnapshot } from './snapshot.js';
+import { getDisplaySnapshot, type DisplaySnapshot } from './snapshot.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
 const log = makeSafeLogger('display-shim');
@@ -93,6 +93,7 @@ export function withCurrentDisplayMessage(
   const messagesHost = [...snap.messagesHost];
   const current = messagesHost[index];
   const next: HostMessage = {
+    ...current,
     id: context.messageId ?? current?.id ?? '',
     role: context.role ?? current?.role ?? (context.isUser ? 'user' : 'assistant'),
     content,
@@ -109,7 +110,11 @@ export function withCurrentDisplayMessage(
 }
 
 export function buildPreloaded(snap: DisplaySnapshot): TriggerRuntimePreloaded {
-  const varsCache: Record<string, string> = {};
+  const current = () => {
+    const value = getDisplaySnapshot(snap.chatId);
+    return value?.characterId === snap.characterId ? value : snap;
+  };
+  const varsCache: Record<string, string | null> = {};
   for (const [k, v] of Object.entries(snap.vars.local)) varsCache['$' + k] = v;
   const lorebook: LorebookCache = {
     entries: [...snap.lorebookHost],
@@ -121,6 +126,11 @@ export function buildPreloaded(snap: DisplaySnapshot): TriggerRuntimePreloaded {
     scriptstateDefaults: snap.scriptstateDefaults,
     messagesRaw: snap.messagesHost,
     lorebook,
+    luaState: {
+      get character() { const value = current(); return { id: value.characterId, ...value.character, name: value.charName }; },
+      get persona() { const value = current(); return { id: '', name: value.userName, description: value.personaText, imageId: value.personaImageId }; },
+      get authorsNote() { return current().chatAuthorsNote?.content ?? ''; },
+    },
   };
 }
 
@@ -186,6 +196,7 @@ export function makeSnapshotHostApi(
     const orig = snap.vars.local;
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (orig[k] === v) continue;
       const s = typeof v === 'string' ? v : String(v);
       if (orig[k] !== s) out[k] = s;
     }
@@ -214,7 +225,7 @@ export function makeSnapshotHostApi(
     },
     characters: {
       get: (id: string): Promise<HostCharacter> =>
-        Promise.resolve({ id, description: snap.character.description, worldBookIds: [], imageId: snap.character.imageId }),
+        Promise.resolve({ id, ...snap.character, name: snap.charName, worldBookIds: [] }),
       update: noWrite,
       setExpression,
     },

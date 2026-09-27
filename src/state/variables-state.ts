@@ -78,7 +78,7 @@ function signature(
   });
 }
 
-function sortedRecord(rec: Readonly<Record<string, string>>): Array<[string, string]> {
+function sortedRecord(rec: Readonly<Record<string, string | null>>): Array<[string, string | null]> {
   const keys = Object.keys(rec).sort();
-  return keys.map((k) => [k, rec[k] ?? ""]);
+  return keys.map((k) => [k, rec[k]!]);
 }

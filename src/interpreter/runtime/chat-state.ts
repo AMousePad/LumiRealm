@@ -8,7 +8,14 @@ import type { HostApi } from '../host.js';
 
 export const VAR_STORE_KEY = 'chat_variables';
 
-export async function loadVars(api: HostApi, chatId?: string): Promise<Record<string, string>> {
+export class VariablePersistenceError extends Error {
+  constructor(operation: 'read' | 'write', key: string, cause: unknown) {
+    super(`Could not ${operation} ${key}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'VariablePersistenceError';
+  }
+}
+
+export async function loadVars(api: HostApi, chatId?: string): Promise<Record<string, string | null>> {
   if (chatId) {
     const cached = getRecentFlush(chatId);
     if (cached) return { ...cached };
@@ -16,36 +23,39 @@ export async function loadVars(api: HostApi, chatId?: string): Promise<Record<st
   try {
     const raw = await api.chat.getMetadata(VAR_STORE_KEY);
     if (!raw || typeof raw !== 'object') return {};
-    const out: Record<string, string> = {};
+    const out: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-      out['$' + k] = toStr(v);
+      if (v !== undefined) out['$' + k] = v === null ? null : toStr(v);
     }
     return out;
-  } catch {
-    return {};
+  } catch (cause) {
+    throw new VariablePersistenceError('read', VAR_STORE_KEY, cause);
   }
 }
 
-export async function loadGlobalVars(api: HostApi): Promise<Record<string, string>> {
+export function parseGlobalVars(raw: unknown): Record<string, string | null> {
+  if (!raw || typeof raw !== 'object') return {};
+  const global = (raw as { global?: unknown }).global;
+  if (!global || typeof global !== 'object') return {};
+  const out: Record<string, string | null> = {};
+  for (const [key, value] of Object.entries(global as Record<string, unknown>)) {
+    if (value !== undefined) out[key] = value === null ? null : toStr(value);
+  }
+  return out;
+}
+
+export async function loadGlobalVars(api: HostApi): Promise<Record<string, string | null>> {
   if (api.getGlobalVariables) return api.getGlobalVariables();
   try {
-    const raw = await api.chat.getMetadata('macro_variables');
-    if (!raw || typeof raw !== 'object') return {};
-    const global = (raw as { global?: unknown }).global;
-    if (!global || typeof global !== 'object') return {};
-    const out: Record<string, string> = {};
-    for (const [key, value] of Object.entries(global as Record<string, unknown>)) {
-      out[key] = toStr(value);
-    }
-    return out;
-  } catch {
-    return {};
+    return parseGlobalVars(await api.chat.getMetadata('macro_variables'));
+  } catch (cause) {
+    throw new VariablePersistenceError('read', 'macro_variables', cause);
   }
 }
 
-export async function saveVars(api: HostApi, vars: Record<string, string>, chatId?: string): Promise<void> {
+export async function saveVars(api: HostApi, vars: Record<string, string | null>, chatId?: string): Promise<void> {
   const write = async (): Promise<void> => {
-    const bare: Record<string, string> = {};
+    const bare: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(vars)) {
       bare[k.startsWith('$') ? k.slice(1) : k] = v;
     }
@@ -55,5 +65,7 @@ export async function saveVars(api: HostApi, vars: Record<string, string>, chatI
   try {
     if (chatId) await runChatMetadataExclusive(chatId, write);
     else await write();
-  } catch { /* ignore, chat-metadata write may not be permitted */ }
+  } catch (cause) {
+    throw new VariablePersistenceError('write', VAR_STORE_KEY, cause);
+  }
 }
