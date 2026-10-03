@@ -1,10 +1,9 @@
 import type { RealmFrontendToBackend, RealmBackendToFrontend } from './messages.js';
 import { searchRealm, getRealmInfo, downloadRealmCard } from './api.js';
 import { convertToCharx, type ImportFormatConversion } from './import-formats/index.js';
-import type { SpindleAPI, UserPresetCreateDTO, UserPresetDTO } from 'lumiverse-spindle-types';
+import type { RegexScriptCreateDTO, SpindleAPI, UserPresetCreateDTO, UserPresetDTO } from 'lumiverse-spindle-types';
 import { isRisuPresetBytes, decodeRisuPreset } from '../core/preset/risup-decoder.js';
 import { translateRisuPreset } from '../core/preset/risup-translator.js';
-import { reconcilePresetRegexScripts } from './preset-regex-reconcile.js';
 import { translatePresetLabels } from '../core/preset/preset-labels.js';
 
 export interface RealmBackendLog {
@@ -23,8 +22,8 @@ export interface RealmBackendDeps {
     preset: UserPresetCreateDTO,
     opts: { readonly connectionId: string; readonly userId: string },
   ) => Promise<UserPresetCreateDTO>;
-  /** Global regex surface used to reconcile this preset's imported rows. */
-  readonly regexApi: Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'>;
+  /** Global regex surface the imported preset's rules are created through. */
+  readonly regexApi: Pick<SpindleAPI['regex_scripts'], 'create'>;
   readonly notifyImportProgress?: (progress: { type: 'import_progress'; phase: string; message: string; fraction: number | null; error?: string | null }, userId?: string) => void;
   readonly toast?: (msg: string, kind?: 'info' | 'error' | 'warning' | 'success') => void;
 }
@@ -174,29 +173,30 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     const created = await deps.createPreset(presetInput, userId);
     log.info(`importPresetFromBytes: created preset id=${created.id} name="${created.name}"`);
 
-    let regexImported = 0;
-    if (regexScripts.length > 0) {
-      // The preset name is the regex folder, so re-importing the same archive
-      // reconciles with the rows the previous import created.
-      const reconciled = await reconcilePresetRegexScripts({
-        api: deps.regexApi,
-        userId,
-        presetName: presetInput.name,
-        rules: regexScripts,
-        log,
-        errMsg: errMessage,
-      });
-      regexImported = reconciled.created;
-      log.info(
-        `importPresetFromBytes: preset "${presetInput.name}" regex rules=${regexScripts.length} ` +
-          `managed=${reconciled.managed} created=${reconciled.created} updated=${reconciled.updated} ` +
-          `unchanged=${reconciled.unchanged} staleKept=${reconciled.staleKept} failed=${reconciled.failed}` +
-          `${reconciled.listFailed ? ' listFailed=true' : ''}`,
-      );
-    }
+    const regexImported = await installPresetRegex(created, regexScripts, userId);
 
     deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexImported > 0 ? `, ${regexImported} regex` : ''})`, 'success');
     deps.notifyImportProgress?.({ type: 'import_progress', phase: 'done', message: `Preset "${created.name}" imported successfully`, fraction: 1.0, error: null }, userId);
+  }
+
+  /** Creates the preset's regex rules bound to it and returns how many the host accepted. */
+  async function installPresetRegex(
+    preset: UserPresetDTO,
+    rules: readonly RegexScriptCreateDTO[],
+    userId: string,
+  ): Promise<number> {
+    let installed = 0;
+    for (const rule of rules) {
+      // A preset-bound row is deleted by the host together with its preset. The pinned 0.6.25 types predate this create-only field.
+      const input: RegexScriptCreateDTO & { readonly preset_id: string } = { ...rule, preset_id: preset.id };
+      try {
+        await deps.regexApi.create(input, userId);
+        installed++;
+      } catch (err) {
+        log.warn(`importPresetFromBytes: regex create failed for "${rule.name}": ${errMessage(err)}`);
+      }
+    }
+    return installed;
   }
 
   async function translateImportedPresetLabels(

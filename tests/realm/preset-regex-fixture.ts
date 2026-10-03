@@ -8,7 +8,7 @@ import type {
 import type { RealmBackendDeps, RealmBackendHandle } from '../../src/realm/backend.js';
 import { setupRealmBackend } from '../../src/realm/backend.js';
 
-export const PRESET_NAME = 'Synthetic Preset';
+const PRESET_NAME = 'Synthetic Preset';
 
 /** Neutral display/response rules. No card text, no third-party preset text. */
 export const SYNTHETIC_REGEX: ReadonlyArray<Record<string, unknown>> = [
@@ -40,9 +40,12 @@ export function presetBytes(
   return new TextEncoder().encode(JSON.stringify(syntheticPresetRaw(regex, name)));
 }
 
+/** A row as the current host projects it; the pinned types predate `preset_id`. */
+export type HostRegexRow = RegexScriptDTO & { preset_id: string | null };
+
 export interface StoredRegexRow {
   readonly userId: string;
-  readonly dto: RegexScriptDTO;
+  readonly dto: HostRegexRow;
 }
 
 export interface RegexStore {
@@ -50,23 +53,19 @@ export interface RegexStore {
   /** Every create input, in call order, for first-import shape assertions. */
   readonly creates: RegexScriptCreateDTO[];
   all(): readonly StoredRegexRow[];
-  rowsFor(userId: string): RegexScriptDTO[];
+  rowsFor(userId: string): HostRegexRow[];
   api: Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'>;
 }
 
 /**
  * Minimal host stand-in: rows are per user, `can_mutate` marks extension-owned
- * rows, and paging is honored so the reconcile has to walk every page.
+ * rows, and paging is honored so callers have to walk every page.
  */
-export function makeRegexStore(options: {
-  readonly userId?: string;
-  readonly seed?: readonly RegexScriptDTO[];
-} = {}): RegexStore {
-  const owner = options.userId ?? 'u1';
-  const stored: StoredRegexRow[] = (options.seed ?? []).map((dto) => ({ userId: owner, dto: { ...dto } }));
+export function makeRegexStore(): RegexStore {
+  const stored: StoredRegexRow[] = [];
   const calls = { list: 0, create: 0, update: 0 };
   const creates: RegexScriptCreateDTO[] = [];
-  let seq = stored.length;
+  let seq = 0;
 
   const api: Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'> = {
     async list(listOptions?: RegexScriptListOptionsDTO) {
@@ -88,7 +87,7 @@ export function makeRegexStore(options: {
       calls.create++;
       creates.push(input);
       seq++;
-      const dto: RegexScriptDTO = {
+      const dto: HostRegexRow = {
         id: `row-${seq}`,
         can_mutate: true,
         name: input.name,
@@ -109,6 +108,7 @@ export function makeRegexStore(options: {
         sort_order: input.sort_order ?? 0,
         description: input.description ?? '',
         folder: input.folder ?? '',
+        preset_id: (input as { readonly preset_id?: string }).preset_id ?? null,
         metadata: { ...(input.metadata ?? {}) },
         created_at: 1000 + seq,
         updated_at: 1000 + seq,
@@ -145,93 +145,33 @@ export function makeRegexStore(options: {
   };
 }
 
-/** One neutral rule shaped like the translator's output. */
-export function syntheticRule(over: Partial<RegexScriptCreateDTO> & { readonly name: string }): RegexScriptCreateDTO {
-  return {
-    find_regex: '(?!)',
-    replace_string: '',
-    flags: 'g',
-    placement: ['ai_output'],
-    scope: 'global',
-    scope_id: null,
-    target: 'display',
-    min_depth: null,
-    max_depth: null,
-    trim_strings: [],
-    run_on_edit: false,
-    substitute_macros: 'none',
-    disabled: false,
-    sort_order: 0,
-    description: '',
-    folder: PRESET_NAME,
-    metadata: {},
-    ...over,
-  };
-}
-
-/** A stored row built from a rule projection. Defaults to a row this extension
- *  does not own, which is how host and other-extension rows look. */
-export function seededRow(
-  rule: RegexScriptCreateDTO,
-  options: { readonly id?: string; readonly canMutate?: boolean } = {},
-): RegexScriptDTO {
-  return {
-    id: options.id ?? 'foreign-row-1',
-    can_mutate: options.canMutate ?? false,
-    name: rule.name,
-    script_id: 'foreign_script',
-    find_regex: rule.find_regex,
-    replace_string: rule.replace_string ?? '',
-    flags: rule.flags ?? '',
-    placement: [...(rule.placement ?? [])],
-    scope: rule.scope ?? 'global',
-    scope_id: rule.scope_id ?? null,
-    target: rule.target ?? 'display',
-    min_depth: rule.min_depth ?? null,
-    max_depth: rule.max_depth ?? null,
-    trim_strings: [...(rule.trim_strings ?? [])],
-    run_on_edit: rule.run_on_edit ?? false,
-    substitute_macros: rule.substitute_macros ?? 'none',
-    disabled: false,
-    sort_order: rule.sort_order ?? 0,
-    description: rule.description ?? '',
-    folder: rule.folder ?? '',
-    metadata: { ...(rule.metadata ?? {}) },
-    created_at: 1,
-    updated_at: 1,
-  };
-}
-
 export interface PresetBackendHarness {
   readonly backend: RealmBackendHandle;
-  readonly logs: readonly string[];
-  readonly warns: readonly string[];
   /** Every preset-create input, in call order. */
   readonly creates: UserPresetCreateDTO[];
+  /** Ids of the presets created, in call order. */
+  readonly presetIds: readonly string[];
 }
 
 export function makePresetBackend(
   store: RegexStore,
   extra: { readonly translatePresetLabels?: RealmBackendDeps['translatePresetLabels'] } = {},
 ): PresetBackendHarness {
-  const logs: string[] = [];
-  const warns: string[] = [];
   const creates: UserPresetCreateDTO[] = [];
+  const presetIds: string[] = [];
   const backend = setupRealmBackend({
     send: () => {},
-    log: {
-      info: (m: string) => { logs.push(m); },
-      warn: (m: string) => { warns.push(m); },
-      error: () => {},
-    },
+    log: { info: () => {}, warn: () => {}, error: () => {} },
     importCardFromBytes: async () => {},
     ...(extra.translatePresetLabels !== undefined
       ? { translatePresetLabels: extra.translatePresetLabels }
       : {}),
     createPreset: async (input) => {
       creates.push(input);
+      const id = `preset-${creates.length}`;
+      presetIds.push(id);
       return {
-        id: `preset-${logs.length}`,
+        id,
         name: input.name,
         provider: input.provider,
         engine: input.engine ?? 'classic',
@@ -247,5 +187,5 @@ export function makePresetBackend(
     regexApi: store.api,
     toast: () => {},
   });
-  return { backend, logs, warns, creates };
+  return { backend, creates, presetIds };
 }

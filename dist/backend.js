@@ -14295,118 +14295,6 @@ function translateRisuPreset(raw, fallbackName = "Imported Preset") {
   return { preset, regexScripts };
 }
 
-// src/realm/preset-regex-reconcile.ts
-var PAGE_SIZE = 200;
-var MAX_STALE_SAMPLE = 5;
-function presetRuleKey(rule) {
-  return JSON.stringify([
-    rule.find_regex,
-    rule.replace_string ?? "",
-    rule.flags ?? "",
-    [...rule.placement ?? []].sort(),
-    rule.target ?? "",
-    rule.scope ?? "",
-    rule.scope_id ?? null,
-    rule.min_depth ?? null,
-    rule.max_depth ?? null,
-    [...rule.trim_strings ?? []],
-    rule.run_on_edit === true,
-    rule.substitute_macros ?? ""
-  ]);
-}
-function oldestFirst(a, b) {
-  if (a.created_at !== b.created_at)
-    return a.created_at - b.created_at;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
-async function listManagedRows(api, presetName, userId) {
-  const rows = [];
-  let offset = 0;
-  while (true) {
-    const page = await api.list({ scope: "global", limit: PAGE_SIZE, offset, userId });
-    for (const row of page.data) {
-      if (row.can_mutate === true && row.folder === presetName && row.scope === "global") {
-        rows.push(row);
-      }
-    }
-    if (page.data.length < PAGE_SIZE)
-      break;
-    offset += page.data.length;
-  }
-  rows.sort(oldestFirst);
-  return rows;
-}
-async function reconcilePresetRegexScripts(deps) {
-  const { api, userId, presetName, rules, log, errMsg } = deps;
-  let managed = [];
-  let listFailed = false;
-  try {
-    managed = await listManagedRows(api, presetName, userId);
-  } catch (err) {
-    listFailed = true;
-    log?.warn(`preset regex: list failed folder="${presetName}", importing without matching: ${errMsg(err)}`);
-  }
-  const available = new Map;
-  for (const row of managed) {
-    const key = presetRuleKey(row);
-    const bucket = available.get(key);
-    if (bucket)
-      bucket.push(row);
-    else
-      available.set(key, [row]);
-  }
-  let created = 0;
-  let updated = 0;
-  let unchanged = 0;
-  let failed = 0;
-  for (const rule of rules) {
-    const existing = available.get(presetRuleKey(rule))?.shift();
-    if (!existing) {
-      try {
-        await api.create(rule, userId);
-        created++;
-      } catch (err) {
-        failed++;
-        log?.warn(`preset regex: create failed for "${rule.name}": ${errMsg(err)}`);
-      }
-      continue;
-    }
-    const sortOrder = rule.sort_order;
-    if (sortOrder === undefined || existing.sort_order === sortOrder) {
-      unchanged++;
-      continue;
-    }
-    try {
-      await api.update(existing.id, { sort_order: sortOrder }, userId);
-      updated++;
-    } catch (err) {
-      failed++;
-      log?.warn(`preset regex: update failed for row ${existing.id}: ${errMsg(err)}`);
-    }
-  }
-  const sample = [];
-  let staleKept = 0;
-  for (const bucket of available.values()) {
-    for (const row of bucket) {
-      staleKept++;
-      if (sample.length < MAX_STALE_SAMPLE)
-        sample.push(`${row.id}("${row.name}")`);
-    }
-  }
-  if (staleKept > 0) {
-    log?.warn(`preset regex: folder="${presetName}" kept ${staleKept} unmatched row(s) ` + `[${sample.join(", ")}${staleKept > sample.length ? ", ..." : ""}]`);
-  }
-  return {
-    managed: managed.length,
-    created,
-    updated,
-    unchanged,
-    staleKept,
-    failed,
-    listFailed
-  };
-}
-
 // src/realm/backend.ts
 function isRealmFrontendMessage(msg) {
   return msg.type === "realm_search" || msg.type === "realm_info" || msg.type === "realm_download";
@@ -14527,21 +14415,22 @@ function setupRealmBackend(deps) {
     deps.notifyImportProgress?.({ type: "import_progress", phase: "saving_payload", message: `Saving preset to Lumiverse`, fraction: 0.8, error: null }, userId);
     const created = await deps.createPreset(presetInput, userId);
     log.info(`importPresetFromBytes: created preset id=${created.id} name="${created.name}"`);
-    let regexImported = 0;
-    if (regexScripts.length > 0) {
-      const reconciled = await reconcilePresetRegexScripts({
-        api: deps.regexApi,
-        userId,
-        presetName: presetInput.name,
-        rules: regexScripts,
-        log,
-        errMsg: errMessage
-      });
-      regexImported = reconciled.created;
-      log.info(`importPresetFromBytes: preset "${presetInput.name}" regex rules=${regexScripts.length} ` + `managed=${reconciled.managed} created=${reconciled.created} updated=${reconciled.updated} ` + `unchanged=${reconciled.unchanged} staleKept=${reconciled.staleKept} failed=${reconciled.failed}` + `${reconciled.listFailed ? " listFailed=true" : ""}`);
-    }
+    const regexImported = await installPresetRegex(created, regexScripts, userId);
     deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexImported > 0 ? `, ${regexImported} regex` : ""})`, "success");
     deps.notifyImportProgress?.({ type: "import_progress", phase: "done", message: `Preset "${created.name}" imported successfully`, fraction: 1, error: null }, userId);
+  }
+  async function installPresetRegex(preset, rules, userId) {
+    let installed = 0;
+    for (const rule of rules) {
+      const input = { ...rule, preset_id: preset.id };
+      try {
+        await deps.regexApi.create(input, userId);
+        installed++;
+      } catch (err) {
+        log.warn(`importPresetFromBytes: regex create failed for "${rule.name}": ${errMessage(err)}`);
+      }
+    }
+    return installed;
   }
   async function translateImportedPresetLabels(preset, connectionId, userId) {
     const translate = deps.translatePresetLabels;
@@ -24904,7 +24793,7 @@ function createModuleUploader(deps) {
 }
 
 // src/state/orphan-orchestrator.ts
-var PAGE_SIZE2 = 200;
+var PAGE_SIZE = 200;
 var MAX_RETURNED_ORPHANS = 1e4;
 function createOrphanOrchestrator(deps) {
   async function detectDeletedWhileOff(userId) {
@@ -24959,7 +24848,7 @@ function createOrphanOrchestrator(deps) {
     while (true) {
       const page = await deps.imagesApi.list({
         onlyOwned: true,
-        limit: PAGE_SIZE2,
+        limit: PAGE_SIZE,
         offset,
         userId
       });
@@ -25039,7 +24928,7 @@ function createOrphanOrchestrator(deps) {
     while (true) {
       let page;
       try {
-        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE2, offset });
+        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
       } catch (err) {
         deps.log.warn(`sweepOrphanModuleRegex: regex_scripts.list offset=${offset} failed: ${deps.errMsg(err)}`);
         break;
@@ -25090,7 +24979,7 @@ function createOrphanOrchestrator(deps) {
     while (true) {
       let page;
       try {
-        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE2, offset });
+        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
       } catch (err) {
         deps.log.warn(`listStaleModuleRegexIds: regex_scripts.list offset=${offset} failed: ${deps.errMsg(err)}`);
         break;
@@ -25126,7 +25015,7 @@ function createOrphanOrchestrator(deps) {
     while (true) {
       let page;
       try {
-        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE2, offset });
+        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
       } catch (err) {
         deps.log.warn(`listStaleCharRegexIds: regex_scripts.list offset=${offset} failed: ${deps.errMsg(err)}`);
         break;
@@ -25202,7 +25091,7 @@ function createOrphanOrchestrator(deps) {
       const liveModuleIds = new Set(await deps.listModuleIds(userId));
       let offset = 0;
       while (true) {
-        const page = await deps.regexApi.list({ userId, limit: PAGE_SIZE2, offset });
+        const page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
         if (!Array.isArray(page.data) || page.data.length === 0)
           break;
         for (const r of page.data) {

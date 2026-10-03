@@ -542,7 +542,6 @@ describe('Preset import via Realm backend', () => {
         };
       },
       regexApi: {
-        list: async () => ({ data: [], total: 0 }),
         create: async (input) => {
           createdRegex.push(input);
           return {
@@ -550,9 +549,6 @@ describe('Preset import via Realm backend', () => {
             can_mutate: true,
             ...input,
           } as any;
-        },
-        update: async () => {
-          throw new Error('unexpected regex update');
         },
       },
       toast: (msg) => {
