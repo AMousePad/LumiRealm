@@ -236,6 +236,9 @@ export function transformPresetTemplate(template: string): string {
   //    choice. risuGlobalVar applies the same effective-globals overlay (chat
   //    globals + persisted user toggle preferences) LumiRealm's own engine uses.
   result = rewriteMacroBody(result, 'getglobalvar', (body) => `{{risuGlobalVar::${body}}}`);
+  // Risu's getvar reads the chat variables the host holds in `variables.chat`,
+  // so it is mapped before the rewrites below emit the host's local {{getvar}}.
+  result = rewriteMacroBody(result, 'getvar', (body) => `{{risuChatVar::${body}}}`);
 
   // 3. Risu loop and scratch reads -> the host's local scope. Risu's #each
   //    substitutes {{slot::NAME}} textually; the host's {{each}} binds the loop

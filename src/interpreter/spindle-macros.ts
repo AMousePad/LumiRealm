@@ -7,6 +7,7 @@ declare const spindle: any;
 import '../risu-compat/handlers/logic.js';
 import { registry } from '../risu-compat/registry.js';
 import { buildEvaluatorContext } from './evaluator/context.js';
+import { getActiveScriptstateDefaults } from './defaults-cache.js';
 import { calcString } from '../risu-compat/risu-helpers.js';
 import { collectLegacyGlobals, mergeEffectiveGlobals, readTogglePreferences } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
@@ -14,18 +15,6 @@ import { readChatAuthorsNote } from '../state/authors-note-cache.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 
 const log = makeSafeLogger('spindle-macros');
-
-interface MacroContext {
-  args: string[];
-  env: {
-    variables: {
-      local: Map<string, string>;
-      global: Map<string, string>;
-      chat: Map<string, string>;
-    };
-    extra?: Record<string, unknown>;
-  };
-}
 
 function getArg(ctx: unknown, index: number): string {
   const args = (ctx as { args?: string[] })?.args;
@@ -43,18 +32,23 @@ function getArgs(ctx: unknown): string[] {
   return [];
 }
 
-function evalRisuCalc(ctx: unknown): string {
+// Risu's getChatVar: the chat variable, then the card's default variables, else
+// the literal null. The host carries Risu chat variables on `variables.chat`.
+function readChatVar(ctx: unknown, name: string): string {
+  const variables = (ctx as { env?: { variables?: Record<string, unknown> } })?.env?.variables;
+  const value = varRecord(variables?.['chat'])?.[name];
+  if (value != null) return String(value);
+  return getActiveScriptstateDefaults(readChatId(ctx))?.[name] ?? 'null';
+}
+
+// Risu's calcString reads `$name` with getChatVar and `@name` with
+// getGlobalChatVar, the same reads as {{getvar}} and {{getglobalvar}}.
+async function evalRisuCalc(ctx: unknown): Promise<string> {
   const expr = getArg(ctx, 0);
   if (!expr) return '0';
-  const c = ctx as MacroContext;
-  const readLocal = (name: string): string => {
-    return c?.env?.variables?.local?.get?.(name) ?? '';
-  };
-  const readGlobal = (name: string): string => {
-    return c?.env?.variables?.global?.get?.(name) ?? '';
-  };
+  const globals = expr.includes('@') ? await effectiveGlobals(ctx, 'risuCalc') : {};
   try {
-    const num = calcString(expr, readLocal, readGlobal);
+    const num = calcString(expr, (name) => readChatVar(ctx, name), (name) => globals[name] ?? 'null');
     return Number.isFinite(num) ? String(num) : '0';
   } catch {
     return '0';
@@ -120,7 +114,7 @@ function readChatId(ctx: unknown): string {
 }
 
 /**
- * Read one global variable with the same effective-globals overlay LumiRealm's
+ * Read the global variables with the same effective-globals overlay LumiRealm's
  * own engine applies to `{{getglobalvar::…}}`: the preset values the host
  * resolved for this evaluation, then the chat globals
  * (`macro_variables.global`), then the user's persisted State → Toggles
@@ -128,12 +122,9 @@ function readChatId(ctx: unknown): string {
  *
  * Preset blocks are evaluated by the HOST macro engine (sourceOwner: "host"),
  * which cannot see the extension's preference store, so translated global
- * lookups must be resolved here. Unset names resolve to the literal `null`
- * (Risu chatVar parity, matching `interpreter/evaluator/context.ts`).
+ * lookups must be resolved here.
  */
-async function resolveGlobalVarMacro(ctx: unknown): Promise<string> {
-  const key = getArg(ctx, 0).trim();
-  if (!key) return '';
+async function effectiveGlobals(ctx: unknown, caller: string): Promise<Record<string, string>> {
   const env = (ctx as { env?: { variables?: Record<string, unknown>; extra?: Record<string, unknown> } })?.env;
   const promptVariables = varRecord(env?.extra?.['promptVariables']);
   const legacy = collectLegacyGlobals({
@@ -142,17 +133,24 @@ async function resolveGlobalVarMacro(ctx: unknown): Promise<string> {
     promptVariables,
   });
   const userId = typeof env?.extra?.['userId'] === 'string' ? (env.extra['userId'] as string) : '';
-  if (!userId) return legacy[key] ?? 'null';
+  if (!userId) return legacy;
   try {
     const presetToggles = presetToggleLayer(ctx, promptVariables, userId);
-    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId), presetToggles)[key] ?? 'null';
+    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId), presetToggles);
   } catch (err) {
     log.warn(
-      `risuGlobalVar(${key}): toggle preference read failed, using chat globals: ` +
+      `${caller}: toggle preference read failed, using chat globals: ` +
         `${err instanceof Error ? err.message : String(err)}`,
     );
-    return legacy[key] ?? 'null';
+    return legacy;
   }
+}
+
+// Unset names resolve to the literal `null` (Risu getGlobalChatVar).
+async function resolveGlobalVarMacro(ctx: unknown): Promise<string> {
+  const key = getArg(ctx, 0).trim();
+  if (!key) return '';
+  return (await effectiveGlobals(ctx, `risuGlobalVar(${key})`))[key] ?? 'null';
 }
 
 // ─── Chat author's note (`{{authornote}}`) ───────────────────────────────────
@@ -217,6 +215,13 @@ export function registerSpindleMacros(): void {
       description: "Reads a Risu global variable, overlaying the user's persisted State → Toggles preferences on the chat globals.",
       returnType: 'string',
       handler: (ctx: unknown) => resolveGlobalVarMacro(ctx),
+    },
+    {
+      name: 'risuChatVar',
+      category: MACRO_CATEGORY,
+      description: 'Reads a Risu chat variable like Risu getvar: the chat value, then the card default, else null.',
+      returnType: 'string',
+      handler: (ctx: unknown) => readChatVar(ctx, getArg(ctx, 0)),
     },
     {
       name: 'risuCalc',

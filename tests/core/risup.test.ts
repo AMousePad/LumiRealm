@@ -424,13 +424,14 @@ describe('Risu preset translator', () => {
     // A dynamic name ({{getglobalvar::{{slot::x}}}}) only resolves when the body
     // is kept intact and the loop read becomes the host local-scope read {{getvar}},
     // which is what {{each}} binds; {{array::}} becomes the list {{each}} splits.
+    // Risu's own getvar is a chat-variable read, not that local scope.
     expect(block.content).toBe(
       '{{setvar::genre_check::0}}' +
         '{{#each toggle_genre1,toggle_genre2 genreVar}}' +
         '{{#if {{risuAny::{{risuEqual::{{risuGlobalVar::{{getvar::genreVar}}}}::1}}}}}}' +
         '{{setvar::genre_check::1}}{{/if}}{{/each}}' +
         '{{#if {{risuEqual::{{getvar::genre_check}}::1}}}}HIT{{/if}}' +
-        '{{#if {{risuAnd::{{risuNotEqual::{{getvar::custom}}::null}}::1}}}}CHECKED{{/if}}',
+        '{{#if {{risuAnd::{{risuNotEqual::{{risuChatVar::custom}}::null}}::1}}}}CHECKED{{/if}}',
     );
     for (const unresolved of [
       '{{array::',

@@ -50,6 +50,11 @@ describe('transformPresetTemplate', () => {
       .toBe('{{// note}}{{#if 1}}A{{/if}}');
   });
 
+  it('maps Risu getvar to the chat-variable reader before loop reads become host getvar', () => {
+    expect(transformPresetTemplate('{{getvar::{{slot::n}}}}{{tempvar::t}}'))
+      .toBe('{{risuChatVar::{{getvar::n}}}}{{getvar::t}}');
+  });
+
   it('routes global reads through the LumiRealm effective-globals macro', () => {
     // {{var::}} reads the host preset prompt-variable store, which only ever
     // holds the import-time defaults, so State → Toggles had no effect on

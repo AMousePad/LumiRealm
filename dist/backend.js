@@ -13940,6 +13940,7 @@ function transformPresetTemplate(template) {
   }
   let result = rewriteCalculations(template);
   result = rewriteMacroBody(result, "getglobalvar", (body) => `{{risuGlobalVar::${body}}}`);
+  result = rewriteMacroBody(result, "getvar", (body) => `{{risuChatVar::${body}}}`);
   result = result.replace(/\{\{slot::([a-zA-Z0-9_]+)\}\}/g, "{{getvar::$1}}");
   result = result.replace(/\{\{(?:get)?tempvar::([a-zA-Z0-9_]+)\}\}/g, "{{getvar::$1}}");
   result = rewriteMacroBody(result, "settempvar", (body) => {
@@ -21937,6 +21938,14 @@ function setActiveScriptstateDefaults(chatId, characterId, defaults) {
 }
 function clearActiveScriptstateDefaults(chatId) {
   chatToCharacter.delete(chatId);
+}
+function getActiveScriptstateDefaults(chatId) {
+  if (!chatId)
+    return null;
+  const characterId = chatToCharacter.get(chatId);
+  if (!characterId)
+    return null;
+  return byCharacter.get(characterId) ?? null;
 }
 
 // src/interpreter/runtime/vars.ts
@@ -30997,19 +31006,20 @@ function getArgs(ctx) {
   }
   return [];
 }
-function evalRisuCalc(ctx) {
+function readChatVar(ctx, name) {
+  const variables = ctx?.env?.variables;
+  const value = varRecord(variables?.["chat"])?.[name];
+  if (value != null)
+    return String(value);
+  return getActiveScriptstateDefaults(readChatId(ctx))?.[name] ?? "null";
+}
+async function evalRisuCalc(ctx) {
   const expr = getArg(ctx, 0);
   if (!expr)
     return "0";
-  const c = ctx;
-  const readLocal = (name) => {
-    return c?.env?.variables?.local?.get?.(name) ?? "";
-  };
-  const readGlobal = (name) => {
-    return c?.env?.variables?.global?.get?.(name) ?? "";
-  };
+  const globals = expr.includes("@") ? await effectiveGlobals(ctx, "risuCalc") : {};
   try {
-    const num = calcString(expr, readLocal, readGlobal);
+    const num = calcString(expr, (name) => readChatVar(ctx, name), (name) => globals[name] ?? "null");
     return Number.isFinite(num) ? String(num) : "0";
   } catch {
     return "0";
@@ -31053,10 +31063,7 @@ function readChatId(ctx) {
   }
   return "";
 }
-async function resolveGlobalVarMacro(ctx) {
-  const key = getArg(ctx, 0).trim();
-  if (!key)
-    return "";
+async function effectiveGlobals(ctx, caller) {
   const env = ctx?.env;
   const promptVariables = varRecord(env?.extra?.["promptVariables"]);
   const legacy = collectLegacyGlobals({
@@ -31066,14 +31073,20 @@ async function resolveGlobalVarMacro(ctx) {
   });
   const userId = typeof env?.extra?.["userId"] === "string" ? env.extra["userId"] : "";
   if (!userId)
-    return legacy[key] ?? "null";
+    return legacy;
   try {
     const presetToggles = presetToggleLayer(ctx, promptVariables, userId);
-    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId), presetToggles)[key] ?? "null";
+    return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId), presetToggles);
   } catch (err) {
-    log7.warn(`risuGlobalVar(${key}): toggle preference read failed, using chat globals: ` + `${err instanceof Error ? err.message : String(err)}`);
-    return legacy[key] ?? "null";
+    log7.warn(`${caller}: toggle preference read failed, using chat globals: ` + `${err instanceof Error ? err.message : String(err)}`);
+    return legacy;
   }
+}
+async function resolveGlobalVarMacro(ctx) {
+  const key = getArg(ctx, 0).trim();
+  if (!key)
+    return "";
+  return (await effectiveGlobals(ctx, `risuGlobalVar(${key})`))[key] ?? "null";
 }
 async function resolveAuthornoteMacro(ctx) {
   const chatId = readChatId(ctx);
@@ -31111,6 +31124,13 @@ function registerSpindleMacros() {
       description: "Reads a Risu global variable, overlaying the user's persisted State \u2192 Toggles preferences on the chat globals.",
       returnType: "string",
       handler: (ctx) => resolveGlobalVarMacro(ctx)
+    },
+    {
+      name: "risuChatVar",
+      category: MACRO_CATEGORY,
+      description: "Reads a Risu chat variable like Risu getvar: the chat value, then the card default, else null.",
+      returnType: "string",
+      handler: (ctx) => readChatVar(ctx, getArg(ctx, 0))
     },
     {
       name: "risuCalc",
