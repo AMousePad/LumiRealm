@@ -13852,8 +13852,7 @@ function namePresetBlockClosers(template) {
   }
   return result + template.slice(copied);
 }
-function rewriteMacroBody(template, name, build) {
-  const open = `{{${name}::`;
+function rewriteMacroBody(template, name, build, open = `{{${name}::`) {
   let result = "";
   let i = 0;
   while (i < template.length) {
@@ -13903,6 +13902,19 @@ function splitMacroArgs(body) {
   args.push(body.slice(start));
   return args;
 }
+function translateEachHeader(header) {
+  let t2 = header.trim();
+  if (t2.startsWith("::keep "))
+    t2 = t2.substring(7).trim();
+  if (t2.startsWith("as "))
+    t2 = t2.substring(3).trim();
+  const asIndex = t2.lastIndexOf(" as ");
+  const split = asIndex === -1 ? t2.lastIndexOf(" ") : asIndex;
+  if (split === -1)
+    return `{{#each${header}}}`;
+  const name = t2.substring(split + (asIndex === -1 ? 1 : 4)).trim();
+  return `{{#each::{{risuList::${t2.substring(0, split)}}}::${name}::\xA7}}`;
+}
 function rewriteCalculations(template) {
   let result = "";
   let i = 0;
@@ -13950,7 +13962,8 @@ function transformPresetTemplate(template) {
   result = result.replace(/\{\{#if_pure\b/g, "{{#if");
   result = result.replace(/\{\{\/if_pure\}\}/g, "{{/if}}");
   result = namePresetBlockClosers(result);
-  result = rewriteMacroBody(result, "array", (body) => splitMacroArgs(body).join(","));
+  result = rewriteMacroBody(result, "#each", translateEachHeader, "{{#each");
+  result = rewriteMacroBody(result, "array", (body) => splitMacroArgs(body).join("\xA7"));
   result = result.replace(/\{\{contains::/g, "{{risuContains::");
   result = result.replace(/\{\{length::/g, "{{risuLength::");
   result = result.replace(/\{\{and::/g, "{{risuAnd::");
@@ -31139,6 +31152,13 @@ function registerSpindleMacros() {
       description: "Evaluates RisuAI math/boolean expressions (+, -, *, /, ^, %, <, >, <=, >=, =, !=, &, |, !).",
       returnType: "number",
       handler: (ctx) => evalRisuCalc(ctx)
+    },
+    {
+      name: "risuList",
+      category: MACRO_CATEGORY,
+      description: "Parses a Risu array (JSON, else \xA7 separated) into the \xA7 list a translated {{#each}} loops over.",
+      returnType: "string",
+      handler: (ctx) => parseArray2(getArgs(ctx).join("::")).map((item) => typeof item === "string" ? item : JSON.stringify(item)).join("\xA7")
     },
     {
       name: "risuContains",

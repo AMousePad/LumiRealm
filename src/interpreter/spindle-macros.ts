@@ -8,7 +8,7 @@ import '../risu-compat/handlers/logic.js';
 import { registry } from '../risu-compat/registry.js';
 import { buildEvaluatorContext } from './evaluator/context.js';
 import { getActiveScriptstateDefaults } from './defaults-cache.js';
-import { calcString } from '../risu-compat/risu-helpers.js';
+import { calcString, parseArray } from '../risu-compat/risu-helpers.js';
 import { collectLegacyGlobals, mergeEffectiveGlobals, readTogglePreferences } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { readChatAuthorsNote } from '../state/authors-note-cache.js';
@@ -230,6 +230,16 @@ export function registerSpindleMacros(): void {
       description: 'Evaluates RisuAI math/boolean expressions (+, -, *, /, ^, %, <, >, <=, >=, =, !=, &, |, !).',
       returnType: 'number',
       handler: (ctx: unknown) => evalRisuCalc(ctx),
+    },
+    {
+      name: 'risuList',
+      category: MACRO_CATEGORY,
+      description: 'Parses a Risu array (JSON, else § separated) into the § list a translated {{#each}} loops over.',
+      returnType: 'string',
+      // Risu's each loop stringifies non-string items; `::` inside the list splits the arguments.
+      handler: (ctx: unknown) => parseArray(getArgs(ctx).join('::'))
+        .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .join('§'),
     },
     {
       name: 'risuContains',

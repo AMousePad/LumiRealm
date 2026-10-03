@@ -39,7 +39,7 @@ describe('transformPresetTemplate', () => {
     const input = '{{#if 1}}A{{#if 0}}B{{/2}}C{{/1}}';
     expect(transformPresetTemplate(input)).toBe('{{#if 1}}A{{#if 0}}B{{/if}}C{{/if}}');
     expect(transformPresetTemplate('{{#if 1}}{{#each a as x}}B{{/9}}{{/8}}'))
-      .toBe('{{#if 1}}{{#each a as x}}B{{/each}}{{/if}}');
+      .toBe('{{#if 1}}{{#each::{{risuList::a}}::x::§}}B{{/each}}{{/if}}');
     expect(transformPresetTemplate('{{#if 1}}A{{/other}}')).toBe('{{#if 1}}A{{/if}}');
   });
 

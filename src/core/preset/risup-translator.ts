@@ -132,8 +132,7 @@ function namePresetBlockClosers(template: string): string {
  * ({{getglobalvar::{{slot::x}}}}), so the macro ends at the matching closing
  * brace, not at the first `}}`.
  */
-function rewriteMacroBody(template: string, name: string, build: (body: string) => string): string {
-  const open = `{{${name}::`;
+function rewriteMacroBody(template: string, name: string, build: (body: string) => string, open = `{{${name}::`): string {
   let result = '';
   let i = 0;
   while (i < template.length) {
@@ -182,6 +181,20 @@ function splitMacroArgs(body: string): string[] {
   }
   args.push(body.slice(start));
   return args;
+}
+
+// Risu's each header (blockStartMatcher) is `[::keep] [as] LIST as NAME` or `LIST NAME`.
+// risuList re-joins the Risu array on §, which the host loop splits on instead of
+// commas; the host trims items and skips blank ones, which Risu keeps.
+function translateEachHeader(header: string): string {
+  let t2 = header.trim();
+  if (t2.startsWith('::keep ')) t2 = t2.substring(7).trim();
+  if (t2.startsWith('as ')) t2 = t2.substring(3).trim();
+  const asIndex = t2.lastIndexOf(' as ');
+  const split = asIndex === -1 ? t2.lastIndexOf(' ') : asIndex;
+  if (split === -1) return `{{#each${header}}}`;
+  const name = t2.substring(split + (asIndex === -1 ? 1 : 4)).trim();
+  return `{{#each::{{risuList::${t2.substring(0, split)}}}::${name}::§}}`;
 }
 
 function rewriteCalculations(template: string): string {
@@ -261,9 +274,10 @@ export function transformPresetTemplate(template: string): string {
   result = namePresetBlockClosers(result);
 
   // 5. Map common CBS helpers to namespaced compatibility macros. Risu's list
-  //    construction ({{array::a::b}}) becomes the comma list the host's {{each}}
-  //    splits on.
-  result = rewriteMacroBody(result, 'array', (body) => splitMacroArgs(body).join(','));
+  //    construction ({{array::a::b}}) becomes the § list Risu's parseArray reads
+  //    back as the same items.
+  result = rewriteMacroBody(result, '#each', translateEachHeader, '{{#each');
+  result = rewriteMacroBody(result, 'array', (body) => splitMacroArgs(body).join('§'));
   result = result.replace(/\{\{contains::/g, '{{risuContains::');
   result = result.replace(/\{\{length::/g, '{{risuLength::');
   result = result.replace(/\{\{and::/g, '{{risuAnd::');
