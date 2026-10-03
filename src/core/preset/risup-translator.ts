@@ -5,7 +5,7 @@ import type {
   UserPresetCreateDTO,
 } from 'lumiverse-spindle-types';
 import type { RisuPresetRaw } from './risup-decoder.js';
-import { mapRegex } from '../mappers/regex.js';
+import { mapRegex, type AtAtAction } from '../mappers/regex.js';
 import { newUuid } from '../mappers/util.js';
 
 export interface ParsedToggleGroup {
@@ -567,6 +567,8 @@ export function translateRisuPromptBlocks(
 export interface TranslatedRisuPreset {
   readonly preset: UserPresetCreateDTO;
   readonly regexScripts: RegexScriptCreateDTO[];
+  /** Rules that need the card at-action runtime, which a preset row cannot reach. */
+  readonly skippedRegex: readonly AtAtAction[];
 }
 
 export function translateRisuPreset(raw: RisuPresetRaw, fallbackName = 'Imported Preset'): TranslatedRisuPreset {
@@ -600,6 +602,7 @@ export function translateRisuPreset(raw: RisuPresetRaw, fallbackName = 'Imported
   const { blocks, defaultsByBlockId } = translateRisuPromptBlocks(raw.promptTemplate, toggleGroups);
 
   const regexScripts: RegexScriptCreateDTO[] = [];
+  let skippedRegex: readonly AtAtAction[] = [];
   if (Array.isArray(raw.regex) && raw.regex.length > 0) {
     const mapRes = mapRegex(raw.regex as any, {
       characterId: 'global-preset',
@@ -607,6 +610,7 @@ export function translateRisuPreset(raw: RisuPresetRaw, fallbackName = 'Imported
       scopeId: null,
       folder: name,
     });
+    skippedRegex = mapRes.skipped;
     for (const r of mapRes.rows) {
       regexScripts.push({
         name: r.name,
@@ -654,5 +658,5 @@ export function translateRisuPreset(raw: RisuPresetRaw, fallbackName = 'Imported
     },
   };
 
-  return { preset, regexScripts };
+  return { preset, regexScripts, skippedRegex };
 }

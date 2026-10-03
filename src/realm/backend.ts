@@ -1,7 +1,7 @@
 import type { RealmFrontendToBackend, RealmBackendToFrontend } from './messages.js';
 import { searchRealm, getRealmInfo, downloadRealmCard } from './api.js';
 import { convertToCharx, type ImportFormatConversion } from './import-formats/index.js';
-import type { RegexScriptCreateDTO, SpindleAPI, UserPresetCreateDTO, UserPresetDTO } from 'lumiverse-spindle-types';
+import type { RegexScriptCreateDTO, RegexScriptDTO, SpindleAPI, UserPresetCreateDTO, UserPresetDTO } from 'lumiverse-spindle-types';
 import { isRisuPresetBytes, decodeRisuPreset } from '../core/preset/risup-decoder.js';
 import { translateRisuPreset } from '../core/preset/risup-translator.js';
 import { translatePresetLabels } from '../core/preset/preset-labels.js';
@@ -17,15 +17,25 @@ export interface RealmBackendDeps {
   readonly log: RealmBackendLog;
   readonly importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) => Promise<void>;
   readonly createPreset?: (input: UserPresetCreateDTO, userId?: string) => Promise<UserPresetDTO>;
+  /** Removes a preset whose regex rules did not all install. */
+  readonly deletePreset: (presetId: string, userId: string) => Promise<boolean>;
   /** Rewrites imported preset display labels; absent when the host cannot generate. */
   readonly translatePresetLabels?: (
     preset: UserPresetCreateDTO,
     opts: { readonly connectionId: string; readonly userId: string },
   ) => Promise<UserPresetCreateDTO>;
   /** Global regex surface the imported preset's rules are created through. */
-  readonly regexApi: Pick<SpindleAPI['regex_scripts'], 'create'>;
+  readonly regexApi: Pick<SpindleAPI['regex_scripts'], 'create' | 'delete'>;
   readonly notifyImportProgress?: (progress: { type: 'import_progress'; phase: string; message: string; fraction: number | null; error?: string | null }, userId?: string) => void;
   readonly toast?: (msg: string, kind?: 'info' | 'error' | 'warning' | 'success') => void;
+}
+
+/** A preset whose regex rules cannot all be installed is not imported. */
+export class PresetRegexImportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PresetRegexImportError';
+  }
 }
 
 export interface PresetImportOptions {
@@ -160,7 +170,12 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     deps.notifyImportProgress?.({ type: 'import_progress', phase: 'decoding', message: `Decoding preset ${fileName}`, fraction: 0.2, error: null }, userId);
     const raw = await decodeRisuPreset(bytes, fileName);
     deps.notifyImportProgress?.({ type: 'import_progress', phase: 'translating', message: `Translating preset ${raw.name || fileName}`, fraction: 0.5, error: null }, userId);
-    const { preset: translatedPreset, regexScripts } = translateRisuPreset(raw, fileName);
+    const { preset: translatedPreset, regexScripts, skippedRegex } = translateRisuPreset(raw, fileName);
+    if (skippedRegex.length > 0) {
+      // Risu's processScriptFull runs @@emo and @@inject against the open character, which a preset row cannot reach.
+      failPresetRegexImport(translatedPreset.name, skippedRegex.map((s) =>
+        `rule ${s.index + 1} "${s.script.comment ?? ''}" uses @@${s.action}, which LumiRealm cannot run from a preset`), userId);
+    }
     const presetInput = opts?.labelTranslation === undefined
       ? translatedPreset
       : await translateImportedPresetLabels(translatedPreset, opts.labelTranslation.connectionId, userId);
@@ -173,30 +188,48 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     const created = await deps.createPreset(presetInput, userId);
     log.info(`importPresetFromBytes: created preset id=${created.id} name="${created.name}"`);
 
-    const regexImported = await installPresetRegex(created, regexScripts, userId);
+    await installPresetRegex(created, regexScripts, userId);
 
-    deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexImported > 0 ? `, ${regexImported} regex` : ''})`, 'success');
+    deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexScripts.length > 0 ? `, ${regexScripts.length} regex` : ''})`, 'success');
     deps.notifyImportProgress?.({ type: 'import_progress', phase: 'done', message: `Preset "${created.name}" imported successfully`, fraction: 1.0, error: null }, userId);
   }
 
-  /** Creates the preset's regex rules bound to it and returns how many the host accepted. */
+  /** Creates the preset's regex rules bound to it; when any rule does not install, removes the preset and throws. */
   async function installPresetRegex(
     preset: UserPresetDTO,
     rules: readonly RegexScriptCreateDTO[],
     userId: string,
-  ): Promise<number> {
-    let installed = 0;
+  ): Promise<void> {
+    const failures: string[] = [];
+    const unboundIds: string[] = [];
     for (const rule of rules) {
       // A preset-bound row is deleted by the host together with its preset. The pinned 0.6.25 types predate this create-only field.
       const input: RegexScriptCreateDTO & { readonly preset_id: string } = { ...rule, preset_id: preset.id };
       try {
-        await deps.regexApi.create(input, userId);
-        installed++;
+        const row: RegexScriptDTO & { readonly preset_id?: string | null } = await deps.regexApi.create(input, userId);
+        if (row.preset_id !== preset.id) {
+          unboundIds.push(row.id);
+          failures.push(`"${rule.name}" was stored without its preset link, which this Lumiverse version does not support`);
+        }
       } catch (err) {
-        log.warn(`importPresetFromBytes: regex create failed for "${rule.name}": ${errMessage(err)}`);
+        failures.push(`"${rule.name}": ${errMessage(err)}`);
       }
     }
-    return installed;
+    if (failures.length === 0) return;
+    // Deleting the preset deletes its bound rows; a row the host left unbound needs its own delete.
+    try {
+      for (const id of unboundIds) await deps.regexApi.delete(id, userId);
+      await deps.deletePreset(preset.id, userId);
+    } catch (err) {
+      failures.push(`removing the partial import failed: ${errMessage(err)}`);
+    }
+    failPresetRegexImport(preset.name, failures, userId);
+  }
+
+  function failPresetRegexImport(presetName: string, failures: readonly string[], userId: string): never {
+    const error = new PresetRegexImportError(`Preset "${presetName}" was not imported: ${failures.join('; ')}`);
+    deps.notifyImportProgress?.({ type: 'import_progress', phase: 'error', message: error.message, fraction: null, error: error.message }, userId);
+    throw error;
   }
 
   async function translateImportedPresetLabels(

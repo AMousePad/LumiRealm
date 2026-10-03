@@ -1662,6 +1662,7 @@ const realmHandle: RealmBackendHandle = setupRealmBackend({
   importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) =>
     importCardFromBytes(bytes, fileName, userId),
   createPreset: (input, uid) => spindle.presets.create(input, uid),
+  deletePreset: (presetId, uid) => spindle.presets.delete(presetId, uid),
   translatePresetLabels: (preset, opts) =>
     translatePresetLabels(preset, opts, { generate: generatePresetLabels }),
   regexApi: spindle.regex_scripts,

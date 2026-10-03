@@ -541,6 +541,9 @@ describe('Preset import via Realm backend', () => {
           updated_at: Date.now(),
         };
       },
+      deletePreset: async () => {
+        throw new Error('unexpected preset delete');
+      },
       regexApi: {
         create: async (input) => {
           createdRegex.push(input);
@@ -549,6 +552,9 @@ describe('Preset import via Realm backend', () => {
             can_mutate: true,
             ...input,
           } as any;
+        },
+        delete: async () => {
+          throw new Error('unexpected regex delete');
         },
       },
       toast: (msg) => {

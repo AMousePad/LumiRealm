@@ -14240,6 +14240,7 @@ function translateRisuPreset(raw, fallbackName = "Imported Preset") {
   const toggleGroups = parseRisuToggleSyntax(raw.customPromptTemplateToggle);
   const { blocks, defaultsByBlockId } = translateRisuPromptBlocks(raw.promptTemplate, toggleGroups);
   const regexScripts = [];
+  let skippedRegex = [];
   if (Array.isArray(raw.regex) && raw.regex.length > 0) {
     const mapRes = mapRegex(raw.regex, {
       characterId: "global-preset",
@@ -14247,6 +14248,7 @@ function translateRisuPreset(raw, fallbackName = "Imported Preset") {
       scopeId: null,
       folder: name
     });
+    skippedRegex = mapRes.skipped;
     for (const r of mapRes.rows) {
       regexScripts.push({
         name: r.name,
@@ -14292,10 +14294,16 @@ function translateRisuPreset(raw, fallbackName = "Imported Preset") {
       promptVariables: defaultsByBlockId
     }
   };
-  return { preset, regexScripts };
+  return { preset, regexScripts, skippedRegex };
 }
 
 // src/realm/backend.ts
+class PresetRegexImportError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "PresetRegexImportError";
+  }
+}
 function isRealmFrontendMessage(msg) {
   return msg.type === "realm_search" || msg.type === "realm_info" || msg.type === "realm_download";
 }
@@ -14407,7 +14415,10 @@ function setupRealmBackend(deps) {
     deps.notifyImportProgress?.({ type: "import_progress", phase: "decoding", message: `Decoding preset ${fileName}`, fraction: 0.2, error: null }, userId);
     const raw = await decodeRisuPreset(bytes, fileName);
     deps.notifyImportProgress?.({ type: "import_progress", phase: "translating", message: `Translating preset ${raw.name || fileName}`, fraction: 0.5, error: null }, userId);
-    const { preset: translatedPreset, regexScripts } = translateRisuPreset(raw, fileName);
+    const { preset: translatedPreset, regexScripts, skippedRegex } = translateRisuPreset(raw, fileName);
+    if (skippedRegex.length > 0) {
+      failPresetRegexImport(translatedPreset.name, skippedRegex.map((s) => `rule ${s.index + 1} "${s.script.comment ?? ""}" uses @@${s.action}, which LumiRealm cannot run from a preset`), userId);
+    }
     const presetInput = opts?.labelTranslation === undefined ? translatedPreset : await translateImportedPresetLabels(translatedPreset, opts.labelTranslation.connectionId, userId);
     if (!deps.createPreset) {
       throw new Error("Host preset creation is unavailable");
@@ -14415,22 +14426,40 @@ function setupRealmBackend(deps) {
     deps.notifyImportProgress?.({ type: "import_progress", phase: "saving_payload", message: `Saving preset to Lumiverse`, fraction: 0.8, error: null }, userId);
     const created = await deps.createPreset(presetInput, userId);
     log.info(`importPresetFromBytes: created preset id=${created.id} name="${created.name}"`);
-    const regexImported = await installPresetRegex(created, regexScripts, userId);
-    deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexImported > 0 ? `, ${regexImported} regex` : ""})`, "success");
+    await installPresetRegex(created, regexScripts, userId);
+    deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexScripts.length > 0 ? `, ${regexScripts.length} regex` : ""})`, "success");
     deps.notifyImportProgress?.({ type: "import_progress", phase: "done", message: `Preset "${created.name}" imported successfully`, fraction: 1, error: null }, userId);
   }
   async function installPresetRegex(preset, rules, userId) {
-    let installed = 0;
+    const failures = [];
+    const unboundIds = [];
     for (const rule of rules) {
       const input = { ...rule, preset_id: preset.id };
       try {
-        await deps.regexApi.create(input, userId);
-        installed++;
+        const row = await deps.regexApi.create(input, userId);
+        if (row.preset_id !== preset.id) {
+          unboundIds.push(row.id);
+          failures.push(`"${rule.name}" was stored without its preset link, which this Lumiverse version does not support`);
+        }
       } catch (err) {
-        log.warn(`importPresetFromBytes: regex create failed for "${rule.name}": ${errMessage(err)}`);
+        failures.push(`"${rule.name}": ${errMessage(err)}`);
       }
     }
-    return installed;
+    if (failures.length === 0)
+      return;
+    try {
+      for (const id of unboundIds)
+        await deps.regexApi.delete(id, userId);
+      await deps.deletePreset(preset.id, userId);
+    } catch (err) {
+      failures.push(`removing the partial import failed: ${errMessage(err)}`);
+    }
+    failPresetRegexImport(preset.name, failures, userId);
+  }
+  function failPresetRegexImport(presetName, failures, userId) {
+    const error = new PresetRegexImportError(`Preset "${presetName}" was not imported: ${failures.join("; ")}`);
+    deps.notifyImportProgress?.({ type: "import_progress", phase: "error", message: error.message, fraction: null, error: error.message }, userId);
+    throw error;
   }
   async function translateImportedPresetLabels(preset, connectionId, userId) {
     const translate = deps.translatePresetLabels;
@@ -38023,6 +38052,7 @@ var realmHandle = setupRealmBackend({
   },
   importCardFromBytes: (bytes, fileName, userId) => importCardFromBytes(bytes, fileName, userId),
   createPreset: (input, uid) => spindle.presets.create(input, uid),
+  deletePreset: (presetId, uid) => spindle.presets.delete(presetId, uid),
   translatePresetLabels: (preset, opts) => translatePresetLabels(preset, opts, { generate: generatePresetLabels }),
   regexApi: spindle.regex_scripts,
   notifyImportProgress: (progress, uid) => send(progress, uid),

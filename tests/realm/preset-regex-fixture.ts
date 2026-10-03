@@ -54,20 +54,29 @@ export interface RegexStore {
   readonly creates: RegexScriptCreateDTO[];
   all(): readonly StoredRegexRow[];
   rowsFor(userId: string): HostRegexRow[];
-  api: Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'>;
+  /** The host's preset-delete cascade: every row bound to the preset goes with it. */
+  deletePresetRows(presetId: string): void;
+  api: Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update' | 'delete'>;
+}
+
+export interface RegexStoreOptions {
+  /** Runs as each create reaches the host, before the row exists; throwing rejects the create. */
+  readonly beforeCreate?: (input: RegexScriptCreateDTO) => void;
+  /** Models a host that predates extension preset links and stores rows unbound. */
+  readonly dropPresetLink?: boolean;
 }
 
 /**
  * Minimal host stand-in: rows are per user, `can_mutate` marks extension-owned
  * rows, and paging is honored so callers have to walk every page.
  */
-export function makeRegexStore(): RegexStore {
-  const stored: StoredRegexRow[] = [];
+export function makeRegexStore(options: RegexStoreOptions = {}): RegexStore {
+  let stored: StoredRegexRow[] = [];
   const calls = { list: 0, create: 0, update: 0 };
   const creates: RegexScriptCreateDTO[] = [];
   let seq = 0;
 
-  const api: Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update'> = {
+  const api: Pick<SpindleAPI['regex_scripts'], 'list' | 'create' | 'update' | 'delete'> = {
     async list(listOptions?: RegexScriptListOptionsDTO) {
       calls.list++;
       const userId = listOptions?.userId ?? '';
@@ -86,6 +95,7 @@ export function makeRegexStore(): RegexStore {
     async create(input: RegexScriptCreateDTO, userId?: string) {
       calls.create++;
       creates.push(input);
+      options.beforeCreate?.(input);
       seq++;
       const dto: HostRegexRow = {
         id: `row-${seq}`,
@@ -108,7 +118,7 @@ export function makeRegexStore(): RegexStore {
         sort_order: input.sort_order ?? 0,
         description: input.description ?? '',
         folder: input.folder ?? '',
-        preset_id: (input as { readonly preset_id?: string }).preset_id ?? null,
+        preset_id: options.dropPresetLink ? null : (input as { readonly preset_id?: string }).preset_id ?? null,
         metadata: { ...(input.metadata ?? {}) },
         created_at: 1000 + seq,
         updated_at: 1000 + seq,
@@ -134,6 +144,11 @@ export function makeRegexStore(): RegexStore {
       dto.updated_at = dto.updated_at + 1;
       return { ...dto };
     },
+    async delete(scriptId: string, userId?: string) {
+      const before = stored.length;
+      stored = stored.filter((r) => !(r.dto.id === scriptId && r.userId === (userId ?? '')));
+      return stored.length < before;
+    },
   };
 
   return {
@@ -142,6 +157,9 @@ export function makeRegexStore(): RegexStore {
     api,
     all: () => stored,
     rowsFor: (userId: string) => stored.filter((row) => row.userId === userId).map((row) => ({ ...row.dto })),
+    deletePresetRows: (presetId: string) => {
+      stored = stored.filter((row) => row.dto.preset_id !== presetId);
+    },
   };
 }
 
@@ -151,6 +169,10 @@ export interface PresetBackendHarness {
   readonly creates: UserPresetCreateDTO[];
   /** Ids of the presets created, in call order. */
   readonly presetIds: readonly string[];
+  /** Ids of the presets deleted, in call order. */
+  readonly deletedPresetIds: readonly string[];
+  /** Every import_progress phase reported, in order. */
+  readonly progress: readonly { readonly phase: string; readonly message: string }[];
 }
 
 export function makePresetBackend(
@@ -159,6 +181,8 @@ export function makePresetBackend(
 ): PresetBackendHarness {
   const creates: UserPresetCreateDTO[] = [];
   const presetIds: string[] = [];
+  const deletedPresetIds: string[] = [];
+  const progress: { phase: string; message: string }[] = [];
   const backend = setupRealmBackend({
     send: () => {},
     log: { info: () => {}, warn: () => {}, error: () => {} },
@@ -184,8 +208,14 @@ export function makePresetBackend(
         updated_at: 1,
       };
     },
+    deletePreset: async (presetId) => {
+      deletedPresetIds.push(presetId);
+      store.deletePresetRows(presetId);
+      return true;
+    },
     regexApi: store.api,
+    notifyImportProgress: ({ phase, message }) => { progress.push({ phase, message }); },
     toast: () => {},
   });
-  return { backend, creates, presetIds };
+  return { backend, creates, presetIds, deletedPresetIds, progress };
 }
