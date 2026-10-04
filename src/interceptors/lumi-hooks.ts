@@ -68,6 +68,7 @@ import {
   listLivePromptRegexScripts,
 } from './prompt-regex-apply.js';
 import type { RunnerDispatchResult } from './prompt-regex-runner-client.js';
+import { applyRisuChatRanges } from './risu-chat-ranges.js';
 
 export interface CreateLumiInterceptorsDeps {
   readonly executeFrontend: <T>(chatId: string, characterId: string, operation: FrontendLuaOperation, userId: string | undefined, sessionId: string | undefined, signal?: AbortSignal) => Promise<T>;
@@ -729,7 +730,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             `interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but no active card resolved — shipping an UN-REGEX'd prompt.`,
           );
         }
-        return messages;
+        return applyRisuChatRanges(messages, ctx.presetMetadata);
       }
 
       return userIdAls.run(userId, async () => {
@@ -791,6 +792,8 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           }
         }
         stage.mark('promptRegex');
+        // Risu slices its chat list after prompt regex and before editRequest triggers see the request.
+        out = applyRisuChatRanges(out, ctx.presetMetadata);
 
         // Tier 3 inject_at: apply staged plans to system messages by content match. Mirrors Risu's positionParser append/prepend/replace operations on the slot's text.
         const buffers = readDecoratorBuffers(chatId);

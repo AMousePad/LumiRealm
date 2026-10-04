@@ -294,12 +294,12 @@ export function transformPresetTemplate(template: string): string {
 }
 
 /** A Risu chat item's slice as offsets from the chat end (0 is the end); a null start is the first message. */
-interface RisuChatRange {
+export interface RisuChatRange {
   readonly start: number | null;
   readonly end: number;
 }
 
-const isFromEnd = (bound: unknown): bound is number => Number.isInteger(bound) && (bound as number) < 0;
+export const isFromEnd = (bound: unknown): bound is number => Number.isInteger(bound) && (bound as number) < 0;
 
 // Risu's sendChat 'chat' case slices its chat list per item. Positive indices count from Risu's example
 // and separator prefix, which the host history lacks, and one host history cannot repeat or reorder messages.
@@ -328,7 +328,7 @@ function risuChatRanges(template: readonly Record<string, unknown>[]): RisuChatR
 export function translateRisuPromptBlocks(
   template: readonly Record<string, unknown>[] | undefined,
   toggleGroups: readonly ParsedToggleGroup[],
-): { blocks: PromptBlockDTO[]; defaultsByBlockId: Record<string, Record<string, unknown>> } {
+): { blocks: PromptBlockDTO[]; defaultsByBlockId: Record<string, Record<string, unknown>>; chatRanges: RisuChatRange[] } {
   const blocks: PromptBlockDTO[] = [];
   const defaultsByBlockId: Record<string, Record<string, unknown>> = {};
 
@@ -380,8 +380,10 @@ export function translateRisuPromptBlocks(
   let seenChat = false;
   let seenPersona = false;
   let chats = 0;
+  // Without a template Risu sends the whole chat.
+  let chatRanges: RisuChatRange[] = [{ start: null, end: 0 }];
   if (Array.isArray(template)) {
-    const chatRanges = risuChatRanges(template);
+    chatRanges = risuChatRanges(template);
     for (const item of template) {
       const type = typeof item['type'] === 'string' ? item['type'] : 'plain';
       const roleField = ['persona', 'description', 'authornote'].includes(type) ? 'role2' : 'role';
@@ -604,7 +606,7 @@ export function translateRisuPromptBlocks(
     } as PromptBlockDTO);
   }
 
-  return { blocks, defaultsByBlockId };
+  return { blocks, defaultsByBlockId, chatRanges };
 }
 
 export interface TranslatedRisuPreset {
@@ -642,7 +644,10 @@ export function translateRisuPreset(raw: RisuPresetRaw, fallbackName = 'Imported
   };
 
     const toggleGroups = parseRisuToggleSyntax(raw.customPromptTemplateToggle);
-  const { blocks, defaultsByBlockId } = translateRisuPromptBlocks(raw.promptTemplate, toggleGroups);
+  const { blocks, defaultsByBlockId, chatRanges } = translateRisuPromptBlocks(raw.promptTemplate, toggleGroups);
+  // The host always renders the whole history, so the prompt interceptor drops what these slices leave out.
+  const wholeHistory = chatRanges.at(-1)?.end === 0
+    && chatRanges.every((range, i) => range.start === (chatRanges[i - 1]?.end ?? null));
 
   const regexScripts: RegexScriptCreateDTO[] = [];
   let skippedRegex: readonly AtAtAction[] = [];
@@ -698,6 +703,7 @@ export function translateRisuPreset(raw: RisuPresetRaw, fallbackName = 'Imported
       ...(raw.aiModel ? { risuAiModel: raw.aiModel } : {}),
       ...(raw.subModel ? { risuSubModel: raw.subModel } : {}),
       promptVariables: defaultsByBlockId,
+      ...(wholeHistory ? {} : { lumirealm: { chatRanges } }),
     },
   };
 

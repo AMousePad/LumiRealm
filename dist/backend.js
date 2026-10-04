@@ -14043,8 +14043,9 @@ function translateRisuPromptBlocks(template, toggleGroups) {
   let seenChat = false;
   let seenPersona = false;
   let chats = 0;
+  let chatRanges = [{ start: null, end: 0 }];
   if (Array.isArray(template)) {
-    const chatRanges = risuChatRanges(template);
+    chatRanges = risuChatRanges(template);
     for (const item of template) {
       const type = typeof item["type"] === "string" ? item["type"] : "plain";
       const roleField = ["persona", "description", "authornote"].includes(type) ? "role2" : "role";
@@ -14238,7 +14239,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
       group: null
     });
   }
-  return { blocks, defaultsByBlockId };
+  return { blocks, defaultsByBlockId, chatRanges };
 }
 function translateRisuPreset(raw, fallbackName = "Imported Preset") {
   const name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : fallbackName;
@@ -14265,7 +14266,8 @@ function translateRisuPreset(raw, fallbackName = "Imported Preset") {
     streaming: true
   };
   const toggleGroups = parseRisuToggleSyntax(raw.customPromptTemplateToggle);
-  const { blocks, defaultsByBlockId } = translateRisuPromptBlocks(raw.promptTemplate, toggleGroups);
+  const { blocks, defaultsByBlockId, chatRanges } = translateRisuPromptBlocks(raw.promptTemplate, toggleGroups);
+  const wholeHistory = chatRanges.at(-1)?.end === 0 && chatRanges.every((range, i) => range.start === (chatRanges[i - 1]?.end ?? null));
   const regexScripts = [];
   let skippedRegex = [];
   if (Array.isArray(raw.regex) && raw.regex.length > 0) {
@@ -14318,7 +14320,8 @@ function translateRisuPreset(raw, fallbackName = "Imported Preset") {
       risuPresetName: raw.name ?? name,
       ...raw.aiModel ? { risuAiModel: raw.aiModel } : {},
       ...raw.subModel ? { risuSubModel: raw.subModel } : {},
-      promptVariables: defaultsByBlockId
+      promptVariables: defaultsByBlockId,
+      ...wholeHistory ? {} : { lumirealm: { chatRanges } }
     }
   };
   return { preset, regexScripts, skippedRegex };
@@ -30139,6 +30142,28 @@ async function listLivePromptRegexScripts(characterId, chatId, userId) {
   return out;
 }
 
+// src/interceptors/risu-chat-ranges.ts
+var isChatRange = (range) => {
+  const { start, end } = range ?? {};
+  return (start === null || isFromEnd(start)) && (end === 0 || isFromEnd(end));
+};
+function applyRisuChatRanges(messages, presetMetadata) {
+  const ranges = presetMetadata?.chatRanges;
+  if (ranges === undefined)
+    return messages;
+  if (!Array.isArray(ranges) || !ranges.every(isChatRange)) {
+    throw new TypeError(`Invalid LumiRealm preset chatRanges: ${JSON.stringify(ranges)}`);
+  }
+  const total = messages.filter((message) => message.__isChatHistory).length;
+  let index = -1;
+  return messages.filter((message) => {
+    if (!message.__isChatHistory)
+      return true;
+    index++;
+    return ranges.some((range) => (range.start === null || index >= total + range.start) && index < total + range.end);
+  });
+}
+
 // src/interceptors/lumi-hooks.ts
 function collectRuntimeModuleLorebooks(active) {
   const extra = active.card.risuPayload.extra;
@@ -30562,7 +30587,7 @@ function createLumiInterceptors(deps) {
         if (deps.isPromptRegexAuthoritative(chatId)) {
           log.error(`interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but no active card resolved \u2014 shipping an UN-REGEX'd prompt.`);
         }
-        return messages;
+        return applyRisuChatRanges(messages, ctx.presetMetadata);
       }
       return userIdAls.run(userId, async () => {
         let out = messages;
@@ -30612,6 +30637,7 @@ function createLumiInterceptors(deps) {
           }
         }
         stage.mark("promptRegex");
+        out = applyRisuChatRanges(out, ctx.presetMetadata);
         const buffers = getDecoratorBuffers(chatId);
         if (buffers && buffers.injectAt.length > 0) {
           const character = await spindle.characters.get(active.card.character_id, userId).catch(() => null);
