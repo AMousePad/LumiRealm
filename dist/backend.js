@@ -13852,6 +13852,39 @@ function namePresetBlockClosers(template) {
   }
   return result + template.slice(copied);
 }
+function trimEachBodies(template) {
+  const openings = [];
+  const blocks = [];
+  let result = "";
+  let copied = 0;
+  for (const token of template.matchAll(/\{\{|\}\}/g)) {
+    const offset = token.index;
+    if (token[0] === "{{") {
+      openings.push(offset);
+      continue;
+    }
+    const start = openings.pop();
+    if (start === undefined || openings.length > 0)
+      continue;
+    const inner = template.slice(start + 2, offset);
+    if (inner.startsWith("#")) {
+      blocks.push({ inner, bodyStart: offset + 2 });
+    } else if (inner.startsWith("/") && !inner.startsWith("//")) {
+      const block = blocks.pop();
+      if (block === undefined || blocks.length > 0)
+        continue;
+      let body = trimEachBodies(template.slice(block.bodyStart, start));
+      if (/^#each\b/.test(block.inner) && !block.inner.slice(5).trim().startsWith("::keep ")) {
+        body = body.trim().split(`
+`).map((line) => line.trimStart()).join(`
+`).trim();
+      }
+      result += template.slice(copied, block.bodyStart) + body;
+      copied = start;
+    }
+  }
+  return result + template.slice(copied);
+}
 function rewriteMacroBody(template, name, build, open = `{{${name}::`) {
   let result = "";
   let i = 0;
@@ -13962,6 +13995,7 @@ function transformPresetTemplate(template) {
   result = result.replace(/\{\{#if_pure\b/g, "{{#if");
   result = result.replace(/\{\{\/if_pure\}\}/g, "{{/if}}");
   result = namePresetBlockClosers(result);
+  result = trimEachBodies(result);
   result = rewriteMacroBody(result, "#each", translateEachHeader, "{{#each");
   result = rewriteMacroBody(result, "array", (body) => splitMacroArgs(body).join("\xA7"));
   result = result.replace(/\{\{contains::/g, "{{risuContains::");

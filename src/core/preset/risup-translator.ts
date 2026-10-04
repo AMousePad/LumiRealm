@@ -127,6 +127,38 @@ function namePresetBlockClosers(template: string): string {
   return result + template.slice(copied);
 }
 
+// Risu's blockEndMatcher passes an each body through trimLines unless its header
+// says ::keep, before any item is substituted, so the trim is static.
+function trimEachBodies(template: string): string {
+  const openings: number[] = [];
+  const blocks: { readonly inner: string; readonly bodyStart: number }[] = [];
+  let result = '';
+  let copied = 0;
+  for (const token of template.matchAll(/\{\{|\}\}/g)) {
+    const offset = token.index!;
+    if (token[0] === '{{') {
+      openings.push(offset);
+      continue;
+    }
+    const start = openings.pop();
+    if (start === undefined || openings.length > 0) continue;
+    const inner = template.slice(start + 2, offset);
+    if (inner.startsWith('#')) {
+      blocks.push({ inner, bodyStart: offset + 2 });
+    } else if (inner.startsWith('/') && !inner.startsWith('//')) {
+      const block = blocks.pop();
+      if (block === undefined || blocks.length > 0) continue;
+      let body = trimEachBodies(template.slice(block.bodyStart, start));
+      if (/^#each\b/.test(block.inner) && !block.inner.slice(5).trim().startsWith('::keep ')) {
+        body = body.trim().split('\n').map((line) => line.trimStart()).join('\n').trim();
+      }
+      result += template.slice(copied, block.bodyStart) + body;
+      copied = start;
+    }
+  }
+  return result + template.slice(copied);
+}
+
 /**
  * Rewrites one Risu macro in place while keeping a dynamic body intact. A plain
  * regex cannot: Risu allows a macro as another macro's argument
@@ -186,7 +218,7 @@ function splitMacroArgs(body: string): string[] {
 
 // Risu's each header (blockStartMatcher) is `[::keep] [as] LIST as NAME` or `LIST NAME`.
 // risuList re-joins the Risu array on §, which the host loop splits on instead of
-// commas; the host trims items and skips blank ones, which Risu keeps.
+// commas; the # flag asks the host to keep item whitespace and blank items as Risu does.
 function translateEachHeader(header: string): string {
   let t2 = header.trim();
   if (t2.startsWith('::keep ')) t2 = t2.substring(7).trim();
@@ -273,6 +305,7 @@ export function transformPresetTemplate(template: string): string {
   result = result.replace(/\{\{\/if_pure\}\}/g, '{{/if}}');
 
   result = namePresetBlockClosers(result);
+  result = trimEachBodies(result);
 
   // 5. Map common CBS helpers to namespaced compatibility macros. Risu's list
   //    construction ({{array::a::b}}) becomes the § list Risu's parseArray reads

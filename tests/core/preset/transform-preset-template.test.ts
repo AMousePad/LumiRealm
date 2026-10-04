@@ -50,6 +50,16 @@ describe('transformPresetTemplate', () => {
       .toBe('{{// note}}{{#if 1}}A{{/if}}');
   });
 
+  it('trims each bodies the way Risu does unless the header keeps them', () => {
+    expect(transformPresetTemplate('{{#each [1, 2, 3] as n}}{{slot::n}} {{/}}'))
+      .toBe('{{#each::{{risuList::[1, 2, 3]}}::n::§}}{{getvar::n}}{{/each}}');
+    expect(transformPresetTemplate('{{#each a,b as n}}\n  - {{slot::n}}\n    {{#each c as m}}\n      {{slot::m}}\n    {{/}}\n{{/}}'))
+      .toBe('{{#each::{{risuList::a,b}}::n::§}}- {{getvar::n}}\n{{#each::{{risuList::c}}::m::§}}{{getvar::m}}{{/each}}{{/each}}');
+    expect(transformPresetTemplate('{{#each ::keep [1, 2] as n}}\n  {{slot::n}} {{/}}'))
+      .toBe('{{#each::{{risuList::[1, 2]}}::n::§}}\n  {{getvar::n}} {{/each}}');
+    expect(transformPresetTemplate('{{#if 1}}\n  A\n{{/if}}')).toBe('{{#if 1}}\n  A\n{{/if}}');
+  });
+
   it('maps Risu getvar to the chat-variable reader before loop reads become host getvar', () => {
     expect(transformPresetTemplate('{{getvar::{{slot::n}}}}{{tempvar::t}}'))
       .toBe('{{risuChatVar::{{getvar::n}}}}{{getvar::t}}');
