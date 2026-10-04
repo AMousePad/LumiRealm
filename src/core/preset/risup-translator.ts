@@ -7,6 +7,7 @@ import type {
 import type { RisuPresetRaw } from './risup-decoder.js';
 import { mapRegex, type AtAtAction } from '../mappers/regex.js';
 import { newUuid } from '../mappers/util.js';
+import { TranslationError } from '../errors.js';
 
 export interface ParsedToggleGroup {
   readonly name: string;
@@ -292,6 +293,38 @@ export function transformPresetTemplate(template: string): string {
   return result;
 }
 
+/** A Risu chat item's slice as offsets from the chat end (0 is the end); a null start is the first message. */
+interface RisuChatRange {
+  readonly start: number | null;
+  readonly end: number;
+}
+
+const isFromEnd = (bound: unknown): bound is number => Number.isInteger(bound) && (bound as number) < 0;
+
+// Risu's sendChat 'chat' case slices its chat list per item. Positive indices count from Risu's example
+// and separator prefix, which the host history lacks, and one host history cannot repeat or reorder messages.
+function risuChatRanges(template: readonly Record<string, unknown>[]): RisuChatRange[] {
+  const ranges: RisuChatRange[] = [];
+  for (const item of template) {
+    if (item['type'] !== 'chat') continue;
+    const { rangeStart = 0, rangeEnd = 'end' } = item;
+    const label = `Risu chat item range [${JSON.stringify(rangeStart)}, ${JSON.stringify(rangeEnd)}]`;
+    let range: RisuChatRange = { start: null, end: 0 };
+    if (rangeStart !== -1000) {
+      if (!(rangeStart === 0 || isFromEnd(rangeStart)) || !(rangeEnd === 'end' || isFromEnd(rangeEnd))) {
+        throw new TranslationError('risup/unsupported_chat_range', `${label} is not relative to the chat end`);
+      }
+      range = { start: rangeStart === 0 ? null : rangeStart, end: rangeEnd === 'end' ? 0 : rangeEnd };
+    }
+    const previous = ranges.at(-1);
+    if ((range.start !== null && range.start >= range.end) || (previous && (range.start === null || range.start < previous.end))) {
+      throw new TranslationError('risup/unsupported_chat_range', `${label} is empty or overlaps an earlier chat item`);
+    }
+    ranges.push(range);
+  }
+  return ranges;
+}
+
 export function translateRisuPromptBlocks(
   template: readonly Record<string, unknown>[] | undefined,
   toggleGroups: readonly ParsedToggleGroup[],
@@ -346,7 +379,9 @@ export function translateRisuPromptBlocks(
   // 3. Prompt template items
   let seenChat = false;
   let seenPersona = false;
+  let chats = 0;
   if (Array.isArray(template)) {
+    const chatRanges = risuChatRanges(template);
     for (const item of template) {
       const type = typeof item['type'] === 'string' ? item['type'] : 'plain';
       const roleField = ['persona', 'description', 'authornote'].includes(type) ? 'role2' : 'role';
@@ -364,6 +399,9 @@ export function translateRisuPromptBlocks(
         : null;
       const type2 = typeof item['type2'] === 'string' ? item['type2'] : 'normal';
       const enabled = type2 !== 'disabled' && item['enabled'] !== false;
+      // The host renders one history, so items between two chat items sit inside it where the earlier slice ends.
+      const position = !seenChat ? 'pre_history' : chats < chatRanges.length ? 'in_history' : 'post_history';
+      const depth = position === 'in_history' ? -chatRanges[chats - 1]!.end : 0;
 
       if (type === 'plain') {
         blocks.push({
@@ -371,8 +409,8 @@ export function translateRisuPromptBlocks(
           name: name || (type2 === 'main' ? '# System Rule' : 'Prompt Block'),
           role,
           enabled,
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: text,
           isLocked: false,
@@ -381,6 +419,7 @@ export function translateRisuPromptBlocks(
       group: null,
         } as PromptBlockDTO);
       } else if (type === 'chat') {
+        chats++;
         if (!seenChat) {
           seenChat = true;
           blocks.push({
@@ -392,21 +431,6 @@ export function translateRisuPromptBlocks(
             depth: 0,
             marker: 'chat_history',
             content: '',
-            isLocked: false,
-            color: null,
-            injectionTrigger: [],
-      group: null,
-          } as PromptBlockDTO);
-        } else {
-          blocks.push({
-            id: newUuid(),
-            name: name || 'Chat History (Split)',
-            role,
-            enabled,
-            position: 'in_history',
-            depth: 0,
-            marker: null,
-            content: text,
             isLocked: false,
             color: null,
             injectionTrigger: [],
@@ -430,8 +454,8 @@ export function translateRisuPromptBlocks(
           name: name || 'User Persona',
           role,
           enabled,
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: personaMarker,
           content: personaContent,
           isLocked: false,
@@ -449,8 +473,8 @@ export function translateRisuPromptBlocks(
           name: name || 'Character Description',
           role,
           enabled,
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: descContent === '{{description}}' ? 'char_description' : null,
           content: descContent,
           isLocked: false,
@@ -464,6 +488,8 @@ export function translateRisuPromptBlocks(
           name: name || 'World Info',
           role: 'system',
           enabled,
+          // Deliberate divergence: the host emits world-info markers in prompt order regardless of
+          // position, so a lorebook between two chat items lands after the history.
           position: seenChat ? 'post_history' : 'pre_history',
           depth: 0,
           marker: seenChat ? 'world_info_after' : 'world_info_before',
@@ -486,8 +512,8 @@ export function translateRisuPromptBlocks(
           name: name || "Author's Note",
           role,
           enabled,
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: anContent,
           isLocked: false,
@@ -501,8 +527,8 @@ export function translateRisuPromptBlocks(
           name: name || 'Long Term Memory',
           role: 'system',
           enabled,
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: text,
           isLocked: false,
@@ -516,8 +542,8 @@ export function translateRisuPromptBlocks(
           name: name || 'Cache Point',
           role: 'system',
           enabled,
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: text,
           isLocked: false,
@@ -531,8 +557,8 @@ export function translateRisuPromptBlocks(
           name: name || 'Jailbreak',
           role: role === 'assistant' ? 'assistant' : (role === 'user' ? 'user' : 'system'),
           enabled,
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: 'jailbreak',
           content: text || '{{jailbreak}}',
           isLocked: false,
@@ -548,8 +574,8 @@ export function translateRisuPromptBlocks(
           name: name || String(type),
           role,
           enabled,
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: text,
           isLocked: false,

@@ -13975,6 +13975,29 @@ function transformPresetTemplate(template) {
   result = result.replace(/\{\{not_equal::/g, "{{risuNotEqual::");
   return result;
 }
+var isFromEnd = (bound) => Number.isInteger(bound) && bound < 0;
+function risuChatRanges(template) {
+  const ranges = [];
+  for (const item of template) {
+    if (item["type"] !== "chat")
+      continue;
+    const { rangeStart = 0, rangeEnd = "end" } = item;
+    const label = `Risu chat item range [${JSON.stringify(rangeStart)}, ${JSON.stringify(rangeEnd)}]`;
+    let range = { start: null, end: 0 };
+    if (rangeStart !== -1000) {
+      if (!(rangeStart === 0 || isFromEnd(rangeStart)) || !(rangeEnd === "end" || isFromEnd(rangeEnd))) {
+        throw new TranslationError("risup/unsupported_chat_range", `${label} is not relative to the chat end`);
+      }
+      range = { start: rangeStart === 0 ? null : rangeStart, end: rangeEnd === "end" ? 0 : rangeEnd };
+    }
+    const previous = ranges.at(-1);
+    if (range.start !== null && range.start >= range.end || previous && (range.start === null || range.start < previous.end)) {
+      throw new TranslationError("risup/unsupported_chat_range", `${label} is empty or overlaps an earlier chat item`);
+    }
+    ranges.push(range);
+  }
+  return ranges;
+}
 function translateRisuPromptBlocks(template, toggleGroups) {
   const blocks = [];
   const defaultsByBlockId = {};
@@ -14019,7 +14042,9 @@ function translateRisuPromptBlocks(template, toggleGroups) {
   }
   let seenChat = false;
   let seenPersona = false;
+  let chats = 0;
   if (Array.isArray(template)) {
+    const chatRanges = risuChatRanges(template);
     for (const item of template) {
       const type = typeof item["type"] === "string" ? item["type"] : "plain";
       const roleField = ["persona", "description", "authornote"].includes(type) ? "role2" : "role";
@@ -14030,14 +14055,16 @@ function translateRisuPromptBlocks(template, toggleGroups) {
       const name = typeof item["name"] === "string" && item["name"].trim() && item["name"] !== "undefined" ? item["name"].trim() : null;
       const type2 = typeof item["type2"] === "string" ? item["type2"] : "normal";
       const enabled = type2 !== "disabled" && item["enabled"] !== false;
+      const position = !seenChat ? "pre_history" : chats < chatRanges.length ? "in_history" : "post_history";
+      const depth = position === "in_history" ? -chatRanges[chats - 1].end : 0;
       if (type === "plain") {
         blocks.push({
           id: newUuid(),
           name: name || (type2 === "main" ? "# System Rule" : "Prompt Block"),
           role,
           enabled,
-          position: seenChat ? "post_history" : "pre_history",
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: text,
           isLocked: false,
@@ -14046,6 +14073,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           group: null
         });
       } else if (type === "chat") {
+        chats++;
         if (!seenChat) {
           seenChat = true;
           blocks.push({
@@ -14062,21 +14090,6 @@ function translateRisuPromptBlocks(template, toggleGroups) {
             injectionTrigger: [],
             group: null
           });
-        } else {
-          blocks.push({
-            id: newUuid(),
-            name: name || "Chat History (Split)",
-            role,
-            enabled,
-            position: "in_history",
-            depth: 0,
-            marker: null,
-            content: text,
-            isLocked: false,
-            color: null,
-            injectionTrigger: [],
-            group: null
-          });
         }
       } else if (type === "persona") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
@@ -14088,8 +14101,8 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           name: name || "User Persona",
           role,
           enabled,
-          position: seenChat ? "post_history" : "pre_history",
-          depth: 0,
+          position,
+          depth,
           marker: personaMarker,
           content: personaContent,
           isLocked: false,
@@ -14105,8 +14118,8 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           name: name || "Character Description",
           role,
           enabled,
-          position: seenChat ? "post_history" : "pre_history",
-          depth: 0,
+          position,
+          depth,
           marker: descContent === "{{description}}" ? "char_description" : null,
           content: descContent,
           isLocked: false,
@@ -14137,8 +14150,8 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           name: name || "Author's Note",
           role,
           enabled,
-          position: seenChat ? "post_history" : "pre_history",
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: anContent,
           isLocked: false,
@@ -14152,8 +14165,8 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           name: name || "Long Term Memory",
           role: "system",
           enabled,
-          position: seenChat ? "post_history" : "pre_history",
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: text,
           isLocked: false,
@@ -14167,8 +14180,8 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           name: name || "Cache Point",
           role: "system",
           enabled,
-          position: seenChat ? "post_history" : "pre_history",
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: text,
           isLocked: false,
@@ -14182,8 +14195,8 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           name: name || "Jailbreak",
           role: role === "assistant" ? "assistant" : role === "user" ? "user" : "system",
           enabled,
-          position: seenChat ? "post_history" : "pre_history",
-          depth: 0,
+          position,
+          depth,
           marker: "jailbreak",
           content: text || "{{jailbreak}}",
           isLocked: false,
@@ -14197,8 +14210,8 @@ function translateRisuPromptBlocks(template, toggleGroups) {
           name: name || String(type),
           role,
           enabled,
-          position: seenChat ? "post_history" : "pre_history",
-          depth: 0,
+          position,
+          depth,
           marker: null,
           content: text,
           isLocked: false,
