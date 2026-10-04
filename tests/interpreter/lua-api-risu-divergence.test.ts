@@ -81,13 +81,13 @@ describe('Lua API Risu divergences', () => {
     expect(fixture.messages.map(message => message.content)).toEqual(['Greeting', 'Welcome']);
   });
 
-  divergence('getLoreBooks filters by exact comment and returns parsed entry objects', async () => {
-    const fixture = await captureLuaRuntime();
+  test('getLoreBooks filters by exact comment and returns parsed entry objects', async () => {
+    const fixture = await captureLuaRuntime({ templateContext: async () => ({ variables: {}, character: {}, chat: {}, commit: false, chatId: 'test-chat', charName: 'Character', userName: 'User' }) });
     const books = JSON.parse(String(await fixture.call('getLoreBooksMain', 'Inventory')));
     expect(books).toEqual([expect.objectContaining({ comment: 'Inventory', content: 'Item Character' })]);
   });
 
-  divergence('getLoreBooks returns no entries for a missing comment', async () => {
+  test('getLoreBooks returns no entries for a missing comment', async () => {
     const fixture = await captureLuaRuntime();
     expect(JSON.parse(String(await fixture.call('getLoreBooksMain', 'Missing')))).toEqual([]);
   });

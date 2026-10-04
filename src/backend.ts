@@ -51,6 +51,7 @@ import { parseDirectLorebook } from './payload/lorebook-direct-import.js';
 import { parseDirectRegex } from './payload/regex-direct-import.js';
 import { mapRegex } from './core/mappers/regex.js';
 import { createRegexImporter } from './state/regex-import.js';
+import { applyActivePreset } from './state/preset-regex-activation.js';
 import {
   awaitRegexDelete,
   completeRegexDelete,
@@ -127,6 +128,8 @@ import { createOrphanHandlers } from './handlers/orphan.js';
 import { createRepairHandlers } from './handlers/repair.js';
 import { createLifecycleEventHandlers } from './events/lifecycle.js';
 import { createLumiInterceptors } from './interceptors/lumi-hooks.js';
+import { translatePresetLabels } from './core/preset/preset-labels.js';
+import { invalidateToggleMacroCache, registerSpindleMacros } from './interpreter/spindle-macros.js';
 import { createPromptRegexRunnerClient } from './interceptors/prompt-regex-runner-client.js';
 import { createReadonlyResolver } from './state/readonly-resolver.js';
 import { isLogTransportNoise } from './log/transport.js';
@@ -994,6 +997,16 @@ async function assembleRuntimeSnapshot(active: ActiveCard, chatId: string, userI
 }
 
 const variablesTogglesService = createVariablesTogglesService({
+  visibleChatForUser: (userId) => lastActiveChatByUser.get(userId),
+  invalidateUserToggleReaders: (userId) => {
+    invalidateToggleMacroCache(userId);
+    for (const [chatId, active] of activeCardByChat) {
+      if (active.ownerUserId !== userId) continue;
+      invalidateRenderMcpForChat(chatId);
+      invalidateMacroInterceptorForChat(chatId);
+      invalidateListenEditPreload(chatId);
+    }
+  },
   translateLang: TRANSLATE_TARGET_LANG,
   variableState,
   toggleState,
@@ -1066,6 +1079,12 @@ createLumiInterceptors({
   log,
   errMsg,
 }).registerAll();
+
+try {
+  registerSpindleMacros();
+} catch (err) {
+  log.warn(`registerSpindleMacros failed: ${errMsg(err)}`);
+}
 
 // Strip msgs[0] when it's the greeting (non-user) so cached array sits in
 // Risu frame, currentMessageIndex (also Risu-frame) indexes correctly.
@@ -1283,6 +1302,7 @@ async function processRisumUpload(
 
 
 const modulePushes = createModulePushes({
+  listWorldBookEntries: (bookId, opts) => spindle.world_books.entries.list(bookId, opts),
   translateLang: TRANSLATE_TARGET_LANG,
   readGlobalModuleIds: (userId) => readGlobalModuleIds(moduleStorage(), userId),
   readLumirealm: (charId, userId) => readLumirealm(charactersApi(), charId, userId),
@@ -1588,6 +1608,51 @@ const viewerPushDeps: ViewerPushDeps = {
 
 
 
+type PresetLabelGenerationInput = {
+  type: 'raw';
+  messages: readonly { role: string; content: string }[];
+  connection_id: string;
+  model?: string;
+  userId?: string;
+};
+
+// `generate.raw` reads `model` off the top level of the request, but the
+// installed DTO declares only connection_id/parameters/userId there, so the
+// call is typed locally. `provider` is left out on purpose: the host's
+// resolveRawProviderAndKey returns early on connection_id and ignores it.
+const rawGenerate = spindle.generate.raw as unknown as (
+  input: PresetLabelGenerationInput,
+) => Promise<unknown>;
+
+// Preset label translation runs on the connection profile the user picked in
+// the import panel. The host call needs a model, so it comes from that profile.
+const generatePresetLabels = async (request: {
+  system: string;
+  user: string;
+  connectionId: string;
+  userId: string;
+}): Promise<string> => {
+  const conn = await spindle.connections.get(request.connectionId, request.userId);
+  if (!conn) {
+    throw new Error(`Connection profile ${request.connectionId.slice(0, 8)}... not found`);
+  }
+  const result = await rawGenerate({
+    type: 'raw',
+    messages: [
+      { role: 'system', content: request.system },
+      { role: 'user', content: request.user },
+    ],
+    connection_id: conn.id,
+    ...(conn.model ? { model: conn.model } : {}),
+    userId: request.userId,
+  });
+  const content = (result as { content?: unknown } | undefined)?.content;
+  if (typeof content !== 'string' || content.trim().length === 0) {
+    throw new Error('Preset label translation: connection returned no content');
+  }
+  return content;
+};
+
 const realmHandle: RealmBackendHandle = setupRealmBackend({
   send: (msg: RealmBackendToFrontend, userId: string | undefined) => send(msg, userId),
   log: {
@@ -1597,6 +1662,17 @@ const realmHandle: RealmBackendHandle = setupRealmBackend({
   },
   importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) =>
     importCardFromBytes(bytes, fileName, userId),
+  createPreset: (input, uid) => spindle.presets.create(input, uid),
+  deletePreset: (presetId, uid) => spindle.presets.delete(presetId, uid),
+  translatePresetLabels: (preset, opts) =>
+    translatePresetLabels(preset, opts, { generate: generatePresetLabels }),
+  regexApi: spindle.regex_scripts,
+  notifyImportProgress: (progress, uid) => send(progress as any, uid),
+  toast: (msg, kind) => {
+    if (kind === 'error') spindle.toast?.error(msg);
+    else if (kind === 'warning') spindle.toast?.warning(msg);
+    else spindle.toast?.success(msg);
+  },
 });
 
 const screenHandlers = createScreenHandlers({ setScreenDims, log });
@@ -1606,7 +1682,26 @@ const consentHandlers = createConsentHandlers({
   resolvePickResolution,
   log,
 });
-const connectionsHandlers = createConnectionsHandlers({ listConnectionsForUser, log });
+const connectionsHandlers = createConnectionsHandlers({
+  listConnectionsForUser,
+  listImageConnectionsForUser: async (uid) => {
+    if (!spindle.imageGen?.listConnections) return [];
+    try {
+      const list = await spindle.imageGen.listConnections(uid);
+      return list.map((c) => ({
+        id: c.id,
+        name: c.name,
+        provider: c.provider,
+        model: c.model,
+        is_default: c.is_default,
+      }));
+    } catch (err) {
+      log.warn(`listImageConnectionsForUser failed: ${err}`);
+      return [];
+    }
+  },
+  log,
+});
 const logHandlers = createLogHandlers({
   extensionVersion: EXTENSION_VERSION,
   logStore,
@@ -1712,7 +1807,7 @@ const importHandlers = createImportHandlers({
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
   refreshVariables,
-  importAnyFormat: (bytes, name, uid) => realmHandle.importAnyFormat(bytes, name, uid),
+  importAnyFormat: (bytes, name, uid, opts) => realmHandle.importAnyFormat(bytes, name, uid, opts),
   getUpload,
   deleteUpload,
   applySvgRasterIndex,
@@ -1731,6 +1826,7 @@ const importHandlers = createImportHandlers({
   errMsg,
 });
 const orphanHandlers = createOrphanHandlers({
+  getImage: (id, userId) => spindle.images.get(id, userId),
   assetUploadsInFlightRef: { get current() { return assetUploadsInFlight; } } as { current: number },
   scanOrphanedImages,
   buildOrphanDetectDeps,
@@ -1922,6 +2018,9 @@ const handlerRegistry: HandlerRegistry = {
   display_authority: async (msg) => {
     if (msg.authoritative) feDisplayShadowOptOut.delete(msg.chatId);
     else feDisplayShadowOptOut.add(msg.chatId);
+  },
+  active_preset: async (msg, ctx) => {
+    await applyActivePreset(spindle.regex_scripts, ctx.userId, msg.presetId);
   },
 };
 

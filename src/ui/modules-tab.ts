@@ -17,6 +17,8 @@ import { sendImportText } from './import-text-upload.js';
 import * as tus from 'tus-js-client';
 import { pickNativeFile } from './native-file-picker.js';
 
+type ConnectionWire = Extract<BackendToFrontend, { type: 'connections_list_pushed' }>['connections'][number];
+
 // Mounts into a host element provided by ui/sidebar.ts.
 
 const UPLOAD_ENDPOINT = '/api/v1/spindle-uploads';
@@ -120,10 +122,11 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
   // Subtab nav (Characters / Modules / Lorebooks). Each subtab is a flat
   // body , no outer `<details>` chrome since the tab itself isolates content.
-  type ImportSubTabId = 'characters' | 'modules' | 'lorebooks' | 'regex';
+  type ImportSubTabId = 'characters' | 'modules' | 'presets' | 'lorebooks' | 'regex';
   const SUB_TABS: ReadonlyArray<{ id: ImportSubTabId; label: string; title: string }> = [
     { id: 'characters', label: 'Characters', title: 'Imported Risu cards. Click any row to manage attached modules.' },
     { id: 'modules',    label: 'Modules',    title: 'Module library. Click any row for details / delete.' },
+    { id: 'presets',    label: 'Presets',    title: 'Import RisuAI presets (.risup) into Lumiverse Loom presets.' },
     { id: 'lorebooks',  label: 'Lorebooks',  title: 'Standalone lorebook import. Creates an unattached world_book; attach via Lumiverse.' },
     { id: 'regex',      label: 'Regex',      title: 'Standalone Risu regex import. Installs global regex rules grouped under a folder.' },
   ];
@@ -275,11 +278,69 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   rxStatus.className = 'lrm-lorebook-status';
   regexBody.appendChild(rxStatus);
 
+  // ---- Presets subtab ------------------------------------------------------
+  const presetsBody = document.createElement('section');
+  presetsBody.className = 'lrm-section-body lrm-tab-body';
+
+  const presetDesc = document.createElement('div');
+  presetDesc.className = 'lrm-section-desc';
+  presetDesc.textContent =
+    'Import RisuAI prompt presets (.risup, .risupreset, or .json). Presets are converted into native Lumiverse Loom presets with prompt blocks, categories, custom variables, sampler overrides, and embedded regex rules.';
+  presetsBody.appendChild(presetDesc);
+
+  const presetToolbar = document.createElement('div');
+  presetToolbar.className = 'lrm-toolbar';
+  const presetUploadBtn = document.createElement('button');
+  presetUploadBtn.type = 'button';
+  presetUploadBtn.className = 'lrm-btn lrm-btn-primary';
+  presetUploadBtn.textContent = 'Upload preset (.risup)…';
+  presetUploadBtn.title = 'Pick a RisuAI preset (.risup, .risupreset, or .json) file to import into Lumiverse Loom presets.';
+  presetToolbar.appendChild(presetUploadBtn);
+  presetsBody.appendChild(presetToolbar);
+
+  // Opt-in label translation. Risu presets are usually authored in the card's
+  // own language, so the labels a Loom category renders are translated at
+  // import through a connection profile the user picks here. Keys, stored
+  // option values and block content are never touched.
+  let presetConnections: readonly ConnectionWire[] | null = null;
+  let presetConnectionId: string | null = null;
+  const presetLabelRow = document.createElement('div');
+  presetLabelRow.className = 'lrm-preset-labels';
+  const presetTranslateCheck = document.createElement('input');
+  presetTranslateCheck.type = 'checkbox';
+  presetTranslateCheck.className = 'lrm-preset-translate-check';
+  presetTranslateCheck.id = 'lr-preset-translate-labels';
+  const presetTranslateText = document.createElement('label');
+  presetTranslateText.className = 'lrm-preset-translate-text';
+  presetTranslateText.htmlFor = presetTranslateCheck.id;
+  presetTranslateText.textContent = 'Translate?';
+  presetTranslateText.title =
+    'Translate this preset toggle group, variable and option labels into English. Variables, option values and prompt content are kept as imported.';
+  presetLabelRow.appendChild(presetTranslateCheck);
+  presetLabelRow.appendChild(presetTranslateText);
+  presetsBody.appendChild(presetLabelRow);
+
+  const presetConnectionSelect = createSearchableSelect({
+    className: 'lrm-preset-connection',
+    placeholder: 'Loading connections…',
+    searchPlaceholder: 'Search connections…',
+    emptyMessage: 'No connections. Set one up in Lumi.',
+    items: [],
+    value: null,
+    onChange: (value) => { presetConnectionId = value; },
+  });
+  presetsBody.appendChild(presetConnectionSelect.root);
+
+  const presetStatus = document.createElement('div');
+  presetStatus.className = 'lrm-lorebook-status';
+  presetsBody.appendChild(presetStatus);
+
   // ---- Subtab activation ---------------------------------------------------
   const panelsHost = document.createElement('div');
   panelsHost.className = 'lr-subtab-panels';
   panelsHost.appendChild(charBody);
   panelsHost.appendChild(libBody);
+  panelsHost.appendChild(presetsBody);
   panelsHost.appendChild(lorebooksBody);
   panelsHost.appendChild(regexBody);
   root.appendChild(panelsHost);
@@ -293,8 +354,14 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     }
     charBody.hidden = id !== 'characters';
     libBody.hidden = id !== 'modules';
+    presetsBody.hidden = id !== 'presets';
     lorebooksBody.hidden = id !== 'lorebooks';
     regexBody.hidden = id !== 'regex';
+    // The Presets panel owns its own copy of the profile list; asking only when
+    // the tab is opened keeps the import panel from polling the host on mount.
+    if (id === 'presets' && presetConnections === null) {
+      sendToBackend({ type: 'request_connections_list' });
+    }
   }
   activateSubTab(activeSubTab);
 
@@ -766,6 +833,113 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     sendToBackend({ type: 'request_modules' });
   });
 
+  // Standalone preset import (.risup / .risupreset / .json)
+  let presetImportInFlight = false;
+  presetUploadBtn.addEventListener('click', () => { void onPresetUploadClicked(); });
+  presetTranslateCheck.addEventListener('change', () => { renderPresetLabelControls(); });
+
+  // The first connection is the host default, so an untouched select still
+  // names a profile instead of silently sending the import without a target.
+  function renderPresetLabelControls(): void {
+    const list = presetConnections ?? [];
+    presetConnectionSelect.setItems(list.map((c) => ({
+      value: c.id,
+      label: c.name,
+      ...(c.model ? { secondary: c.model } : {}),
+    })));
+    if (presetConnectionId === null || !list.some((c) => c.id === presetConnectionId)) {
+      presetConnectionId = (list.find((c) => c.is_default) ?? list[0])?.id ?? null;
+    }
+    presetConnectionSelect.setValue(presetConnectionId);
+    const ready = list.length > 0;
+    if (!ready) presetTranslateCheck.checked = false;
+    presetTranslateCheck.disabled = !ready;
+    presetConnectionSelect.setDisabled(!ready || !presetTranslateCheck.checked);
+  }
+  renderPresetLabelControls();
+
+  async function onPresetUploadClicked(): Promise<void> {
+    if (presetImportInFlight) return;
+    let file: File | null = null;
+    try {
+      file = await pickNativeFile(['.risup', '.risupreset', '.json']);
+    } catch (err) {
+      setPresetStatus(`File pick failed: ${errMsg(err)}`, true);
+      return;
+    }
+    if (!file) return;
+
+    presetImportInFlight = true;
+    presetUploadBtn.disabled = true;
+    const fileName = file.name;
+    const totalBytes = file.size;
+    setPresetStatus(`Uploading "${fileName}" (${(totalBytes / 1024).toFixed(1)} KB)…`, false);
+
+    let cancelled = false;
+    opts.onImportStart?.(fileName, () => {
+      cancelled = true;
+      if (activeTus) { void activeTus.abort(true).catch(() => {}); activeTus = null; }
+      presetImportInFlight = false;
+      presetUploadBtn.disabled = false;
+      setPresetStatus('Import cancelled', false);
+    }, totalBytes);
+
+    const upload = new tus.Upload(file, {
+      endpoint: UPLOAD_ENDPOINT,
+      chunkSize: UPLOAD_CHUNK_BYTES,
+      retryDelays: [0, 1000, 3000, 5000, 10000],
+      removeFingerprintOnSuccess: true,
+      metadata: {
+        filename: fileName,
+        extension: EXTENSION_IDENTIFIER,
+      },
+      onError: (err) => {
+        activeTus = null;
+        if (cancelled) return;
+        presetImportInFlight = false;
+        presetUploadBtn.disabled = false;
+        setPresetStatus(`Upload failed: ${errMsg(err)}`, true);
+      },
+      onProgress: (bytesSent, bytesTotal) => {
+        opts.onUploadProgress?.(bytesSent, bytesTotal);
+      },
+      onSuccess: () => {
+        activeTus = null;
+        if (cancelled) return;
+        const uploadId = upload.url?.split('/').pop();
+        if (!uploadId) {
+          presetImportInFlight = false;
+          presetUploadBtn.disabled = false;
+          setPresetStatus('Could not read upload ID from endpoint', true);
+          return;
+        }
+        const labelTranslation = presetTranslateCheck.checked && presetConnectionId !== null
+          ? { connectionId: presetConnectionId }
+          : null;
+        setPresetStatus(
+          labelTranslation === null
+            ? `Processing "${fileName}" on server…`
+            : `Processing "${fileName}" on server (translating labels)…`,
+          false,
+        );
+        sendToBackend({
+          type: 'import_card_from_upload',
+          uploadId,
+          fileName,
+          ...(labelTranslation !== null ? { presetLabelTranslation: labelTranslation } : {}),
+        });
+      },
+    });
+
+    activeTus = upload;
+    upload.start();
+  }
+
+  function setPresetStatus(msg: string, isError: boolean): void {
+    presetStatus.textContent = msg;
+    presetStatus.classList.toggle('lrm-status-error', isError);
+  }
+
   // Standalone lorebook import. Large files upload via tus (sendImportText)
   // so they survive the 4MB single-frame WS cap.
   let lorebookImportInFlight = false;
@@ -1010,6 +1184,10 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         render();
         break;
       }
+      case 'connections_list_pushed':
+        presetConnections = msg.connections;
+        renderPresetLabelControls();
+        break;
       case 'modules_pushed':
         modules = msg.modules;
         globalModuleIds = msg.global_module_ids ?? [];
@@ -1053,6 +1231,19 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         void onStandaloneRegexInstall(msg);
         break;
       case 'import_progress':
+        if (presetImportInFlight) {
+          if (msg.phase === 'done') {
+            presetImportInFlight = false;
+            presetUploadBtn.disabled = false;
+            setPresetStatus(msg.message, false);
+          } else if (msg.phase === 'error') {
+            presetImportInFlight = false;
+            presetUploadBtn.disabled = false;
+            setPresetStatus(msg.message || msg.error || 'Import failed', true);
+          } else {
+            setPresetStatus(msg.message, false);
+          }
+        }
         if (processingTimer) {
           if (msg.phase === 'done') {
             finishModuleUpload();

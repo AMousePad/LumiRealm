@@ -37,7 +37,8 @@ export type RuntimeStateCommand =
   | { kind: 'lore.delete'; id: string };
 
 export type RuntimeSettings = Pick<RisuCompatSettings, 'auxConnectionId' | 'auxModelOverride' | 'auxSamplers' | 'auxPrefillCompat'
-  | 'submodelConnectionId' | 'submodelModelOverride' | 'submodelSamplers' | 'submodelPrefillCompat' | 'auxDebugCaptureRequest' | 'auxDebugCaptureResponse'>;
+  | 'submodelConnectionId' | 'submodelModelOverride' | 'submodelSamplers' | 'submodelPrefillCompat' | 'auxDebugCaptureRequest' | 'auxDebugCaptureResponse'
+  | 'imageConnectionId' | 'imageModelOverride' | 'naiSettings'>;
 export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: DisplaySnapshot; settings: RuntimeSettings }
 export type RuntimeService =
   | { kind: 'bootstrap' }
@@ -46,6 +47,9 @@ export type RuntimeService =
   | { kind: 'llm.generate'; request: Parameters<NonNullable<HostApi['llm']>['generate']>[0] }
   | { kind: 'connections.list' }
   | { kind: 'tokens.count'; text: string }
+  | { kind: 'image.generate'; prompt: string; options?: Parameters<NonNullable<HostApi['imageGen']>['generate']>[1] }
+  | { kind: 'image.upload'; dataUrl: string; name?: string }
+  | { kind: 'request'; url: string }
   | { kind: 'chat.inject'; id: string; content: string; options?: Parameters<HostApi['chat']['inject']>[2] };
 
 export function runtimeMessage(message: RuntimeMessageDto): HostMessage {

@@ -66,7 +66,7 @@ for (const engine of [chromium, firefox]) {
     });
     assert.deepEqual(result.metrics, {
       width: '300px', height: '300px', position: 'absolute', overlapping: true,
-      headingSize: '24.75px', lineHeight: '20px', action: 'preserved', actionColor: 'rgb(44, 55, 66)',
+      headingSize: '24.75px', lineHeight: 'normal', action: 'preserved', actionColor: 'rgb(44, 55, 66)',
     });
     assert.deepEqual(result.before, result.after);
     assert(result.replacementHasStyles);

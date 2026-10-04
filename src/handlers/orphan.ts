@@ -9,6 +9,7 @@ export interface OrphanHandlerDeps {
   readonly assetUploadsInFlightRef: { readonly current: number };
   readonly scanOrphanedImages: (userId: string) => Promise<OrphanScanReport>;
   readonly buildOrphanDetectDeps: (userId: string) => OrphanDetectDeps;
+  readonly getImage: (id: string, userId: string) => Promise<{ owner_chat_id: string | null } | null>;
   readonly deleteImageIds: (
     ids: readonly string[],
     userId: string,
@@ -108,7 +109,7 @@ export function createOrphanHandlers(deps: OrphanHandlerDeps): {
         const skippedIds: string[] = [];
         for (const id of msg.imageIds) {
           if (typeof id !== 'string' || id.length === 0) continue;
-          if (live.liveIds.has(id)) {
+          if (live.liveIds.has(id) || (await deps.getImage(id, ctx.userId))?.owner_chat_id) {
             skippedIds.push(id);
             continue;
           }

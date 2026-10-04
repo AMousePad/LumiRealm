@@ -20,6 +20,7 @@ interface CachedSnapshot {
   readonly snapshot: TriggerRuntimePreloaded;
   readonly ts: number;
   readonly characterId: string | null;
+  readonly userId: string | undefined;
 }
 
 // Module-scoped cache. Key: chatId. Short TTL so we don't serve stale data
@@ -69,11 +70,12 @@ export async function preloadForListenEditChain(
   // Cache lookup gated on chatId; without one we can't key.
   if (chatId) {
     const cached = cache.get(chatId);
-    if (cached && Date.now() - cached.ts < CACHE_TTL_MS && cached.characterId === (characterId ?? null)) {
+    if (cached && Date.now() - cached.ts < CACHE_TTL_MS && cached.characterId === (characterId ?? null) && cached.userId === api.userId) {
       log.trace(`cache.hit chat=${chatId} age=${Date.now() - cached.ts}ms ` +
           `entries=${cached.snapshot.lorebook?.entries.length ?? 0} msgs=${cached.snapshot.messagesRaw?.length ?? 0}`,
       );
-      return cached.snapshot;
+      // Preferences are user-global and can change without a chat mutation.
+      return { ...cached.snapshot, globalVars: await loadGlobalVars(api) };
     }
   }
 
@@ -96,6 +98,7 @@ export async function preloadForListenEditChain(
   else log.warn(`loadVars failed — ${(varsResult.reason as { message?: string })?.message ?? varsResult.reason}`);
 
   let globalVars: Record<string, string | null> | undefined;
+  if (globalVarsResult.status === 'rejected' && api.getGlobalVariables) throw globalVarsResult.reason;
   if (globalVarsResult.status === 'fulfilled') globalVars = globalVarsResult.value;
   else log.warn(`loadGlobalVars failed — ${(globalVarsResult.reason as { message?: string })?.message ?? globalVarsResult.reason}`);
 
@@ -143,7 +146,7 @@ export async function preloadForListenEditChain(
   };
 
   if (chatId) {
-    cache.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null });
+    cache.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null, userId: api.userId });
   }
 
   log.trace(`preload.done chat=${chatId ?? '<none>'} parallel_fetch=${tParallel}ms ` +

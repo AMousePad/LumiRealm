@@ -1,15 +1,20 @@
-import { expect, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
 import type { SpindleAPI } from 'lumiverse-spindle-types';
 import { createFrontendLuaBackend, type FrontendLuaHostContract } from '../../src/frontend-lua/backend';
 import { FrontendLuaUnavailableError } from '../../src/frontend-lua/protocol';
 import type { RuntimeBootstrap } from '../../src/frontend-lua/state-contract';
 
+const savedSpindle = (globalThis as any).spindle;
+afterEach(() => { (globalThis as any).spindle = savedSpindle; });
+
 function fixture() {
   const sent: { payload: any; userId: string; sessionId: string }[] = [];
   const reads: unknown[][] = [], writes: unknown[][] = [], configurations: unknown[][] = [];
-  const state = { revision: { epoch: 'host', sequence: 1 } };
+  const state = { revision: { epoch: 'host', sequence: 1 }, globalVariables: { unset: null } };
   const capabilities: Record<string, number> = Object.fromEntries(['frontend-session-routing-v1', 'runtime-state-v1', 'required-context-handlers-v1', 'required-interceptors-v1'].map(key => [key, 1]));
   const host = {
+    generate: { raw: async () => { throw new Error('Unexpected generation'); } },
+    userStorage: { getJson: async () => null },
     host: { capabilities },
     runtimeState: {
       async read(...args: unknown[]) { reads.push(args); return state; },
@@ -19,12 +24,60 @@ function fixture() {
       sent.push({ payload, userId, sessionId: options.frontendSessionId });
     },
   } as unknown as SpindleAPI & FrontendLuaHostContract;
+  (globalThis as any).spindle = host;
   const bootstrap = async (...args: unknown[]) => {
     configurations.push(args);
     return { snapshot: { chatId: args[0] }, settings: {} } as Omit<RuntimeBootstrap, 'state'>;
   };
-  return { host, bootstrap, sent, reads, writes, configurations, capabilities };
+  return { host, bootstrap, sent, reads, writes, configurations, capabilities, state };
 }
+
+test('state refresh carries current user toggle preferences and preserves unrelated null values', async () => {
+  const f = fixture();
+  let preferences = { toggle_panel: '1' };
+  (f.host as any).userStorage.getJson = async (_path: string, options: { userId: string }) => {
+    expect(options.userId).toBe('owner');
+    return preferences;
+  };
+  const backend = createFrontendLuaBackend(f.host, f.bootstrap);
+  const call = { type: 'lua_service', requestId: 'request', chatId: 'chat', characterId: 'character', request: { kind: 'state.read' } };
+  try {
+    await backend.receive(call, 'owner', 'document');
+    expect(f.sent.at(-1)!.payload.value.globalVariables).toEqual({ unset: null, toggle_panel: '1' });
+    preferences = { toggle_panel: '0' };
+    await backend.receive(call, 'owner', 'document');
+    expect(f.sent.at(-1)!.payload.value.globalVariables).toEqual({ unset: null, toggle_panel: '0' });
+  } finally { backend.dispose(); }
+});
+
+test('image and request services reach the authenticated host adapters', async () => {
+  const f = fixture();
+  const calls: unknown[] = [];
+  Object.assign(f.host, {
+    imageGen: { generate: async (input: unknown) => { calls.push(input); return { imageId: 'generated' }; } },
+    images: { uploadFromDataUrl: async (...args: unknown[]) => { calls.push(args); return { id: 'uploaded' }; } },
+    cors: async (...args: unknown[]) => { calls.push(args); return { status: 201, text: async () => 'response' }; },
+  });
+  const backend = createFrontendLuaBackend(f.host, f.bootstrap);
+  const call = { type: 'lua_service', requestId: 'request', chatId: 'chat', characterId: 'character' };
+  try {
+    for (const request of [
+      { kind: 'image.generate', prompt: 'scene', options: { connectionId: 'image-profile', parameters: { steps: 12 } } },
+      { kind: 'image.upload', dataUrl: 'data:image/png;base64,AA==', name: 'image' },
+      { kind: 'request', url: 'https://example.test' },
+    ]) await backend.receive({ ...call, request }, 'owner', 'document');
+    expect(calls).toEqual([
+      { prompt: 'scene', owner_chat_id: 'chat', negativePrompt: undefined, connection_id: 'image-profile', parameters: { steps: 12 }, userId: 'owner' },
+      ['data:image/png;base64,AA==', { originalFilename: 'image', owner_chat_id: 'chat', userId: 'owner' }],
+      ['https://example.test', { method: 'GET' }],
+    ]);
+    expect(f.sent.map(message => message.payload)).toEqual([
+      { type: 'lua_service_reply', requestId: 'request', ok: true, value: { imageId: 'generated' } },
+      { type: 'lua_service_reply', requestId: 'request', ok: true, value: 'uploaded' },
+      { type: 'lua_service_reply', requestId: 'request', ok: true, value: { status: 201, body: 'response' } },
+    ]);
+  } finally { backend.dispose(); }
+});
 
 test('production backend refuses missing host contracts and unowned invocations', async () => {
   const f = fixture();

@@ -211,6 +211,7 @@ async function runInterpretedTrigger(
       characterId: entry.rtOpts.characterId,
       localState: invocation.localState,
       invocationState: invocation.invocationState,
+      ...(invocation.moduleLorebooks ? { moduleLorebooks: invocation.moduleLorebooks } : {}),
     });
     try {
       const result = await interpretTrigger(entry.source, rt, makeMirroredConsole(entry.name), {

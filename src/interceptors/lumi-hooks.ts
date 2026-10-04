@@ -33,6 +33,8 @@ import {
   cacheMacroInterceptor,
   macroInterceptorCacheStats,
 } from '../state/macro-interceptor-cache.js';
+import { collectLegacyGlobals, readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { presetToggleValues, recordPresetToggleValues } from '../state/preset-toggle-values.js';
 import { rememberOurWrite } from '../state/recent-writes.js';
 import { expectChatChange } from '../state/own-chat-change.js';
 import { invalidateRecentFlush } from '../state/recent-flush-cache.js';
@@ -66,6 +68,7 @@ import {
   listLivePromptRegexScripts,
 } from './prompt-regex-apply.js';
 import type { RunnerDispatchResult } from './prompt-regex-runner-client.js';
+import { applyRisuChatRanges } from './risu-chat-ranges.js';
 
 export interface CreateLumiInterceptorsDeps {
   readonly executeFrontend: <T>(chatId: string, characterId: string, operation: FrontendLuaOperation, userId: string | undefined, sessionId: string | undefined, signal?: AbortSignal) => Promise<T>;
@@ -126,6 +129,15 @@ export interface LumiInterceptors {
   readonly registerAll: () => void;
 }
 
+// Module lore rows live on the card payload rather than in the host lorebook,
+// so listenEdit chains have to pass them to the runtime explicitly.
+function collectRuntimeModuleLorebooks(active: ActiveCard): readonly unknown[] {
+  const extra = active.card.risuPayload.extra as
+    | { runtime_module_lorebooks?: Record<string, readonly unknown[]> }
+    | undefined;
+  return Object.values(extra?.runtime_module_lorebooks ?? {}).flat();
+}
+
 function cardDisablesRecursiveWorldInfo(active: ActiveCard): boolean {
   const source = active.lumirealm.source?.card;
   if (!source || typeof source !== 'object' || Array.isArray(source)) return false;
@@ -139,6 +151,35 @@ function cardDisablesRecursiveWorldInfo(active: ActiveCard): boolean {
     return false;
   }
   return (characterBook as Record<string, unknown>)['recursive_scanning'] === false;
+}
+
+// The host aborts a whole interceptor once its wall-clock budget passes
+// (interceptor-pipeline.ts: DEFAULT_INTERCEPTOR_TIMEOUT_MS, 10s unless the
+// manifest or the user's Spindle setting says otherwise) and keeps the
+// pre-interceptor messages, so an overrun silently ships an un-mutated prompt.
+// Stage marks make that overrun self-explaining at the default log level
+// instead of leaving a bare timeout in the host console.
+const SLOW_INTERCEPTOR_WARN_MS = 8_000;
+
+interface StageTimer {
+  mark(name: string): void;
+  elapsed(): number;
+  summary(): string;
+}
+
+function createStageTimer(): StageTimer {
+  const t0 = Date.now();
+  let prev = t0;
+  const marks: string[] = [];
+  return {
+    mark(name: string): void {
+      const now = Date.now();
+      marks.push(`${name}=${now - prev}ms`);
+      prev = now;
+    },
+    elapsed: () => Date.now() - t0,
+    summary: () => marks.join(' '),
+  };
 }
 
 export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiInterceptors {
@@ -228,8 +269,22 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
         return;
       }
 
+      const ownerUserId = ctx.userId ?? active.ownerUserId;
+      const envExtra = (ctx.env as { extra?: { presetId?: unknown; promptVariables?: unknown } }).extra;
+      recordPresetToggleValues(chatId, ownerUserId, envExtra?.presetId, envExtra?.promptVariables);
+      const legacyGlobals = collectLegacyGlobals({
+        global: ctx.env.variables.global,
+        local: ctx.env.variables.local,
+        promptVariables: envExtra?.promptVariables,
+      });
+      const effectiveGlobals = await readEffectiveGlobals(
+        ownerUserId,
+        legacyGlobals,
+        presetToggleValues(chatId, ownerUserId),
+      );
+
       const micDynForKey = (ctx.env as { dynamicMacros?: Record<string, string> }).dynamicMacros;
-      const micCtxKey = `${micDynForKey?.chat_index ?? ''}|${micDynForKey?.role ?? ''}|${ownedSource}`;
+      const micCtxKey = `${micDynForKey?.chat_index ?? ''}|${micDynForKey?.role ?? ''}|${ownedSource}|${JSON.stringify(effectiveGlobals)}`;
       const hit = lookupMacroInterceptor(chatId, ctx.template, ctx.commit !== false, micCtxKey);
       if (hit !== null) {
         maybeEmitMicCacheStats();
@@ -332,7 +387,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           },
           variables: {
             local: ctx.env.variables.local,
-            global: ctx.env.variables.global,
+            global: effectiveGlobals,
             chat: ctx.env.variables.chat,
           },
           system: {
@@ -487,6 +542,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             source: t,
             luaCode: luaScripts[i] ?? '',
           }));
+          const moduleLorebooks = collectRuntimeModuleLorebooks(active);
           try {
             const editApi = makeSpindleHost({
               chatId: ctx.chatId,
@@ -674,17 +730,19 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             `interceptor: chat=${chatId} is prompt-regex owned (host skipped its pass) but no active card resolved — shipping an UN-REGEX'd prompt.`,
           );
         }
-        return messages;
+        return applyRisuChatRanges(messages, ctx.presetMetadata);
       }
 
       return userIdAls.run(userId, async () => {
         let out: LlmMessage[] = messages;
+        const stage = createStageTimer();
 
         try {
           await deps.runMessageVarPass(chatId, active.card.character_id, userId);
         } catch (err) {
           log.warn(`interceptor.runMessageVarPass threw chat=${chatId}: ${errMsg(err)}`);
         }
+        stage.mark('messageVarPass');
         out = out.map((m) => {
           if (typeof m.content === 'string') {
             if (!hasSetvarFamily(m.content)) return m;
@@ -698,6 +756,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           });
           return changed ? { ...m, content } : m;
         });
+        stage.mark('stripSetvar');
 
         if (deps.isPromptRegexAuthoritative(chatId)) {
           try {
@@ -732,6 +791,9 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             );
           }
         }
+        stage.mark('promptRegex');
+        // Risu slices its chat list after prompt regex and before editRequest triggers see the request.
+        out = applyRisuChatRanges(out, ctx.presetMetadata);
 
         // Tier 3 inject_at: apply staged plans to system messages by content match. Mirrors Risu's positionParser append/prepend/replace operations on the slot's text.
         const buffers = readDecoratorBuffers(chatId);
@@ -797,10 +859,20 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             clearDecoratorBuffer(chatId);
           }
         }
+        stage.mark('injectAt');
 
         if (active.card.risuPayload.triggers.length > 0) {
           out = await deps.executeFrontend<LlmMessage[]>(chatId, active.card.character_id,
             { kind: 'intercept', messages: out, generationType: ctx.generationType }, userId, ctx.frontendSessionId, signal);
+        }
+        stage.mark('frontendLua');
+
+        const interceptorMs = stage.elapsed();
+        if (interceptorMs >= SLOW_INTERCEPTOR_WARN_MS) {
+          log.warn(
+            `interceptor slow chat=${chatId} total=${interceptorMs}ms ` +
+              `host_budget_default=10000ms stages=[${stage.summary()}]`,
+          );
         }
 
         return out;

@@ -190,11 +190,11 @@ describe('native island compatibility styles', () => {
     expect(a.root.adoptedStyleSheets[1]!.cssRules[0]!.cssText).toContain('position: relative');
   });
 
-  test('uses the Risu chat shell metrics without adding a light DOM wrapper', () => {
+  test('inherits host reader metrics without adding a light DOM wrapper', () => {
     const css = rescopeRisuEnvironment('.prose h1{font-size:2.25em}.chattext p{color:red}');
     expect(css).toContain(':host h1{font-size:2.25em}');
-    expect(css).toContain('font-size:calc(14px * var(--lumiverse-font-scale,1))');
-    expect(css).toContain('line-height:calc(20px * var(--lumiverse-font-scale,1))');
+    expect(css).toContain('font-size:inherit');
+    expect(css).toContain('line-height:inherit');
     expect(css).not.toContain('.chattext');
     const a = island();
     manager.setActiveChat('chat');

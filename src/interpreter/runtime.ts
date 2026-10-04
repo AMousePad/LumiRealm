@@ -23,9 +23,14 @@ import { makeCharacterNoteApi } from './runtime/character-note.js';
 import {
   makeLorebookApi,
   sortLorebookEntriesBySourceOrder,
+  withModuleLorebooks,
+  keyToArray,
   type LorebookCache,
 } from './runtime/lorebook.js';
+import { evaluate } from './evaluator/index.js';
+import { buildEvaluatorContext } from './evaluator/context.js';
 import { makeDisplayStateApi } from './runtime/display-state.js';
+import { makeLuaRequest } from './runtime/request.js';
 import { runLLM as _runLLM, parseLuaPromptArg } from './runtime/llm.js';
 import {
   extractRegex,
@@ -51,6 +56,7 @@ const _logLLMMain         = makeSafeLogger('runtime.LLMMain');
 const _logAxLLMMain       = makeSafeLogger('runtime.axLLMMain');
 const _logFlush           = makeSafeLogger('runtime.flush');
 const _logLuaPrint        = makeSafeLogger('runtime.lua');
+const _logImageGen        = makeSafeLogger('runtime.imageGen');
 
 type WasmoonExec = (
   code: string,
@@ -226,6 +232,11 @@ export async function makeRisuTriggerRuntime(
   const submodelSamplers = opts.submodelSamplers ?? dispatchCtx.submodelSamplers ?? auxSamplers;
   const auxDebugCapture: ((event: AuxDebugCaptureEvent) => void) | undefined =
     opts.auxDebugCapture ?? dispatchCtx.auxDebugCapture;
+  const imageConnectionId: string | null =
+    (opts.imageConnectionId ?? dispatchCtx.imageConnectionId ?? null);
+  const imageModelOverride: string | null =
+    (opts.imageModelOverride ?? dispatchCtx.imageModelOverride ?? null);
+  const naiSettings = opts.naiSettings ?? dispatchCtx.naiSettings ?? null;
   const auxParamsWire = samplersToWire(auxSamplers);
   const submodelParamsWire = samplersToWire(submodelSamplers);
   const auxPrefillCompat: boolean =
@@ -383,6 +394,18 @@ export async function makeRisuTriggerRuntime(
       }
     } catch { /* world_books permission not granted */ }
   }
+  // A preloaded snapshot carries only the character's own books, so listenEdit
+  // chains pass their module lore rows through opts. The fetched path can also
+  // read them from the dispatch context.
+  const rawExtra = preloaded?.lorebook
+    ? opts.moduleLorebooks ?? []
+    : opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+  const extraLorebooks = Array.isArray(rawExtra)
+    ? rawExtra
+    : (rawExtra && typeof rawExtra === 'object')
+    ? Object.values(rawExtra as unknown as Record<string, unknown>).flat()
+    : [];
+  lorebook.entries = withModuleLorebooks(lorebook.entries, extraLorebooks);
 
   const _factoryTotal = Date.now() - _factoryStart;
   // Always emit so we capture per-trigger factory cost in editDisplay chains.
@@ -1018,6 +1041,9 @@ export async function makeRisuTriggerRuntime(
       reloadDisplay: (_id: unknown) => {
         notifyStateChanged('reloadDisplay');
       },
+      updateDisplay: (_id: unknown) => {
+        notifyStateChanged('updateDisplay');
+      },
       reloadChat: (_id: unknown, _index: unknown) => {
         notifyStateChanged('reloadChat');
       },
@@ -1205,8 +1231,105 @@ export async function makeRisuTriggerRuntime(
         }
       },
       similarity: luaReject('similarity', 'requires vector-store bridge'),
-      request: luaReject('request', 'arbitrary-URL fetch from user Lua is out of scope'),
-      generateImage: luaReject('generateImage', 'requires image-gen pipeline'),
+      // Risu parity: scriptings.ts declareAPI('request', ...). Mirrors upstream
+      // exactly: no lowLevelAccess -> nil (upstream `return`), every other path
+      // resolves JSON and never rejects, so one bad URL cannot kill the trigger.
+      request: async (_id: unknown, urlVal: unknown): Promise<string | undefined> => {
+        if (!lowLevelAccess) return undefined;
+        return _luaRequest(urlVal);
+      },
+      generateImage: async (
+        _id: unknown,
+        promptVal: unknown,
+        negVal: unknown,
+        optionsVal: unknown,
+      ): Promise<string> => {
+        if (!lowLevelAccess) {
+          return 'Error: lowLevelAccess required';
+        }
+        if (!api.imageGen?.generate) {
+          return 'Error: image generation not available on this host';
+        }
+        try {
+          const prompt = toStr(promptVal);
+          const negativePrompt = negVal ? toStr(negVal) : undefined;
+          let callerParameters: Record<string, unknown> | undefined = undefined;
+          if (typeof optionsVal === 'string' && optionsVal.trim().startsWith('{')) {
+            try {
+              callerParameters = JSON.parse(optionsVal);
+            } catch {
+              // ignore json parse error
+            }
+          } else if (typeof optionsVal === 'object' && optionsVal !== null) {
+            callerParameters = optionsVal as Record<string, unknown>;
+          }
+
+          const baseParameters: Record<string, unknown> = {};
+          if (naiSettings) {
+            if (naiSettings.resolution) baseParameters.resolution = naiSettings.resolution;
+            if (naiSettings.sampler) baseParameters.sampler = naiSettings.sampler;
+            if (typeof naiSettings.steps === 'number') baseParameters.steps = naiSettings.steps;
+            if (typeof naiSettings.guidance === 'number') baseParameters.guidance = naiSettings.guidance;
+            if (typeof naiSettings.smea === 'boolean') baseParameters.smea = naiSettings.smea;
+            if (typeof naiSettings.smeaDyn === 'boolean') baseParameters.smeaDyn = naiSettings.smeaDyn;
+            if (typeof naiSettings.seed === 'number') baseParameters.seed = naiSettings.seed;
+            if (typeof naiSettings.qualityToggle === 'boolean') baseParameters.qualityToggle = naiSettings.qualityToggle;
+            if (typeof naiSettings.ucPreset === 'number') baseParameters.ucPreset = naiSettings.ucPreset;
+            if (naiSettings.negativePrompt && !negativePrompt) {
+              baseParameters.negativePrompt = naiSettings.negativePrompt;
+            }
+          }
+
+          const parameters = {
+            ...baseParameters,
+            ...(callerParameters || {}),
+          };
+          if (typeof parameters.seed === 'number' && parameters.seed < 0) {
+            delete parameters.seed;
+          }
+
+          const effectiveNegativePrompt = negativePrompt
+            ?? (typeof parameters.negativePrompt === 'string' ? parameters.negativePrompt : undefined)
+            ?? (naiSettings?.negativePrompt || undefined);
+
+          _logImageGen.info(`generateImage: dispatching prompt="${prompt.slice(0, 100)}" conn=${imageConnectionId ?? '<default>'}`);
+          const res = await api.imageGen.generate(prompt, {
+            ...(effectiveNegativePrompt !== undefined ? { negativePrompt: effectiveNegativePrompt } : {}),
+            ...(imageConnectionId ? { connectionId: imageConnectionId } : {}),
+            ...(imageModelOverride ? { model: imageModelOverride } : (naiSettings?.model ? { model: naiSettings.model } : {})),
+            ...(Object.keys(parameters).length > 0 ? { parameters } : {}),
+          });
+          let imageId: string | undefined;
+          if (typeof res === 'string') {
+            if (res.startsWith('data:')) {
+              if (api.images?.uploadFromDataUrl) {
+                const up = await api.images.uploadFromDataUrl(res);
+                imageId = typeof up === 'string' ? up : up?.id;
+              }
+            } else {
+              imageId = res;
+            }
+          } else if (typeof res === 'object' && res !== null) {
+            const r = res as { imageId?: string; imageUrl?: string; imageDataUrl?: string };
+            if (r.imageId) {
+              imageId = r.imageId;
+            } else if (r.imageDataUrl && api.images?.uploadFromDataUrl) {
+              const up = await api.images.uploadFromDataUrl(r.imageDataUrl);
+              imageId = typeof up === 'string' ? up : up?.id;
+            }
+          }
+          if (imageId) {
+            _logImageGen.info(`generateImage: success imageId=${imageId}`);
+            return `{{inlay::${imageId}}}`;
+          }
+          _logImageGen.warn(`generateImage: failed — no image returned`);
+          return 'Error: image generation returned no image';
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          _logImageGen.warn(`generateImage: threw — ${msg}`);
+          return `Error: image generation failed: ${msg}`;
+        }
+      },
       // Emits resolved HTML directly. Sentinel wouldn't survive DB write without a re-parse pass.
       getCharacterImageMain: async (_id: unknown) => {
         try {
@@ -1229,9 +1352,54 @@ export async function makeRisuTriggerRuntime(
       },
       loadLoreBooksMain: (_id: unknown, _reserve: unknown) => {
         void _reserve;
-        return Promise.resolve(JSON.stringify(lorebook.entries.map((e) => toStr(e.content))));
+        const evalCtx = buildEvaluatorContext({
+          chatId: portalChatId ?? '',
+          commit: false,
+          suppressVarPersist: true,
+          userName: 'User',
+          charName: 'Char',
+          character: { description: '' },
+          chat: {
+            messages: messagesCache.map((m) => ({
+              role: m.role === 'user' ? ('user' as const) : m.role === 'system' ? ('system' as const) : ('assistant' as const),
+              content: m.content,
+              createdAt: m.createdAt ?? Date.now(),
+            })),
+          },
+          variables: {
+            global: { ...globalVarsCache },
+            local: { ...varsCache },
+            chat: { ...varsCache },
+          },
+        });
+        const out = lorebook.entries.map((e) => {
+          let content = toStr(e.content);
+          if (content.includes('{{')) {
+            try { content = evaluate(content, evalCtx); } catch { /* skip */ }
+          }
+          return {
+            ...e,
+            // Risu loadLoreBooksMain exposes prompt text as data, not content.
+            data: content,
+            name: toStr(e.comment || e.id),
+            comment: toStr(e.comment),
+            content,
+            key: Array.isArray(e.key) ? e.key.join(', ') : toStr(e.key),
+            order: e.orderValue ?? 100,
+            alwaysActive: !e.disabled,
+          };
+        });
+        return Promise.resolve(JSON.stringify(out));
       },
-      getLoreBooksMain: (_id: unknown, _search: unknown) => JSON.stringify(getAllLorebooks()),
+      getLoreBooksMain: (_id: unknown, search: unknown) => JSON.stringify(
+        lorebook.entries.filter(entry => entry.comment === search).map(entry => ({
+          ...entry,
+          content: toStr(entry.content).includes('{{') ? luaCbs(entry.content) : toStr(entry.content),
+          key: Array.isArray(entry.key) ? entry.key.join(', ') : toStr(entry.key),
+          insertorder: entry.orderValue ?? entry.insertorder ?? 100,
+          alwaysActive: entry.constant ?? entry.alwaysActive ?? false,
+        })),
+      ),
       upsertLocalLoreBook: (_id: unknown, name: unknown, content: unknown, opts?: Record<string, unknown>) => {
         const o = opts || {};
         createLorebook(name, o['key'] || name, content, o['order'] || 0);
@@ -1255,6 +1423,10 @@ export async function makeRisuTriggerRuntime(
     modifyLorebook, modifyLorebookByIndex, createLorebook,
     deleteLorebookByIndex, setLorebookActivation, setLorebookAlwaysActive,
   } = _lore;
+
+  // Risu parity: scriptings.ts declareAPI('request', ...). Rate-limit state is
+  // module-scoped inside makeLuaRequest, so every runtime shares one window.
+  const _luaRequest = makeLuaRequest({ corsFetch: api.corsFetch });
 
   const _displayState = makeDisplayStateApi(opts.displayData, opts.requestData);
   const {

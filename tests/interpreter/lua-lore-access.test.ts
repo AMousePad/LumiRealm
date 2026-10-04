@@ -10,6 +10,7 @@ async function run(body: string, lowLevelAccess: boolean, empty = false) {
   if (empty) host.preloaded.lorebook.entries = [];
   const runtime = await makeRisuTriggerRuntime(host.api, {}, divergenceLuaScriptNS, {
     binding: 'manual', lowLevelAccess, preloaded: host.preloaded,
+    templateContext: async () => ({ variables: {}, character: {}, chat: {}, commit: false, chatId: 'chat', charName: 'Character', userName: 'User' }),
   });
   return runtime.runLua(`probe = async(function(id) ${body} end)`, { entry: 'probe' });
 }

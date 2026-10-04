@@ -44,6 +44,11 @@ export interface DispatchContext {
   /** Backs Lua `cbs(value)`. Routes through resolveReadonly. */
   resolveTemplate?: (text: string) => Promise<string>;
   templateContext?: import('./template.js').TriggerTemplateContext;
+  /** Image generation connection profile ID. Null = default connection. */
+  imageConnectionId?: string | null;
+  imageModelOverride?: string | null;
+  naiSettings?: import('../../state/settings-store.js').NaiSettings;
+  moduleLorebooks?: readonly unknown[];
 }
 
 export interface AuxDebugCaptureEvent {

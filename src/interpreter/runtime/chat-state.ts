@@ -45,6 +45,7 @@ export function parseGlobalVars(raw: unknown): Record<string, string | null> {
 }
 
 export async function loadGlobalVars(api: HostApi): Promise<Record<string, string | null>> {
+  if (api.getGlobalVariables) return api.getGlobalVariables();
   try {
     return parseGlobalVars(await api.chat.getMetadata('macro_variables'));
   } catch (cause) {

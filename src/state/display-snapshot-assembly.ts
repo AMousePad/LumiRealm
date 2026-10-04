@@ -14,6 +14,7 @@ import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import type { RisuChatView } from '../interpreter/risu-chat-view.js';
 import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import type { TriggerScript } from '../core/schemas/triggerscript.js';
+import { withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
 import { hostMessageTime } from '../util/message-time.js';
 
 export interface DisplaySnapshotAssemblyDeps {
@@ -201,6 +202,13 @@ export async function assembleDisplaySnapshot(
     fetchChatRuntimeState(chatId, userId),
   ]);
 
+  // Display runtimes consume preloaded lore, so include the active card's module
+  // rows here rather than relying on the runtime's host-fetch path.
+  const moduleLorebooks = Object.values(
+    (active.card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {},
+  ).flat();
+  const combinedLorebook = withModuleLorebooks(lorebookHost, moduleLorebooks, bookIds);
+
   const chatView = buildRisuChatView({ messages: messagesHost });
   const chatState = buildDisplayChatStateFromView(chatView);
 
@@ -261,7 +269,7 @@ export async function assembleDisplaySnapshot(
     hasEditAtActions,
     luaTriggers,
     messagesHost,
-    lorebookHost,
+    lorebookHost: combinedLorebook,
     atActions: coerceAtActions(active.card.risuPayload.at_actions as readonly unknown[]),
   };
 }

@@ -4,6 +4,8 @@ import { FrontendLuaUnavailableError, type FrontendLuaOperation, type FrontendLu
 import type { RuntimeBootstrap, RuntimeStateCommand, RuntimeStateDto, RuntimeStateWrite } from './state-contract.js';
 import type { RuntimeServiceCall, RuntimeServiceReply } from './services.js';
 import { makeSpindleHost } from '../interpreter/spindle-host.js';
+import { readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { presetToggleValues } from '../state/preset-toggle-values.js';
 
 export interface FrontendLuaHostContract {
   runtimeState: {
@@ -19,6 +21,10 @@ export function createFrontendLuaBackend(host: SpindleAPI & FrontendLuaHostContr
   }
   const send = (message: { sessionId: string }, userId: string) => host.sendToFrontend(message, userId, { frontendSessionId: message.sessionId });
   const rpc = createFrontendLuaRpc(send);
+  async function readState(chatId: string, characterId: string, userId: string): Promise<RuntimeStateDto> {
+    const state = await host.runtimeState.read(chatId, characterId, userId);
+    return { ...state, globalVariables: await readEffectiveGlobals(userId, state.globalVariables, presetToggleValues(chatId, userId)) };
+  }
   return {
     async call<T>(chatId: string, characterId: string, operation: FrontendLuaOperation, userId: string | undefined, sessionId: string | undefined, signal?: AbortSignal): Promise<T> {
       if (!sessionId || !userId) throw new FrontendLuaUnavailableError('Lua execution requires an active browser tab');
@@ -42,14 +48,21 @@ export function createFrontendLuaBackend(host: SpindleAPI & FrontendLuaHostContr
         switch (call.request.kind) {
           case 'bootstrap': {
             const config = await bootstrap(call.chatId, call.characterId, userId);
-            value = { ...config, state: await host.runtimeState.read(call.chatId, call.characterId, userId) };
+            value = { ...config, state: await readState(call.chatId, call.characterId, userId) };
             break;
           }
-          case 'state.read': value = await host.runtimeState.read(call.chatId, call.characterId, userId); break;
+          case 'state.read': value = await readState(call.chatId, call.characterId, userId); break;
           case 'state.write': value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId); break;
           case 'llm.generate': value = await api().llm!.generate(call.request.request); break;
           case 'connections.list': value = await api().llm!.listConnections!(); break;
           case 'tokens.count': value = await api().tokens!.count(call.request.text); break;
+          case 'image.generate': value = await api().imageGen!.generate(call.request.prompt, call.request.options); break;
+          case 'image.upload': value = await api().images!.uploadFromDataUrl(call.request.dataUrl, call.request.name); break;
+          case 'request': {
+            const response = await api().corsFetch!(call.request.url, { method: 'GET' });
+            value = { status: response.status, body: response.text ? await response.text() : response.body };
+            break;
+          }
           case 'chat.inject': value = await api().chat.inject(call.request.id, call.request.content, call.request.options); break;
           default: throw new FrontendLuaUnavailableError('Unknown Lua host service');
         }

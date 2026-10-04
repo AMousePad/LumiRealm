@@ -227,3 +227,68 @@ describe('character-owned Risu toggle DSL', () => {
     ]);
   });
 });
+
+  test('global modules are included in toggle definitions', async () => {
+    const { setGlobalModuleIdsCache, clearGlobalModuleIdsCache } = await import(
+      '../../src/state/global-modules-cache.js'
+    );
+    setGlobalModuleIdsCache('user-1', ['mod-global']);
+
+    const envelopes = new Map<string, any>([
+      [
+        'mod-global',
+        {
+          id: 'mod-global',
+          module: {
+            name: 'Global Mod',
+            customModuleToggle: '=Global Group=group\ng_toggle=Global Option\n==groupEnd',
+          },
+        },
+      ],
+      [
+        'mod-local',
+        {
+          id: 'mod-local',
+          module: {
+            name: 'Local Mod',
+            customModuleToggle: '=Local Group=group\nl_toggle=Local Option\n==groupEnd',
+          },
+        },
+      ],
+    ]);
+
+    let pushedToggles: readonly any[] = [];
+    const service = createVariablesTogglesService({
+      translateLang: 'en',
+      variableState: new VariableStateStore(),
+      toggleState: new ToggleStateStore(),
+      readLumirealm: async () => ({
+        character: { id: 'c-1', name: 'Hero' },
+        data: characterData(undefined, ['mod-local']),
+        risuai: {},
+      }),
+      readAttachedModuleEnvelopes: async (_u, ids) =>
+        ids.map((id) => envelopes.get(id)).filter(Boolean),
+      ensureActiveCardForChat: async () => null,
+      refreshBgHtml: async () => {},
+      send: (msg) => {
+        if (msg.type === 'set_toggle_definitions') pushedToggles = msg.toggles;
+      },
+      log: noopLog,
+      errMsg: (e) => String(e),
+    });
+
+    await service.refreshToggleDefinitions(
+      { card: { character_id: 'c-1' } } as any,
+      'chat-1',
+      'user-1',
+    );
+
+    clearGlobalModuleIdsCache();
+
+    // Verify that both global and local toggles were pushed
+    const names = pushedToggles.map((t) => t.name || t.key);
+    expect(names).toContain('g_toggle');
+    expect(names).toContain('l_toggle');
+  });
+

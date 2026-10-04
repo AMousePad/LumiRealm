@@ -1,5 +1,7 @@
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
+import { readEffectiveGlobals, TogglePreferencesError } from '../state/toggle-preferences.js';
+import { presetToggleValues } from './preset-toggle-values.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import { runPipeline } from '../interpreter/evaluator/pipeline.js';
@@ -194,7 +196,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       },
       variables: {
         ...(mv.local ? { local: mv.local } : {}),
-        ...(mv.global ? { global: mv.global } : {}),
+        global: await readEffectiveGlobals(userId, mv.global ?? {}, presetToggleValues(chatId, userId)),
         ...(chatVars ? { chat: chatVars } : {}),
       },
       legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
@@ -260,6 +262,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       );
       return resolved;
     } catch (err) {
+      if (err instanceof TogglePreferencesError) throw err;
       log.error(
         `resolveReadonlyMany: worker-eval threw chat=${chatId}: ${(err as Error).message}. ` +
           `Returning templates verbatim (no Lumi-native fallback).`,
@@ -328,6 +331,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       );
       return out;
     } catch (err) {
+      if (err instanceof TogglePreferencesError) throw err;
       log.error(`resolveReadonly: worker-eval threw chat=${chatId}: ${(err as Error).message}. Returning template verbatim (no Lumi-native fallback).`);
       return template;
     }

@@ -51,6 +51,7 @@ function makeResolver() {
   ];
 
   (globalThis as Record<string, unknown>).spindle = {
+    userStorage: { getJson: async () => null },
     chat: {
       getMessages: async () => messages,
     },

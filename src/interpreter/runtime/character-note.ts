@@ -2,6 +2,7 @@
 // setAuthorNote writes both Lumi's authors_note metadata and the legacy __risu_author_note__ var.
 // getAuthorNote prefers the Lumi surface; falls back to the legacy var.
 
+import { invalidateAuthorsNoteCache } from '../../state/authors-note-cache.js';
 import { toStr } from '../../util/coerce.js';
 import type { HostApi } from '../host.js';
 import type { VarsApi } from './vars.js';
@@ -76,6 +77,9 @@ export function makeCharacterNoteApi(
     },
     async setAuthorNote(value: unknown): Promise<void> {
       const v = toStr(value);
+      // The prompt engine memoizes the note per chat; this write must not be
+      // served from that memo.
+      invalidateAuthorsNoteCache();
       vars.setVar('__risu_author_note__', v);
       // Lumi prompt-assembly.service.ts reads from authors_note; preserve existing depth/role/position.
       try {

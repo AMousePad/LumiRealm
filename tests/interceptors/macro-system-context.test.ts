@@ -9,6 +9,7 @@ describe('macro interceptor system context', () => {
   test('forwards the host model and max-context setting', async () => {
     let macroInterceptor: ((ctx: any) => Promise<any>) | undefined;
     (globalThis as { spindle?: unknown }).spindle = {
+      userStorage: { getJson: async () => null },
       registerMacroInterceptor(handler: typeof macroInterceptor) {
         macroInterceptor = handler;
       },

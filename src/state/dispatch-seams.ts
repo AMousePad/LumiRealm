@@ -20,6 +20,10 @@ export interface DispatchSeams {
   readonly auxDebugCapture?: DispatchAuxDebugCapture;
   readonly resolveTemplate: (text: string) => Promise<string>;
   readonly templateContext: TriggerTemplateContext;
+  readonly imageConnectionId: string | null;
+  readonly imageModelOverride: string | null;
+  readonly naiSettings: RisuCompatSettings['naiSettings'];
+  readonly moduleLorebooks?: readonly unknown[];
 }
 
 export interface BuildDispatchSeamsArgs {
@@ -31,6 +35,7 @@ export interface BuildDispatchSeamsArgs {
   readonly auxDebugCapture: DispatchAuxDebugCapture | undefined;
   readonly resolveTemplate: (text: string) => Promise<string>;
   readonly templateContext: TriggerTemplateContext;
+  readonly moduleLorebooks?: readonly unknown[];
 }
 
 // Single source of truth for the dispatch-context / runtime-opts shape that
@@ -54,6 +59,9 @@ export function buildDispatchSeams(args: BuildDispatchSeamsArgs): DispatchSeams 
     auxDebugCapture?: DispatchAuxDebugCapture;
     resolveTemplate: (text: string) => Promise<string>;
     templateContext: TriggerTemplateContext;
+    imageConnectionId: string | null;
+    imageModelOverride: string | null;
+    naiSettings: RisuCompatSettings['naiSettings'];
   } = {
     chatId: args.chatId,
     binding: args.binding,
@@ -69,6 +77,10 @@ export function buildDispatchSeams(args: BuildDispatchSeamsArgs): DispatchSeams 
     submodelPrefillCompat: args.settings.submodelPrefillCompat,
     resolveTemplate: args.resolveTemplate,
     templateContext: () => templateContext ??= args.templateContext(),
+    imageConnectionId: args.settings.imageConnectionId,
+    imageModelOverride: args.settings.imageModelOverride,
+    naiSettings: args.settings.naiSettings,
+    ...(args.moduleLorebooks ? { moduleLorebooks: args.moduleLorebooks } : {}),
   };
   if (args.auxDebugCapture) seams.auxDebugCapture = args.auxDebugCapture;
   return seams;

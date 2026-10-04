@@ -137,7 +137,7 @@ describe('mountModulesPanel — initial state', () => {
     const { root } = build();
     const subtabs = Array.from(root.querySelectorAll('.lr-subtab'))
       .map((t) => (t as HTMLElement).textContent ?? '');
-    expect(subtabs).toEqual(['Characters', 'Modules', 'Lorebooks', 'Regex']);
+    expect(subtabs).toEqual(['Characters', 'Modules', 'Presets', 'Lorebooks', 'Regex']);
     const bodies = root.querySelectorAll('.lrm-tab-body');
     expect(bodies.length).toBeGreaterThanOrEqual(2);
   });

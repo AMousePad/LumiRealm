@@ -187,6 +187,9 @@ describe('buildDispatchSeams', () => {
       submodelPrefillCompat: settings.submodelPrefillCompat,
       resolveTemplate,
       templateContext: basicTriggerContext,
+      imageConnectionId: settings.imageConnectionId,
+      imageModelOverride: settings.imageModelOverride,
+      naiSettings: settings.naiSettings,
     };
 
     const helper = buildDispatchSeams({
@@ -230,6 +233,9 @@ describe('buildDispatchSeams', () => {
       auxDebugCapture: cb,
       resolveTemplate,
       templateContext: basicTriggerContext,
+      imageConnectionId: settings.imageConnectionId,
+      imageModelOverride: settings.imageModelOverride,
+      naiSettings: settings.naiSettings,
     };
 
     const helper = buildDispatchSeams({

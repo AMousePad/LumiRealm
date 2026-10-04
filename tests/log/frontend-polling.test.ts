@@ -28,11 +28,16 @@ function installBrowser(): Window {
   return win;
 }
 
-function makeContext(win: Window, withDisplay = true): {
+function makeContext(win: Window, withDisplay = true, settingsReady = true): {
   ctx: SpindleFrontendContext;
   events: string[];
+  sent: unknown[];
+  setActivePreset(presetId: string | null): void;
 } {
   const events: string[] = [];
+  const sent: unknown[] = [];
+  let activePresetId: string | null = 'preset-1';
+  const presetListeners = new Set<(presetId: string | null) => void>();
   const display = {
     registerResolver(): () => void {
       events.push('register');
@@ -50,7 +55,16 @@ function makeContext(win: Window, withDisplay = true): {
     ...(withDisplay ? { display } : {}),
     sendToBackend(payload: unknown): void {
       events.push(`send:${(payload as { type: string }).type}`);
+      sent.push(payload);
     },
+    state: {
+      get: () => activePresetId,
+      subscribe(_selector: string, listener: (presetId: string | null) => void): () => void {
+        presetListeners.add(listener);
+        return () => presetListeners.delete(listener);
+      },
+    },
+    settings: { core: { isReady: () => settingsReady } },
     onBackendMessage(): () => void {
       events.push('subscribe');
       return () => events.push('unsubscribe');
@@ -74,7 +88,11 @@ function makeContext(win: Window, withDisplay = true): {
       },
     },
   } as unknown as SpindleFrontendContext;
-  return { ctx, events };
+  const setActivePreset = (presetId: string | null): void => {
+    activePresetId = presetId;
+    for (const listener of presetListeners) listener(presetId);
+  };
+  return { ctx, events, sent, setActivePreset };
 }
 
 afterEach(() => {
@@ -167,12 +185,27 @@ describe('frontend runtime setup', () => {
     expect(harness.events.slice(
       harness.events.indexOf('subscribe') + 1,
       harness.events.indexOf('ready'),
-    )).toEqual(['send:get_cards', 'send:log_request_state', 'send:screen_dims']);
+    )).toEqual(['send:get_cards', 'send:log_request_state', 'send:screen_dims', 'send:active_preset']);
 
     teardown();
     teardown = null;
     expect(harness.events.filter((event) => event === 'unregister' || event === 'unsubscribe'))
       .toEqual(['unregister', 'unsubscribe']);
+  });
+
+  test('reports the active preset once settings hydrate and on every change', () => {
+    const harness = makeContext(installBrowser(), true, false);
+    teardown = setup(harness.ctx);
+    const reports = () => harness.sent.filter((msg) => (msg as { type: string }).type === 'active_preset');
+
+    expect(reports()).toEqual([]);
+    harness.setActivePreset('preset-2');
+    harness.setActivePreset(null);
+
+    expect(reports()).toEqual([
+      { type: 'active_preset', presetId: 'preset-2' },
+      { type: 'active_preset', presetId: null },
+    ]);
   });
 
   test('fails before registration or readiness when display is unavailable', () => {

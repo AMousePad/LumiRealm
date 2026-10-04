@@ -16,7 +16,7 @@ test('variable refresh preserves null in UI and display snapshots and distinguis
     card: { character_id: 'character', risuPayload: { scriptstate_defaults: { missing: 'DEFAULT' } } },
     lumirealm: { user_overrides: {} },
   } as unknown as ActiveCard;
-  global.spindle = { chats: { get: async () => ({ metadata: { chat_variables: local, macro_variables: { global: { missing: null } } } }) } };
+  global.spindle = { userStorage: { getJson: async () => null }, chats: { get: async () => ({ metadata: { chat_variables: local, macro_variables: { global: { missing: null } } } }) } };
   const service = createVariablesTogglesService({
     translateLang: 'en', variableState: new VariableStateStore(), toggleState: new ToggleStateStore(),
     readLumirealm: async () => null, readAttachedModuleEnvelopes: async () => [],

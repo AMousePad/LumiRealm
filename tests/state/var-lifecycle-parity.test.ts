@@ -29,6 +29,7 @@ const USER = 'user-1';
 
 function installMockSpindle(db: MockDb): void {
   (globalThis as Record<string, unknown>).spindle = {
+    userStorage: { getJson: async () => null },
     chats: {
       get: async () => ({ id: CHAT, metadata: db.metadata }),
       update: async (_id: string, input: { metadata?: Record<string, unknown> }) => {

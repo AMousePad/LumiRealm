@@ -15,6 +15,7 @@ function changesStyle(record: MutationRecord): boolean {
 // compatibility environment inside their shadows, away from themed prose.
 export function rescopeRisuEnvironment(css: string): string {
   return css
+    .replace(/--risu-font-family:\s*Arial,\s*sans-serif,\s*serif;?/g, '')
     .replace(/\.prose-invert\b/g, ':host')
     .replace(/\.prose\b(?!-)/g, ':host')
     .replace(/\.chattext\b/g, ':host')
@@ -22,9 +23,8 @@ export function rescopeRisuEnvironment(css: string): string {
     .replace(/:root\b(?!,)/g, ':root,:host')
     .replace(/--FontColorQuote2:\s*(#[0-9a-fA-F]{3,8})/g,
       '--FontColorQuote2:var(--lumiverse-prose-dialogue,$1)')
-    // Risu's Chat.svelte sets these inline; host font scale substitutes for Risu zoom.
-    + '\n:host{font-size:calc(14px * var(--lumiverse-font-scale,1));'
-    + 'line-height:calc(20px * var(--lumiverse-font-scale,1));overflow:visible !important}\n';
+    // Host reader settings replace Risu's app metrics, preserving authored card styles.
+    + '\n:host{font-family:inherit;font-size:inherit;line-height:inherit;overflow:visible !important}\n';
 }
 
 export function setupIslandStyles() {

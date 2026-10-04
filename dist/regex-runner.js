@@ -9613,11 +9613,17 @@ var init_scanner = __esm(() => {
   init_cbs();
 });
 
+// src/state/toggle-preferences.ts
+var chains = new Map;
+
+// src/state/preset-toggle-values.ts
+var snapshots = new Map;
+
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.10.0",
+  version: "0.11.0",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -9654,9 +9660,9 @@ var spindle_default = {
     "base64_decode",
     "dynamic_code_execution"
   ],
+  interceptorTimeoutMs: 60000,
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  interceptorTimeoutMs: 30000,
   minimum_lumiverse_version: "1.2.0",
   lumirealm: {
     risu_app_version: "2026.6.215",
