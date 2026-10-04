@@ -45224,6 +45224,9 @@ function setup(ctx) {
   const display = ctx.display;
   if (!display)
     throw new Error("LumiRealm requires the current Lumiverse display resolver API");
+  const { state, settings } = ctx;
+  if (!state || !settings)
+    throw new Error("LumiRealm requires the current Lumiverse state and settings APIs");
   const activationPatterns = createActivationPatternCache();
   cleanups.push(subscribeActivationPatternChanges(ctx.events, activationPatterns, (keys) => display.invalidate(keys)));
   const invalidateActivationVars = (chatId, changed) => {
@@ -45445,6 +45448,14 @@ function setup(ctx) {
     if (!isLogTransportNoise(msg.type))
       flog2.trace(`frontend send: ${msg.type}`, msg);
     ctx.sendToBackend(msg);
+  };
+  const reportActivePreset = (presetId) => {
+    sendToBackend({ type: "active_preset", presetId });
+  };
+  cleanups.push(state.subscribe("loom.activePresetId", reportActivePreset));
+  const reportHydratedActivePreset = () => {
+    if (settings.core.isReady())
+      reportActivePreset(state.get("loom.activePresetId"));
   };
   const importOverlay = setupImportOverlay(flog2, sendToBackend);
   cleanups.push(() => importOverlay.destroy());
@@ -45797,6 +45808,7 @@ function setup(ctx) {
     sendToBackend({ type: "get_cards" });
     sendToBackend({ type: "log_request_state" });
     reportDims("handshake", true);
+    reportHydratedActivePreset();
   }
   handshake();
   const retry = window.setInterval(() => {

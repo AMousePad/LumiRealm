@@ -51,6 +51,7 @@ import { parseDirectLorebook } from './payload/lorebook-direct-import.js';
 import { parseDirectRegex } from './payload/regex-direct-import.js';
 import { mapRegex } from './core/mappers/regex.js';
 import { createRegexImporter } from './state/regex-import.js';
+import { applyActivePreset } from './state/preset-regex-activation.js';
 import {
   awaitRegexDelete,
   completeRegexDelete,
@@ -2017,6 +2018,9 @@ const handlerRegistry: HandlerRegistry = {
   display_authority: async (msg) => {
     if (msg.authoritative) feDisplayShadowOptOut.delete(msg.chatId);
     else feDisplayShadowOptOut.add(msg.chatId);
+  },
+  active_preset: async (msg, ctx) => {
+    await applyActivePreset(spindle.regex_scripts, ctx.userId, msg.presetId);
   },
 };
 

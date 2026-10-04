@@ -141,6 +141,7 @@ export function makeRegexStore(options: RegexStoreOptions = {}): RegexStore {
       if (input.placement !== undefined) dto.placement = [...input.placement];
       if (input.disabled !== undefined) dto.disabled = input.disabled;
       if (input.sort_order !== undefined) dto.sort_order = input.sort_order;
+      if (input.metadata !== undefined) dto.metadata = { ...input.metadata };
       dto.updated_at = dto.updated_at + 1;
       return { ...dto };
     },

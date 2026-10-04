@@ -14297,6 +14297,54 @@ function translateRisuPreset(raw, fallbackName = "Imported Preset") {
   return { preset, regexScripts, skippedRegex };
 }
 
+// src/state/preset-regex-activation.ts
+var SUSPENDED_KEY = "lumirealm_preset_inactive";
+var PAGE_SIZE = 200;
+var chains = new Map;
+function runPresetRegexExclusive(userId, fn) {
+  const previous = chains.get(userId) ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  const tail = run.then(() => {
+    return;
+  }, () => {
+    return;
+  });
+  chains.set(userId, tail);
+  tail.then(() => {
+    if (chains.get(userId) === tail)
+      chains.delete(userId);
+  });
+  return run;
+}
+function suspendedPresetRule(rule) {
+  if (rule.disabled)
+    return rule;
+  return { ...rule, disabled: true, metadata: { ...rule.metadata, [SUSPENDED_KEY]: true } };
+}
+function applyActivePreset(api, userId, activePresetId) {
+  return runPresetRegexExclusive(userId, async () => {
+    const rows = [];
+    for (let offset = 0;; offset += PAGE_SIZE) {
+      const page = await api.list({ scope: "global", limit: PAGE_SIZE, offset, userId });
+      rows.push(...page.data);
+      if (page.data.length < PAGE_SIZE)
+        break;
+    }
+    for (const row of rows) {
+      if (!row.can_mutate || !row.preset_id)
+        continue;
+      if (row.preset_id === activePresetId) {
+        if (row.metadata[SUSPENDED_KEY] !== true)
+          continue;
+        const { [SUSPENDED_KEY]: _suspended, ...metadata } = row.metadata;
+        await api.update(row.id, { disabled: false, metadata }, userId);
+      } else if (!row.disabled) {
+        await api.update(row.id, { disabled: true, metadata: { ...row.metadata, [SUSPENDED_KEY]: true } }, userId);
+      }
+    }
+  });
+}
+
 // src/realm/backend.ts
 class PresetRegexImportError extends Error {
   constructor(message) {
@@ -14426,7 +14474,7 @@ function setupRealmBackend(deps) {
     deps.notifyImportProgress?.({ type: "import_progress", phase: "saving_payload", message: `Saving preset to Lumiverse`, fraction: 0.8, error: null }, userId);
     const created = await deps.createPreset(presetInput, userId);
     log.info(`importPresetFromBytes: created preset id=${created.id} name="${created.name}"`);
-    await installPresetRegex(created, regexScripts, userId);
+    await runPresetRegexExclusive(userId, () => installPresetRegex(created, regexScripts, userId));
     deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexScripts.length > 0 ? `, ${regexScripts.length} regex` : ""})`, "success");
     deps.notifyImportProgress?.({ type: "import_progress", phase: "done", message: `Preset "${created.name}" imported successfully`, fraction: 1, error: null }, userId);
   }
@@ -14434,7 +14482,7 @@ function setupRealmBackend(deps) {
     const failures = [];
     const unboundIds = [];
     for (const rule of rules) {
-      const input = { ...rule, preset_id: preset.id };
+      const input = { ...suspendedPresetRule(rule), preset_id: preset.id };
       try {
         const row = await deps.regexApi.create(input, userId);
         if (row.preset_id !== preset.id) {
@@ -22795,19 +22843,19 @@ function invalidateRecentFlush(chatId) {
 }
 
 // src/state/chat-metadata-queue.ts
-var chains = new Map;
+var chains2 = new Map;
 function runChatMetadataExclusive(chatId, fn) {
-  const prev = chains.get(chatId) ?? Promise.resolve();
+  const prev = chains2.get(chatId) ?? Promise.resolve();
   const run = prev.then(fn, fn);
   const tail = run.then(() => {
     return;
   }, () => {
     return;
   });
-  chains.set(chatId, tail);
+  chains2.set(chatId, tail);
   tail.then(() => {
-    if (chains.get(chatId) === tail)
-      chains.delete(chatId);
+    if (chains2.get(chatId) === tail)
+      chains2.delete(chatId);
   });
   return run;
 }
@@ -24822,7 +24870,7 @@ function createModuleUploader(deps) {
 }
 
 // src/state/orphan-orchestrator.ts
-var PAGE_SIZE = 200;
+var PAGE_SIZE2 = 200;
 var MAX_RETURNED_ORPHANS = 1e4;
 function createOrphanOrchestrator(deps) {
   async function detectDeletedWhileOff(userId) {
@@ -24877,7 +24925,7 @@ function createOrphanOrchestrator(deps) {
     while (true) {
       const page = await deps.imagesApi.list({
         onlyOwned: true,
-        limit: PAGE_SIZE,
+        limit: PAGE_SIZE2,
         offset,
         userId
       });
@@ -24957,7 +25005,7 @@ function createOrphanOrchestrator(deps) {
     while (true) {
       let page;
       try {
-        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
+        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE2, offset });
       } catch (err) {
         deps.log.warn(`sweepOrphanModuleRegex: regex_scripts.list offset=${offset} failed: ${deps.errMsg(err)}`);
         break;
@@ -25008,7 +25056,7 @@ function createOrphanOrchestrator(deps) {
     while (true) {
       let page;
       try {
-        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
+        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE2, offset });
       } catch (err) {
         deps.log.warn(`listStaleModuleRegexIds: regex_scripts.list offset=${offset} failed: ${deps.errMsg(err)}`);
         break;
@@ -25044,7 +25092,7 @@ function createOrphanOrchestrator(deps) {
     while (true) {
       let page;
       try {
-        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
+        page = await deps.regexApi.list({ userId, limit: PAGE_SIZE2, offset });
       } catch (err) {
         deps.log.warn(`listStaleCharRegexIds: regex_scripts.list offset=${offset} failed: ${deps.errMsg(err)}`);
         break;
@@ -25120,7 +25168,7 @@ function createOrphanOrchestrator(deps) {
       const liveModuleIds = new Set(await deps.listModuleIds(userId));
       let offset = 0;
       while (true) {
-        const page = await deps.regexApi.list({ userId, limit: PAGE_SIZE, offset });
+        const page = await deps.regexApi.list({ userId, limit: PAGE_SIZE2, offset });
         if (!Array.isArray(page.data) || page.data.length === 0)
           break;
         for (const r of page.data) {
@@ -28684,21 +28732,21 @@ function macroInterceptorCacheStats() {
 
 // src/state/toggle-preferences.ts
 var PATH2 = "lumirealm/toggle-preferences.json";
-var chains2 = new Map;
+var chains3 = new Map;
 function exclusive(userId, fn) {
   if (!userId)
     throw new TypeError("Toggle preferences require a user ID");
-  const previous = chains2.get(userId) ?? Promise.resolve();
+  const previous = chains3.get(userId) ?? Promise.resolve();
   const run = previous.then(fn, fn);
   const tail = run.then(() => {
     return;
   }, () => {
     return;
   });
-  chains2.set(userId, tail);
+  chains3.set(userId, tail);
   tail.then(() => {
-    if (chains2.get(userId) === tail)
-      chains2.delete(userId);
+    if (chains3.get(userId) === tail)
+      chains3.delete(userId);
   });
   return run;
 }
@@ -38403,6 +38451,9 @@ var handlerRegistry = {
       feDisplayShadowOptOut.delete(msg.chatId);
     else
       feDisplayShadowOptOut.add(msg.chatId);
+  },
+  active_preset: async (msg, ctx) => {
+    await applyActivePreset(spindle.regex_scripts, ctx.userId, msg.presetId);
   }
 };
 spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {

@@ -206,6 +206,9 @@ export type FrontendToBackend =
       /** `window.innerHeight` at report time. */
       height: number;
     }
+  // The backend cannot read the active Loom preset, so the frontend reports it
+  // at handshake and on every change to gate imported preset regex rules.
+  | { type: 'active_preset'; presetId: string | null }
   // Backend replies with `set_variables` push. Also fires on every state-tick lifecycle event.
   | {
       type: 'request_variables_snapshot';

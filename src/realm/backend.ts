@@ -5,6 +5,7 @@ import type { RegexScriptCreateDTO, RegexScriptDTO, SpindleAPI, UserPresetCreate
 import { isRisuPresetBytes, decodeRisuPreset } from '../core/preset/risup-decoder.js';
 import { translateRisuPreset } from '../core/preset/risup-translator.js';
 import { translatePresetLabels } from '../core/preset/preset-labels.js';
+import { runPresetRegexExclusive, suspendedPresetRule } from '../state/preset-regex-activation.js';
 
 export interface RealmBackendLog {
   info(msg: string): void;
@@ -188,7 +189,7 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     const created = await deps.createPreset(presetInput, userId);
     log.info(`importPresetFromBytes: created preset id=${created.id} name="${created.name}"`);
 
-    await installPresetRegex(created, regexScripts, userId);
+    await runPresetRegexExclusive(userId, () => installPresetRegex(created, regexScripts, userId));
 
     deps.toast?.(`Preset "${created.name}" imported (${created.prompt_order?.length ?? 0} blocks${regexScripts.length > 0 ? `, ${regexScripts.length} regex` : ''})`, 'success');
     deps.notifyImportProgress?.({ type: 'import_progress', phase: 'done', message: `Preset "${created.name}" imported successfully`, fraction: 1.0, error: null }, userId);
@@ -204,7 +205,7 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     const unboundIds: string[] = [];
     for (const rule of rules) {
       // A preset-bound row is deleted by the host together with its preset. The pinned 0.6.25 types predate this create-only field.
-      const input: RegexScriptCreateDTO & { readonly preset_id: string } = { ...rule, preset_id: preset.id };
+      const input: RegexScriptCreateDTO & { readonly preset_id: string } = { ...suspendedPresetRule(rule), preset_id: preset.id };
       try {
         const row: RegexScriptDTO & { readonly preset_id?: string | null } = await deps.regexApi.create(input, userId);
         if (row.preset_id !== preset.id) {
