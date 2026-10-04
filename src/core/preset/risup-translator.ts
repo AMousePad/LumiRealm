@@ -523,10 +523,8 @@ export function translateRisuPromptBlocks(
           name: name || 'World Info',
           role: 'system',
           enabled,
-          // Deliberate divergence: the host emits world-info markers in prompt order regardless of
-          // position, so a lorebook between two chat items lands after the history.
-          position: seenChat ? 'post_history' : 'pre_history',
-          depth: 0,
+          position,
+          depth,
           marker: seenChat ? 'world_info_after' : 'world_info_before',
           content: text,
           isLocked: false,

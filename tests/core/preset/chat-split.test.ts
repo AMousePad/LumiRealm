@@ -25,6 +25,21 @@ test('places items between Risu chat items inside the history where the earlier 
   ]);
 });
 
+test('places a Risu lorebook item between chat items inside the history', () => {
+  expect(placement([
+    { type: 'lorebook', name: 'Lore Before' },
+    { type: 'chat', name: 'Older', rangeStart: 0, rangeEnd: -6 },
+    { type: 'lorebook', name: 'Lore Between' },
+    { type: 'chat', name: 'Latest', rangeStart: -6, rangeEnd: 'end' },
+    { type: 'lorebook', name: 'Lore After' },
+  ])).toEqual([
+    ['Lore Before', 'pre_history', 0, 'world_info_before'],
+    ['Older', 'in_history', 0, 'chat_history'],
+    ['Lore Between', 'in_history', 6, 'world_info_after'],
+    ['Lore After', 'post_history', 0, 'world_info_after'],
+  ]);
+});
+
 test('reads missing Risu chat bounds and the -1000 start as Risu slices them', () => {
   expect(placement([
     { type: 'chat', name: 'Older', rangeEnd: -2 },
