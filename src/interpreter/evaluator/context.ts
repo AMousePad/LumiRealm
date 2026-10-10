@@ -102,6 +102,8 @@ export const MSG_DEP_KEY = "__msg__";
 // Input shape for a single evaluator run, including direct identity and
 // message slices pulled out of the extension's live ActiveCard state.
 export interface BuildEvaluatorCtxInput {
+  readonly resolveLeaf?: EvaluatorCtx['resolveLeaf'];
+  readonly reparseMacroResults?: boolean;
   readonly chatId: string;
   readonly userId?: string;
   readonly characterId?: string;
@@ -139,9 +141,9 @@ export interface BuildEvaluatorCtxInput {
     readonly messages?: readonly Message[];
   };
   readonly variables: {
-    readonly local?: Readonly<Record<string, string>>;
-    readonly global?: Readonly<Record<string, string>>;
-    readonly chat?: Readonly<Record<string, string>>;
+    readonly local?: Readonly<Record<string, string | null>>;
+    readonly global?: Readonly<Record<string, string | null>>;
+    readonly chat?: Readonly<Record<string, string | null>>;
   };
   readonly scriptstateDefaults?: Readonly<Record<string, string>>;
   readonly system?: {
@@ -162,6 +164,7 @@ export interface BuildEvaluatorCtxInput {
   readonly positionPt?: Readonly<Record<string, string>>;
   /** Risu cbs() call context. See RisuRuntimeContext.cbsContext. */
   readonly cbsContext?: boolean;
+  readonly visualize?: boolean;
   /** Risu Chat.svelte display render: setvar family hides without executing. */
   readonly rmVar?: boolean;
   /** Risu runCurrentChatFunction pass: setvar family executes. */
@@ -205,10 +208,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
       : chatId
         ? getOverlay(chatId)
         : null;
-  // Temp vars are per-pass scratchpad (Risu cbs.ts). Not persisted;
-  // not gated on commit so display-mode settempvar chains work correctly.
-  const tempOverlay = new Map<string, string>();
-
   const envLocal = variables.local ?? {};
   const envGlobal = variables.global ?? {};
   const envChat = variables.chat ?? {};
@@ -230,7 +229,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
   const vars = {
     get(scope: VarScope, name: string): string {
       if (recordRead) recordRead(scope, name);
-      if (scope === "temp") return tempOverlay.get(name) ?? "";
       if (overlay) {
         if (scope === "local" && overlay.local.has(name)) return overlay.local.get(name)!;
         if (scope === "global" && overlay.global.has(name)) return overlay.global.get(name)!;
@@ -240,15 +238,14 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
       // Character defaults shadow "null" on local scope.
       if (scope === "global") return envGlobal[name] ?? "null";
       const fromChat = envChat[name];
-      if (fromChat !== undefined) return fromChat;
+      if (fromChat != null) return fromChat;
       const fromLocal = envLocal[name];
-      if (fromLocal !== undefined) return fromLocal;
+      if (fromLocal != null) return fromLocal;
       const fromDefaults = defaults[name];
       if (fromDefaults !== undefined) return fromDefaults;
       return "null";
     },
     set(scope: VarScope, name: string, value: string): void {
-      if (scope === "temp") { tempOverlay.set(name, value); return; }
       if (!commit || !overlay) return;
       if (scope === "global") {
         overlay.global.set(name, value);
@@ -271,7 +268,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     },
     has(scope: VarScope, name: string): boolean {
       if (recordRead) recordRead(scope, name);
-      if (scope === "temp") return tempOverlay.has(name);
       if (overlay) {
         if (scope === "local" && (overlay.local.has(name) || overlay.chat.has(name))) return true;
         if (scope === "global" && overlay.global.has(name)) return true;
@@ -283,7 +279,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
         || Object.prototype.hasOwnProperty.call(defaults, name);
     },
     delete(scope: VarScope, name: string): void {
-      if (scope === "temp") { tempOverlay.delete(name); return; }
       if (!commit) return;
       if (overlay) {
         if (scope === "global") overlay.global.delete(name);
@@ -373,10 +368,6 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
 
   const lorebook: readonly LorebookEntry[] = input.lorebook ?? [];
 
-  // Risu creates this table inside each risuChatParser call. Recursive calls
-  // share it through parser arguments, but independent templates never do.
-  const functions = makeFunctionRegistry();
-
   const rng = recorder
     ? { random: () => { recorder.volatile = true; return Math.random(); } }
     : { random: () => Math.random() };
@@ -384,7 +375,9 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     ? { now: () => { recorder.volatile = true; return Date.now(); } }
     : { now: () => Date.now() };
 
-  const out: EvaluatorCtx = {
+  return freshParserContext({
+    ...(input.resolveLeaf ? { resolveLeaf: input.resolveLeaf } : {}),
+    ...(input.reparseMacroResults === false ? { reparseMacroResults: false } : {}),
     chatId,
     vars,
     identity,
@@ -396,12 +389,11 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     role: input.currentMessageRoleOverride
       ? normalizeRoleToLumi(input.currentMessageRoleOverride)
       : null,
-    functions,
     aiModel: input.system?.model ?? "",
     axModel: "",
     isFirstMessage: Number(chat.messageCount ?? 0) <= 1,
     currentMessageIndex: input.currentMessageIndexOverride !== undefined
-      ? Math.max(-1, input.currentMessageIndexOverride)
+      ? input.currentMessageIndexOverride
       : (chat.lastMessageId != null
         ? Math.max(-1, chat.lastMessageId - 1)
         : null),
@@ -419,20 +411,45 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     ...(input.modulesByNamespace ? { modulesByNamespace: input.modulesByNamespace } : {}),
     ...(input.positionPt ? { positionPt: input.positionPt } : {}),
     ...(input.cbsContext ? { cbsContext: true } : {}),
+    ...(input.visualize !== undefined ? { visualize: input.visualize } : {}),
     ...(input.rmVar ? { rmVar: true } : {}),
     ...(input.runVar ? { runVar: true } : {}),
     // The prompt-regex pass (suppressVarPersist) leaves the setvar family literal,
     // mirroring Risu's editprocess (no runVar). See RisuRuntimeContext.promptRegexLiteralVars.
     ...(input.suppressVarPersist ? { promptRegexLiteralVars: true } : {}),
+  });
+}
+
+// Independent risuChatParser calls reset functions and temporary variables,
+// while retaining the character, assets and live saved-variable reader.
+export function freshParserContext(base: Omit<EvaluatorCtx, 'functions' | 'tempVars'>): EvaluatorCtx {
+  const temp = new Map<string, string>();
+  const vars: EvaluatorCtx['vars'] = {
+    get: (scope, name) => scope === 'temp' ? temp.get(name) ?? '' : base.vars.get(scope, name),
+    set: (scope, name, value) => {
+      if (scope === 'temp') temp.set(name, value);
+      else base.vars.set(scope, name, value);
+    },
+    add(scope, name, delta) {
+      if (scope === 'temp') this.set(scope, name, String(Number(this.get(scope, name)) + delta));
+      else base.vars.add(scope, name, delta);
+    },
+    has: (scope, name) => scope === 'temp' ? temp.has(name) : base.vars.has(scope, name),
+    delete: (scope, name) => {
+      if (scope === 'temp') temp.delete(name);
+      else base.vars.delete(scope, name);
+    },
   };
-  // Late-bound: handlers re-parse field content with the same context.
-  // Lazy require dodges the circular dep through dispatch->handlers.
+  const out: EvaluatorCtx = { ...base, vars, tempVars: {}, functions: makeFunctionRegistry() };
+  // Risu field/history reparses receive matcherArg.displaying, not visualize.
+  // Lazy require dodges the circular dependency through dispatch and handlers.
   (out as { evaluate?: (text: string) => string }).evaluate = (text: string) => {
     if (typeof text !== "string" || text.length === 0) return "";
-    if (text.indexOf("{{") < 0 && text.indexOf("<") < 0) return text;
+    if (text.indexOf("{{") < 0 && text.indexOf("{#") < 0 && text.indexOf("<") < 0) return text;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { evaluate } = require("./scanner.js") as typeof import("./scanner.js");
-    return evaluate(text, out, out.callStack !== undefined ? { callStack: out.callStack } : {});
+    const nested = out.visualize === true ? { ...out, visualize: false } : out;
+    return evaluate(text, nested, out.callStack !== undefined ? { callStack: out.callStack } : {});
   };
   return out;
 }

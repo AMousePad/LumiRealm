@@ -2,6 +2,7 @@ import * as tus from 'tus-js-client';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend, CardSummary, ImportProgress } from '../types/messages.js';
 import { errMsg } from '../util/coerce.js';
+import { isLogTransportNoise } from '../log/transport.js';
 import { recoverModuleRegexScriptIds } from '../state/module-artifact-project.js';
 import {
   planCardRegexCleanup,
@@ -12,7 +13,7 @@ import { pickNativeFile } from './native-file-picker.js';
 
 // Mounts into a host element provided by ui/sidebar.ts.
 
-const ACCEPT_EXTENSIONS = ['.charx', '.png', '.json', '.jpg', '.jpeg'];
+const ACCEPT_EXTENSIONS = ['.charx', '.png', '.json', '.jpg', '.jpeg', '.risup', '.risupreset', '.risum'];
 
 const UPLOAD_ENDPOINT = '/api/v1/spindle-uploads';
 const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
@@ -64,8 +65,8 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   const importBtn = document.createElement('button');
   importBtn.type = 'button';
   importBtn.className = 'lrm-btn lrm-btn-primary';
-  importBtn.textContent = 'Upload card';
-  importBtn.title = 'Pick a .charx, .png, .json, or .jpg/.jpeg character file.';
+  importBtn.textContent = 'Upload file…';
+  importBtn.title = 'Pick a character card (.charx, .png, .json) or preset (.risup, .risupreset) file.';
   actionRow.appendChild(importBtn);
   root.appendChild(actionRow);
 
@@ -588,7 +589,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   }
 
   function handleBackendMessage(msg: BackendToFrontend): void {
-    log.info(`drawer.handle: ${msg.type}`);
+    if (!isLogTransportNoise(msg.type)) log.info(`drawer.handle: ${msg.type}`);
     switch (msg.type) {
       case 'cards_updated':
         log.info(`drawer.cards_updated: count=${msg.cards.length}`);

@@ -5,3 +5,8 @@ local/
 /tmp*.txt
 tmp/
 CLAUDE.md
+# Optional private card library for data-driven tests (never committed).
+tests/local_library/*
+!tests/local_library/.gitkeep
+# Per-machine deploy destination.
+.deploy-dest

@@ -1,5 +1,7 @@
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
+import { readEffectiveGlobals, TogglePreferencesError } from '../state/toggle-preferences.js';
+import { presetToggleValues } from './preset-toggle-values.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import { runPipeline } from '../interpreter/evaluator/pipeline.js';
@@ -14,6 +16,7 @@ import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import type { Message } from '../core/cbs/index.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
+import { hostMessageTime } from '../util/message-time.js';
 
 export interface ChatMessage {
   readonly id: string;
@@ -40,6 +43,9 @@ export interface ReadonlyResolverDeps {
 }
 
 export interface ReadonlyResolver {
+  readonly prepareTriggerContext: (
+    chatId: string, characterId: string, userId: string | undefined,
+  ) => Promise<BuildEvaluatorCtxInput>;
   readonly resolve: (
     template: string,
     chatId: string,
@@ -85,7 +91,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         id: m.id,
         role: m.role,
         content: m.content,
-        createdAt: m.send_date ?? m.created_at ?? 0,
+        createdAt: hostMessageTime(m),
         ...(m.name ? { speaker: m.name } : {}),
         ...(typeof m.extra?.greeting_index === 'number'
           ? { greetingIndex: m.extra.greeting_index }
@@ -190,7 +196,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       },
       variables: {
         ...(mv.local ? { local: mv.local } : {}),
-        ...(mv.global ? { global: mv.global } : {}),
+        global: await readEffectiveGlobals(userId, mv.global ?? {}, presetToggleValues(chatId, userId)),
         ...(chatVars ? { chat: chatVars } : {}),
       },
       legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
@@ -216,7 +222,6 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       template,
       phase: 'display',
       ...(rmVar ? { rmVar: true } : {}),
-      wrapIslands: false,
     });
   }
 
@@ -249,7 +254,6 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
           template,
           phase: 'display',
           ...(opts?.rmVar === true ? { rmVar: true } : {}),
-          wrapIslands: false,
         }),
       );
       log.debug(
@@ -258,6 +262,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       );
       return resolved;
     } catch (err) {
+      if (err instanceof TogglePreferencesError) throw err;
       log.error(
         `resolveReadonlyMany: worker-eval threw chat=${chatId}: ${(err as Error).message}. ` +
           `Returning templates verbatim (no Lumi-native fallback).`,
@@ -326,10 +331,17 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       );
       return out;
     } catch (err) {
+      if (err instanceof TogglePreferencesError) throw err;
       log.error(`resolveReadonly: worker-eval threw chat=${chatId}: ${(err as Error).message}. Returning template verbatim (no Lumi-native fallback).`);
       return template;
     }
   }
 
-  return { resolve, resolveMany, resolveInWorker, fetchMessages, stripMessageSetvars };
+  async function prepareTriggerContext(chatId: string, characterId: string, userId: string | undefined): Promise<BuildEvaluatorCtxInput> {
+    if (!userId) throw new Error('Trigger evaluation requires a user context');
+    const messages = await fetchMessages(chatId);
+    return { ...await buildCtxInput(chatId, characterId, userId, messages, false), commit: false };
+  }
+
+  return { resolve, resolveMany, resolveInWorker, fetchMessages, stripMessageSetvars, prepareTriggerContext };
 }

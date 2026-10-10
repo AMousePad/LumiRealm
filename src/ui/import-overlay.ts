@@ -121,11 +121,15 @@ export function setupImportOverlay(
     progressInner.style.width = `${clamped * 100}%`;
   }
 
-  function showOverlay(newLabel: string): void {
+  function cancelHide(): void {
     if (hideTimer) {
       clearTimeout(hideTimer);
       hideTimer = undefined;
     }
+  }
+
+  function showOverlay(newLabel: string): void {
+    cancelHide();
     label = newLabel;
     visible = true;
     lastPhase = '';
@@ -156,17 +160,14 @@ export function setupImportOverlay(
   });
 
   function hideNow(): void {
-    if (hideTimer) {
-      clearTimeout(hideTimer);
-      hideTimer = undefined;
-    }
+    cancelHide();
     visible = false;
     overlay.hidden = true;
     log.info('import-overlay: hidden');
   }
 
   function scheduleHide(): void {
-    if (hideTimer) clearTimeout(hideTimer);
+    cancelHide();
     hideTimer = setTimeout(() => {
       hideTimer = undefined;
       hideNow();
@@ -174,6 +175,7 @@ export function setupImportOverlay(
   }
 
   function applyProgress(phase: string, message: string, fraction: number | null): void {
+    cancelHide();
     phaseEl.textContent = PHASE_LABEL[phase] ?? phase;
     messageEl.textContent = message || '';
     lastPhase = phase;
@@ -207,10 +209,7 @@ export function setupImportOverlay(
     msg: Extract<BackendToFrontend, { type: 'operation_progress' }>,
   ): void {
     activeOperationId = msg.operationId;
-    if (hideTimer) {
-      clearTimeout(hideTimer);
-      hideTimer = undefined;
-    }
+    cancelHide();
     if (msg.phase === 'started' || !visible) {
       visible = true;
       lastPhase = '';
@@ -248,6 +247,7 @@ export function setupImportOverlay(
   }
 
   function showConsent(prompt: Extract<BackendToFrontend, { type: 'consent_prompt' }>): void {
+    cancelHide();
     if (!visible) showOverlay(label || 'character');
     pendingConsentRequestId = prompt.requestId;
     titleEl.textContent = prompt.title;
@@ -346,7 +346,7 @@ export function setupImportOverlay(
   }
 
   function destroy(): void {
-    if (hideTimer) clearTimeout(hideTimer);
+    cancelHide();
     overlay.remove();
   }
 

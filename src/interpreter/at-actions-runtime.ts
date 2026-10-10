@@ -613,7 +613,7 @@ function normalizeRuntimeFlag(
   actions: readonly AtAtFlagAction[];
   order?: number;
 } {
-  let raw = ableFlag ? (rawFlag ?? 'g') : 'g';
+  let raw = ableFlag ? (rawFlag || 'g') : 'g';
   let order: number | undefined;
   const actions: AtAtFlagAction[] = [];
   if (ableFlag && raw.includes('<')) {

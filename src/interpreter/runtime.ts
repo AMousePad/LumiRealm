@@ -9,36 +9,46 @@ import {
   RisuCompatUnsupportedError,
 } from './host.js';
 import { buildRisuChatView } from './risu-chat-view.js';
-import { makeVarsApi } from './runtime/vars.js';
-import { makeArraysDictsApi } from './runtime/arrays-dicts.js';
-import { makeChatApi } from './runtime/chat.js';
+import { makeVarsApi, createTriggerLocalState } from './runtime/vars.js';
+import { createLuaTemplateParser, createTriggerTemplateParser } from './runtime/template.js';
+import { prepareLuaHostState, type LuaHostState } from './runtime/lua-state.js';
+import { LuaCallbackError, type ExecuteOpts } from './lua-engine.js';
+import { currentUserId } from './runtime/als.js';
+import { hasTriggerTemplate } from '../core/triggers/templates.js';
+import { advanceTriggerControl, type TriggerControlState } from '../core/triggers/control-flow.js';
+import type { TriggerEffect } from '../core/schemas/triggerscript.js';
+import { runCollectionEffect } from './runtime/arrays-dicts.js';
+import { makeChatApi, retainedChatMessages, recoverFailedChatCut } from './runtime/chat.js';
 import { makeCharacterNoteApi } from './runtime/character-note.js';
 import {
   makeLorebookApi,
   sortLorebookEntriesBySourceOrder,
+  withModuleLorebooks,
+  keyToArray,
   type LorebookCache,
 } from './runtime/lorebook.js';
+import { evaluate } from './evaluator/index.js';
+import { buildEvaluatorContext } from './evaluator/context.js';
 import { makeDisplayStateApi } from './runtime/display-state.js';
+import { makeLuaRequest } from './runtime/request.js';
 import { runLLM as _runLLM, parseLuaPromptArg } from './runtime/llm.js';
 import {
   extractRegex,
-  regexTest,
-  replaceString,
+  runRegexEffect,
   random,
   setCharAt,
-  calculate,
   splitString,
 } from './runtime/strings-regex.js';
 import { toStr } from '../util/coerce.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import { samplersToWire } from '../util/samplers-wire.js';
-import { normalizeReplaceStringForSanitizer } from '../util/sanitizer-doc-shape.js';
 import { risuRoleToLumi, lumiRoleToRisu } from '../util/role-coerce.js';
 
 const _logStateChanged    = makeSafeLogger('runtime.stateChanged');
 const _logMake            = makeSafeLogger('runtime.makeRisuTriggerRuntime');
 const _logTriggercode     = makeSafeLogger('runtime.triggercode');
 const _logRunLua          = makeSafeLogger('runtime.runLua');
+const _logAlert           = makeSafeLogger('runtime.showAlert');
 const _logSetChat         = makeSafeLogger('runtime.setChat');
 const _logSetFullChat     = makeSafeLogger('runtime.setFullChat');
 const _logAddChat         = makeSafeLogger('runtime.addChat');
@@ -46,32 +56,18 @@ const _logLLMMain         = makeSafeLogger('runtime.LLMMain');
 const _logAxLLMMain       = makeSafeLogger('runtime.axLLMMain');
 const _logFlush           = makeSafeLogger('runtime.flush');
 const _logLuaPrint        = makeSafeLogger('runtime.lua');
-const _logCbs             = makeSafeLogger('runtime.cbs');
+const _logImageGen        = makeSafeLogger('runtime.imageGen');
 
 type WasmoonExec = (
   code: string,
   globals: Record<string, unknown>,
-  opts: { entry?: string; args?: readonly unknown[]; wasmoonKey: string },
+  opts: ExecuteOpts & { wasmoonKey: string },
 ) => Promise<unknown>;
 let _wasmoonExec: WasmoonExec | null = null;
 export function setWasmoonExecutor(fn: WasmoonExec): void { _wasmoonExec = fn; }
 let _wasmoonEnabled = true;
 export function setWasmoonEnabled(b: boolean): void { _wasmoonEnabled = b; }
 export function isWasmoonEnabled(): boolean { return _wasmoonEnabled; }
-
-// Per-process alert gate so a Lua loop calling cbs() doesn't stack modals.
-let _cbsUnresolvedAlertFired = false;
-function warnCbsUnresolvedOnce(api: HostApi): void {
-  _logCbs.warn('cbs(): no resolver wired, returning input verbatim');
-  if (_cbsUnresolvedAlertFired) return;
-  _cbsUnresolvedAlertFired = true;
-  try {
-    api.ui?.alert?.(
-      'A card script called cbs(template) but no resolver was wired. Output will contain raw {{...}} markers. Report this if you see it.',
-      'error',
-    );
-  } catch { /* */ }
-}
 
 // Compiled triggers' rtOpts are JSON-frozen, so non-serialisable fields
 // (Function, Set) ride the side-channel. Safe: dispatch is serial,
@@ -88,12 +84,12 @@ export {
 export type { AuxDebugCaptureEvent } from './runtime/dispatch-context.js';
 
 import { loadGlobalVars, loadVars, saveVars } from './runtime/chat-state.js';
-import { inheritedVarsAls, withInheritedVarsCache } from './runtime/als.js';
+import { adoptInvocation, cloneInvocation, commitInvocation, initializeInvocation, invocationHostApi, type TriggerInvocationState } from './runtime/invocation.js';
 
 export { compareValues } from './runtime/compare.js';
 export { applyMatchTemplate } from './runtime/match-template.js';
-export { calcString } from './runtime/calc.js';
-import { compareValues } from './runtime/compare.js';
+import { calculate } from './runtime/calc.js';
+import { compareValues, compareTriggerCondition } from './runtime/compare.js';
 import { unsupported } from './runtime/unsupported.js';
 
 
@@ -112,14 +108,17 @@ export interface RisuTriggerRuntime {
   stopSending: boolean;
   sendAIprompt: boolean;
   // resolution
+  prepareTemplates(): Promise<void>;
   resolve(value: unknown, kind: 'var' | 'value' | 'regex' | string): string;
   setVar(name: string, value: unknown): void;
+  setResult(name: string, value: unknown): void;
   getVar(name: string): string;
   declareLocalVar(name: string, value: unknown, indent: number): void;
   setvarV1(name: string, op: string, rawValue: unknown): void;
   setvarV2(name: string, op: string, value: unknown): void;
   compare(a: unknown, b: unknown, op: string): boolean;
   checkConditions(conditions: readonly unknown[]): boolean;
+  advanceControl(effects: readonly TriggerEffect[], index: number, state: TriggerControlState): Promise<number | undefined>;
   // control flow
   loopTick(): number;
   sleep(ms: number): Promise<void>;
@@ -127,7 +126,7 @@ export interface RisuTriggerRuntime {
   impersonate(role: 'user' | 'char' | string, value: unknown): Promise<void>;
   systemPrompt(location: 'start' | 'historyend' | 'promptend' | string, value: unknown): Promise<void>;
   command(value: unknown): Promise<never>;
-  cutChat(start: unknown, end: unknown): Promise<void>;
+  cutChat(start: unknown, end: unknown, defaultInvalidEnd?: boolean): Promise<void>;
   modifyChat(index: unknown, value: unknown): Promise<void>;
   updateGUI(): Promise<void>;
   updateChatAt(i: unknown): Promise<void>;
@@ -150,37 +149,13 @@ export interface RisuTriggerRuntime {
   runCode(code: unknown): Promise<void>;
   runLua(code: unknown, luaOpts?: Record<string, unknown>): Promise<unknown>;
   // string / regex / random
-  extractRegex(value: unknown, regex: unknown, flags: unknown, result: unknown): string;
-  regexTest(value: unknown, regex: unknown, flags: unknown): boolean;
-  replaceString(source: unknown, regex: unknown, result: unknown, replacement: unknown, flags: unknown): string;
+  extractRegex(value: unknown, regex: unknown, flags: unknown, result: unknown, v1?: boolean): string;
+  regexEffect(effect: TriggerEffect): void;
   random(min: unknown, max: unknown): number;
   setCharAt(source: unknown, index: unknown, value: unknown): string;
   splitString(source: unknown, delimiter: unknown, kind?: string): readonly string[];
-  calculate(expr: unknown): string;
-  // arrays
-  makeArrayVar(name: string): void;
-  arrayLength(name: string): number;
-  arrayGet(name: string, i: unknown): string;
-  arraySet(name: string, i: unknown, v: unknown): void;
-  arrayPush(name: string, v: unknown): void;
-  arrayPop(name: string): string;
-  arrayShift(name: string): string;
-  arrayUnshift(name: string, v: unknown): void;
-  arraySplice(name: string, start: unknown, item: unknown): void;
-  arraySlice(name: string, start: unknown, end: unknown): string;
-  arrayJoin(name: string, delim: unknown): string;
-  arrayIndexOf(name: string, v: unknown): number;
-  arrayRemoveIndex(name: string, i: unknown): void;
-  // dicts
-  makeDictVar(name: string): void;
-  dictGet(name: string, k: unknown): string;
-  dictSet(name: string, k: unknown, v: unknown): void;
-  dictDelete(name: string, k: unknown): void;
-  dictHasKey(name: string, k: unknown): boolean;
-  dictClear(name: string): void;
-  dictSize(name: string): number;
-  dictKeys(name: string): string[];
-  dictValues(name: string): unknown[];
+  calculate(expression: unknown, expressionType: string, outputVar: string): void;
+  collectionEffect(effect: TriggerEffect): void;
   // character / persona / note
   getCharacterDesc(): Promise<string>;
   setCharacterDesc(value: unknown): Promise<void>;
@@ -217,7 +192,8 @@ export interface RisuTriggerRuntime {
     readonly content: string;
   }[];
   // lifecycle
-  flush(): Promise<void>;
+  // Resolves true when a dirty var write was persisted (Risu varChanged analog).
+  flush(): Promise<boolean>;
   warnDroppedTriggerCode(label?: string): void;
 }
 
@@ -229,6 +205,7 @@ export async function makeRisuTriggerRuntime(
   scriptNs: ScriptNS,
   opts: TriggerRuntimeOpts = {},
 ): Promise<RisuTriggerRuntime> {
+  const invocation: TriggerInvocationState = opts.invocationState ?? { stopSending: false };
   const displayMode = !!opts.displayMode;
   const lowLevelAccess = !!opts.lowLevelAccess;
   const characterId = opts.characterId || null;
@@ -240,7 +217,7 @@ export async function makeRisuTriggerRuntime(
   const portalChatId: string | undefined = opts.chatId ?? dispatchCtx.chatId;
   const rememberOurWrite: ((chatId: string, msgId: string, content: string) => void) | undefined =
     opts.rememberOurWrite ?? dispatchCtx.rememberOurWrite;
-  const stateChanged: (() => void) | undefined =
+  const stateChanged: ((source?: string) => void) | undefined =
     opts.stateChanged ?? dispatchCtx.stateChanged;
   const auxConnectionId: string | null =
     (opts.auxConnectionId ?? dispatchCtx.auxConnectionId ?? null);
@@ -255,10 +232,11 @@ export async function makeRisuTriggerRuntime(
   const submodelSamplers = opts.submodelSamplers ?? dispatchCtx.submodelSamplers ?? auxSamplers;
   const auxDebugCapture: ((event: AuxDebugCaptureEvent) => void) | undefined =
     opts.auxDebugCapture ?? dispatchCtx.auxDebugCapture;
-  // Bind at factory time so cbs() invoked from Lua resolves against the
-  // user this runtime was built for, not whoever last set the global.
-  const capturedResolveTemplate: ((text: string) => Promise<string>) | undefined =
-    opts.resolveTemplate ?? dispatchCtx.resolveTemplate;
+  const imageConnectionId: string | null =
+    (opts.imageConnectionId ?? dispatchCtx.imageConnectionId ?? null);
+  const imageModelOverride: string | null =
+    (opts.imageModelOverride ?? dispatchCtx.imageModelOverride ?? null);
+  const naiSettings = opts.naiSettings ?? dispatchCtx.naiSettings ?? null;
   const auxParamsWire = samplersToWire(auxSamplers);
   const submodelParamsWire = samplersToWire(submodelSamplers);
   const auxPrefillCompat: boolean =
@@ -271,7 +249,7 @@ export async function makeRisuTriggerRuntime(
       return;
     }
     _logStateChanged.info(`source=${source} → calling backend`);
-    try { stateChanged(); }
+    try { stateChanged(source); }
     catch (err) {
       _logStateChanged.warn(`callback threw: ${(err as Error).message}`);
     }
@@ -293,10 +271,9 @@ export async function makeRisuTriggerRuntime(
     );
   }
 
-  // Nested runTrigger reuses parent varsCache; only outermost runtime flushes.
   // Per-await timing: every step here is an IPC round-trip in Spindle; the
-  // editDisplay listenEdit chain creates a fresh runtime per trigger (16x for
-  // Mortal Realm), so the factory cost dominates the wall-clock budget.
+  // editDisplay listenEdit chain creates a fresh runtime per trigger (16x on
+  // a 16-trigger card), so the factory cost dominates the wall-clock budget.
   //
   // PRELOAD FAST-PATH: when caller passes `opts.preloaded`, we skip the
   // matching IPC fetch and reuse the provided snapshot. Used by
@@ -308,28 +285,26 @@ export async function makeRisuTriggerRuntime(
   const globalVarsPromise = preloaded?.globalVars
     ? Promise.resolve({ ...preloaded.globalVars })
     : loadGlobalVars(api);
-  let varsCache: Record<string, string>;
+  let varsPromise: Promise<Record<string, string | null>>;
   let isInheritedVarsCache = false;
   let _tVars = 0;
   let _varsSrc: 'inherited' | 'preloaded' | 'fetched' = 'fetched';
-  const inheritedFrame = inheritedVarsAls.getStore();
+  const inheritedFrame = invocation.varsCache;
   if (inheritedFrame) {
-    varsCache = inheritedFrame;
+    varsPromise = Promise.resolve(inheritedFrame);
     isInheritedVarsCache = true;
     _varsSrc = 'inherited';
   } else if (preloaded?.varsCache) {
-    // Shallow-clone so per-trigger writes don't corrupt the shared snapshot.
-    // Risu's listenEdit chain runs each trigger in fresh Lua state , varsCache
-    // mutations from one trigger should not leak into the next via the
-    // shared preload (they'd leak via flush() at chain end if needed).
-    varsCache = { ...preloaded.varsCache };
+    // Isolate invocation state from its preload; frontend Lua uses live
+    // variable accessors independently of this copy.
+    varsPromise = Promise.resolve({ ...preloaded.varsCache });
     _varsSrc = 'preloaded';
   } else {
     const _t0 = Date.now();
-    varsCache = await loadVars(api);
-    _tVars = Date.now() - _t0;
+    varsPromise = loadVars(api).then(vars => { _tVars = Date.now() - _t0; return vars; });
   }
-  const globalVarsCache = await globalVarsPromise;
+  const [varsCache, globalVarsCache] = await Promise.all([varsPromise, globalVarsPromise]);
+  invocation.varsCache = varsCache;
   let messagesCache: HostMessage[] = [];
   // Risu's `char.firstMessage` (greeting), excluded from messagesCache to
   // match `chat.message[]`. getFirstMessage / getCharacterLastMessage use it.
@@ -338,7 +313,15 @@ export async function makeRisuTriggerRuntime(
   let _msgsSrc: 'preloaded' | 'fetched' = 'fetched';
   const _tMsgsStart = Date.now();
   try {
-    if (preloaded?.messagesRaw) {
+    if (opts.luaChat && !opts.invocationState) {
+      messagesCache = opts.luaChat.messages;
+      firstMessage = opts.luaChat.firstMessage;
+      _msgsSrc = 'preloaded';
+    } else if (invocation.messagesCache) {
+      messagesCache = invocation.messagesCache;
+      firstMessage = invocation.firstMessage;
+      _msgsSrc = 'preloaded';
+    } else if (preloaded?.messagesRaw) {
       _msgsSrc = 'preloaded';
       _msgsCount = preloaded.messagesRaw.length;
       const view = buildRisuChatView({ messages: preloaded.messagesRaw.map((m) => ({ ...m })) });
@@ -358,6 +341,14 @@ export async function makeRisuTriggerRuntime(
       }
     }
   } catch { messagesCache = []; }
+  invocation.messagesCache = messagesCache;
+  if (firstMessage !== undefined) invocation.firstMessage = firstMessage;
+  initializeInvocation(invocation, api, (id, content) => {
+    if (opts.invocationState && rememberOurWrite && portalChatId) {
+      try { rememberOurWrite(portalChatId, id, content); } catch { /* */ }
+    }
+  });
+  api = opts.invocationState ? invocationHostApi(invocation) : invocation.live!.api;
   const _tMsgs = _msgsSrc === 'preloaded' ? 0 : Date.now() - _tMsgsStart;
 
   const lorebook: LorebookCache = { entries: [], primaryBookId: null };
@@ -403,6 +394,18 @@ export async function makeRisuTriggerRuntime(
       }
     } catch { /* world_books permission not granted */ }
   }
+  // A preloaded snapshot carries only the character's own books, so listenEdit
+  // chains pass their module lore rows through opts. The fetched path can also
+  // read them from the dispatch context.
+  const rawExtra = preloaded?.lorebook
+    ? opts.moduleLorebooks ?? []
+    : opts.moduleLorebooks ?? dispatchCtx.moduleLorebooks ?? [];
+  const extraLorebooks = Array.isArray(rawExtra)
+    ? rawExtra
+    : (rawExtra && typeof rawExtra === 'object')
+    ? Object.values(rawExtra as unknown as Record<string, unknown>).flat()
+    : [];
+  lorebook.entries = withModuleLorebooks(lorebook.entries, extraLorebooks);
 
   const _factoryTotal = Date.now() - _factoryStart;
   // Always emit so we capture per-trigger factory cost in editDisplay chains.
@@ -423,15 +426,25 @@ export async function makeRisuTriggerRuntime(
   // and track IDs assigned to new rows so later edits/deletes cannot race them.
   const pendingSendIds = new WeakMap<HostMessage, Promise<string>>();
   let chatMutationTail: Promise<void> = Promise.resolve();
+  let cutChatFailure: { cause: unknown; previous: HostMessage[] } | undefined;
 
   function enqueueChatMutation(label: string, operation: () => Promise<void>): Promise<void> {
-    const next = chatMutationTail.then(operation);
+    const next = opts.luaChat?.enqueue ? opts.luaChat.enqueue(operation) : chatMutationTail.then(operation);
     chatMutationTail = next.catch((err) => {
       _logSetFullChat.warn(
         `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     });
     return chatMutationTail;
+  }
+
+  async function drainChatMutations(): Promise<void> {
+    await chatMutationTail;
+    if (cutChatFailure) {
+      const { cause, previous } = cutChatFailure;
+      cutChatFailure = undefined;
+      await recoverFailedChatCut(api, messagesCache, previous, cause);
+    }
   }
 
   function trackPendingSend(entry: HostMessage, completion: Promise<void>): void {
@@ -453,7 +466,7 @@ export async function makeRisuTriggerRuntime(
 
   async function persistChatSend(entry: HostMessage): Promise<void> {
     try {
-      const result = await api.chat.sendMessage(entry.content, { role: entry.role });
+      const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, { role: entry.role, ...(opts.luaChat?.enqueue ? { messageId: entry.id } : {}) });
       const id = result && typeof result.id === 'string' ? result.id : '';
       if (id) (entry as { id: string }).id = id;
     } catch (err) {
@@ -464,7 +477,7 @@ export async function makeRisuTriggerRuntime(
   async function persistChatDelete(entry: HostMessage): Promise<void> {
     try {
       const id = await resolveHostMessageId(entry);
-      if (id) await api.chat.deleteMessage(id);
+      if (id) await (opts.luaChat?.persistence ?? api.chat).deleteMessage(id);
     } catch (err) {
       _logSetFullChat.warn(
         `delete msgId=${entry.id} threw: ${err instanceof Error ? err.message : String(err)}`,
@@ -479,7 +492,7 @@ export async function makeRisuTriggerRuntime(
       if (rememberOurWrite && portalChatId) {
         try { rememberOurWrite(portalChatId, id, next.content); } catch { /* */ }
       }
-      await api.chat.editMessage(id, next.content);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content);
     } catch (err) {
       _logSetFullChat.warn(
         `edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`,
@@ -488,28 +501,13 @@ export async function makeRisuTriggerRuntime(
   }
 
   function reconcileFullChat(value: unknown): void {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(toStr(value));
-    } catch (err) {
-      _logSetFullChat.warn(
-        `invalid JSON ignored: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return;
-    }
-    if (!Array.isArray(parsed)) {
-      _logSetFullChat.warn('non-array payload ignored');
-      return;
-    }
+    const parsed = JSON.parse(value as string);
 
     const previous = [...messagesCache];
-    const desired = parsed.map((raw) => {
-      const item = raw && typeof raw === 'object'
-        ? raw as { role?: unknown; data?: unknown }
-        : {};
+    const desired = parsed.map((raw: { role?: unknown; data?: unknown }) => {
       return {
-        role: risuRoleToLumi(toStr(item.role)),
-        content: toStr(item.data),
+        role: risuRoleToLumi(toStr(raw.role)),
+        content: toStr(raw.data),
       };
     });
     const overlap = Math.min(previous.length, desired.length);
@@ -559,14 +557,36 @@ export async function makeRisuTriggerRuntime(
   }
 
   // `dirty` boxed so flush() observes setVar writes across the closure boundary.
-  const dirty: { value: boolean } = { value: false };
-  const localScopes = new Map<number, Map<string, string>>();
+  const dirty = invocation.live!.dirty;
+  const localState = opts.localState ?? createTriggerLocalState();
   const tempVars = displayMode ? {} : undefined;
+  const onVarRead = opts.onVarRead;
+  let parseTemplate: ((text: string) => string) | undefined;
+  async function prepareTemplates(): Promise<void> {
+    if (parseTemplate) return;
+    const prepare = opts.templateContext ?? dispatchCtx.templateContext;
+    if (!prepare) return;
+    parseTemplate = createTriggerTemplateParser(await prepare(), (scope, name) => {
+      if (scope === 'global') {
+        onVarRead?.(name, 'global');
+        return globalVarsCache[name] ?? 'null';
+      }
+      return _vars.getStoredVar(name);
+    });
+  }
   const _vars = makeVarsApi({
     varsCache,
-    localScopes,
+    ...localState,
     dirty,
+    storedVars: () => invocation.live!.varsCache,
+    onStoredWrite: () => { invocation.live!.varsCache = varsCache; },
     characterId,
+    parseTemplate: text => {
+      if (!hasTriggerTemplate(text)) return text;
+      if (!parseTemplate) throw new RisuCompatUnsupportedError('trigger templates', 'no evaluation context was prepared');
+      return parseTemplate(text);
+    },
+    ...(onVarRead ? { onVarRead: (n: string) => onVarRead(n, 'chat') } : {}),
     ...(preloaded?.scriptstateDefaults !== undefined
       ? { scriptstateDefaults: preloaded.scriptstateDefaults }
       : {}),
@@ -574,20 +594,22 @@ export async function makeRisuTriggerRuntime(
   });
   const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal } = _vars;
 
-  let stopSending = false;
   let sendAIprompt = false;
   const loopCounter: { value: number } = { value: 0 };
-  const additionalSysPrompt: Record<'start' | 'historyend' | 'promptend', string> = {
-    start: '', historyend: '', promptend: '',
-  };
+  const additionalSysPrompt = invocation.live!.additionalSysPrompt;
 
-  const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage }, (src) => notifyStateChanged(src));
+  const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage, deferSystemPrompt: Boolean(opts.invocationState) }, (src) => notifyStateChanged(src));
   const {
     getMessagesTail, getMessageCount, getLastMessage, getMessageAtIndex,
     getLastUserMessage, getLastCharMessage, getFirstMessage,
-    impersonate, systemPrompt, command, cutChat, modifyChat,
+    impersonate, systemPrompt, command, cutChat: cutChatMessages, modifyChat,
     updateGUI, updateChatAt, tokenize, quickSearchChat,
   } = _chat;
+
+  async function cutChat(start: unknown, end: unknown, defaultInvalidEnd = false): Promise<void> {
+    await drainChatMutations();
+    await cutChatMessages(start, end, defaultInvalidEnd);
+  }
 
   function compare(a: unknown, b: unknown, op: string): boolean {
     return compareValues(a, b, op);
@@ -600,22 +622,17 @@ export async function makeRisuTriggerRuntime(
       const co = c as Record<string, unknown>;
       const type = co['type'];
       let pass = true;
-      if (type === 'chatindex') {
-        const idx = getMessageCount() - 1;
-        pass = compare(idx, resolve(co['value'], toStr(co['valueType'] ?? 'value')), toStr(co['operator'] ?? '='));
+      if (type === 'var' || type === 'value' || type === 'chatindex') {
+        const source = type === 'chatindex' ? String(getMessageCount())
+          : type === 'value' ? toStr(co['var']) : getVar(toStr(co['var']));
+        const target = resolve(co['value'], 'value');
+        pass = compareTriggerCondition(resolve(source, 'value'), target, toStr(co['operator']));
       } else if (type === 'exists') {
-        const depth = Math.max(1, Number(co['depth']) || 1);
-        const msgs = getMessagesTail(depth);
-        const needle = toStr(resolve(co['value'], toStr(co['valueType'] ?? 'value'))).toLowerCase();
-        const joined = msgs.map((m) => toStr(m.content)).join('\n').toLowerCase();
-        const cond = co['condition'];
-        pass = cond === 'loose' ? joined.indexOf(needle) >= 0
-          : cond === 'regex' ? (() => { try { return new RegExp(needle).test(joined); } catch { return joined.indexOf(needle) >= 0; } })()
-          : joined.split(/\s+/).indexOf(needle) >= 0;
-      } else {
-        const source = type === 'value' ? toStr(co['var']) : getVar(toStr(co['var']));
-        const target = resolve(co['value'], toStr(co['valueType'] ?? 'value'));
-        pass = compare(source, target, toStr(co['operator'] ?? '='));
+        const needle = resolve(resolve(co['value'], 'value'), 'value');
+        const joined = messagesCache.slice(-Number(co['depth'])).map(m => m.content).join(' ');
+        if (co['type2'] === 'loose') pass = joined.toLowerCase().includes(needle.toLowerCase());
+        else if (co['type2'] === 'strict') pass = joined.split(' ').includes(needle);
+        else if (co['type2'] === 'regex') pass = new RegExp(needle).test(joined);
       }
       if (!pass) return false;
     }
@@ -623,48 +640,39 @@ export async function makeRisuTriggerRuntime(
   }
 
   async function showAlert(type: unknown, value: unknown, inputVar: string | null): Promise<void> {
-    const t = toStr(type).toLowerCase();
     const v = toStr(value);
-    try {
-      if (t === 'input') {
-        const r = api.ui && api.ui.prompt ? await api.ui.prompt(v, '') : null;
-        if (inputVar) setVar(inputVar, toStr(r ?? ''));
-        return;
-      }
-      if (t === 'ask' || t === 'confirm') {
-        const r = api.ui && api.ui.confirm ? await api.ui.confirm(v, '') : false;
-        if (inputVar) setVar(inputVar, r ? '1' : '0');
-        return;
-      }
-      if (api.ui && api.ui.toast) {
-        const kind = t === 'error' ? 'error' : t === 'warn' || t === 'warning' ? 'warning'
-          : t === 'success' ? 'success' : 'info';
-        api.ui.toast(v, kind);
-      }
-      if (inputVar) setVar(inputVar, '');
-    } catch {
-      if (inputVar) setVar(inputVar, '');
+    switch (type) {
+      case 'normal':
+      case 'error':
+        if (!api.ui?.alert) return unsupported('showAlert', 'requires api.ui.alert');
+        // Risu runTrigger continues while the notice is open.
+        void api.ui.alert(v, type === 'error' ? 'error' : 'info')
+          .catch(error => _logAlert.error(`Alert failed: ${String(error)}`));
+        break;
+      case 'input':
+        setVar(inputVar ?? '', await alertInput(v));
+        break;
+      case 'select':
+        setVar(inputVar ?? '', await alertSelect(undefined, v.split('§')));
+        break;
     }
   }
 
   async function alertInput(display: unknown): Promise<string> {
-    try {
-      if (api.ui && api.ui.prompt) {
-        const r = await api.ui.prompt(toStr(display), '');
-        return toStr(r ?? '');
-      }
-    } catch { /* */ }
-    return '';
+    if (!api.ui?.prompt) return unsupported('alertInput', 'requires api.ui.prompt');
+    return toStr(await api.ui.prompt(toStr(display), '') ?? '');
   }
 
   async function alertSelect(display: unknown, options: unknown): Promise<string> {
     if (api.ui && typeof api.ui.pick === 'function') {
       const opts = Array.isArray(options) ? options.map(toStr) : [];
-      const r = await api.ui.pick(toStr(display), opts);
-      // alertSelect returns the option index as a string, not its label.
-      if (r == null) return '';
-      const idx = opts.indexOf(toStr(r));
-      return idx >= 0 ? String(idx) : '';
+      // Risu alertSelect and AlertComp serialize labels through this delimiter.
+      const message = display === undefined ? opts.join('||') : `__DISPLAY__${toStr(display)}||${opts.join('||')}`;
+      const hasDisplay = message.startsWith('__DISPLAY__');
+      const parts = (hasDisplay ? message.substring(11) : message).split('||');
+      const title = hasDisplay ? parts.shift()! : '';
+      const r = await api.ui.pick(title, parts);
+      return r ?? '';
     }
     return unsupported('alertSelect', 'requires api.ui.pick');
   }
@@ -697,19 +705,14 @@ export async function makeRisuTriggerRuntime(
   }
 
   async function runTrigger(name: unknown): Promise<void> {
-    const candidates = ['risu-manual-' + toStr(name), toStr(name)];
-    await withInheritedVarsCache(varsCache, async () => {
-      for (const n of candidates) {
-        try {
-          const mod = await scriptNs.require(n);
-          const modObj = mod as { run?: (ctx: unknown) => Promise<unknown> };
-          if (modObj && typeof modObj.run === 'function') {
-            await modObj.run({ api, data, script: scriptNs });
-            return;
-          }
-        } catch { /* try next */ }
-      }
-    });
+    await drainChatMutations();
+    const mod = await scriptNs.require('risu-manual-' + toStr(name)) as { run?: (ctx: unknown) => Promise<{ aborted?: boolean } | 'abort' | void> } | null;
+    if (!mod || typeof mod.run !== 'function') return;
+    const child = cloneInvocation(invocation);
+    const result = await mod.run({ api, data, script: scriptNs, invocationState: child });
+    if (result === 'abort' || result?.aborted) return;
+    adoptInvocation(invocation, child);
+    if (!opts.invocationState) await commitInvocation(invocation, portalChatId);
   }
 
   // Risu dropped triggercode; runCode is a no-op for parity.
@@ -728,6 +731,43 @@ export async function makeRisuTriggerRuntime(
       `characterId=${characterId ?? '<none>'} binding=${binding ?? '<none>'} ` +
       `body[0..60]=${JSON.stringify(key)}`,
     );
+  }
+
+  let luaState: LuaHostState | undefined = preloaded?.luaState;
+  let parseLuaTemplate = opts.luaTemplate;
+  const identityWrites: Promise<void>[] = [];
+  async function prepareLua(): Promise<void> {
+    luaState ??= await prepareLuaHostState(api, characterId ?? data.characterId);
+    if (parseLuaTemplate) return;
+    const prepare = opts.templateContext ?? dispatchCtx.templateContext;
+    if (!prepare) return;
+    const input = await prepare();
+    parseLuaTemplate = createLuaTemplateParser(() => ({
+      ...input,
+      charName: luaState!.character?.name ?? input.charName,
+      userName: luaState!.persona?.name ?? input.userName,
+      personaText: luaState!.persona?.description ?? input.personaText ?? '',
+      character: { ...input.character, ...luaState!.character },
+      chat: { ...input.chat, messages: messagesCache.map(m => ({ ...m, createdAt: m.createdAt ?? 0, role: risuRoleToLumi(lumiRoleToRisu(m.role)) as 'user' | 'assistant' | 'system' })), messageCount: messagesCache.length,
+        lastMessage: messagesCache.at(-1)?.content ?? '', lastUserMessage: getLastUserMessage(''),
+        lastCharMessage: getLastCharMessage(luaState!.character?.firstMessage ?? '') },
+    }), (scope, name) => {
+      onVarRead?.(name, scope === 'global' ? 'global' : 'chat');
+      return opts.luaVariables ? opts.luaVariables.get(name, scope === 'global' ? 'global' : 'chat')
+        : scope === 'global' ? globalVarsCache[name] ?? 'null' : _vars.getStoredVar(name);
+    });
+  }
+  function luaCbs(value: unknown): string {
+    if (!parseLuaTemplate) return unsupported('lua.cbs', 'no synchronous evaluation context was prepared');
+    return parseLuaTemplate(value as string);
+  }
+  function updateLuaCharacter(patch: Partial<import('./host.js').HostCharacter>): void {
+    const character = luaState!.character;
+    if (!character) return unsupported('lua.character', 'no current character');
+    if (!luaState!.updateCharacter) return unsupported('lua.character', 'character state is read-only');
+    const pending = luaState!.updateCharacter(patch);
+    pending.catch(() => undefined);
+    identityWrites.push(pending);
   }
 
   async function runLua(code: unknown, luaOpts?: Record<string, unknown>): Promise<unknown> {
@@ -755,37 +795,91 @@ export async function makeRisuTriggerRuntime(
       manual: 'onButtonClick', request: 'onRequest',
     };
     const effective: Record<string, unknown> = { ...(luaOpts || {}) };
-    if (!effective['entry']) effective['entry'] = entryMap[binding] || binding || 'onRun';
-    if (!effective['args']) effective['args'] = [String(Math.random()).slice(2, 10)];
+    if (!effective['entry']) {
+      if (binding === 'manual' && typeof data.manualName === 'string') {
+        const mode = data.manualName;
+        effective['mode'] ??= mode;
+        effective['entry'] = ['input', 'output', 'start'].includes(mode) ? entryMap[mode] : mode;
+        if (['editInput', 'editOutput', 'editDisplay', 'editRequest'].includes(mode)) {
+          effective['entry'] = 'callListenMain';
+          effective['args'] ??= [mode, undefined, '""', '{}'];
+        } else if (mode === 'onButtonClick') effective['args'] ??= [undefined, ''];
+      } else effective['entry'] = entryMap[binding] || binding || 'onRun';
+    }
+    if (!effective['args']) effective['args'] = [];
+    effective['data'] ??= (effective['args'] as readonly unknown[])[1] ?? '';
     rverbose(`calling lua.execute entry=${String(effective['entry'])} args=${JSON.stringify(effective['args'])}`);
+    await prepareLua();
+    effective['mode'] = effective['mode'] ?? (effective['entry'] === 'callListenMain'
+      ? (effective['args'] as unknown[])[0]
+      : ['input', 'output', 'start'].includes(binding) ? binding : effective['entry']);
+    effective['scope'] = currentUserId() ?? '';
+    effective['enforceAccess'] = true;
+    effective['lowLevelAccess'] = lowLevelAccess;
+    effective['synchronizeState'] = luaState?.synchronize;
+    effective['signal'] = opts.luaSignal;
     const globals = makeRisuLuaGlobals();
     rverbose(`globals keys=${Object.keys(globals).length}: ${Object.keys(globals).slice(0, 20).join(',')}${Object.keys(globals).length > 20 ? '…' : ''}`);
     const wasmoonKey = typeof effective['wasmoonKey'] === 'string' ? effective['wasmoonKey'] as string : null;
     try {
-      const result = (wasmoonKey && _wasmoonExec && _wasmoonEnabled)
-        ? await _wasmoonExec(codeStr, globals, { entry: String(effective['entry']), args: effective['args'] as readonly unknown[], wasmoonKey })
+      let result = (wasmoonKey && _wasmoonExec && _wasmoonEnabled)
+        ? await _wasmoonExec(codeStr, globals, { ...effective as ExecuteOpts, wasmoonKey })
         : await lua.execute(codeStr, globals, effective);
+      if (effective['entry'] === 'callListenMain') {
+        try { result = JSON.parse(result as string); }
+        catch (err) {
+          // runScripted retains the raw return when its JSON.parse assignment fails.
+          rerr(`Lua edit result is not JSON: ${String(err)}`);
+          return result;
+        }
+      }
       const preview = result === undefined ? 'undefined' : String(JSON.stringify(result) ?? '').slice(0, 200);
       rlog(`DONE elapsed=${Date.now() - tStart}ms result_type=${typeof result} result_preview=${preview}`);
-      if (result === false) stopSending = true;
+      if (result === false) invocation.stopSending = true;
       return result;
     } catch (err) {
       rerr(`THREW after ${Date.now() - tStart}ms: ${(err as Error).message}`);
-      throw err;
+      if (!(err instanceof LuaCallbackError)) {
+        // Risu keeps writes made before a chunk aborts, even when no callback ran.
+        await flush();
+        throw err;
+      }
+      return undefined;
+    } finally {
+      await opts.luaVariables?.flush();
     }
   }
 
   function makeRisuLuaGlobals(): Record<string, unknown> {
+    function readMessages(): HostMessage[] { opts.onMessageRead?.(); return messagesCache; }
     function luaReject(name: string, reason: string): () => Promise<never> {
       return function () {
         return Promise.reject(new Error('risu-compat: lua.' + name + ' unavailable: ' + reason));
       };
     }
+    function writeVariable(key: unknown, value: unknown): true | undefined {
+      const name = toStr(key);
+      const text = toStr(value);
+      if (opts.luaVariables) return opts.luaVariables.set(name, text) === true ? true : undefined;
+      if (varsCache['$' + name] === text) return;
+      setVar(name, text);
+      return true;
+    }
     return {
-      getChatVar: (_id: unknown, key: unknown) => getVar(toStr(key)),
-      setChatVar: (_id: unknown, key: unknown, value: unknown) => setVar(toStr(key), toStr(value)),
-      getGlobalVar: (_id: unknown, key: unknown) => globalVarsCache[toStr(key)] ?? 'null',
-      stopChat: (_id: unknown) => { stopSending = true; },
+      getChatVar: (_id: unknown, key: unknown) => {
+        const k = toStr(key);
+        if (!opts.luaVariables) return getVar(k);
+        onVarRead?.(k, 'chat');
+        return opts.luaVariables.get(k, 'chat');
+      },
+      setChatVar: (_id: unknown, key: unknown, value: unknown) => { writeVariable(key, value); },
+      setChatVarChanged: (_id: unknown, key: unknown, value: unknown) => writeVariable(key, value),
+      getGlobalVar: (_id: unknown, key: unknown) => {
+        const k = toStr(key);
+        onVarRead?.(k, 'global');
+        return opts.luaVariables ? opts.luaVariables.get(k, 'global') : globalVarsCache[k] ?? 'null';
+      },
+      stopChat: (_id: unknown) => { invocation.stopSending = true; },
       // Risu parity: fire-and-forget. Returning the Promise would force Lua to await or leak an unhandledRejection on modal-infra throw.
       alertError: (_id: unknown, value: unknown) => {
         if (api.ui?.alert) {
@@ -806,30 +900,20 @@ export async function makeRisuTriggerRuntime(
         return api.ui.prompt(toStr(value), '').then((r) => toStr(r ?? ''));
       },
       alertSelect: (_id: unknown, options: unknown) => {
-        if (api.ui?.pick) {
-          const opts = Array.isArray(options) ? options.map(toStr) : [];
-          return api.ui.pick('', opts).then((r) => {
-            if (r == null) return '';
-            const idx = opts.indexOf(toStr(r));
-            return idx >= 0 ? String(idx) : '';
-          });
-        }
-        return Promise.reject(new Error('risu-compat: lua.alertSelect requires api.ui.pick'));
+        return alertSelect(undefined, options);
       },
       alertConfirm: (_id: unknown, value: unknown) => {
         if (!api.ui?.confirm) return Promise.reject(new Error('risu-compat: lua.alertConfirm requires api.ui.confirm'));
         return api.ui.confirm(toStr(value), '');
       },
       getChatMain: (_id: unknown, index: unknown) => {
-        const n = Number(index);
-        const real = n >= 0 ? n : messagesCache.length + n;
-        const m = messagesCache[real];
+        const m = readMessages().at(Number(index));
         // Risu chat.message[i].role is 'user' | 'char' (scriptings.ts:154-165,182).
         // Cards branch on `msg.role == "char"`; surface Lumi roles in Risu shape.
-        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }) : JSON.stringify(null);
+        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }) : JSON.stringify(null);
       },
       setChat: (_id: unknown, index: unknown, value: unknown) => {
-        const n = Number(index);
+        const n = Math.trunc(Number(index)) || 0;
         const real = n >= 0 ? n : messagesCache.length + n;
         if (!messagesCache[real]) {
           // Risu silently no-ops on out-of-range; log for diagnosis (off-by-one callers).
@@ -839,19 +923,19 @@ export async function makeRisuTriggerRuntime(
           );
           return;
         }
-        // Doc-boundary normalize. Strips DOCTYPE/html/head/body tags, wraps
-        // leading style so DOMPurify keeps the CSS.
-        const raw = normalizeReplaceStringForSanitizer(toStr(value));
+        // Persist verbatim, Risu parity. Normalizing here stripped card
+        // pseudo-markup like <title> and baked the style wrap into storage.
+        const raw = toStr(value);
         const msgId = messagesCache[real]!.id;
         const prevContent = messagesCache[real]!.content;
 
         // No-op write: Lua read the message via `getChat(N)`, did some logic
         // that didn't actually mutate the body, then wrote the same string
         // back. Cards do this routinely as part of "set var X then nudge"
-        // patterns (Alternate Hunters V2 ToggleSysSettings , flips
-        // `ui_sys_stat` and re-writes the same already-resolved greeting,
-        // expecting the next render to re-evaluate `{{getvar::ui_sys_stat}}`
-        // in the display-regex panel rule).
+        // patterns (a settings-toggle trigger flips `ui_sys_stat` and
+        // re-writes the same already-resolved greeting, expecting the next
+        // render to re-evaluate `{{getvar::ui_sys_stat}}` in the
+        // display-regex panel rule).
         //
         // Skip when the value is identical to what's already stored. Lua's
         // intent ("nudge a re-render") is satisfied by the
@@ -883,7 +967,8 @@ export async function makeRisuTriggerRuntime(
         enqueueChatMutation('setChat', () => persistChatEdit(oldEntry, newEntry));
       },
       setChatRole: (_id: unknown, index: unknown, value: unknown) => {
-        const n = Number(index);
+        const rawIndex = Math.trunc(Number(index)) || 0;
+        const n = rawIndex < 0 ? messagesCache.length + Math.trunc(rawIndex) : Math.trunc(rawIndex);
         if (!messagesCache[n]) return;
         const desired = messagesCache.map((message) => ({
           role: lumiRoleToRisu(message.role),
@@ -895,22 +980,32 @@ export async function makeRisuTriggerRuntime(
         };
         reconcileFullChat(JSON.stringify(desired));
       },
-      cutChat: (_id: unknown, start: unknown, end: unknown) => { cutChat(start, end); },
+      cutChat: (_id: unknown, start: unknown, end: unknown) => {
+        const previous = [...messagesCache];
+        const kept = retainedChatMessages(previous, start, end);
+        const keep = new Set(kept);
+        const removed = messagesCache.filter(message => !keep.has(message)).reverse();
+        messagesCache.splice(0, messagesCache.length, ...kept);
+        enqueueChatMutation('cutChat', async () => {
+          if (cutChatFailure) {
+            cutChatFailure.previous.push(...removed);
+            return;
+          }
+          try {
+            for (const message of removed) {
+              const id = await resolveHostMessageId(message);
+              if (!id) throw new Error('Cut message has no persisted ID');
+              await api.chat.deleteMessage(id);
+            }
+          } catch (cause) { cutChatFailure = { cause, previous }; }
+        });
+      },
       removeChat: (_id: unknown, index: unknown) => {
-        const n = Number(index);
-        if (!Number.isFinite(n)) return;
-        // Mirror Risu's `chat.message.splice(index, 1)` JS clamping exactly so
-        // positive/negative/out-of-range indices remove the same element. `start`
-        // also locates the Lumi row ('' id while the send is still pending).
-        const len = messagesCache.length;
-        const start = n < 0 ? Math.max(len + n, 0) : Math.min(n, len);
-        if (start >= len) return;
-        const m = messagesCache[start];
+        const [m] = messagesCache.splice(Number(index), 1);
         if (m) enqueueChatMutation('removeChat', () => persistChatDelete(m));
-        messagesCache.splice(start, 1);
       },
       addChat: (_id: unknown, role: unknown, value: unknown) => {
-        const raw = normalizeReplaceStringForSanitizer(toStr(value));
+        const raw = toStr(value);
         const lumiRole = risuRoleToLumi(toStr(role));
         const entry: HostMessage = { id: '', role: lumiRole, content: raw };
         messagesCache.push(entry);
@@ -933,93 +1028,59 @@ export async function makeRisuTriggerRuntime(
         });
         reconcileFullChat(JSON.stringify(desired));
       },
-      getChatLength: (_id: unknown) => messagesCache.length,
-      getFullChatMain: (_id: unknown) => JSON.stringify(messagesCache.map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content) }))),
+      getChatData: (_id: unknown, index: number) => readMessages().at(index)?.content ?? '',
+      getChatRole: (_id: unknown, index: number) => { const message = readMessages().at(index); return message ? lumiRoleToRisu(message.role) : ''; },
+      getRecentChatsMain: (_id: unknown, count: number) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map(m => ({ role: lumiRoleToRisu(m.role), data: m.content, time: m.createdAt ?? 0 }))),
+      getChatLength: (_id: unknown) => readMessages().length,
+      getFullChatMain: (_id: unknown) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }))),
       setFullChatMain: (_id: unknown, value: unknown) => { reconcileFullChat(value); },
-      sleep: (_id: unknown, ms: unknown) => new Promise<void>((r) => setTimeout(r, Math.max(0, Number(ms) || 0))),
-      // Risu parity: user-facing `cbs` is sync. The lua-bridge prelude wraps `cbsMain():await()` so cards calling `cbs("...")` get a string.
-      cbsMain: async (value: unknown): Promise<string> => {
-        const text = toStr(value);
-        // Closure-captured resolver. Late-reading the dispatch context here
-        // would route cbs() through whichever user's setDispatchContext won
-        // the race, leaking their data into this runtime's Lua.
-        const resolver = capturedResolveTemplate;
-        if (resolver) {
-          try {
-            return await resolver(text);
-          } catch (err) {
-            _logCbs.warn(`cbs resolver threw — returning input verbatim: ${err instanceof Error ? err.message : String(err)}`);
-            return text;
-          }
-        }
-        if (api.utils?.template?.render) {
-          try {
-            return await api.utils.template.render(text, {});
-          } catch (err) {
-            _logCbs.warn(`cbs api.utils.template.render threw — returning input verbatim: ${err instanceof Error ? err.message : String(err)}`);
-            return text;
-          }
-        }
-        warnCbsUnresolvedOnce(api);
-        return text;
-      },
-      logMain: (value: unknown) => { try { _logLuaPrint.debug(toStr(value)); } catch { /* */ } },
+      sleep: (_id: unknown, ms: number) => new Promise<boolean>(resolve => setTimeout(() => resolve(true), ms)),
+      cbs: luaCbs,
+      logMain: (value: string) => { _logLuaPrint.debug(JSON.parse(value)); },
       // reloadDisplay forces refresh from async/callback paths.
       reloadDisplay: (_id: unknown) => {
         notifyStateChanged('reloadDisplay');
       },
+      updateDisplay: (_id: unknown) => {
+        notifyStateChanged('updateDisplay');
+      },
       reloadChat: (_id: unknown, _index: unknown) => {
         notifyStateChanged('reloadChat');
       },
-      getNameMain: async (_id: unknown) => {
-        const cid = characterId || (data as { characterId?: string }).characterId;
-        if (!cid) return '';
-        try {
-          return toStr((await api.characters.get(cid)).name);
-        } catch {
-          return toStr((data as { characterName?: unknown }).characterName || '');
-        }
+      getName: (_id: unknown) => luaState!.character?.name,
+      setName: (_id: unknown, name: unknown) => {
+        if (typeof name !== 'string') throw new Error('Invalid data type');
+        updateLuaCharacter({ name });
       },
-      setNameMain: async (_id: unknown, name: unknown) => {
-        const cid = characterId || (data as { characterId?: string }).characterId;
-        if (cid) await api.characters.update(cid, { name: toStr(name) });
+      getDescription: (_id: unknown) => luaState!.character?.description,
+      setDescription: (_id: unknown, description: string) => { updateLuaCharacter({ description }); },
+      getCharacterFirstMessage: (_id: unknown) => luaState!.character?.firstMessage,
+      setCharacterFirstMessage: (_id: unknown, firstMessage: unknown) => {
+        if (typeof firstMessage !== 'string') return false;
+        updateLuaCharacter({ firstMessage });
+        return true;
       },
-      getDescriptionMain: (_id: unknown) => _charNote.getCharacterDesc(),
-      setDescriptionMain: (_id: unknown, desc: unknown) => _charNote.setCharacterDesc(desc),
-      getCharacterFirstMessageMain: async (_id: unknown) => {
-        const cid = characterId || (data as { characterId?: string }).characterId;
-        if (!cid) return toStr(firstMessage ?? '');
-        try {
-          return toStr((await api.characters.get(cid)).firstMessage);
-        } catch {
-          return toStr(firstMessage ?? '');
-        }
+      getPersonaName: (_id: unknown) => luaState!.persona?.name ?? data.userName ?? 'user',
+      getPersonaDescription: (_id: unknown) => luaCbs(luaState!.persona?.description ?? ''),
+      getAuthorsNote: (_id: unknown) => {
+        if (luaState!.authorsNote) return luaState!.authorsNote;
+        onVarRead?.('__risu_author_note__', 'chat');
+        return varsCache['$__risu_author_note__'] ?? '';
       },
-      setCharacterFirstMessageMain: async (_id: unknown, value: unknown) => {
-        const cid = characterId || (data as { characterId?: string }).characterId;
-        if (cid) await api.characters.update(cid, { firstMessage: toStr(value) });
+      getBackgroundEmbedding: (_id: unknown) => {
+        if (!luaState!.character || !('backgroundHTML' in luaState!.character)) return unsupported('lua.getBackgroundEmbedding', 'host character state does not expose background HTML');
+        return luaState!.character.backgroundHTML;
       },
-      getPersonaName: (_id: unknown) => toStr((data as { userName?: unknown }).userName || 'user'),
-      getPersonaDescriptionMain: async (_id: unknown) => {
-        const description = await _charNote.getPersonaDesc();
-        const resolver = capturedResolveTemplate;
-        if (!resolver) return description;
-        try {
-          return await resolver(description);
-        } catch {
-          return description;
-        }
+      setBackgroundEmbedding: (_id: unknown, backgroundHTML: unknown) => {
+        if (typeof backgroundHTML !== 'string') return false;
+        if (!luaState!.character || !('backgroundHTML' in luaState!.character)) return unsupported('lua.setBackgroundEmbedding', 'host character state does not expose background HTML');
+        updateLuaCharacter({ backgroundHTML });
+        return true;
       },
-      getAuthorsNoteMain: (_id: unknown) => _charNote.getAuthorNote(),
-      getBackgroundEmbedding: (_id: unknown) => '',
-      setBackgroundEmbedding: (_id: unknown, _data: unknown) => { /* */ },
       // Risu scriptings.ts getCharacterLastMessage falls back to char.firstMessage
       // (the greeting) when chat.message[] has no char-role message.
-      getCharacterLastMessage: (_id: unknown) => {
-        const last = getLastCharMessage();
-        return last !== '' ? last : toStr(firstMessage ?? '');
-      },
-      getUserLastMessage: (_id: unknown) => getLastUserMessage(),
+      getCharacterLastMessage: (_id: unknown) => { readMessages(); return getLastCharMessage(luaState!.character?.firstMessage ?? ''); },
+      getUserLastMessage: (_id: unknown) => { readMessages(); return getLastUserMessage(''); },
       // Returns {success,result} JSON. Gated on lowLevelAccess.
       LLMMain: async (_id: unknown, promptStr: unknown, _useMulti: unknown, _optionsStr: unknown): Promise<string> => {
         if (!lowLevelAccess) {
@@ -1132,8 +1193,7 @@ export async function makeRisuTriggerRuntime(
           return JSON.stringify({ success: false, result: 'Error: ' + errMsg });
         }
       },
-      // Returns string directly. Empty string when no access (Risu parity).
-      simpleLLM: async (_id: unknown, prompt: unknown): Promise<string> => {
+      simpleLLM: async (_id: unknown, prompt: unknown): Promise<string | { success: true; result: string }> => {
         if (!lowLevelAccess) {
           return '';
         }
@@ -1141,7 +1201,7 @@ export async function makeRisuTriggerRuntime(
           throw new Error('risu-compat: lua.simpleLLM requires api.llm.generate');
         }
         const r = await api.llm.generate({ messages: [{ role: 'user', content: toStr(prompt) }], ...(auxPrefillCompat ? { prefillCompat: true } : {}) });
-        return toStr(r && r.content);
+        return { success: true, result: toStr(r && r.content) };
       },
       hash: (_id: unknown, value: unknown) => {
         if (typeof crypto === 'undefined' || !crypto.subtle) {
@@ -1171,8 +1231,105 @@ export async function makeRisuTriggerRuntime(
         }
       },
       similarity: luaReject('similarity', 'requires vector-store bridge'),
-      request: luaReject('request', 'arbitrary-URL fetch from user Lua is out of scope'),
-      generateImage: luaReject('generateImage', 'requires image-gen pipeline'),
+      // Risu parity: scriptings.ts declareAPI('request', ...). Mirrors upstream
+      // exactly: no lowLevelAccess -> nil (upstream `return`), every other path
+      // resolves JSON and never rejects, so one bad URL cannot kill the trigger.
+      request: async (_id: unknown, urlVal: unknown): Promise<string | undefined> => {
+        if (!lowLevelAccess) return undefined;
+        return _luaRequest(urlVal);
+      },
+      generateImage: async (
+        _id: unknown,
+        promptVal: unknown,
+        negVal: unknown,
+        optionsVal: unknown,
+      ): Promise<string> => {
+        if (!lowLevelAccess) {
+          return 'Error: lowLevelAccess required';
+        }
+        if (!api.imageGen?.generate) {
+          return 'Error: image generation not available on this host';
+        }
+        try {
+          const prompt = toStr(promptVal);
+          const negativePrompt = negVal ? toStr(negVal) : undefined;
+          let callerParameters: Record<string, unknown> | undefined = undefined;
+          if (typeof optionsVal === 'string' && optionsVal.trim().startsWith('{')) {
+            try {
+              callerParameters = JSON.parse(optionsVal);
+            } catch {
+              // ignore json parse error
+            }
+          } else if (typeof optionsVal === 'object' && optionsVal !== null) {
+            callerParameters = optionsVal as Record<string, unknown>;
+          }
+
+          const baseParameters: Record<string, unknown> = {};
+          if (naiSettings) {
+            if (naiSettings.resolution) baseParameters.resolution = naiSettings.resolution;
+            if (naiSettings.sampler) baseParameters.sampler = naiSettings.sampler;
+            if (typeof naiSettings.steps === 'number') baseParameters.steps = naiSettings.steps;
+            if (typeof naiSettings.guidance === 'number') baseParameters.guidance = naiSettings.guidance;
+            if (typeof naiSettings.smea === 'boolean') baseParameters.smea = naiSettings.smea;
+            if (typeof naiSettings.smeaDyn === 'boolean') baseParameters.smeaDyn = naiSettings.smeaDyn;
+            if (typeof naiSettings.seed === 'number') baseParameters.seed = naiSettings.seed;
+            if (typeof naiSettings.qualityToggle === 'boolean') baseParameters.qualityToggle = naiSettings.qualityToggle;
+            if (typeof naiSettings.ucPreset === 'number') baseParameters.ucPreset = naiSettings.ucPreset;
+            if (naiSettings.negativePrompt && !negativePrompt) {
+              baseParameters.negativePrompt = naiSettings.negativePrompt;
+            }
+          }
+
+          const parameters = {
+            ...baseParameters,
+            ...(callerParameters || {}),
+          };
+          if (typeof parameters.seed === 'number' && parameters.seed < 0) {
+            delete parameters.seed;
+          }
+
+          const effectiveNegativePrompt = negativePrompt
+            ?? (typeof parameters.negativePrompt === 'string' ? parameters.negativePrompt : undefined)
+            ?? (naiSettings?.negativePrompt || undefined);
+
+          _logImageGen.info(`generateImage: dispatching prompt="${prompt.slice(0, 100)}" conn=${imageConnectionId ?? '<default>'}`);
+          const res = await api.imageGen.generate(prompt, {
+            ...(effectiveNegativePrompt !== undefined ? { negativePrompt: effectiveNegativePrompt } : {}),
+            ...(imageConnectionId ? { connectionId: imageConnectionId } : {}),
+            ...(imageModelOverride ? { model: imageModelOverride } : (naiSettings?.model ? { model: naiSettings.model } : {})),
+            ...(Object.keys(parameters).length > 0 ? { parameters } : {}),
+          });
+          let imageId: string | undefined;
+          if (typeof res === 'string') {
+            if (res.startsWith('data:')) {
+              if (api.images?.uploadFromDataUrl) {
+                const up = await api.images.uploadFromDataUrl(res);
+                imageId = typeof up === 'string' ? up : up?.id;
+              }
+            } else {
+              imageId = res;
+            }
+          } else if (typeof res === 'object' && res !== null) {
+            const r = res as { imageId?: string; imageUrl?: string; imageDataUrl?: string };
+            if (r.imageId) {
+              imageId = r.imageId;
+            } else if (r.imageDataUrl && api.images?.uploadFromDataUrl) {
+              const up = await api.images.uploadFromDataUrl(r.imageDataUrl);
+              imageId = typeof up === 'string' ? up : up?.id;
+            }
+          }
+          if (imageId) {
+            _logImageGen.info(`generateImage: success imageId=${imageId}`);
+            return `{{inlay::${imageId}}}`;
+          }
+          _logImageGen.warn(`generateImage: failed — no image returned`);
+          return 'Error: image generation returned no image';
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          _logImageGen.warn(`generateImage: threw — ${msg}`);
+          return `Error: image generation failed: ${msg}`;
+        }
+      },
       // Emits resolved HTML directly. Sentinel wouldn't survive DB write without a re-parse pass.
       getCharacterImageMain: async (_id: unknown) => {
         try {
@@ -1195,9 +1352,54 @@ export async function makeRisuTriggerRuntime(
       },
       loadLoreBooksMain: (_id: unknown, _reserve: unknown) => {
         void _reserve;
-        return Promise.resolve(JSON.stringify(lorebook.entries.map((e) => toStr(e.content))));
+        const evalCtx = buildEvaluatorContext({
+          chatId: portalChatId ?? '',
+          commit: false,
+          suppressVarPersist: true,
+          userName: 'User',
+          charName: 'Char',
+          character: { description: '' },
+          chat: {
+            messages: messagesCache.map((m) => ({
+              role: m.role === 'user' ? ('user' as const) : m.role === 'system' ? ('system' as const) : ('assistant' as const),
+              content: m.content,
+              createdAt: m.createdAt ?? Date.now(),
+            })),
+          },
+          variables: {
+            global: { ...globalVarsCache },
+            local: { ...varsCache },
+            chat: { ...varsCache },
+          },
+        });
+        const out = lorebook.entries.map((e) => {
+          let content = toStr(e.content);
+          if (content.includes('{{')) {
+            try { content = evaluate(content, evalCtx); } catch { /* skip */ }
+          }
+          return {
+            ...e,
+            // Risu loadLoreBooksMain exposes prompt text as data, not content.
+            data: content,
+            name: toStr(e.comment || e.id),
+            comment: toStr(e.comment),
+            content,
+            key: Array.isArray(e.key) ? e.key.join(', ') : toStr(e.key),
+            order: e.orderValue ?? 100,
+            alwaysActive: !e.disabled,
+          };
+        });
+        return Promise.resolve(JSON.stringify(out));
       },
-      getLoreBooksMain: (_id: unknown, _search: unknown) => JSON.stringify(getAllLorebooks()),
+      getLoreBooksMain: (_id: unknown, search: unknown) => JSON.stringify(
+        lorebook.entries.filter(entry => entry.comment === search).map(entry => ({
+          ...entry,
+          content: toStr(entry.content).includes('{{') ? luaCbs(entry.content) : toStr(entry.content),
+          key: Array.isArray(entry.key) ? entry.key.join(', ') : toStr(entry.key),
+          insertorder: entry.orderValue ?? entry.insertorder ?? 100,
+          alwaysActive: entry.constant ?? entry.alwaysActive ?? false,
+        })),
+      ),
       upsertLocalLoreBook: (_id: unknown, name: unknown, content: unknown, opts?: Record<string, unknown>) => {
         const o = opts || {};
         createLorebook(name, o['key'] || name, content, o['order'] || 0);
@@ -1205,17 +1407,6 @@ export async function makeRisuTriggerRuntime(
     };
   }
 
-
-  // String/regex/arithmetic helpers live in runtime/strings-regex.ts (pure, no closure deps).
-
-  const _arraysDicts = makeArraysDictsApi(_vars);
-  const {
-    makeArrayVar, arrayLength, arrayGet, arraySet, arrayPush, arrayPop,
-    arrayShift, arrayUnshift, arraySplice, arraySlice, arrayJoin,
-    arrayIndexOf, arrayRemoveIndex,
-    makeDictVar, dictGet, dictSet, dictDelete, dictHasKey, dictClear,
-    dictSize, dictKeys, dictValues,
-  } = _arraysDicts;
 
   const _charNote = makeCharacterNoteApi(api, { characterId, data: data as { characterId?: string } & Record<string, unknown> }, _vars);
   const {
@@ -1233,6 +1424,10 @@ export async function makeRisuTriggerRuntime(
     deleteLorebookByIndex, setLorebookActivation, setLorebookAlwaysActive,
   } = _lore;
 
+  // Risu parity: scriptings.ts declareAPI('request', ...). Rate-limit state is
+  // module-scoped inside makeLuaRequest, so every runtime shares one window.
+  const _luaRequest = makeLuaRequest({ corsFetch: api.corsFetch });
+
   const _displayState = makeDisplayStateApi(opts.displayData, opts.requestData);
   const {
     getDisplayState, setDisplayState,
@@ -1245,39 +1440,41 @@ export async function makeRisuTriggerRuntime(
   function loopTick(): number { return ++loopCounter.value; }
   function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, Math.max(1, Number(ms) || 1))); }
 
-  async function flush(): Promise<void> {
+  async function flush(): Promise<boolean> {
     const flog = _logFlush.info;
-    // Persist on dirty=true even when frame is inherited: Risu's two-stage
-    // cycle (parent fires runTrigger, child writes, parent returns without
-    // writing itself) would lose child-only writes if we gated, since
-    // parent's own dirty stays false and its flush no-ops. inheritedVarsAls
-    // prevents cross-user mixing at source so no extra gate needed.
+    // Risu setVar updates live stored state even when a nested call later aborts.
     flog(`START dirty=${dirty.value} varsCache_keys=${Object.keys(varsCache).length} binding=${binding} inherited=${isInheritedVarsCache}`);
     if (Object.keys(varsCache).length > 0) {
       const preview = Object.entries(varsCache).slice(0, 10).map(([k,v]) => `${k}=${JSON.stringify(String(v).slice(0, 40))}`).join(' ');
       flog(`varsCache_sample: ${preview}${Object.keys(varsCache).length > 10 ? ' …' : ''}`);
     }
+    const wasDirty = dirty.value;
     if (dirty.value) {
-      try {
-        await saveVars(api, varsCache, portalChatId);
-        flog(`saveVars OK`);
-      } catch (err) {
-        _logFlush.error(`saveVars FAILED: ${(err as Error).message}`);
-      }
+      await saveVars(api, invocation.live!.varsCache, portalChatId);
+      invocation.live!.varsFlushed = true;
+      flog(`saveVars OK`);
     }
     dirty.value = false;
-    await chatMutationTail;
+    await drainChatMutations();
+    const writes = await Promise.allSettled(identityWrites.splice(0));
+    const errors = writes.filter(result => result.status === 'rejected').map(result => result.reason);
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'Lua identity persistence failed');
     flog(`DONE`);
+    return wasDirty;
   }
 
+  const controlRuntime = { ..._vars, compare, sleep };
   const publicApi: RisuTriggerRuntime = {
-    get stopSending() { return stopSending; },
-    set stopSending(v) { stopSending = !!v; },
+    advanceControl: (effects, index, state) => advanceTriggerControl(effects, index, state, controlRuntime),
+    get stopSending() { return invocation.stopSending; },
+    set stopSending(v) { invocation.stopSending = !!v; },
     get sendAIprompt() { return sendAIprompt; },
     set sendAIprompt(v) { sendAIprompt = !!v; },
     displayMode, lowLevelAccess, characterId,
     resolve, setVar, getVar, declareLocalVar,
-    setvarV1, setvarV2, compare, checkConditions,
+    setResult: (name, value) => setVar(resolve(name, 'value'), value),
+    setvarV1, setvarV2, compare, checkConditions, prepareTemplates,
     loopTick, sleep,
     impersonate, systemPrompt, command, cutChat, modifyChat,
     updateGUI, updateChatAt, tokenize, quickSearchChat,
@@ -1286,14 +1483,14 @@ export async function makeRisuTriggerRuntime(
     showAlert, alertInput, alertSelect,
     runLLM, checkSimilarity, runImgGen,
     runTrigger, runCode, runLua,
-    extractRegex, regexTest, replaceString,
+    extractRegex, regexEffect: (effect) => runRegexEffect(_vars, effect),
     random,
-    setCharAt, splitString, calculate,
-    makeArrayVar, arrayLength, arrayGet, arraySet, arrayPush, arrayPop,
-    arrayShift, arrayUnshift, arraySplice, arraySlice, arrayJoin,
-    arrayIndexOf, arrayRemoveIndex,
-    makeDictVar, dictGet, dictSet, dictDelete, dictHasKey, dictClear,
-    dictSize, dictKeys, dictValues,
+    setCharAt, splitString,
+    calculate: (expression, expressionType, outputVar) => calculate(_vars, name => {
+      onVarRead?.(name, 'global');
+      return globalVarsCache[name] ?? 'null';
+    }, expression, expressionType, outputVar),
+    collectionEffect: (effect) => runCollectionEffect(_vars, effect),
     getCharacterDesc, setCharacterDesc, getPersonaDesc, setPersonaDesc,
     getReplaceGlobalNote, setReplaceGlobalNote, getAuthorNote, setAuthorNote,
     modifyLorebook, getLorebookByKey, getLorebookCount, getLorebookEntry,

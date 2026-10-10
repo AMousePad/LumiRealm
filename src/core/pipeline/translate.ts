@@ -178,6 +178,10 @@ export function translateFromCharxBundle(
   });
   for (const iss of charMap.issues) issues.push(iss);
 
+  const lowLevelAccess = Boolean(
+    (charMap.character.extensions["risuai"] as { lowLevelAccess?: unknown } | undefined)?.lowLevelAccess,
+  );
+
   let moduleLorebook: readonly LoreBook[] = [];
   let moduleRegexScripts: readonly CustomScript[] = [];
   let moduleTriggerScripts: readonly TriggerScript[] = [];
@@ -211,10 +215,13 @@ export function translateFromCharxBundle(
         });
       }
     } catch (e) {
-      issues.push({
-        path: "module",
-        message: `module parse failed: ${e instanceof Error ? e.message : String(e)}`,
-      });
+      // Existing module validation is stricter than Risu's reader; rejection must not emit an empty replacement.
+      if (e instanceof TranslationError) throw e;
+      throw new TranslationError(
+        "pipeline/module_parse",
+        `module parse failed: ${e instanceof Error ? e.message : String(e)}`,
+        { cause: e },
+      );
     }
   }
 
@@ -276,7 +283,7 @@ export function translateFromCharxBundle(
   const finalCharacter = charMap.character;
 
   const charRegexScripts = filterValidCustomScripts(
-    charMap.extracted.customScripts,
+    bundle.moduleEnvelope ? [] : charMap.extracted.customScripts,
     issues,
     "character_level_regex",
   );
@@ -323,10 +330,12 @@ export function translateFromCharxBundle(
     moduleRegexOut.issues.filter((i) => i.message.startsWith("unknown Risu regex phase")).length;
 
   const charTriggerScripts = filterValidTriggerScripts(
-    charMap.extracted.triggerScripts,
+    bundle.moduleEnvelope ? [] : charMap.extracted.triggerScripts,
     issues,
     "character_level_triggers",
   );
+  const allTriggers = [...charTriggerScripts, ...moduleTriggerScripts]
+    .map((trigger) => ({ ...trigger, lowLevelAccess }));
   const atActionsOut = wantTriggers
     ? compileAtActions(allAtActions, {
         characterId: charMap.character.id,
@@ -335,7 +344,7 @@ export function translateFromCharxBundle(
     : { files: [] as ScriptPackEntry[], issues: [] as { path: string; message: string }[] };
   const triggersOut = wantTriggers
     ? compileTriggers(
-        [...charTriggerScripts, ...moduleTriggerScripts],
+        allTriggers,
         {
           characterId: charMap.character.id,
           characterName: charMap.character.name,
@@ -381,10 +390,10 @@ export function translateFromCharxBundle(
   const untranslated: UntranslatedSummary = {
     module_regex: Math.max(0, moduleRegexCount - translatedModuleRegex),
     module_triggers: Math.max(0, moduleTriggerCount - translatedTriggers),
-    character_level_regex: Math.max(0, charMap.extracted.customScripts.length - translatedCharRegex),
+    character_level_regex: Math.max(0, (bundle.moduleEnvelope ? 0 : charMap.extracted.customScripts.length) - translatedCharRegex),
     character_level_triggers: Math.max(
       0,
-      charMap.extracted.triggerScripts.length - Math.min(translatedTriggers, charTriggerScripts.length),
+      (bundle.moduleEnvelope ? 0 : charMap.extracted.triggerScripts.length) - Math.min(translatedTriggers, charTriggerScripts.length),
     ),
     virtualscript: isNonEmpty(charMap.extracted.virtualScript),
     default_variables: isNonEmpty(charMap.extracted.defaultVariables),
@@ -411,15 +420,12 @@ export function translateFromCharxBundle(
       : {}),
   };
 
-  const allTriggers = [...charTriggerScripts, ...moduleTriggerScripts];
   const hostFeaturesSet = new Set<string>();
-  let needsLowLevelAccess = false;
   let usesRunImgGen = false;
   let usesCheckSimilarity = false;
   let usesCommand = false;
   if (charMap.extracted.utilityBot) hostFeaturesSet.add("utilityBot");
   for (const t of allTriggers) {
-    if (t.lowLevelAccess) needsLowLevelAccess = true;
     for (const e of t.effect ?? []) {
       const typ = (e as { type?: string }).type;
       if (typ === "v2GetAlertSelect") hostFeaturesSet.add("alertSelect");
@@ -471,7 +477,7 @@ export function translateFromCharxBundle(
     });
   }
   const requires = {
-    lowLevelAccess: needsLowLevelAccess,
+    lowLevelAccess,
     hostFeatures: [...hostFeaturesSet].sort(),
     lua: triggersOut.luaCount > 0,
   };
@@ -499,7 +505,7 @@ export function translateFromCharxBundle(
     risuPayload = buildRisuPayload({
       translatorVersion: TRANSLATOR_VERSION,
       risuSpecVersion: RISU_SPEC_VERSION,
-      triggers: [...charTriggerScripts, ...moduleTriggerScripts],
+      triggers: allTriggers,
       atActions: allAtActions,
       extracted: adjustedExtracted,
       characterExtensions: charMap.character.extensions,

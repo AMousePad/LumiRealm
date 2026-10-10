@@ -117,6 +117,10 @@ export interface RepairApplyResult {
   readonly elapsedMs: number;
 }
 
+export type ViewerSourceRef =
+  | { readonly kind: 'character'; readonly characterId: string }
+  | { readonly kind: 'module'; readonly moduleId: string };
+
 export interface PendingRegexScriptMsg {
   readonly name: string;
   readonly script_id: string;
@@ -146,7 +150,13 @@ export type FrontendToBackend =
   | { type: 'display_authority'; chatId: string; authoritative: boolean }
   // Card bytes are streamed to the host tus endpoint (resumable, no WS frame
   // cap), then the worker reads them by id via spindle.uploads.
-  | { type: 'import_card_from_upload'; uploadId: string; fileName: string }
+  | {
+      type: 'import_card_from_upload';
+      uploadId: string;
+      fileName: string;
+      /** Set by the Presets panel when the user opted into label translation. */
+      presetLabelTranslation?: { readonly connectionId: string };
+    }
   // Large lorebook / regex JSON imports upload via the tus endpoint (a single
   // SPINDLE_BACKEND_MSG frame is capped at 4MB and silently dropped past that).
   | {
@@ -196,6 +206,9 @@ export type FrontendToBackend =
       /** `window.innerHeight` at report time. */
       height: number;
     }
+  // The backend cannot read the active Loom preset, so the frontend reports it
+  // at handshake and on every change to gate imported preset regex rules.
+  | { type: 'active_preset'; presetId: string | null }
   // Backend replies with `set_variables` push. Also fires on every state-tick lifecycle event.
   | {
       type: 'request_variables_snapshot';
@@ -238,6 +251,10 @@ export type FrontendToBackend =
         readonly auxDebugCaptureResponse?: boolean;
         readonly legacyMediaFindings?: boolean;
         readonly translateEnabled?: boolean;
+        readonly skipAssetThumbnails?: boolean;
+        readonly imageConnectionId?: string | null;
+        readonly imageModelOverride?: string | null;
+        readonly naiSettings?: Partial<NaiSettingsWire>;
       };
     }
   // Browser-translated cache writeback, one message per scope per language.
@@ -260,6 +277,9 @@ export type FrontendToBackend =
   | {
       type: 'request_connections_list';
     }
+  | {
+      type: 'request_image_connections_list';
+    }
   | { type: 'process_module_from_upload'; uploadId: string; fileName: string }
   | { type: 'request_modules' }
   | { type: 'delete_module'; moduleId: string }
@@ -271,8 +291,15 @@ export type FrontendToBackend =
   | { type: 'export_character'; characterId: string }
   | {
       type: 'request_viewer_data';
-      source: { kind: 'character'; characterId: string }
-        | { kind: 'module'; moduleId: string };
+      source: ViewerSourceRef;
+    }
+  | {
+      /** Toggle the live Lumiverse world-book row shown by Viewer → Lore. */
+      type: 'set_viewer_lorebook_entry_disabled';
+      source: ViewerSourceRef;
+      worldBookId: string;
+      entryId: string;
+      disabled: boolean;
     }
   // Single envelope write + single viewer re-push regardless of `entries.length`.
   // FE pre-uploads bytes via `/api/v1/images`.
@@ -527,7 +554,6 @@ export type BackendToFrontend =
       type: 'render_bg_html';
       chatId: string;
       bgHtml: string;
-      crossRuleStyles?: readonly string[];
     }
   | {
       type: 'clear_bg_html';
@@ -550,6 +576,9 @@ export type BackendToFrontend =
   | {
       type: 'display_snapshot';
       snapshot: DisplaySnapshot;
+      // 'gui-reload' = Risu ReloadGUIPointer analog: FE must invalidate ['*']
+      // instead of var-diffing (explicit reloadDisplay or dirty trigger flush).
+      reason?: 'gui-reload';
     }
   // `seq` is monotonic per-chat; pushes only when snapshot changes (or on explicit request).
   | {
@@ -589,6 +618,10 @@ export type BackendToFrontend =
         readonly auxDebugCaptureResponse: boolean;
         readonly legacyMediaFindings: boolean;
         readonly translateEnabled: boolean;
+        readonly skipAssetThumbnails: boolean;
+        readonly imageConnectionId: string | null;
+        readonly imageModelOverride: string | null;
+        readonly naiSettings: NaiSettingsWire;
       };
     }
   // Emitted when the user enables request/response capture toggles in Settings → Debug.
@@ -627,6 +660,16 @@ export type BackendToFrontend =
         readonly is_default: boolean;
       }[];
     }
+  | {
+      type: 'image_connections_list_pushed';
+      connections: readonly {
+        readonly id: string;
+        readonly name: string;
+        readonly provider: string;
+        readonly model: string;
+        readonly is_default: boolean;
+      }[];
+    }
   // `modules_pushed` is the full library + per-character attachment map.
   // `attached_modules_pushed` is a per-character delta after attach/detach.
   | {
@@ -653,6 +696,15 @@ export type BackendToFrontend =
   | {
       type: 'viewer_data_pushed';
       data: ViewerData;
+    }
+  | {
+      type: 'viewer_lorebook_entry_disabled_result';
+      source: ViewerSourceRef;
+      worldBookId: string;
+      entryId: string;
+      disabled: boolean;
+      ok: boolean;
+      error?: string;
     }
   | {
       type: 'lorebook_import_result';
@@ -894,6 +946,20 @@ export type SidebarToggleWire =
       readonly moduleId?: string;
     };
 
+export interface NaiSettingsWire {
+  readonly model: string | null;
+  readonly resolution: string;
+  readonly sampler: string;
+  readonly steps: number;
+  readonly guidance: number;
+  readonly negativePrompt: string | null;
+  readonly smea: boolean;
+  readonly smeaDyn: boolean;
+  readonly seed: number | null;
+  readonly qualityToggle: boolean;
+  readonly ucPreset: number;
+}
+
 export interface AuxSamplersWire {
   readonly temperature: number | null;
   readonly maxTokens: number | null;
@@ -907,9 +973,9 @@ export interface AuxSamplersWire {
 }
 
 export interface VariableScopes {
-  readonly local: Readonly<Record<string, string>>;
-  readonly global: Readonly<Record<string, string>>;
-  readonly chat: Readonly<Record<string, string>>;
+  readonly local: Readonly<Record<string, string | null>>;
+  readonly global: Readonly<Record<string, string | null>>;
+  readonly chat: Readonly<Record<string, string | null>>;
 }
 
 export interface ModuleSummary {

@@ -2,9 +2,15 @@
 // after each apply for resumability across worker restarts.
 
 import { translateFromStoredSource } from '../core/pipeline/translate.js';
+import { RisuConsentRequiredError } from '../payload/codec.js';
 import { prepareBackgroundHtmlForRuntime } from '../core/mappers/background-html.js';
 import { unprefixCssInStyleBlocks } from '../bghtml/rewriter.js';
 import { replaceStringHasPerMessageMacro } from '../core/mappers/regex.js';
+import { stripLegacyIslandWrappers } from '../core/mappers/island-merge.js';
+import { regexRowTargetsDisplay } from './regex-row.js';
+import { unicodeRegexPatch } from './regex-unicode.js';
+import { lorePriorityPatch, lorePriorityTargets } from './lore-priority.js';
+import { createEmbeddedSourceRetirementPatch, embeddedSourceScriptId, isCharacterSource } from './embedded-sources.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import type { SvgRasterTask } from '../core/svg-rasterize.js';
 import {
@@ -18,12 +24,14 @@ import {
   type ProjectedCharacterRegexScript,
 } from '../payload/character-regex-projection.js';
 import {
+  computeEntrySourceHash,
   LEGACY_ENTRY_HASH_FIELDS_V1,
   computeEntrySourceHashWithFields,
 } from '../core/mappers/lorebook-hash.js';
 
 export interface LiveWorldBookEntry {
   readonly id: string;
+  readonly priority?: number;
   readonly exclude_greeting: boolean;
   readonly extensions: Readonly<Record<string, unknown>> | null;
 }
@@ -59,6 +67,7 @@ export interface MigrationDeps {
     entryId: string,
     input: {
       readonly exclude_greeting: boolean;
+      readonly priority?: number;
       readonly extensions: Readonly<Record<string, unknown>>;
     },
     userId: string,
@@ -138,7 +147,7 @@ export type MigrationResult =
       stepsApplied: ReadonlyArray<{ version: number; notes: readonly string[] }>;
     }
   | { kind: 'needs_reimport'; reason: 'no_source'; storedVersion: number }
-  | { kind: 'failed'; from: number; to: number; error: string; partialAt?: number };
+  | { kind: 'failed'; from: number; to: number; error: string; partialAt?: number; consentRequired?: true };
 
 async function applyV5AssetIndexRebuild(
   args: CharacterMigrationStepArgs,
@@ -421,6 +430,31 @@ async function applyV23CorrectCharXSpelling(
   };
 }
 
+async function applyV24StripLegacyIslandWrappers(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const result = await deps.applyCharacterRegexRowPatch(
+    args.characterId,
+    args.userId,
+    (row) => {
+      if (!regexRowTargetsDisplay(row['target'])) return null;
+      const rs = row['replace_string'];
+      if (typeof rs !== 'string') return null;
+      const next = stripLegacyIslandWrappers(rs);
+      return next === rs ? null : { replace_string: next };
+    },
+  );
+  return {
+    nextEnvelope: args.envelope,
+    notes: [
+      `scanned=${result.scanned}`,
+      `updated=${result.updated}`,
+      `failed=${result.failed}`,
+    ],
+  };
+}
+
 async function applyV6BackfillArrayIndex(
   args: CharacterMigrationStepArgs,
   deps: MigrationDeps,
@@ -434,6 +468,9 @@ async function applyV6BackfillArrayIndex(
     const idx = ext['_risu_array_index'];
     if (typeof hash === 'string' && typeof idx === 'number') {
       indexBySourceHash.set(hash, idx);
+      for (const legacyHash of lorePriorityTargets([e as unknown as Record<string, unknown>]).keys()) {
+        indexBySourceHash.set(legacyHash, idx);
+      }
     }
   }
   if (indexBySourceHash.size === 0) {
@@ -697,6 +734,9 @@ async function applyV15ExcludeGreetingPerEntry(
     );
     targetBySourceHash.set(legacyHash, currentHash);
     targetBySourceHash.set(currentHash, currentHash);
+    for (const oldHash of lorePriorityTargets([record]).keys()) {
+      targetBySourceHash.set(oldHash, computeEntrySourceHash({ ...record, priority: 0 }));
+    }
   }
   if (targetBySourceHash.size === 0) {
     return {
@@ -786,6 +826,26 @@ async function applyV17UseFindMacroMode(
       `failed=${result.failed}`,
     ],
   };
+}
+
+async function applyV26RestoreLorePriority(
+  args: CharacterMigrationStepArgs,
+  deps: MigrationDeps,
+): Promise<CharacterMigrationStepResult> {
+  const targets = lorePriorityTargets(args.newBundle.worldBookEntries as unknown as Record<string, unknown>[]);
+  let updated = 0;
+  for (const bookId of await deps.getCharacterWorldBookIds(args.characterId, args.userId)) {
+    for (const entry of await deps.listWorldBookEntries(bookId, args.userId)) {
+      if (entry.extensions?.['_risu_module_id']) continue;
+      const patch = lorePriorityPatch(entry, targets);
+      if (!patch) continue;
+      await deps.updateWorldBookEntryActivation(entry.id, {
+        ...patch, exclude_greeting: entry.exclude_greeting,
+      }, args.userId);
+      updated += 1;
+    }
+  }
+  return { nextEnvelope: args.envelope, notes: [`restored priority on ${updated} lore entries`] };
 }
 
 export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
@@ -920,6 +980,82 @@ export const CHARACTER_MIGRATIONS: readonly CharacterMigrationStep[] = [
     touches: ['regex_scripts'],
     apply: applyV23CorrectCharXSpelling,
   },
+  {
+    version: 24,
+    description:
+      'Strip retired per-rule island wrappers from display replace_strings; rows store the raw author fragment and the resolver wraps the whole message. In-place per row, preserves user disable + edits.',
+    touches: ['regex_scripts'],
+    apply: applyV24StripLegacyIslandWrappers,
+  },
+  // v24 shipped with a scalar target gate; live rows carry target as an
+  // array, so the step stamped without patching. Corrected re-run.
+  {
+    version: 25,
+    description:
+      'Re-run the legacy island-wrapper strip with the array-shaped target gate.',
+    touches: ['regex_scripts'],
+    apply: applyV24StripLegacyIslandWrappers,
+  },
+  {
+    version: 26,
+    description: 'Restore Risu insertion-order priority on source-matched lore entries with the old zero default.',
+    touches: ['world_book_entries'],
+    apply: applyV26RestoreLorePriority,
+  },
+  {
+    version: 27,
+    description: 'Restore Unicode display execution flags on source-matched regex rows without changing host validation flags.',
+    touches: ['regex_scripts'],
+    async apply(args, deps) {
+      const sources = args.newBundle.regexScripts as unknown as readonly Readonly<Record<string, unknown>>[];
+      const patch = (row: Readonly<Record<string, unknown>>) => unicodeRegexPatch(row, sources);
+      const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, patch);
+      if (result.failed > 0) throw new Error(`failed to restore Unicode flags on ${result.failed} regex rows`);
+      return {
+        nextEnvelope: { ...args.envelope, regex_scripts: args.envelope.regex_scripts.map(row => ({ ...row, ...patch(row as unknown as Readonly<Record<string, unknown>>) })) },
+        notes: [`restored Unicode flags on ${result.updated} regex rows`],
+      };
+    },
+  },
+  {
+    version: 28,
+    description: 'Match character trigger permissions and embedded script ownership without replacing edited regex rows.',
+    touches: ['payload.triggers', 'payload.lua_scripts', 'payload.at_actions', 'regex_scripts'],
+    async apply(args, deps) {
+      const retired = new Set<string>();
+      if (args.envelope.source?.module && args.envelope.regex_scripts.some((row) =>
+        row.disabled === false && isCharacterSource(row as unknown as Readonly<Record<string, unknown>>))) {
+        const patch = createEmbeddedSourceRetirementPatch(
+          args.envelope.regex_scripts as unknown as readonly Readonly<Record<string, unknown>>[],
+        );
+        const result = await deps.applyCharacterRegexRowPatch(args.characterId, args.userId, (row) => {
+          const change = patch(row);
+          if (change || (row['disabled'] === true && patch({ ...row, disabled: false }))) {
+            retired.add(embeddedSourceScriptId(row));
+          }
+          return change;
+        });
+        if (result.failed > 0) throw new Error(`failed to retire ${result.failed} obsolete character regex rows`);
+      }
+      const payload = args.newBundle.risuPayload!;
+      return {
+        nextEnvelope: {
+          ...args.envelope,
+          payload: {
+            ...args.envelope.payload,
+            triggers: payload.triggers,
+            lua_scripts: payload.lua_scripts,
+            at_actions: payload.at_actions,
+            requires: payload.requires,
+          },
+          regex_scripts: args.envelope.regex_scripts.map((row) =>
+            retired.has(embeddedSourceScriptId(row as unknown as Readonly<Record<string, unknown>>))
+              ? { ...row, disabled: true } : row),
+        },
+        notes: [`retired ${retired.size} unchanged character regex rows; refreshed trigger ownership`],
+      };
+    },
+  },
 ];
 
 export const CURRENT_CHARACTER_SCHEMA_VERSION: number =
@@ -945,10 +1081,10 @@ export async function migrateCharacterIfNeeded(
   let newBundle: LumiBundle;
   try {
     newBundle = translateFromStoredSource(
-      {
+      structuredClone({
         card: args.envelope.source.card,
         module: args.envelope.source.module,
-      },
+      }),
       {
         sourceId: `migrate:${args.characterId}`,
         mode: 'full',
@@ -969,6 +1105,12 @@ export async function migrateCharacterIfNeeded(
       from: stored,
       to: target,
       error: 'translator returned no risuPayload',
+    };
+  }
+  if (newBundle.risuPayload.requires.lowLevelAccess && args.envelope.user_overrides.low_level_access_granted !== true) {
+    return {
+      kind: 'failed', from: stored, to: target, consentRequired: true,
+      error: new RisuConsentRequiredError(args.characterName).message,
     };
   }
 

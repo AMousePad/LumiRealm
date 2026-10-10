@@ -14,6 +14,8 @@ import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import type { RisuChatView } from '../interpreter/risu-chat-view.js';
 import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import type { TriggerScript } from '../core/schemas/triggerscript.js';
+import { withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
+import { hostMessageTime } from '../util/message-time.js';
 
 export interface DisplaySnapshotAssemblyDeps {
   readonly modulesByNamespaceFromCard: (
@@ -60,13 +62,11 @@ async function fetchHostMessages(chatId: string): Promise<HostMessage[]> {
         send_date?: unknown;
         name?: unknown;
       };
-      const sendDate = typeof raw.send_date === 'number' ? raw.send_date : null;
-      const createdAt = typeof raw.created_at === 'number' ? raw.created_at : null;
       return {
         id: m.id,
         content: typeof m.content === 'string' ? m.content : '',
         role: m.role,
-        createdAt: sendDate ?? createdAt ?? 0,
+        createdAt: hostMessageTime(raw),
         ...(typeof raw.name === 'string' && raw.name.length > 0
           ? { speaker: raw.name }
           : {}),
@@ -185,7 +185,7 @@ export async function assembleDisplaySnapshot(
   active: ActiveCard,
   chatId: string,
   userId: string,
-  vars: { local: Record<string, string>; global: Record<string, string>; chat: Record<string, string> },
+  vars: DisplaySnapshot['vars'],
 ): Promise<DisplaySnapshot> {
   const characterId = active.card.character_id;
   const [charRaw, personaRaw] = await Promise.all([
@@ -201,6 +201,13 @@ export async function assembleDisplaySnapshot(
     fetchHostLorebook(bookIds, userId),
     fetchChatRuntimeState(chatId, userId),
   ]);
+
+  // Display runtimes consume preloaded lore, so include the active card's module
+  // rows here rather than relying on the runtime's host-fetch path.
+  const moduleLorebooks = Object.values(
+    (active.card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {},
+  ).flat();
+  const combinedLorebook = withModuleLorebooks(lorebookHost, moduleLorebooks, bookIds);
 
   const chatView = buildRisuChatView({ messages: messagesHost });
   const chatState = buildDisplayChatStateFromView(chatView);
@@ -262,7 +269,7 @@ export async function assembleDisplaySnapshot(
     hasEditAtActions,
     luaTriggers,
     messagesHost,
-    lorebookHost,
+    lorebookHost: combinedLorebook,
     atActions: coerceAtActions(active.card.risuPayload.at_actions as readonly unknown[]),
   };
 }

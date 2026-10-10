@@ -1,5 +1,6 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend } from '../types/messages.js';
+import { filterBridgePermissions } from '../bridge-permissions.js';
 
 // Bottom-right banner driven by phoneline dial outcomes. Non-blocking, since
 // bridge perms are not required for core LumiRealm function.
@@ -156,13 +157,14 @@ export function setupBridgeStatusBanner(opts: {
   return {
     handleBackendMessage(msg: BackendToFrontend): void {
       if (msg.type !== 'notify_bridge_status') return;
-      if (!msg.offline || msg.missingPermissions.length === 0) {
+      const missing = filterBridgePermissions(msg.missingPermissions);
+      if (!msg.offline || missing.length === 0) {
         lastKey = null;
         dismissedKeys.clear();
         clearBanner();
         return;
       }
-      show(msg.missingPermissions, msg.forCaller ?? null);
+      show(missing, msg.forCaller ?? null);
     },
     destroy(): void {
       clearBanner();

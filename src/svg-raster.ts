@@ -84,16 +84,22 @@ async function rasterizeOne(
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
+    try {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
 
-    ctx.drawImage(img, 0, 0, w, h);
-    const blobOut = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob((b) => resolve(b), "image/png");
-    });
-    if (!blobOut) return null;
-    const buf = await blobOut.arrayBuffer();
-    return new Uint8Array(buf);
+      ctx.drawImage(img, 0, 0, w, h);
+      const blobOut = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((b) => resolve(b), "image/png");
+      });
+      if (!blobOut) return null;
+      const buf = await blobOut.arrayBuffer();
+      return new Uint8Array(buf);
+    } finally {
+      // Zeroing releases the backing store now instead of at GC time.
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   } catch {
     return null;
   } finally {
@@ -222,19 +228,26 @@ export function setupSvgRasterizer(
     });
   }
 
+  // Mass re-translate dispatches one batch per character. Running them
+  // concurrently stacked hundreds of canvases and crashed the tab, so batches
+  // run strictly one at a time through this chain.
+  let batchChain: Promise<void> = Promise.resolve();
+
   return {
     handleRasterizeSvgsMessage(msg): void {
-      void rasterizeBatch(msg).catch((err) => {
-        log.error(
-          `svg-raster: rasterizeBatch threw char=${msg.characterId}: ${(err as Error).message}`,
-        );
-        // Send empty index so backend clears the svg-pending flag and finalizes the import.
-        sendToBackend({
-          type: "register_svg_raster_index",
-          characterId: msg.characterId,
-          imageIdByMarker: {},
-        });
-      });
+      batchChain = batchChain.then(() =>
+        rasterizeBatch(msg).catch((err) => {
+          log.error(
+            `svg-raster: rasterizeBatch threw char=${msg.characterId}: ${(err as Error).message}`,
+          );
+          // Send empty index so backend clears the svg-pending flag and finalizes the import.
+          sendToBackend({
+            type: "register_svg_raster_index",
+            characterId: msg.characterId,
+            imageIdByMarker: {},
+          });
+        }),
+      );
     },
   };
 }

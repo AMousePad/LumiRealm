@@ -152,8 +152,8 @@ describe('spindle host UI', () => {
         { type: 'request_pick', requestId: pickPayload.requestId, title: 'Choose', options: ['one', 'two'] },
         'user-1',
       ]);
-      expect(resolvePickResolution(pickPayload.requestId, 'user-1', 'two')).toEqual({ ok: true });
-      expect(await pick).toBe('two');
+      expect(resolvePickResolution(pickPayload.requestId, 'user-1', '1')).toEqual({ ok: true });
+      expect(await pick).toBe('1');
     });
   });
 

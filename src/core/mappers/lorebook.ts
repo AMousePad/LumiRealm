@@ -203,7 +203,7 @@ export function mapLoreBookEntryWithStats(
     prevent_recursion: applied.patch.prevent_recursion ?? false,
     exclude_recursion: applied.patch.exclude_recursion ?? false,
     delay_until_recursion: false,
-    priority: applied.patch.priority ?? 0,
+    priority: applied.patch.priority ?? entry.insertorder,
     sticky: 0,
     cooldown: 0,
     delay: 0,

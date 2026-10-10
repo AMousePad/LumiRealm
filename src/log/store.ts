@@ -45,8 +45,6 @@ export interface LogStateSnapshot extends LogState {
   bufferBytes: number;
 }
 
-const MAX_BYTES = 5 * 1024 * 1024;
-
 const STATE_STORAGE_KEY = 'lumirealm/log-state.json';
 
 const DEFAULT_STATE: LogState = { enabled: false, includeChatData: false, level: DEFAULT_LOG_LEVEL };
@@ -109,10 +107,6 @@ class LogStore {
     const size = approxBytes(ev);
     this.events.push(ev);
     this.bytes += size;
-    while (this.bytes > MAX_BYTES && this.events.length > 1) {
-      const dropped = this.events.shift();
-      if (dropped) this.bytes -= approxBytes(dropped);
-    }
   }
 
   snapshot(userId?: string | null): { events: readonly LogEvent[] } {

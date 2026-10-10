@@ -30,12 +30,12 @@ register("displayescapedcolon", () => "\uE9BE",
 register("displayescapedsemicolon", () => "\uE9BF",
   "Displays as ;.");
 
-// With no args: returns '\n'. With numeric arg N: repeats N times (min 1).
-register("cbr", (_c, a) => {
+// Risu repeats the raw payload, including alias spelling, when a count is supplied.
+register("cbr", (_c, a, raw) => {
   if (a.length === 0) return "\\n";
   const n = Math.max(1, Number(a[0] ?? "1"));
-  return "\\n".repeat(n);
-}, "Returns a literal '\\n'. With numeric arg, repeats that many times.");
+  return raw.repeat(n);
+}, "Returns a literal '\\n' without args; with a count, repeats the raw macro payload.");
 
 // Asset family (img/image/asset/bg/emotion/video/audio/bgm/source/path/raw) and inlay* are in handlers/assets.ts.
 //

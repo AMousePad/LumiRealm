@@ -1,9 +1,8 @@
 import {
   compileRegex,
-  collectMatches,
   substituteRegexCaptures,
-  rebuildFromMatches,
   applyTrimStrings,
+  type FeRegexMatch,
 } from './regex-apply.js';
 
 export interface RegexCoreScript {
@@ -19,6 +18,9 @@ export interface RegexCoreScript {
   readonly disabled?: boolean;
   readonly preResolvedFind?: string;
   readonly preResolvedReplace?: string;
+  readonly reResolveAfterRule?: boolean;
+  readonly risuActions?: readonly string[];
+  readonly evalTemplate?: (text: string) => string;
   readonly matchActions?: readonly (
     | 'move_top'
     | 'move_bottom'
@@ -26,14 +28,14 @@ export interface RegexCoreScript {
   )[];
   readonly repeatPosition?: string;
   readonly repeatRawMatch?: boolean;
+  readonly decorateReplacement?: (replacement: string, match: FeRegexMatch, input: string) => string;
 }
 
 export interface ApplyRegexCoreOptions {
   readonly placement: string;
   readonly depth: number | undefined;
   readonly evalTemplate: (text: string) => string;
-  // Risu re-parses CBS after every script. Fires only when the rule changed
-  // the text and the result carries CBS syntax.
+  // Reparse changed output for callers using the host substitution modes.
   readonly reResolveAfterRule?: boolean;
   /** Nearest earlier same-role message, or the greeting when none exists. */
   readonly previousContent?: string;
@@ -54,7 +56,7 @@ export function applyRegexScriptsCore(
   const {
     placement,
     depth,
-    evalTemplate,
+    evalTemplate: defaultEvalTemplate,
     reResolveAfterRule,
     previousContent,
   } = opts;
@@ -69,10 +71,13 @@ export function applyRegexScriptsCore(
     }
 
     const before = result;
+    const evalTemplate = script.evalTemplate ?? defaultEvalTemplate;
     let findRegex = script.find_regex;
     if (script.preResolvedFind !== undefined) {
       findRegex = script.preResolvedFind;
-    } else if (script.substitute_macros !== 'none') {
+    } else if (script.risuActions !== undefined
+      ? script.risuActions.includes('cbs')
+      : script.substitute_macros !== 'none') {
       findRegex = evalTemplate(findRegex);
     }
 
@@ -85,6 +90,10 @@ export function applyRegexScriptsCore(
     if (!regex) continue;
 
     try {
+      if (script.risuActions !== undefined) {
+        result = applyRisuRule(result, regex, script, evalTemplate, previousContent);
+        continue;
+      }
       const behaviorResult = applyMatchActions(
         result,
         regex,
@@ -98,18 +107,9 @@ export function applyRegexScriptsCore(
       }
 
       if (script.substitute_macros === 'raw') {
-        const matches = collectMatches(result, regex);
-        if (matches.length > 0) {
-          const replacements = matches.map((m) => {
-            const withCaptures = substituteRegexCaptures(
-              script.replace_string, m.fullMatch, m.groups, m.index, result, m.namedGroups,
-            );
-            return evalTemplate(withCaptures);
-          });
-          result = rebuildFromMatches(result, matches, replacements);
-        }
+        result = replaceWithDecoration(result, regex, script.replace_string, script.decorateReplacement, evalTemplate);
       } else if (script.substitute_macros === 'after') {
-        const substituted = result.replace(regex, script.replace_string);
+        const substituted = replaceWithDecoration(result, regex, script.replace_string, script.decorateReplacement);
         result = evalTemplate(substituted);
       } else {
         let replaceString = script.replace_string;
@@ -126,13 +126,13 @@ export function applyRegexScriptsCore(
             ? resolved.replace(/\$/g, '$$$$')
             : resolved;
         }
-        result = result.replace(regex, replaceString);
+        result = replaceWithDecoration(result, regex, replaceString, script.decorateReplacement);
       }
 
       result = applyTrimStrings(result, script.trim_strings);
 
       if (
-        reResolveAfterRule
+        (script.reResolveAfterRule ?? reResolveAfterRule)
         && script.substitute_macros !== 'after'
         && script.substitute_macros !== 'raw'
         && result !== before
@@ -146,6 +146,73 @@ export function applyRegexScriptsCore(
   }
 
   return result;
+}
+
+function applyRisuRule(
+  content: string,
+  regex: RegExp,
+  script: RegexCoreScript,
+  evalTemplate: (text: string) => string,
+  previousContent: string | undefined,
+): string {
+  const movesTop = script.matchActions?.includes('move_top');
+  const movesBottom = script.matchActions?.includes('move_bottom');
+  const requiresMatch = script.risuActions!.length > 0
+    || (script.matchActions?.length ?? 0) > 0 || script.replace_string.startsWith('@@');
+  // Risu's processScriptFull reuses lastIndex after its metadata-branch probe.
+  if (requiresMatch && !regex.test(content)) {
+    return script.matchActions?.includes('repeat_back')
+      ? applyMatchActions(content, regex, script, previousContent, evalTemplate).content
+      : content;
+  }
+  if (movesTop || movesBottom) {
+    const match = content.match(regex);
+    const remainder = content.replace(regex, '');
+    if (!match) return remainder;
+    const replacement = script.replace_string
+      .replace(/(?<!\$)\$[0-9]+/g, token => {
+        const index = Number.parseInt(token.slice(1), 10);
+        return index < match.length ? String(match[index]) : token;
+      })
+      .replace(/\$&/g, match[0]!)
+      .replace(/(?<!\$)\$<([^>]+)>/g, token => {
+        const name = Number.parseInt(token.slice(2, -1), 10);
+        return match.groups?.[name] || token;
+      });
+    return applyTrimStrings(movesTop ? `${replacement}\n${remainder}` : `${remainder}\n${replacement}`, script.trim_strings);
+  }
+  const replaced = replaceWithDecoration(content, regex, script.replace_string, script.decorateReplacement);
+  const trimmed = applyTrimStrings(replaced, script.trim_strings);
+  return hasCbsSyntax(trimmed) ? evalTemplate(trimmed) : trimmed;
+}
+
+function replaceWithDecoration(
+  input: string,
+  regex: RegExp,
+  replacement: string,
+  decorate: RegexCoreScript['decorateReplacement'],
+  evalReplacement?: (text: string) => string,
+): string {
+  if (!decorate && !evalReplacement) return input.replace(regex, replacement);
+  // Native replace owns match iteration, including sticky and Unicode empty
+  // matches, so adding actions cannot change which occurrences are replaced.
+  return input.replace(regex, (fullMatch: string, ...args: unknown[]) => {
+    const tail = args[args.length - 1];
+    const namedGroups = typeof tail === 'object' && tail !== null
+      ? tail as Record<string, string | undefined> : undefined;
+    const offsetIndex = args.length - (namedGroups ? 3 : 2);
+    const match: FeRegexMatch = {
+      fullMatch,
+      index: args[offsetIndex] as number,
+      groups: args.slice(0, offsetIndex) as (string | undefined)[],
+      ...(namedGroups ? { namedGroups } : {}),
+    };
+    const substituted = substituteRegexCaptures(
+      replacement, fullMatch, match.groups, match.index, input, namedGroups,
+    );
+    const resolved = evalReplacement ? evalReplacement(substituted) : substituted;
+    return decorate ? decorate(resolved, match, input) : resolved;
+  });
 }
 
 function applyMatchActions(
@@ -213,6 +280,12 @@ function applyMatchActions(
           previousContent,
           priorMatch.groups,
         );
+      }
+      if (script.decorateReplacement) {
+        piece = script.decorateReplacement(piece, {
+          fullMatch: priorMatch[0], index: priorMatch.index, groups,
+          ...(priorMatch.groups ? { namedGroups: priorMatch.groups } : {}),
+        }, previousContent);
       }
     }
     if (!position) return { handled: true, content: content + piece };

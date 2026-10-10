@@ -13,17 +13,19 @@ export interface RunPipelineInput extends Omit<BuildEvaluatorCtxInput, "commit">
   readonly template: string;
   /** Controls the dry-fire gate on mutating handlers. */
   readonly phase: PipelinePhase;
-  readonly wrapIslands?: boolean;
 }
 
 export interface RunPipelineOptions {
   readonly recorder?: VarReadRecorder;
+  readonly resolveLeaf?: BuildEvaluatorCtxInput['resolveLeaf'];
 }
 
 export function runPipeline(input: RunPipelineInput, opts?: RunPipelineOptions): string {
   const commit = input.phase === "commit";
 
   const ctx = buildEvaluatorContext({
+    ...(opts?.resolveLeaf ? { resolveLeaf: opts.resolveLeaf } : {}),
+    ...(input.reparseMacroResults === false ? { reparseMacroResults: false } : {}),
     chatId: input.chatId,
     ...(opts?.recorder ? { recorder: opts.recorder } : {}),
     ...(input.userId !== undefined ? { userId: input.userId } : {}),
@@ -52,6 +54,7 @@ export function runPipeline(input: RunPipelineInput, opts?: RunPipelineOptions):
     ...(input.lorebook ? { lorebook: input.lorebook } : {}),
     ...(input.positionPt ? { positionPt: input.positionPt } : {}),
     ...(input.cbsContext ? { cbsContext: true } : {}),
+    ...(input.visualize !== undefined ? { visualize: input.visualize } : {}),
     ...(input.rmVar ? { rmVar: true } : {}),
     ...(input.runVar ? { runVar: true } : {}),
     ...(input.suppressVarPersist ? { suppressVarPersist: true } : {}),

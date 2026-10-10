@@ -1,42 +1,15 @@
 // @bun
-var __defProp = Object.defineProperty;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-function __accessProp(key) {
-  return this[key];
-}
-var __toCommonJS = (from) => {
-  var entry = (__moduleCache ??= new WeakMap).get(from), desc;
-  if (entry)
-    return entry;
-  entry = __defProp({}, "__esModule", { value: true });
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (var key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(entry, key))
-        __defProp(entry, key, {
-          get: __accessProp.bind(from, key),
-          enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
-        });
-  }
-  __moduleCache.set(from, entry);
-  return entry;
+var __esm = (fn, res, err) => () => {
+  if (fn)
+    try {
+      res = fn(fn = 0);
+    } catch (e) {
+      err = [e];
+    }
+  if (err)
+    throw err[0];
+  return res;
 };
-var __moduleCache;
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
-      enumerable: true,
-      configurable: true,
-      set: __exportSetter.bind(all, name)
-    });
-};
-var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // src/interpreter/evaluator/scoped.ts
 function isTruthy(s) {
@@ -195,8 +168,6 @@ function blockStartMatcher(input, ctx) {
     return { type: "pure" };
   if (p1 === "#pure_display" || p1 === "#puredisplay")
     return { type: "pure-display" };
-  if (p1 === "#ignore")
-    return { type: "ignore" };
   if (p1 === "#code")
     return { type: "normalize" };
   if (p1.startsWith("#escape")) {
@@ -553,9 +524,7 @@ function parseArray2(s) {
 }
 function parseDict(s) {
   try {
-    const v = JSON.parse(s);
-    if (v && typeof v === "object" && !Array.isArray(v))
-      return v;
+    return JSON.parse(s);
   } catch {}
   return {};
 }
@@ -757,7 +726,7 @@ var init_risu_helpers = __esm(() => {
 function register2(name, handler, description) {
   registry.register({ name, handler, description, category: "Risu / Math", scoped: false });
 }
-var aggSource = (args) => args.length > 1 ? args : parseArray2(args[0] ?? "").map((v) => String(v)), toNum = (s) => {
+var aggSource = (args) => args.length > 1 ? args : parseArray2(args[0]), toNum = (s) => {
   const n = Number(s);
   return isNaN(n) ? 0 : n;
 };
@@ -780,7 +749,7 @@ var init_math = __esm(() => {
     return (src.map(toNum).reduce((x, y) => x + y, 0) / src.length).toString();
   }, "Arithmetic mean of the given values.");
   register2("tonumber", (_c, a) => {
-    const s = a[0] ?? "";
+    const s = a[0];
     let out = "";
     for (const ch of s) {
       if (!isNaN(Number(ch)) || ch === ".")
@@ -790,7 +759,7 @@ var init_math = __esm(() => {
   }, "Extracts digits (and decimal points) from the input string.");
   register2("fixnum", (_c, a) => Number(a[0]).toFixed(Number(a[1])).toString(), "Rounds to N decimal places via toFixed.");
   register2("calc", (ctx, a) => {
-    const expr = a[0] ?? "";
+    const expr = a[0];
     const n = calcString(expr, (name) => ctx.vars.get("local", name), (name) => ctx.vars.get("global", name));
     return n.toString();
   }, "Evaluates a mathematical expression. Supports + - * / ^ % and comparison operators; $x reads local var, @x reads global var.");
@@ -800,7 +769,7 @@ var init_math = __esm(() => {
 function register3(name, handler, description) {
   registry.register({ name, handler, description, category: "Risu / Logic", scoped: false });
 }
-var bag = (a) => a.length > 1 ? a : parseArray2(a[0] ?? "").map((v) => String(v));
+var bag = (a) => a.length > 1 ? a : parseArray2(a[0]);
 var init_logic = __esm(() => {
   init_registry();
   init_risu_helpers();
@@ -815,10 +784,10 @@ var init_logic = __esm(() => {
   register3("not", (_c, a) => a[0] === "1" ? "0" : "1", "Boolean NOT of a '1'/'0' value.");
   register3("all", (_c, a) => bag(a).every((f) => f === "1") ? "1" : "0", "Returns '1' if every value is the literal string '1'.");
   register3("any", (_c, a) => bag(a).some((f) => f === "1") ? "1" : "0", "Returns '1' if any value is '1'.");
-  register3("startswith", (_c, a) => (a[0] ?? "").startsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] starts with args[1].");
-  register3("endswith", (_c, a) => (a[0] ?? "").endsWith(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] ends with args[1].");
-  register3("contains", (_c, a) => (a[0] ?? "").includes(a[1] ?? "") ? "1" : "0", "Returns '1' if args[0] contains args[1] anywhere.");
-  register3("iserror", (_c, a) => (a[0] ?? "").toLocaleLowerCase().startsWith("error:") ? "1" : "0", "Returns '1' if the argument begins with 'error:' (case-insensitive).");
+  register3("startswith", (_c, a) => a[0].startsWith(a[1]) ? "1" : "0", "Returns '1' if args[0] starts with args[1].");
+  register3("endswith", (_c, a) => a[0].endsWith(a[1]) ? "1" : "0", "Returns '1' if args[0] ends with args[1].");
+  register3("contains", (_c, a) => a[0].includes(a[1]) ? "1" : "0", "Returns '1' if args[0] contains args[1] anywhere.");
+  register3("iserror", (_c, a) => a[0].toLocaleLowerCase().startsWith("error:") ? "1" : "0", "Returns '1' if the argument begins with 'error:' (case-insensitive).");
 });
 
 // src/risu-compat/handlers/strings.ts
@@ -828,16 +797,16 @@ function register4(name, handler, description) {
 var init_strings = __esm(() => {
   init_registry();
   init_risu_helpers();
-  register4("replace", (_c, a) => (a[0] ?? "").replaceAll(a[1] ?? "", a[2] ?? ""), "Replaces all occurrences of needle with replacement.");
-  register4("split", (_c, a) => makeArray2((a[0] ?? "").split(a[1] ?? "")), "Splits a string on the delimiter and returns a JSON array.");
-  register4("join", (_c, a) => parseArray2(a[0] ?? "").join(a[1] ?? ""), "Joins a JSON array using the given separator.");
-  register4("spread", (_c, a) => parseArray2(a[0] ?? "").join("::"), "Joins a JSON array using :: as the separator.");
-  register4("trim", (_c, a) => (a[0] ?? "").trim(), "Strips leading/trailing whitespace.");
-  register4("length", (_c, a) => (a[0] ?? "").length.toString(), "Returns the character length of a string.");
-  register4("lower", (_c, a) => (a[0] ?? "").toLocaleLowerCase(), "Lowercases using locale-aware conversion.");
-  register4("upper", (_c, a) => (a[0] ?? "").toLocaleUpperCase(), "Uppercases using locale-aware conversion.");
+  register4("replace", (_c, a) => a[0].replaceAll(a[1], a[2]), "Replaces all occurrences of needle with replacement.");
+  register4("split", (_c, a) => makeArray2(a[0].split(a[1])), "Splits a string on the delimiter and returns a JSON array.");
+  register4("join", (_c, a) => parseArray2(a[0]).join(a[1]), "Joins a JSON array using the given separator.");
+  register4("spread", (_c, a) => parseArray2(a[0]).join("::"), "Joins a JSON array using :: as the separator.");
+  register4("trim", (_c, a) => a[0].trim(), "Strips leading/trailing whitespace.");
+  register4("length", (_c, a) => a[0].length.toString(), "Returns the character length of a string.");
+  register4("lower", (_c, a) => a[0].toLocaleLowerCase(), "Lowercases using locale-aware conversion.");
+  register4("upper", (_c, a) => a[0].toLocaleUpperCase(), "Uppercases using locale-aware conversion.");
   register4("capitalize", (_c, a) => {
-    const s = a[0] ?? "";
+    const s = a[0];
     return s.charAt(0).toUpperCase() + s.slice(1);
   }, "Uppercases only the first character.");
   register4("reverse", (_c, a) => [...a[0] ?? ""].reverse().join(""), "Reverses a string (code-point safe via iterator).");
@@ -850,46 +819,46 @@ function register5(name, handler, description) {
 var init_arrays = __esm(() => {
   init_registry();
   init_risu_helpers();
-  register5("arraylength", (_c, a) => parseArray2(a[0] ?? "").length.toString(), "Returns the length of a JSON array.");
+  register5("arraylength", (_c, a) => parseArray2(a[0]).length.toString(), "Returns the length of a JSON array.");
   register5("arrayshift", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     arr.shift();
     return makeArray2(arr);
   }, "Removes and discards the first element.");
   register5("arraypop", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     arr.pop();
     return makeArray2(arr);
   }, "Removes and discards the last element.");
   register5("arraypush", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
-    arr.push(a[1] ?? "");
+    const arr = parseArray2(a[0]);
+    arr.push(a[1]);
     return makeArray2(arr);
   }, "Appends a new element.");
   register5("arraysplice", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
-    arr.splice(Number(a[1]), Number(a[2]), a[3] ?? "");
+    const arr = parseArray2(a[0]);
+    arr.splice(Number(a[1]), Number(a[2]), a[3]);
     return makeArray2(arr);
   }, "Risu-style splice: (array, start, deleteCount, newElement).");
   register5("arrayassert", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     const idx = Number(a[1]);
     if (idx >= arr.length)
-      arr[idx] = a[2] ?? "";
+      arr[idx] = a[2];
     return makeArray2(arr);
   }, "Sets arr[idx] = value if idx is out of bounds; else leaves array unchanged.");
   register5("arrayelement", (_c, a) => {
-    const el = parseArray2(a[0] ?? "").at(Number(a[1])) ?? "null";
+    const el = parseArray2(a[0]).at(Number(a[1])) ?? "null";
     return typeof el === "object" ? JSON.stringify(el) : String(el);
   }, "Returns the element at index (JSON-stringifies if object). 'null' if OOB.");
   register5("dictelement", (_c, a) => {
-    const el = parseDict(a[0] ?? "")[a[1] ?? ""] ?? "null";
+    const el = parseDict(a[0])[a[1]] ?? "null";
     return typeof el === "object" ? JSON.stringify(el) : String(el);
   }, "Returns dict[key] or 'null'.");
   register5("objectassert", (_c, a) => {
-    const d = parseDict(a[0] ?? "");
-    if (!d[a[1] ?? ""])
-      d[a[1] ?? ""] = a[2] ?? "";
+    const d = parseDict(a[0]);
+    if (!d[a[1]])
+      d[a[1]] = a[2];
     return JSON.stringify(d);
   }, "Sets obj[key] = value if missing or falsy; returns JSON.");
   register5("element", (_c, a) => {
@@ -911,13 +880,16 @@ var init_arrays = __esm(() => {
   register5("makearray", (_c, a) => makeArray2(a), "Creates a JSON array from the given arguments.");
   register5("makedict", (_c, a) => {
     const d = {};
-    for (let i = 0;i + 1 < a.length; i += 2) {
-      d[a[i] ?? ""] = a[i + 1] ?? "";
+    for (const pair of a) {
+      const separator = pair.indexOf("=");
+      if (separator === -1)
+        continue;
+      d[pair.slice(0, separator)] = pair.slice(separator + 1);
     }
     return JSON.stringify(d);
-  }, "Creates a JSON object from interleaved key-value arguments.");
+  }, "Creates a JSON object from key=value arguments.");
   register5("range", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     const start = arr.length > 1 ? Number(arr[0]) : 0;
     const end = arr.length > 1 ? Number(arr[1]) : Number(arr[0]);
     const step = arr.length > 2 ? Number(arr[2]) : 1;
@@ -929,7 +901,7 @@ var init_arrays = __esm(() => {
     return makeArray2(out);
   }, "Creates a range. [n] \u2192 [0,1,\u2026,n-1]. [a,b] \u2192 [a,\u2026,b-1]. [a,b,s] \u2192 step s.");
   register5("filter", (_c, a) => {
-    const arr = parseArray2(a[0] ?? "");
+    const arr = parseArray2(a[0]);
     const mode = ["all", "nonempty", "unique"].indexOf(a[1] ?? "all");
     const filterType = mode === -1 ? 0 : mode;
     return makeArray2(arr.filter((f, i) => {
@@ -1058,30 +1030,30 @@ function leaveVarLiteral(ctx) {
 var init_variables = __esm(() => {
   init_registry();
   register7("getvar", (ctx, a) => ctx.vars.get("local", a[0] ?? ""), "Reads a local chat variable. Empty string if unset.");
-  register7("setvar", (ctx, a) => {
+  register7("setvar", (ctx, a, raw) => {
     const mode = setvarMode(ctx);
     if (mode === "hide")
       return "";
     if (mode === "literal")
-      return `{{setvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+      return `{{${raw}}}`;
     ctx.vars.set("local", a[0] ?? "", a[1] ?? "");
     return "";
   }, "Sets a local chat variable.");
-  register7("addvar", (ctx, a) => {
+  register7("addvar", (ctx, a, raw) => {
     const mode = setvarMode(ctx);
     if (mode === "hide")
       return "";
     if (mode === "literal")
-      return `{{addvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+      return `{{${raw}}}`;
     ctx.vars.add("local", a[0] ?? "", Number(a[1]));
     return "";
   }, "Adds delta to a local chat variable (coerces current value to number).");
-  register7("setdefaultvar", (ctx, a) => {
+  register7("setdefaultvar", (ctx, a, raw) => {
     const mode = setvarMode(ctx);
     if (mode === "hide")
       return "";
     if (mode === "literal")
-      return `{{setdefaultvar::${a[0] ?? ""}::${a[1] ?? ""}}}`;
+      return `{{${raw}}}`;
     const name = a[0] ?? "";
     const current = ctx.vars.get("local", name);
     if (!current || current === "null") {
@@ -1090,9 +1062,9 @@ var init_variables = __esm(() => {
     return "";
   }, "Sets a local chat variable only if its current value is the empty string (Risu falsy check).");
   register7("getglobalvar", (ctx, a) => ctx.vars.get("global", a[0] ?? ""), "Reads a global chat variable.");
-  register7("tempvar", (ctx, a) => ctx.vars.get("temp", a[0] ?? ""), "Reads a temporary variable (per-evaluation scope).");
+  register7("tempvar", (ctx, a) => ctx.tempVars[String(a[0])] ?? "", "Reads a temporary variable (per-evaluation scope).");
   register7("settempvar", (ctx, a) => {
-    ctx.vars.set("temp", a[0] ?? "", a[1] ?? "");
+    ctx.tempVars[String(a[0])] = a[1];
     return "";
   }, "Sets a temporary variable.");
   register7("deletevar", (ctx, a) => {
@@ -1115,8 +1087,8 @@ var init_variables = __esm(() => {
     return "";
   }, "Sets a chat-scoped variable.");
   register7("return", (ctx, a) => {
-    ctx.vars.set("temp", "__force_return__", "1");
-    ctx.vars.set("temp", "__return__", a[0] ?? "");
+    ctx.tempVars.__return__ = a[0];
+    ctx.tempVars.__force_return__ = "1";
     return "";
   }, "Halts further macro resolution, returns the given value as the entire parser output (Risu parity).");
 });
@@ -1187,10 +1159,10 @@ var init_misc = __esm(() => {
   init_base64();
   register8("u", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Returns the character for a hex codepoint.");
   register8("ue", (_c, a) => String.fromCharCode(parseInt(a[0] ?? "0", 16)), "Alias for {{u}}.");
-  register8("unicodeencode", (_c, a) => (a[0] ?? "").charCodeAt(a[1] ? Number(a[1]) : 0).toString(), "Returns the Unicode code point of a character at the given index (default 0).");
+  register8("unicodeencode", (_c, a) => a[0].charCodeAt(a[1] ? Number(a[1]) : 0).toString(), "Returns the Unicode code point of a character at the given index (default 0).");
   register8("unicodedecode", (_c, a) => String.fromCharCode(Number(a[0] ?? "0")), "Converts a Unicode code point back to a character.");
-  register8("fromhex", (_c, a) => Number.parseInt(a[0] ?? "0", 16).toString(), "Converts a hex string to decimal.");
-  register8("tohex", (_c, a) => Number.parseInt(a[0] ?? "0").toString(16), "Converts a decimal number to hex.");
+  register8("fromhex", (_c, a) => Number.parseInt(a[0], 16).toString(), "Converts a hex string to decimal.");
+  register8("tohex", (_c, a) => Number.parseInt(a[0]).toString(16), "Converts a decimal number to hex.");
   register8("xor", (_c, a) => {
     const bytes = new TextEncoder().encode(a[0] ?? "");
     for (let i = 0;i < bytes.length; i++)
@@ -1207,7 +1179,7 @@ var init_misc = __esm(() => {
     let shift = a[1] ? Number(a[1]) : 32768;
     if (isNaN(shift))
       shift = 32768;
-    const input = a[0] ?? "";
+    const input = a[0];
     let result = "";
     for (let i = 0;i < input.length; i++) {
       const code = input.charCodeAt(i);
@@ -1240,10 +1212,11 @@ var init_misc = __esm(() => {
   }, "Alias of {{date::fmt}}.");
   register8("hiddenkey", () => "", "A key that activates lorebook entries without being sent to the model.");
   register8("comment", (ctx, a) => {
-    if (ctx.commit || ctx.cbsContext)
+    const visualize = ctx.visualize ?? !(ctx.commit || ctx.cbsContext);
+    if (!visualize)
       return "";
     return `<div class="risu-comment x-risu-risu-comment">${a[0] ?? ""}</div>`;
-  }, 'Comment macro. Empty at prompt time and in cbs; displays as <div class="risu-comment">\u2026</div> at render time.');
+  }, "Comment macro. Shown only when the parser caller enables visualization.");
   registry.register({
     name: "//",
     handler: () => "",
@@ -1293,7 +1266,7 @@ var init_misc = __esm(() => {
     return makeArray2(list);
   }, "Returns a JSON array of asset names for the specified module namespace. Returns empty string if namespace not found.");
   register8("metadata", (ctx, a) => {
-    const key = (a[0] ?? "").toLocaleLowerCase();
+    const key = a[0].toLocaleLowerCase();
     switch (key) {
       case "imateapot":
         return "\uD83E\uDED6";
@@ -1390,8 +1363,7 @@ var init_chat_context = __esm(() => {
       const fm = selectedGreeting(ctx);
       const head = [{
         role: "char",
-        data: ctx.evaluate ? ctx.evaluate(fm) : fm,
-        time: 0
+        data: ctx.evaluate ? ctx.evaluate(fm) : fm
       }];
       return makeArray2([
         ...head,
@@ -1411,27 +1383,27 @@ var init_chat_context = __esm(() => {
   }, "Returns message[N].content, or 'Out of range' if index invalid.");
   register9("previouscharchat", (ctx) => {
     const msgs = ctx.messages.all();
-    const start = ctx.cbsContext ? msgs.length - 1 : ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1;
+    const start = ctx.cbsContext || ctx.currentMessageIndex === -1 ? msgs.length - 1 : ctx.currentMessageIndex !== null ? ctx.currentMessageIndex - 1 : msgs.length - 1;
     for (let i = start;i >= 0; i--) {
       const m = msgs[i];
-      if (m && m.role === "assistant")
+      if (m.role === "assistant")
         return m.content;
     }
     return selectedGreeting(ctx);
-  }, "Last character (assistant) message; cbs walks from chat-end, others from currentMessageIndex-1.");
+  }, "Last character message before the current index; index -1 or no index searches from chat-end.");
   register9("previoususerchat", (ctx) => {
-    if (ctx.cbsContext)
+    if (ctx.cbsContext || ctx.currentMessageIndex === -1)
       return "";
     if (ctx.currentMessageIndex === null)
       return "";
     const msgs = ctx.messages.all();
     for (let i = ctx.currentMessageIndex - 1;i >= 0; i--) {
       const m = msgs[i];
-      if (m && m.role === "user")
+      if (m.role === "user")
         return m.content;
     }
     return selectedGreeting(ctx);
-  }, "Last user message; '' in cbs (chatID=-1 short-circuit), else walks back from currentMessageIndex-1.");
+  }, "Last user message before the current index; index -1 or no index returns empty.");
   register9("lastmessage", (ctx) => {
     const last = ctx.messages.last();
     return last?.content ?? "";
@@ -1440,14 +1412,6 @@ var init_chat_context = __esm(() => {
     const n = ctx.messages.count();
     return Math.max(-1, n - 1).toString();
   }, "Index of the last message in Risu's greeting-excluded frame. Returns -1 when no messages (matches Risu cbs.ts (n-1).toString()).");
-  register9("lastusermessage", (ctx) => {
-    const m = ctx.messages.lastOf("user");
-    return m?.content ?? "";
-  }, "Alias-style shortcut for the most recent user message. '' if none.");
-  register9("lastcharmessage", (ctx) => {
-    const m = ctx.messages.lastOf("assistant");
-    return m?.content ?? "";
-  }, "Alias-style shortcut for the most recent character (assistant) message.");
   register9("jbtoggled", (ctx) => ctx.jailbreakToggle ? "1" : "0", "Returns '1' when the global jailbreak toggle is on.");
   register9("maxcontext", (ctx) => ctx.maxContext.toString(), "Returns the configured max-context length as a string.");
   register9("messagecount", (ctx) => ctx.messages.count().toString(), "Returns the total number of messages in the chat.");
@@ -1470,12 +1434,12 @@ var init_display = __esm(() => {
   register10("displayescapedanglebracketclose", () => "\uE9BD", "Displays as >.");
   register10("displayescapedcolon", () => "\uE9BE", "Displays as : without being parsed as a CBS separator.");
   register10("displayescapedsemicolon", () => "\uE9BF", "Displays as ;.");
-  register10("cbr", (_c, a) => {
+  register10("cbr", (_c, a, raw) => {
     if (a.length === 0)
       return "\\n";
     const n = Math.max(1, Number(a[0] ?? "1"));
-    return "\\n".repeat(n);
-  }, "Returns a literal '\\n'. With numeric arg, repeats that many times.");
+    return raw.repeat(n);
+  }, "Returns a literal '\\n' without args; with a count, repeats the raw macro payload.");
   register10("position", (ctx, args, raw) => {
     if (ctx.cbsContext) {
       const source = raw || `position::${args.join("::")}`;
@@ -1507,13 +1471,6 @@ var init_metadata = __esm(() => {
   init_registry();
   init_risu_helpers();
   init_base64();
-  register11("declare", (ctx, a) => {
-    ctx.vars.set("temp", `__declared_${a[0] ?? ""}__`, "1");
-    return "";
-  }, "Declares a marker; {{declared::NAME}} reads it. Backed by the temp-scope store.");
-  register11("declared", (ctx, a) => {
-    return ctx.vars.get("temp", `__declared_${a[0] ?? ""}__`) === "1" ? "1" : "0";
-  }, "Reads a declaration marker set by {{declare::NAME}}.");
   register11("emotionlist", (ctx) => {
     return makeArray2(ctx.character.emotionImages.map((e) => e.name));
   }, "JSON array of emotion image names for the current character.");
@@ -1526,8 +1483,8 @@ var init_metadata = __esm(() => {
     return ctx.aiModel.startsWith("claude") ? "1" : "0";
   }, "'1' if the current AI model id starts with 'claude' (Claude supports prefill).");
   register11("file", (ctx, a) => {
-    const decode = ctx.cbsContext || ctx.commit;
-    if (!decode)
+    const visualize = ctx.visualize ?? !(ctx.cbsContext || ctx.commit);
+    if (visualize)
       return `<br><div class="x-risu-risu-file">${a[0] ?? ""}</div><br>`;
     const content = a[1] ?? "";
     try {
@@ -1535,7 +1492,7 @@ var init_metadata = __esm(() => {
     } catch {
       return "";
     }
-  }, 'Decodes base64 file content to UTF-8 (prompt and cbs paths); renders <div class="risu-file">\u2026</div> in display path.');
+  }, "Shows the filename when visualization is enabled; otherwise decodes base64 content to UTF-8.");
   register11("chardisplayasset", (ctx) => {
     if (!ctx.character.prebuiltAssetCommand)
       return makeArray2([]);
@@ -1547,7 +1504,13 @@ var init_metadata = __esm(() => {
 
 // src/risu-compat/handlers/assets.ts
 function register12(name, handler, description) {
-  registry.register({ name, handler, description, category: "Risu / Assets", scoped: false });
+  registry.register({
+    name,
+    description,
+    category: "Risu / Assets",
+    scoped: false,
+    handler: (ctx, args, raw) => ctx.cbsContext ? `{{${raw}}}` : handler(ctx, args, raw)
+  });
 }
 function trimAssetKey(s) {
   let out = s;
@@ -1624,9 +1587,6 @@ function videoTag(src, opts) {
   return `<video ${controls}${muted}autoplay loop><source src="${src}" type="video/mp4"></video>
 `;
 }
-function literal(name, args) {
-  return `{{${name}${args.length > 0 ? "::" + args.join("::") : ""}}}`;
-}
 var ASSET_WIDTH_STYLE = "", VIDEO_EXTENSIONS, TRIMMER_EXTS, ASSET_MAX_DIFFERENCE = 4;
 var init_assets = __esm(() => {
   init_registry();
@@ -1648,8 +1608,6 @@ var init_assets = __esm(() => {
     "ogg"
   ];
   register12("path", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("path", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1657,8 +1615,6 @@ var init_assets = __esm(() => {
     return hit?.src ?? "";
   }, "Asset URL by name, plain string (for src=/url()). parser.svelte.ts.");
   register12("img", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("img", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1668,8 +1624,6 @@ var init_assets = __esm(() => {
     return imgTag(hit.src);
   }, "Inline <img> for a named asset. parser.svelte.ts.");
   register12("image", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("image", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1680,8 +1634,6 @@ var init_assets = __esm(() => {
 `;
   }, "Inlay image wrapper. parser.svelte.ts.");
   register12("emotion", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("emotion", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1691,8 +1643,6 @@ var init_assets = __esm(() => {
     return imgTag(hit.src);
   }, "Emotion image by name. parser.svelte.ts.");
   register12("asset", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("asset", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1706,8 +1656,6 @@ var init_assets = __esm(() => {
 `;
   }, "Asset by name \u2014 img or video depending on extension. parser.svelte.ts.");
   register12("bg", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("bg", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1717,8 +1665,6 @@ var init_assets = __esm(() => {
     return `<div style="width:100%;height:100%;background: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),url(${hit.src}); background-size: cover;"></div>`;
   }, "Background panel. parser.svelte.ts.");
   register12("video", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("video", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1728,8 +1674,6 @@ var init_assets = __esm(() => {
     return videoTag(hit.src, { controls: true, muted: false });
   }, "Full-featured video. parser.svelte.ts.");
   register12("video-img", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("video-img", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1739,8 +1683,6 @@ var init_assets = __esm(() => {
     return videoTag(hit.src, { controls: false, muted: true });
   }, "Muted autoplay video (image-substitute). parser.svelte.ts.");
   register12("audio", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("audio", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1751,8 +1693,6 @@ var init_assets = __esm(() => {
 `;
   }, "Audio player. parser.svelte.ts.");
   register12("bgm", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("bgm", args);
     const name = String(args[0] ?? "");
     if (!name)
       return "";
@@ -1763,16 +1703,12 @@ var init_assets = __esm(() => {
 `;
   }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
   register12("inlay", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlay", args);
     const id = String(args[0] ?? "");
     if (!id)
       return "";
     return `<img src="/api/v1/images/${id}"/>`;
   }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
   register12("inlayed", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlayed", args);
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -1781,8 +1717,6 @@ var init_assets = __esm(() => {
 `;
   }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
   register12("inlayeddata", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("inlayeddata", args);
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -1791,8 +1725,6 @@ var init_assets = __esm(() => {
 `;
   }, "Wrapped inlay image (data variant). Risu parser.svelte.ts + 688.");
   register12("source", (ctx, args) => {
-    if (ctx.cbsContext)
-      return literal("source", args);
     const kind = String(args[0] ?? "").toLowerCase();
     if (kind === "char")
       return ctx.character.image;
@@ -1887,35 +1819,35 @@ var util, objectUtil, ZodParsedType, getParsedType = (data) => {
   }
 };
 var init_util = __esm(() => {
-  (function(util2) {
-    util2.assertEqual = (_) => {};
+  (function(util) {
+    util.assertEqual = (_) => {};
     function assertIs(_arg) {}
-    util2.assertIs = assertIs;
+    util.assertIs = assertIs;
     function assertNever(_x) {
       throw new Error;
     }
-    util2.assertNever = assertNever;
-    util2.arrayToEnum = (items) => {
+    util.assertNever = assertNever;
+    util.arrayToEnum = (items) => {
       const obj = {};
       for (const item of items) {
         obj[item] = item;
       }
       return obj;
     };
-    util2.getValidEnumValues = (obj) => {
-      const validKeys = util2.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+    util.getValidEnumValues = (obj) => {
+      const validKeys = util.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
       const filtered = {};
       for (const k of validKeys) {
         filtered[k] = obj[k];
       }
-      return util2.objectValues(filtered);
+      return util.objectValues(filtered);
     };
-    util2.objectValues = (obj) => {
-      return util2.objectKeys(obj).map(function(e) {
+    util.objectValues = (obj) => {
+      return util.objectKeys(obj).map(function(e) {
         return obj[e];
       });
     };
-    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+    util.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
       const keys = [];
       for (const key in object) {
         if (Object.prototype.hasOwnProperty.call(object, key)) {
@@ -1924,27 +1856,27 @@ var init_util = __esm(() => {
       }
       return keys;
     };
-    util2.find = (arr, checker) => {
+    util.find = (arr, checker) => {
       for (const item of arr) {
         if (checker(item))
           return item;
       }
       return;
     };
-    util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
+    util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
     function joinValues(array, separator = " | ") {
       return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
     }
-    util2.joinValues = joinValues;
-    util2.jsonStringifyReplacer = (_, value) => {
+    util.joinValues = joinValues;
+    util.jsonStringifyReplacer = (_, value) => {
       if (typeof value === "bigint") {
         return value.toString();
       }
       return value;
     };
   })(util || (util = {}));
-  (function(objectUtil2) {
-    objectUtil2.mergeShapes = (first, second) => {
+  (function(objectUtil) {
+    objectUtil.mergeShapes = (first, second) => {
       return {
         ...first,
         ...second
@@ -1976,10 +1908,7 @@ var init_util = __esm(() => {
 });
 
 // node_modules/zod/v3/ZodError.js
-var ZodIssueCode, quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
-}, ZodError;
+var ZodIssueCode, ZodError;
 var init_ZodError = __esm(() => {
   init_util();
   ZodIssueCode = util.arrayToEnum([
@@ -2204,9 +2133,6 @@ var init_en = __esm(() => {
 });
 
 // node_modules/zod/v3/errors.js
-function setErrorMap(map) {
-  overrideErrorMap = map;
-}
 function getErrorMap() {
   return overrideErrorMap;
 }
@@ -2311,11 +2237,10 @@ var makeIssue = (params) => {
     path: fullPath,
     message: errorMessage
   };
-}, EMPTY_PATH, INVALID, DIRTY = (value) => ({ status: "dirty", value }), OK = (value) => ({ status: "valid", value }), isAborted = (x) => x.status === "aborted", isDirty = (x) => x.status === "dirty", isValid = (x) => x.status === "valid", isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
+}, INVALID, DIRTY = (value) => ({ status: "dirty", value }), OK = (value) => ({ status: "valid", value }), isAborted = (x) => x.status === "aborted", isDirty = (x) => x.status === "dirty", isValid = (x) => x.status === "valid", isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 var init_parseUtil = __esm(() => {
   init_errors();
   init_en();
-  EMPTY_PATH = [];
   INVALID = Object.freeze({
     status: "aborted"
   });
@@ -2327,9 +2252,9 @@ var init_typeAliases = () => {};
 // node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 var init_errorUtil = __esm(() => {
-  (function(errorUtil2) {
-    errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-    errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
+  (function(errorUtil) {
+    errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
+    errorUtil.toString = (message) => typeof message === "string" ? message : message?.message;
   })(errorUtil || (errorUtil = {}));
 });
 
@@ -2356,12 +2281,12 @@ class ParseInputLazyPath {
 function processCreateParams(params) {
   if (!params)
     return {};
-  const { errorMap: errorMap2, invalid_type_error, required_error, description } = params;
-  if (errorMap2 && (invalid_type_error || required_error)) {
+  const { errorMap, invalid_type_error, required_error, description } = params;
+  if (errorMap && (invalid_type_error || required_error)) {
     throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
   }
-  if (errorMap2)
-    return { errorMap: errorMap2, description };
+  if (errorMap)
+    return { errorMap, description };
   const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
@@ -2801,33 +2726,6 @@ function createZodEnum(values, params) {
     ...processCreateParams(params)
   });
 }
-function cleanParams(params, data) {
-  const p = typeof params === "function" ? params(data) : typeof params === "string" ? { message: params } : params;
-  const p2 = typeof p === "string" ? { message: p } : p;
-  return p2;
-}
-function custom(check, _params = {}, fatal) {
-  if (check)
-    return ZodAny.create().superRefine((data, ctx) => {
-      const r = check(data);
-      if (r instanceof Promise) {
-        return r.then((r2) => {
-          if (!r2) {
-            const params = cleanParams(_params, data);
-            const _fatal = params.fatal ?? fatal ?? true;
-            ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-          }
-        });
-      }
-      if (!r) {
-        const params = cleanParams(_params, data);
-        const _fatal = params.fatal ?? fatal ?? true;
-        ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-      }
-      return;
-    });
-  return ZodAny.create();
-}
 var handleResult = (ctx, result) => {
   if (isValid(result)) {
     return { success: true, data: result.value };
@@ -2876,9 +2774,7 @@ var handleResult = (ctx, result) => {
   } else {
     return [];
   }
-}, ZodDiscriminatedUnion, ZodIntersection, ZodTuple, ZodRecord, ZodMap, ZodSet, ZodFunction, ZodLazy, ZodLiteral, ZodEnum, ZodNativeEnum, ZodPromise, ZodEffects, ZodOptional, ZodNullable, ZodDefault, ZodCatch, ZodNaN, BRAND, ZodBranded, ZodPipeline, ZodReadonly, late, ZodFirstPartyTypeKind, instanceOfType = (cls, params = {
-  message: `Input not instance of ${cls.name}`
-}) => custom((data) => data instanceof cls, params), stringType, numberType, nanType, bigIntType, booleanType, dateType, symbolType, undefinedType, nullType, anyType, unknownType, neverType, voidType, arrayType, objectType, strictObjectType, unionType, discriminatedUnionType, intersectionType, tupleType, recordType, mapType, setType, functionType, lazyType, literalType, enumType, nativeEnumType, promiseType, effectsType, optionalType, nullableType, preprocessType, pipelineType, ostring = () => stringType().optional(), onumber = () => numberType().optional(), oboolean = () => booleanType().optional(), coerce, NEVER;
+}, ZodDiscriminatedUnion, ZodIntersection, ZodTuple, ZodRecord, ZodMap, ZodSet, ZodFunction, ZodLazy, ZodLiteral, ZodEnum, ZodNativeEnum, ZodPromise, ZodEffects, ZodOptional, ZodNullable, ZodDefault, ZodCatch, ZodNaN, BRAND, ZodBranded, ZodPipeline, ZodReadonly, late, ZodFirstPartyTypeKind, stringType, numberType, nanType, bigIntType, booleanType, dateType, symbolType, undefinedType, nullType, anyType, unknownType, neverType, voidType, arrayType, objectType, strictObjectType, unionType, discriminatedUnionType, intersectionType, tupleType, recordType, mapType, setType, functionType, lazyType, literalType, enumType, nativeEnumType, promiseType, effectsType, optionalType, nullableType, preprocessType, pipelineType;
 var init_types = __esm(() => {
   init_ZodError();
   init_errors();
@@ -2907,11 +2803,11 @@ var init_types = __esm(() => {
       }
       const parsedType = this._getType(input);
       if (parsedType !== ZodParsedType.string) {
-        const ctx2 = this._getOrReturnCtx(input);
-        addIssueToContext(ctx2, {
+        const ctx = this._getOrReturnCtx(input);
+        addIssueToContext(ctx, {
           code: ZodIssueCode.invalid_type,
           expected: ZodParsedType.string,
-          received: ctx2.parsedType
+          received: ctx.parsedType
         });
         return INVALID;
       }
@@ -3456,11 +3352,11 @@ var init_types = __esm(() => {
       }
       const parsedType = this._getType(input);
       if (parsedType !== ZodParsedType.number) {
-        const ctx2 = this._getOrReturnCtx(input);
-        addIssueToContext(ctx2, {
+        const ctx = this._getOrReturnCtx(input);
+        addIssueToContext(ctx, {
           code: ZodIssueCode.invalid_type,
           expected: ZodParsedType.number,
-          received: ctx2.parsedType
+          received: ctx.parsedType
         });
         return INVALID;
       }
@@ -3879,17 +3775,17 @@ var init_types = __esm(() => {
       }
       const parsedType = this._getType(input);
       if (parsedType !== ZodParsedType.date) {
-        const ctx2 = this._getOrReturnCtx(input);
-        addIssueToContext(ctx2, {
+        const ctx = this._getOrReturnCtx(input);
+        addIssueToContext(ctx, {
           code: ZodIssueCode.invalid_type,
           expected: ZodParsedType.date,
-          received: ctx2.parsedType
+          received: ctx.parsedType
         });
         return INVALID;
       }
       if (Number.isNaN(input.data.getTime())) {
-        const ctx2 = this._getOrReturnCtx(input);
-        addIssueToContext(ctx2, {
+        const ctx = this._getOrReturnCtx(input);
+        addIssueToContext(ctx, {
           code: ZodIssueCode.invalid_date
         });
         return INVALID;
@@ -4169,8 +4065,8 @@ var init_types = __esm(() => {
       if (ctx.common.async) {
         return Promise.all([...ctx.data].map((item, i) => {
           return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-        })).then((result2) => {
-          return ParseStatus.mergeArray(status, result2);
+        })).then((result) => {
+          return ParseStatus.mergeArray(status, result);
         });
       }
       const result = [...ctx.data].map((item, i) => {
@@ -4231,11 +4127,11 @@ var init_types = __esm(() => {
     _parse(input) {
       const parsedType = this._getType(input);
       if (parsedType !== ZodParsedType.object) {
-        const ctx2 = this._getOrReturnCtx(input);
-        addIssueToContext(ctx2, {
+        const ctx = this._getOrReturnCtx(input);
+        addIssueToContext(ctx, {
           code: ZodIssueCode.invalid_type,
           expected: ZodParsedType.object,
-          received: ctx2.parsedType
+          received: ctx.parsedType
         });
         return INVALID;
       }
@@ -4538,7 +4434,7 @@ var init_types = __esm(() => {
           ctx.common.issues.push(...dirty.ctx.common.issues);
           return dirty.result;
         }
-        const unionErrors = issues.map((issues2) => new ZodError(issues2));
+        const unionErrors = issues.map((issues) => new ZodError(issues));
         addIssueToContext(ctx, {
           code: ZodIssueCode.invalid_union,
           unionErrors
@@ -4903,9 +4799,9 @@ var init_types = __esm(() => {
         }
       }
       const valueType = this._def.valueType;
-      function finalizeSet(elements2) {
+      function finalizeSet(elements) {
         const parsedSet = new Set;
-        for (const element of elements2) {
+        for (const element of elements) {
           if (element.status === "aborted")
             return INVALID;
           if (element.status === "dirty")
@@ -4916,7 +4812,7 @@ var init_types = __esm(() => {
       }
       const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
       if (ctx.common.async) {
-        return Promise.all(elements).then((elements2) => finalizeSet(elements2));
+        return Promise.all(elements).then((elements) => finalizeSet(elements));
       } else {
         return finalizeSet(elements);
       }
@@ -5255,11 +5151,11 @@ var init_types = __esm(() => {
       if (effect.type === "preprocess") {
         const processed = effect.transform(ctx.data, checkCtx);
         if (ctx.common.async) {
-          return Promise.resolve(processed).then(async (processed2) => {
+          return Promise.resolve(processed).then(async (processed) => {
             if (status.value === "aborted")
               return INVALID;
             const result = await this._def.schema._parseAsync({
-              data: processed2,
+              data: processed,
               path: ctx.path,
               parent: ctx
             });
@@ -5448,10 +5344,10 @@ var init_types = __esm(() => {
         }
       });
       if (isAsync(result)) {
-        return result.then((result2) => {
+        return result.then((result) => {
           return {
             status: "valid",
-            value: result2.status === "valid" ? result2.value : this._def.catchValue({
+            value: result.status === "valid" ? result.value : this._def.catchValue({
               get error() {
                 return new ZodError(newCtx.common.issues);
               },
@@ -5599,43 +5495,43 @@ var init_types = __esm(() => {
   late = {
     object: ZodObject.lazycreate
   };
-  (function(ZodFirstPartyTypeKind2) {
-    ZodFirstPartyTypeKind2["ZodString"] = "ZodString";
-    ZodFirstPartyTypeKind2["ZodNumber"] = "ZodNumber";
-    ZodFirstPartyTypeKind2["ZodNaN"] = "ZodNaN";
-    ZodFirstPartyTypeKind2["ZodBigInt"] = "ZodBigInt";
-    ZodFirstPartyTypeKind2["ZodBoolean"] = "ZodBoolean";
-    ZodFirstPartyTypeKind2["ZodDate"] = "ZodDate";
-    ZodFirstPartyTypeKind2["ZodSymbol"] = "ZodSymbol";
-    ZodFirstPartyTypeKind2["ZodUndefined"] = "ZodUndefined";
-    ZodFirstPartyTypeKind2["ZodNull"] = "ZodNull";
-    ZodFirstPartyTypeKind2["ZodAny"] = "ZodAny";
-    ZodFirstPartyTypeKind2["ZodUnknown"] = "ZodUnknown";
-    ZodFirstPartyTypeKind2["ZodNever"] = "ZodNever";
-    ZodFirstPartyTypeKind2["ZodVoid"] = "ZodVoid";
-    ZodFirstPartyTypeKind2["ZodArray"] = "ZodArray";
-    ZodFirstPartyTypeKind2["ZodObject"] = "ZodObject";
-    ZodFirstPartyTypeKind2["ZodUnion"] = "ZodUnion";
-    ZodFirstPartyTypeKind2["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-    ZodFirstPartyTypeKind2["ZodIntersection"] = "ZodIntersection";
-    ZodFirstPartyTypeKind2["ZodTuple"] = "ZodTuple";
-    ZodFirstPartyTypeKind2["ZodRecord"] = "ZodRecord";
-    ZodFirstPartyTypeKind2["ZodMap"] = "ZodMap";
-    ZodFirstPartyTypeKind2["ZodSet"] = "ZodSet";
-    ZodFirstPartyTypeKind2["ZodFunction"] = "ZodFunction";
-    ZodFirstPartyTypeKind2["ZodLazy"] = "ZodLazy";
-    ZodFirstPartyTypeKind2["ZodLiteral"] = "ZodLiteral";
-    ZodFirstPartyTypeKind2["ZodEnum"] = "ZodEnum";
-    ZodFirstPartyTypeKind2["ZodEffects"] = "ZodEffects";
-    ZodFirstPartyTypeKind2["ZodNativeEnum"] = "ZodNativeEnum";
-    ZodFirstPartyTypeKind2["ZodOptional"] = "ZodOptional";
-    ZodFirstPartyTypeKind2["ZodNullable"] = "ZodNullable";
-    ZodFirstPartyTypeKind2["ZodDefault"] = "ZodDefault";
-    ZodFirstPartyTypeKind2["ZodCatch"] = "ZodCatch";
-    ZodFirstPartyTypeKind2["ZodPromise"] = "ZodPromise";
-    ZodFirstPartyTypeKind2["ZodBranded"] = "ZodBranded";
-    ZodFirstPartyTypeKind2["ZodPipeline"] = "ZodPipeline";
-    ZodFirstPartyTypeKind2["ZodReadonly"] = "ZodReadonly";
+  (function(ZodFirstPartyTypeKind) {
+    ZodFirstPartyTypeKind["ZodString"] = "ZodString";
+    ZodFirstPartyTypeKind["ZodNumber"] = "ZodNumber";
+    ZodFirstPartyTypeKind["ZodNaN"] = "ZodNaN";
+    ZodFirstPartyTypeKind["ZodBigInt"] = "ZodBigInt";
+    ZodFirstPartyTypeKind["ZodBoolean"] = "ZodBoolean";
+    ZodFirstPartyTypeKind["ZodDate"] = "ZodDate";
+    ZodFirstPartyTypeKind["ZodSymbol"] = "ZodSymbol";
+    ZodFirstPartyTypeKind["ZodUndefined"] = "ZodUndefined";
+    ZodFirstPartyTypeKind["ZodNull"] = "ZodNull";
+    ZodFirstPartyTypeKind["ZodAny"] = "ZodAny";
+    ZodFirstPartyTypeKind["ZodUnknown"] = "ZodUnknown";
+    ZodFirstPartyTypeKind["ZodNever"] = "ZodNever";
+    ZodFirstPartyTypeKind["ZodVoid"] = "ZodVoid";
+    ZodFirstPartyTypeKind["ZodArray"] = "ZodArray";
+    ZodFirstPartyTypeKind["ZodObject"] = "ZodObject";
+    ZodFirstPartyTypeKind["ZodUnion"] = "ZodUnion";
+    ZodFirstPartyTypeKind["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
+    ZodFirstPartyTypeKind["ZodIntersection"] = "ZodIntersection";
+    ZodFirstPartyTypeKind["ZodTuple"] = "ZodTuple";
+    ZodFirstPartyTypeKind["ZodRecord"] = "ZodRecord";
+    ZodFirstPartyTypeKind["ZodMap"] = "ZodMap";
+    ZodFirstPartyTypeKind["ZodSet"] = "ZodSet";
+    ZodFirstPartyTypeKind["ZodFunction"] = "ZodFunction";
+    ZodFirstPartyTypeKind["ZodLazy"] = "ZodLazy";
+    ZodFirstPartyTypeKind["ZodLiteral"] = "ZodLiteral";
+    ZodFirstPartyTypeKind["ZodEnum"] = "ZodEnum";
+    ZodFirstPartyTypeKind["ZodEffects"] = "ZodEffects";
+    ZodFirstPartyTypeKind["ZodNativeEnum"] = "ZodNativeEnum";
+    ZodFirstPartyTypeKind["ZodOptional"] = "ZodOptional";
+    ZodFirstPartyTypeKind["ZodNullable"] = "ZodNullable";
+    ZodFirstPartyTypeKind["ZodDefault"] = "ZodDefault";
+    ZodFirstPartyTypeKind["ZodCatch"] = "ZodCatch";
+    ZodFirstPartyTypeKind["ZodPromise"] = "ZodPromise";
+    ZodFirstPartyTypeKind["ZodBranded"] = "ZodBranded";
+    ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
+    ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
   })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
   stringType = ZodString.create;
   numberType = ZodNumber.create;
@@ -5671,130 +5567,9 @@ var init_types = __esm(() => {
   nullableType = ZodNullable.create;
   preprocessType = ZodEffects.createWithPreprocess;
   pipelineType = ZodPipeline.create;
-  coerce = {
-    string: (arg) => ZodString.create({ ...arg, coerce: true }),
-    number: (arg) => ZodNumber.create({ ...arg, coerce: true }),
-    boolean: (arg) => ZodBoolean.create({
-      ...arg,
-      coerce: true
-    }),
-    bigint: (arg) => ZodBigInt.create({ ...arg, coerce: true }),
-    date: (arg) => ZodDate.create({ ...arg, coerce: true })
-  };
-  NEVER = INVALID;
 });
 
 // node_modules/zod/v3/external.js
-var exports_external = {};
-__export(exports_external, {
-  void: () => voidType,
-  util: () => util,
-  unknown: () => unknownType,
-  union: () => unionType,
-  undefined: () => undefinedType,
-  tuple: () => tupleType,
-  transformer: () => effectsType,
-  symbol: () => symbolType,
-  string: () => stringType,
-  strictObject: () => strictObjectType,
-  setErrorMap: () => setErrorMap,
-  set: () => setType,
-  record: () => recordType,
-  quotelessJson: () => quotelessJson,
-  promise: () => promiseType,
-  preprocess: () => preprocessType,
-  pipeline: () => pipelineType,
-  ostring: () => ostring,
-  optional: () => optionalType,
-  onumber: () => onumber,
-  oboolean: () => oboolean,
-  objectUtil: () => objectUtil,
-  object: () => objectType,
-  number: () => numberType,
-  nullable: () => nullableType,
-  null: () => nullType,
-  never: () => neverType,
-  nativeEnum: () => nativeEnumType,
-  nan: () => nanType,
-  map: () => mapType,
-  makeIssue: () => makeIssue,
-  literal: () => literalType,
-  lazy: () => lazyType,
-  late: () => late,
-  isValid: () => isValid,
-  isDirty: () => isDirty,
-  isAsync: () => isAsync,
-  isAborted: () => isAborted,
-  intersection: () => intersectionType,
-  instanceof: () => instanceOfType,
-  getParsedType: () => getParsedType,
-  getErrorMap: () => getErrorMap,
-  function: () => functionType,
-  enum: () => enumType,
-  effect: () => effectsType,
-  discriminatedUnion: () => discriminatedUnionType,
-  defaultErrorMap: () => en_default,
-  datetimeRegex: () => datetimeRegex,
-  date: () => dateType,
-  custom: () => custom,
-  coerce: () => coerce,
-  boolean: () => booleanType,
-  bigint: () => bigIntType,
-  array: () => arrayType,
-  any: () => anyType,
-  addIssueToContext: () => addIssueToContext,
-  ZodVoid: () => ZodVoid,
-  ZodUnknown: () => ZodUnknown,
-  ZodUnion: () => ZodUnion,
-  ZodUndefined: () => ZodUndefined,
-  ZodType: () => ZodType,
-  ZodTuple: () => ZodTuple,
-  ZodTransformer: () => ZodEffects,
-  ZodSymbol: () => ZodSymbol,
-  ZodString: () => ZodString,
-  ZodSet: () => ZodSet,
-  ZodSchema: () => ZodType,
-  ZodRecord: () => ZodRecord,
-  ZodReadonly: () => ZodReadonly,
-  ZodPromise: () => ZodPromise,
-  ZodPipeline: () => ZodPipeline,
-  ZodParsedType: () => ZodParsedType,
-  ZodOptional: () => ZodOptional,
-  ZodObject: () => ZodObject,
-  ZodNumber: () => ZodNumber,
-  ZodNullable: () => ZodNullable,
-  ZodNull: () => ZodNull,
-  ZodNever: () => ZodNever,
-  ZodNativeEnum: () => ZodNativeEnum,
-  ZodNaN: () => ZodNaN,
-  ZodMap: () => ZodMap,
-  ZodLiteral: () => ZodLiteral,
-  ZodLazy: () => ZodLazy,
-  ZodIssueCode: () => ZodIssueCode,
-  ZodIntersection: () => ZodIntersection,
-  ZodFunction: () => ZodFunction,
-  ZodFirstPartyTypeKind: () => ZodFirstPartyTypeKind,
-  ZodError: () => ZodError,
-  ZodEnum: () => ZodEnum,
-  ZodEffects: () => ZodEffects,
-  ZodDiscriminatedUnion: () => ZodDiscriminatedUnion,
-  ZodDefault: () => ZodDefault,
-  ZodDate: () => ZodDate,
-  ZodCatch: () => ZodCatch,
-  ZodBranded: () => ZodBranded,
-  ZodBoolean: () => ZodBoolean,
-  ZodBigInt: () => ZodBigInt,
-  ZodArray: () => ZodArray,
-  ZodAny: () => ZodAny,
-  Schema: () => ZodType,
-  ParseStatus: () => ParseStatus,
-  OK: () => OK,
-  NEVER: () => NEVER,
-  INVALID: () => INVALID,
-  EMPTY_PATH: () => EMPTY_PATH,
-  DIRTY: () => DIRTY,
-  BRAND: () => BRAND
-});
 var init_external = __esm(() => {
   init_errors();
   init_parseUtil();
@@ -5823,7 +5598,7 @@ function isComplete(entry) {
 var stateReadKindSchema, stateWriteKindSchema, macroCategorySchema, lumiverseCollisionSchema, macroCatalogEntrySchema, macroCatalogSchema;
 var init_schema = __esm(() => {
   init_zod();
-  stateReadKindSchema = exports_external.enum([
+  stateReadKindSchema = enumType([
     "none",
     "localVars",
     "globalVars",
@@ -5833,14 +5608,14 @@ var init_schema = __esm(() => {
     "rng",
     "messages"
   ]);
-  stateWriteKindSchema = exports_external.enum([
+  stateWriteKindSchema = enumType([
     "none",
     "localVars",
     "globalVars",
     "chatState",
     "messages"
   ]);
-  macroCategorySchema = exports_external.enum([
+  macroCategorySchema = enumType([
     "identity",
     "character_fields",
     "chat_context",
@@ -5859,28 +5634,28 @@ var init_schema = __esm(() => {
     "flow_control",
     "other"
   ]);
-  lumiverseCollisionSchema = exports_external.object({
-    name: exports_external.string(),
-    compatible: exports_external.boolean(),
-    notes: exports_external.string()
+  lumiverseCollisionSchema = objectType({
+    name: stringType(),
+    compatible: booleanType(),
+    notes: stringType()
   });
-  macroCatalogEntrySchema = exports_external.object({
-    name: exports_external.string().min(1),
-    aliases: exports_external.array(exports_external.string()),
+  macroCatalogEntrySchema = objectType({
+    name: stringType().min(1),
+    aliases: arrayType(stringType()),
     category: macroCategorySchema,
-    argShape: exports_external.string().min(1),
-    minArgs: exports_external.number().int().min(0),
-    maxArgs: exports_external.number().int().min(-1),
-    pure: exports_external.boolean(),
-    readsState: exports_external.array(stateReadKindSchema),
-    writesState: exports_external.array(stateWriteKindSchema),
+    argShape: stringType().min(1),
+    minArgs: numberType().int().min(0),
+    maxArgs: numberType().int().min(-1),
+    pure: booleanType(),
+    readsState: arrayType(stateReadKindSchema),
+    writesState: arrayType(stateWriteKindSchema),
     lumiverseCollision: lumiverseCollisionSchema.nullable(),
-    risuFile: exports_external.string(),
-    risuLine: exports_external.number().int().min(1),
-    summary: exports_external.string(),
-    notes: exports_external.string()
+    risuFile: stringType(),
+    risuLine: numberType().int().min(1),
+    summary: stringType(),
+    notes: stringType()
   });
-  macroCatalogSchema = exports_external.array(macroCatalogEntrySchema);
+  macroCatalogSchema = arrayType(macroCatalogEntrySchema);
 });
 
 // src/core/cbs/catalog/loader.ts
@@ -5957,44 +5732,6 @@ var init_catalog = __esm(() => {
   init_loader();
 });
 // src/core/cbs/runtime/mock.ts
-class MockVariableStore {
-  data = {
-    local: new Map,
-    global: new Map,
-    temp: new Map
-  };
-  get(scope, name) {
-    return this.data[scope].get(name) ?? "";
-  }
-  set(scope, name, value) {
-    this.data[scope].set(name, value);
-  }
-  add(scope, name, delta) {
-    this.data[scope].set(name, String(Number(this.data[scope].get(name) ?? "0") + delta));
-  }
-  has(scope, name) {
-    return this.data[scope].has(name);
-  }
-  delete(scope, name) {
-    this.data[scope].delete(name);
-  }
-}
-
-class MockFunctionRegistry {
-  table = new Map;
-  define(name, body, argNames) {
-    this.table.set(name, { body, argNames });
-  }
-  get(name) {
-    return this.table.get(name) ?? null;
-  }
-  delete(name) {
-    this.table.delete(name);
-  }
-  has(name) {
-    return this.table.has(name);
-  }
-}
 var init_mock = () => {};
 
 // src/core/cbs/runtime/index.ts
@@ -6738,9 +6475,9 @@ var init_risu_macros = __esm(() => {
       writesState: [],
       lumiverseCollision: null,
       risuFile: "src/ts/cbs.ts",
-      risuLine: 1384,
-      summary: "Emits literal '\\n' (backslash+n). Optional N repeats the sequence.",
-      notes: ""
+      risuLine: 1386,
+      summary: "Emits literal '\\n' (backslash+n) without args. With N, repeats the raw macro payload, preserving its spelling.",
+      notes: "Risu uses String.repeat with counts below 1 clamped to 1; nonnumeric counts produce empty output."
     },
     {
       name: "ceil",
@@ -6972,9 +6709,9 @@ var init_risu_macros = __esm(() => {
       ],
       lumiverseCollision: null,
       risuFile: "src/ts/cbs.ts",
-      risuLine: 2247,
-      summary: "Sets a __declared_NAME__ marker in the temp scope (writable from later {{declared::NAME}} reads).",
-      notes: ""
+      risuLine: 2249,
+      summary: "Sets a __declared_NAME__ marker in the optional parser caller variable map.",
+      notes: "Current callers do not supply that map. Risu retains the literal macro when the map is absent; this parser leaves it unhandled."
     },
     {
       name: "description",
@@ -7960,7 +7697,7 @@ var init_risu_macros = __esm(() => {
         "o"
       ],
       category: "other",
-      argShape: "K1::V1[::K2::V2\u2026]",
+      argShape: "K1=V1[::K2=V2\u2026]",
       minArgs: 0,
       maxArgs: -1,
       pure: true,
@@ -7969,8 +7706,8 @@ var init_risu_macros = __esm(() => {
       lumiverseCollision: null,
       risuFile: "src/ts/cbs.ts",
       risuLine: 1303,
-      summary: "Creates a JSON object from interleaved key-value arguments. Note: Risu's built-in parses 'key=value' strings; our port accepts separate args \u2014 behavior documented.",
-      notes: "Risu's upstream makedict parses each arg as 'key=value'. Our port accepts alternating key/value args (pair-wise), which matches the risu-compat handler."
+      summary: "Creates a JSON object from key=value arguments, splitting each at its first equals sign.",
+      notes: "Arguments without an equals sign are ignored; later duplicate keys replace earlier values."
     },
     {
       name: "max",
@@ -9472,24 +9209,6 @@ content#} form. Returns trimmed content if cond is not the empty string, 0, or -
       risuLine: 1,
       summary: "Total number of messages in the chat as a string. Frequently synthesized in CBS templates.",
       notes: "Not registered in Risu's cbs.ts as a named function; many cards use it via script."
-    },
-    {
-      name: "declared",
-      aliases: [],
-      category: "metadata",
-      argShape: "NAME",
-      minArgs: 1,
-      maxArgs: 1,
-      pure: false,
-      readsState: [
-        "localVars"
-      ],
-      writesState: [],
-      lumiverseCollision: null,
-      risuFile: "src/ts/cbs.ts",
-      risuLine: 2247,
-      summary: "Reads a declaration marker set by {{declare::NAME}}; returns '1' if declared else '0'.",
-      notes: "Risu implements this implicitly via var checks; we expose it as a dedicated handler for clarity."
     }
   ];
 });
@@ -9504,31 +9223,31 @@ function parseUTCOffset(s) {
   const mm = m[3] ? parseInt(m[3], 10) : 0;
   return sign * (h + mm / 60);
 }
-function registerBuiltins(register13) {
-  register13("bot", (ctx) => ctx.identity.charName, false);
-  register13("user", (ctx) => ctx.identity.userName, false);
-  register13("char", (ctx) => ctx.identity.charName, false);
-  register13("charname", (ctx) => ctx.identity.charName, false);
-  register13("notchar", (ctx) => ctx.identity.userName, false);
-  register13("not_char", (ctx) => ctx.identity.userName, false);
-  register13("newline", () => `
+function registerBuiltins(register) {
+  register("bot", (ctx) => ctx.identity.charName, false);
+  register("user", (ctx) => ctx.identity.userName, false);
+  register("char", (ctx) => ctx.identity.charName, false);
+  register("charname", (ctx) => ctx.identity.charName, false);
+  register("notchar", (ctx) => ctx.identity.userName, false);
+  register("not_char", (ctx) => ctx.identity.userName, false);
+  register("newline", () => `
 `, false);
-  register13("nl", () => `
+  register("nl", () => `
 `, false);
-  register13("n", () => `
+  register("n", () => `
 `, false);
-  register13("space", () => " ", false);
-  register13("noop", () => "", false);
-  register13("//", () => "", false);
-  register13("comment", () => "", false);
-  register13("note", () => "", false);
-  register13("upper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
-  register13("uppercase", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
-  register13("toupper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
-  register13("lower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
-  register13("lowercase", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
-  register13("tolower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
-  register13("random", (ctx, a) => {
+  register("space", () => " ", false);
+  register("noop", () => "", false);
+  register("//", () => "", false);
+  register("comment", () => "", false);
+  register("note", () => "", false);
+  register("upper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
+  register("uppercase", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
+  register("toupper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
+  register("lower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
+  register("lowercase", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
+  register("tolower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
+  register("random", (ctx, a) => {
     if (a.length === 0)
       return String(Math.round(ctx.rng.random()));
     const allNumeric = a.length <= 2 && a.every((x) => x.trim() !== "" && !isNaN(Number(x)));
@@ -9542,7 +9261,7 @@ function registerBuiltins(register13) {
     const idx = Math.floor(ctx.rng.random() * a.length);
     return a[idx] ?? "";
   }, false);
-  register13("roll", (ctx, a) => {
+  register("roll", (ctx, a) => {
     const notation = a[0] ?? "1d6";
     const match = /^(\d+)d(\d+)$/i.exec(notation);
     if (!match)
@@ -9556,7 +9275,7 @@ function registerBuiltins(register13) {
       total += Math.floor(ctx.rng.random() * sides) + 1;
     return String(total);
   }, false);
-  register13("time", (ctx, a) => {
+  register("time", (ctx, a) => {
     const offset = a[0];
     const now = new Date(ctx.clock.now());
     if (offset) {
@@ -9569,8 +9288,8 @@ function registerBuiltins(register13) {
     }
     return now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   }, false);
-  register13("jailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
-  register13("charjailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
+  register("jailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
+  register("charjailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
 }
 
 // src/interpreter/evaluator/dispatch.ts
@@ -9593,8 +9312,8 @@ function init() {
     registerInto(reg.name, reg.handler, reg.scoped);
   }
   try {
-    const catalog2 = new CatalogIndex(parseCatalog(risu_macros_default));
-    for (const entry of catalog2.entries) {
+    const catalog = new CatalogIndex(parseCatalog(risu_macros_default));
+    for (const entry of catalog.entries) {
       if (!entry.aliases || entry.aliases.length === 0)
         continue;
       const canonicalKey = strip(entry.name);
@@ -9627,12 +9346,6 @@ var init_dispatch = __esm(() => {
 });
 
 // src/interpreter/evaluator/scanner.ts
-var exports_scanner = {};
-__export(exports_scanner, {
-  risuEscape: () => risuEscape,
-  normalizeMacroName: () => normalizeMacroName,
-  evaluate: () => evaluate
-});
 function splitMacroArgs(payload) {
   const colon = payload.indexOf(":");
   let parts;
@@ -9661,12 +9374,16 @@ function dispatchLeaf(payload, ctx, callStack) {
   if (calc !== null)
     return calc;
   const { name, args } = splitMacroArgs(payload);
+  const resolved = ctx.resolveLeaf?.(name, args, payload);
+  if (resolved) {
+    return !resolved.terminal && resolved.text.includes("{{") && resolved.text !== `{{${payload}}}` ? evaluate(resolved.text, ctx, { callStack }) : resolved.text;
+  }
   const entry = lookup(name);
   if (!entry)
     return null;
   try {
     const result = entry.handler(ctx, args, payload);
-    if (typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
+    if (ctx.reparseMacroResults !== false && typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
       return evaluate(result, ctx, { callStack });
     }
     return result;
@@ -9716,8 +9433,10 @@ function evaluate(template, ctx, opts = {}) {
   if (callStack > CALL_STACK_LIMIT) {
     return "ERROR: Call stack limit reached";
   }
-  const innerCtx = callStack === ctx.callStack ? ctx : Object.assign(Object.create(Object.getPrototypeOf(ctx) ?? null), ctx, {
-    callStack
+  const tempVars = {};
+  const innerCtx = Object.assign(Object.create(Object.getPrototypeOf(ctx) ?? null), ctx, {
+    callStack,
+    tempVars
   });
   let da = template.replace(/<(user|char|bot)>/gi, "{{$1}}");
   let pointer = 0;
@@ -9869,12 +9588,8 @@ function evaluate(template, ctx, opts = {}) {
         } else {
           nested[0] += mc;
         }
-        if (innerCtx.vars.get("temp", "__force_return__") === "1") {
-          const ret = innerCtx.vars.get("temp", "__return__") || "null";
-          innerCtx.vars.delete("temp", "__force_return__");
-          innerCtx.vars.delete("temp", "__return__");
-          return ret;
-        }
+        if (tempVars.__force_return__)
+          return tempVars.__return__ ?? "null";
         break;
       }
       default:
@@ -9898,11 +9613,17 @@ var init_scanner = __esm(() => {
   init_cbs();
 });
 
+// src/state/toggle-preferences.ts
+var chains = new Map;
+
+// src/state/preset-toggle-values.ts
+var snapshots = new Map;
+
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.8.11",
+  version: "0.12.0",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -9936,11 +9657,13 @@ var spindle_default = {
     "web_search"
   ],
   requested_capabilities: [
-    "base64_decode"
+    "base64_decode",
+    "dynamic_code_execution"
   ],
+  interceptorTimeoutMs: 60000,
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.1.5",
+  minimum_lumiverse_version: "1.2.0",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"
@@ -9952,16 +9675,16 @@ var RISU_APP_VERSION = spindle_default.lumirealm.risu_app_version;
 var RISU_LANGUAGE = spindle_default.lumirealm.risu_language;
 var spindleGlobal = typeof spindle !== "undefined" ? spindle : undefined;
 function makeFunctionRegistry() {
-  const table2 = new Map;
+  const table = new Map;
   return {
     define: (name, body, argNames) => {
-      table2.set(name, { body, argNames });
+      table.set(name, { body, argNames });
     },
-    get: (name) => table2.get(name) ?? null,
+    get: (name) => table.get(name) ?? null,
     delete: (name) => {
-      table2.delete(name);
+      table.delete(name);
     },
-    has: (name) => table2.has(name)
+    has: (name) => table.has(name)
   };
 }
 var varOverlays = new Map;
@@ -10022,7 +9745,6 @@ function buildEvaluatorContext(input) {
   const { chatId, commit, character: card, chat, variables } = input;
   const persistVars = commit && input.suppressVarPersist !== true;
   const overlay = !commit ? null : input.suppressVarPersist === true ? makeEphemeralOverlay() : chatId ? getOverlay(chatId) : null;
-  const tempOverlay = new Map;
   const envLocal = variables.local ?? {};
   const envGlobal = variables.global ?? {};
   const envChat = variables.chat ?? {};
@@ -10046,8 +9768,6 @@ function buildEvaluatorContext(input) {
     get(scope, name) {
       if (recordRead)
         recordRead(scope, name);
-      if (scope === "temp")
-        return tempOverlay.get(name) ?? "";
       if (overlay) {
         if (scope === "local" && overlay.local.has(name))
           return overlay.local.get(name);
@@ -10059,10 +9779,10 @@ function buildEvaluatorContext(input) {
       if (scope === "global")
         return envGlobal[name] ?? "null";
       const fromChat = envChat[name];
-      if (fromChat !== undefined)
+      if (fromChat != null)
         return fromChat;
       const fromLocal = envLocal[name];
-      if (fromLocal !== undefined)
+      if (fromLocal != null)
         return fromLocal;
       const fromDefaults = defaults[name];
       if (fromDefaults !== undefined)
@@ -10070,10 +9790,6 @@ function buildEvaluatorContext(input) {
       return "null";
     },
     set(scope, name, value) {
-      if (scope === "temp") {
-        tempOverlay.set(name, value);
-        return;
-      }
       if (!commit || !overlay)
         return;
       if (scope === "global") {
@@ -10097,8 +9813,6 @@ function buildEvaluatorContext(input) {
     has(scope, name) {
       if (recordRead)
         recordRead(scope, name);
-      if (scope === "temp")
-        return tempOverlay.has(name);
       if (overlay) {
         if (scope === "local" && (overlay.local.has(name) || overlay.chat.has(name)))
           return true;
@@ -10110,10 +9824,6 @@ function buildEvaluatorContext(input) {
       return Object.prototype.hasOwnProperty.call(envChat, name) || Object.prototype.hasOwnProperty.call(envLocal, name) || Object.prototype.hasOwnProperty.call(defaults, name);
     },
     delete(scope, name) {
-      if (scope === "temp") {
-        tempOverlay.delete(name);
-        return;
-      }
       if (!commit)
         return;
       if (overlay) {
@@ -10210,7 +9920,6 @@ function buildEvaluatorContext(input) {
     image: card.image ?? ""
   };
   const lorebook = input.lorebook ?? [];
-  const functions = makeFunctionRegistry();
   const rng = recorder ? { random: () => {
     recorder.volatile = true;
     return Math.random();
@@ -10219,7 +9928,9 @@ function buildEvaluatorContext(input) {
     recorder.volatile = true;
     return Date.now();
   } } : { now: () => Date.now() };
-  const out = {
+  return freshParserContext({
+    ...input.resolveLeaf ? { resolveLeaf: input.resolveLeaf } : {},
+    ...input.reparseMacroResults === false ? { reparseMacroResults: false } : {},
     chatId,
     vars,
     identity,
@@ -10229,11 +9940,10 @@ function buildEvaluatorContext(input) {
     clock,
     triggerId: null,
     role: input.currentMessageRoleOverride ? normalizeRoleToLumi(input.currentMessageRoleOverride) : null,
-    functions,
     aiModel: input.system?.model ?? "",
     axModel: "",
     isFirstMessage: Number(chat.messageCount ?? 0) <= 1,
-    currentMessageIndex: input.currentMessageIndexOverride !== undefined ? Math.max(-1, input.currentMessageIndexOverride) : chat.lastMessageId != null ? Math.max(-1, chat.lastMessageId - 1) : null,
+    currentMessageIndex: input.currentMessageIndexOverride !== undefined ? input.currentMessageIndexOverride : chat.lastMessageId != null ? Math.max(-1, chat.lastMessageId - 1) : null,
     lorebook,
     jailbreakToggle: false,
     maxContext: Number(input.system?.maxContext ?? 0),
@@ -10247,17 +9957,45 @@ function buildEvaluatorContext(input) {
     ...input.modulesByNamespace ? { modulesByNamespace: input.modulesByNamespace } : {},
     ...input.positionPt ? { positionPt: input.positionPt } : {},
     ...input.cbsContext ? { cbsContext: true } : {},
+    ...input.visualize !== undefined ? { visualize: input.visualize } : {},
     ...input.rmVar ? { rmVar: true } : {},
     ...input.runVar ? { runVar: true } : {},
     ...input.suppressVarPersist ? { promptRegexLiteralVars: true } : {}
+  });
+}
+function freshParserContext(base) {
+  const temp = new Map;
+  const vars = {
+    get: (scope, name) => scope === "temp" ? temp.get(name) ?? "" : base.vars.get(scope, name),
+    set: (scope, name, value) => {
+      if (scope === "temp")
+        temp.set(name, value);
+      else
+        base.vars.set(scope, name, value);
+    },
+    add(scope, name, delta) {
+      if (scope === "temp")
+        this.set(scope, name, String(Number(this.get(scope, name)) + delta));
+      else
+        base.vars.add(scope, name, delta);
+    },
+    has: (scope, name) => scope === "temp" ? temp.has(name) : base.vars.has(scope, name),
+    delete: (scope, name) => {
+      if (scope === "temp")
+        temp.delete(name);
+      else
+        base.vars.delete(scope, name);
+    }
   };
+  const out = { ...base, vars, tempVars: {}, functions: makeFunctionRegistry() };
   out.evaluate = (text) => {
     if (typeof text !== "string" || text.length === 0)
       return "";
-    if (text.indexOf("{{") < 0 && text.indexOf("<") < 0)
+    if (text.indexOf("{{") < 0 && text.indexOf("{#") < 0 && text.indexOf("<") < 0)
       return text;
-    const { evaluate: evaluate2 } = (init_scanner(), __toCommonJS(exports_scanner));
-    return evaluate2(text, out, out.callStack !== undefined ? { callStack: out.callStack } : {});
+    init_scanner();
+    const nested = out.visualize === true ? { ...out, visualize: false } : out;
+    return evaluate(text, nested, out.callStack !== undefined ? { callStack: out.callStack } : {});
   };
   return out;
 }
@@ -10266,6 +10004,8 @@ function buildEvaluatorContext(input) {
 function runPipeline(input, opts) {
   const commit = input.phase === "commit";
   const ctx = buildEvaluatorContext({
+    ...opts?.resolveLeaf ? { resolveLeaf: opts.resolveLeaf } : {},
+    ...input.reparseMacroResults === false ? { reparseMacroResults: false } : {},
     chatId: input.chatId,
     ...opts?.recorder ? { recorder: opts.recorder } : {},
     ...input.userId !== undefined ? { userId: input.userId } : {},
@@ -10287,6 +10027,7 @@ function runPipeline(input, opts) {
     ...input.lorebook ? { lorebook: input.lorebook } : {},
     ...input.positionPt ? { positionPt: input.positionPt } : {},
     ...input.cbsContext ? { cbsContext: true } : {},
+    ...input.visualize !== undefined ? { visualize: input.visualize } : {},
     ...input.rmVar ? { rmVar: true } : {},
     ...input.runVar ? { runVar: true } : {},
     ...input.suppressVarPersist ? { suppressVarPersist: true } : {},
@@ -10302,31 +10043,6 @@ function compileRegex(pattern, flags) {
   } catch {
     return null;
   }
-}
-function collectMatches(content, regex) {
-  const re = new RegExp(regex.source, regex.flags);
-  const matches = [];
-  const push = (m) => {
-    matches.push({
-      fullMatch: m[0],
-      index: m.index,
-      groups: Array.from(m).slice(1),
-      ...m.groups ? { namedGroups: m.groups } : {}
-    });
-  };
-  if (re.global || re.sticky) {
-    let m;
-    while ((m = re.exec(content)) !== null) {
-      push(m);
-      if (m[0].length === 0)
-        re.lastIndex++;
-    }
-  } else {
-    const m = re.exec(content);
-    if (m)
-      push(m);
-  }
-  return matches;
 }
 function substituteRegexCaptures(template, fullMatch, groups, offset, input, namedGroups) {
   return template.replace(/\$(?:(\$)|(&)|(`)|(')|(\d{1,2})|<([^>]*)>)/g, (token, dollar, amp, backtick, quote, digits, name) => {
@@ -10344,21 +10060,11 @@ function substituteRegexCaptures(template, fullMatch, groups, offset, input, nam
         return groups[idx - 1] ?? "";
       return token;
     }
-    if (name !== undefined && namedGroups)
-      return namedGroups[name] ?? token;
+    if (name !== undefined && namedGroups) {
+      return Object.prototype.hasOwnProperty.call(namedGroups, name) ? namedGroups[name] ?? "" : token;
+    }
     return token;
   });
-}
-function rebuildFromMatches(content, matches, replacements) {
-  let out = "";
-  let lastIdx = 0;
-  for (let i = 0;i < matches.length; i++) {
-    out += content.slice(lastIdx, matches[i].index);
-    out += replacements[i];
-    lastIdx = matches[i].index + matches[i].fullMatch.length;
-  }
-  out += content.slice(lastIdx);
-  return out;
 }
 function applyTrimStrings(result, trims) {
   let out = result;
@@ -10380,7 +10086,7 @@ function applyRegexScriptsCore(content, scripts, opts) {
   const {
     placement,
     depth,
-    evalTemplate,
+    evalTemplate: defaultEvalTemplate,
     reResolveAfterRule,
     previousContent
   } = opts;
@@ -10397,10 +10103,11 @@ function applyRegexScriptsCore(content, scripts, opts) {
         continue;
     }
     const before = result;
+    const evalTemplate = script.evalTemplate ?? defaultEvalTemplate;
     let findRegex = script.find_regex;
     if (script.preResolvedFind !== undefined) {
       findRegex = script.preResolvedFind;
-    } else if (script.substitute_macros !== "none") {
+    } else if (script.risuActions !== undefined ? script.risuActions.includes("cbs") : script.substitute_macros !== "none") {
       findRegex = evalTemplate(findRegex);
     }
     const movesMatch = script.matchActions?.includes("move_top") === true || script.matchActions?.includes("move_bottom") === true;
@@ -10409,22 +10116,19 @@ function applyRegexScriptsCore(content, scripts, opts) {
     if (!regex)
       continue;
     try {
+      if (script.risuActions !== undefined) {
+        result = applyRisuRule(result, regex, script, evalTemplate, previousContent);
+        continue;
+      }
       const behaviorResult = applyMatchActions(result, regex, script, previousContent, evalTemplate);
       if (behaviorResult.handled) {
         result = applyTrimStrings(behaviorResult.content, script.trim_strings);
         continue;
       }
       if (script.substitute_macros === "raw") {
-        const matches = collectMatches(result, regex);
-        if (matches.length > 0) {
-          const replacements = matches.map((m) => {
-            const withCaptures = substituteRegexCaptures(script.replace_string, m.fullMatch, m.groups, m.index, result, m.namedGroups);
-            return evalTemplate(withCaptures);
-          });
-          result = rebuildFromMatches(result, matches, replacements);
-        }
+        result = replaceWithDecoration(result, regex, script.replace_string, script.decorateReplacement, evalTemplate);
       } else if (script.substitute_macros === "after") {
-        const substituted = result.replace(regex, script.replace_string);
+        const substituted = replaceWithDecoration(result, regex, script.replace_string, script.decorateReplacement);
         result = evalTemplate(substituted);
       } else {
         let replaceString = script.replace_string;
@@ -10434,10 +10138,10 @@ function applyRegexScriptsCore(content, scripts, opts) {
           const resolved = evalTemplate(replaceString);
           replaceString = script.substitute_macros === "escaped" ? resolved.replace(/\$/g, "$$$$") : resolved;
         }
-        result = result.replace(regex, replaceString);
+        result = replaceWithDecoration(result, regex, replaceString, script.decorateReplacement);
       }
       result = applyTrimStrings(result, script.trim_strings);
-      if (reResolveAfterRule && script.substitute_macros !== "after" && script.substitute_macros !== "raw" && result !== before && hasCbsSyntax(result)) {
+      if ((script.reResolveAfterRule ?? reResolveAfterRule) && script.substitute_macros !== "after" && script.substitute_macros !== "raw" && result !== before && hasCbsSyntax(result)) {
         result = evalTemplate(result);
       }
     } catch {
@@ -10445,6 +10149,51 @@ function applyRegexScriptsCore(content, scripts, opts) {
     }
   }
   return result;
+}
+function applyRisuRule(content, regex, script, evalTemplate, previousContent) {
+  const movesTop = script.matchActions?.includes("move_top");
+  const movesBottom = script.matchActions?.includes("move_bottom");
+  const requiresMatch = script.risuActions.length > 0 || (script.matchActions?.length ?? 0) > 0 || script.replace_string.startsWith("@@");
+  if (requiresMatch && !regex.test(content)) {
+    return script.matchActions?.includes("repeat_back") ? applyMatchActions(content, regex, script, previousContent, evalTemplate).content : content;
+  }
+  if (movesTop || movesBottom) {
+    const match = content.match(regex);
+    const remainder = content.replace(regex, "");
+    if (!match)
+      return remainder;
+    const replacement = script.replace_string.replace(/(?<!\$)\$[0-9]+/g, (token) => {
+      const index = Number.parseInt(token.slice(1), 10);
+      return index < match.length ? String(match[index]) : token;
+    }).replace(/\$&/g, match[0]).replace(/(?<!\$)\$<([^>]+)>/g, (token) => {
+      const name = Number.parseInt(token.slice(2, -1), 10);
+      return match.groups?.[name] || token;
+    });
+    return applyTrimStrings(movesTop ? `${replacement}
+${remainder}` : `${remainder}
+${replacement}`, script.trim_strings);
+  }
+  const replaced = replaceWithDecoration(content, regex, script.replace_string, script.decorateReplacement);
+  const trimmed = applyTrimStrings(replaced, script.trim_strings);
+  return hasCbsSyntax(trimmed) ? evalTemplate(trimmed) : trimmed;
+}
+function replaceWithDecoration(input, regex, replacement, decorate, evalReplacement) {
+  if (!decorate && !evalReplacement)
+    return input.replace(regex, replacement);
+  return input.replace(regex, (fullMatch, ...args) => {
+    const tail = args[args.length - 1];
+    const namedGroups = typeof tail === "object" && tail !== null ? tail : undefined;
+    const offsetIndex = args.length - (namedGroups ? 3 : 2);
+    const match = {
+      fullMatch,
+      index: args[offsetIndex],
+      groups: args.slice(0, offsetIndex),
+      ...namedGroups ? { namedGroups } : {}
+    };
+    const substituted = substituteRegexCaptures(replacement, fullMatch, match.groups, match.index, input, namedGroups);
+    const resolved = evalReplacement ? evalReplacement(substituted) : substituted;
+    return decorate ? decorate(resolved, match, input) : resolved;
+  });
 }
 function applyMatchActions(content, regex, script, previousContent, evalTemplate) {
   const actions = script.matchActions;
@@ -10479,6 +10228,14 @@ function applyMatchActions(content, regex, script, previousContent, evalTemplate
           replacement = script.substitute_macros === "escaped" ? resolved.replace(/\$/g, "$$$$") : resolved;
         }
         piece = substituteRegexCaptures(replacement, priorMatch[0], groups, priorMatch.index, previousContent, priorMatch.groups);
+      }
+      if (script.decorateReplacement) {
+        piece = script.decorateReplacement(piece, {
+          fullMatch: priorMatch[0],
+          index: priorMatch.index,
+          groups,
+          ...priorMatch.groups ? { namedGroups: priorMatch.groups } : {}
+        }, previousContent);
       }
     }
     if (!position)
@@ -10665,6 +10422,6 @@ function regexRunner(ctx) {
   };
 }
 export {
-  runRegexRequest,
-  regexRunner as default
+  regexRunner as default,
+  runRegexRequest
 };

@@ -6,9 +6,11 @@ import type {
   LumiRegexMacroMode,
   LumiRegexScope,
 } from "../lumiverse/types.js";
-import { wrapIslandMergeIfNeeded, wrapForIslandTriggerIfNeeded } from "./island-merge.js";
 import { newUuid, nowMs } from "./util.js";
-import { normalizeReplaceStringForSanitizer } from "../../util/sanitizer-doc-shape.js";
+import {
+  normalizeReplaceStringForSanitizer,
+  stripDocBoundaries,
+} from "../../util/sanitizer-doc-shape.js";
 import { applyIframePolicy } from "./iframe-policy.js";
 import { unprefixHtmlClasses, normalizeIncompleteHtmlEntities, unprefixCssInStyleBlocks } from "../../bghtml/rewriter.js";
 
@@ -111,7 +113,9 @@ export function normalizeMatchActionDisplayReplaceString(
   });
 }
 
-// Keep every Risu display-regex source on one Lumiverse renderer adaptation.
+// Display rows store the author's raw fragment (Risu parity): the display
+// resolver assembles the resolved message in one tree, preserving tag balance
+// across rules without adding per-rule wrappers.
 export function normalizeDisplayReplaceString(
   replaceString: string,
   options: {
@@ -122,16 +126,12 @@ export function normalizeDisplayReplaceString(
   const action = options.action === true;
   const preTransformed = options.preTransformed === true;
   let normalized = replaceString;
-  if (!preTransformed && !action) {
-    normalized = wrapIslandMergeIfNeeded(normalized);
-  }
   if (!preTransformed) {
     normalized = applyIframePolicy(normalized).html;
   }
-  if (!preTransformed && !action) {
-    normalized = wrapForIslandTriggerIfNeeded(normalized);
-  }
-  normalized = normalizeReplaceStringForSanitizer(normalized);
+  normalized = (!preTransformed && !action)
+    ? stripDocBoundaries(normalized)
+    : normalizeReplaceStringForSanitizer(normalized);
   if (!preTransformed && normalized.length > 0) {
     normalized = unprefixHtmlClasses(normalized);
     normalized = unprefixCssInStyleBlocks(normalized);
@@ -242,6 +242,7 @@ export function mapRegex(
       baseFlags = baseFlags.replace(/g/g, "");
     }
     if (baseFlags.length === 0) baseFlags = "u";
+    const unicodeFlags = movesMatch ? normalised.flag.replace(/g/g, "") || "u" : normalised.flag;
 
     let baseReplace = outNormalised;
     if (baseReplace.endsWith(">") && !hasNoEndNl) baseReplace += "\n";
@@ -282,6 +283,8 @@ export function mapRegex(
         origin,
         order_index: i,
         has_meta: normalised.actions.length > 0,
+        // Preserve execution flags while the host validates unresolved CBS without u.
+        ...(effectivePhase.target === "display" && unicodeFlags !== baseFlags ? { unicode_flags: unicodeFlags } : {}),
         ...(normalised.order !== undefined ? { order_flag: normalised.order } : {}),
         ...(action ? { at_action: action } : {}),
         ...(normalised.actions.length > 0 ? { flag_actions: normalised.actions } : {}),
@@ -379,7 +382,7 @@ export interface NormalisedFlag {
 
 // Port of Risu's flag-meta parser + char-filter from scripts.ts.
 export function normaliseRisuFlag(rawFlag: string | undefined, ableFlag: boolean): NormalisedFlag {
-  let raw = ableFlag ? (rawFlag ?? "g") : "g";
+  let raw = ableFlag ? (rawFlag || "g") : "g";
   const actions: string[] = [];
   let order: number | undefined;
 

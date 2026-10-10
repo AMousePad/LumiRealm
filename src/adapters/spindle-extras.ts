@@ -2,6 +2,7 @@ export type { LlmMessageDTO as LlmMessage } from 'lumiverse-spindle-types';
 
 // Awaited by the host before world-info activation and macro resolution.
 export interface GenerationContextShape {
+  frontendSessionId?: string;
   chatId?: string;
   connectionId?: string;
   personaId?: string;

@@ -2,6 +2,7 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { FrontendToBackend, BackendToFrontend, CardSummary } from './types/messages.js';
 import { errMsg } from './util/coerce.js';
+import { hostMessageTime } from './util/message-time.js';
 import {
   setupRealmBackend,
   isRealmFrontendMessage,
@@ -50,6 +51,7 @@ import { parseDirectLorebook } from './payload/lorebook-direct-import.js';
 import { parseDirectRegex } from './payload/regex-direct-import.js';
 import { mapRegex } from './core/mappers/regex.js';
 import { createRegexImporter } from './state/regex-import.js';
+import { applyActivePreset } from './state/preset-regex-activation.js';
 import {
   awaitRegexDelete,
   completeRegexDelete,
@@ -126,11 +128,15 @@ import { createOrphanHandlers } from './handlers/orphan.js';
 import { createRepairHandlers } from './handlers/repair.js';
 import { createLifecycleEventHandlers } from './events/lifecycle.js';
 import { createLumiInterceptors } from './interceptors/lumi-hooks.js';
+import { translatePresetLabels } from './core/preset/preset-labels.js';
+import { invalidateToggleMacroCache, registerSpindleMacros } from './interpreter/spindle-macros.js';
 import { createPromptRegexRunnerClient } from './interceptors/prompt-regex-runner-client.js';
 import { createReadonlyResolver } from './state/readonly-resolver.js';
+import { isLogTransportNoise } from './log/transport.js';
 import { createMessageVarPass } from './state/message-var-pass.js';
 import { createBgHtmlRefresher } from './state/bg-html.js';
 import { createTriggerDispatcher } from './state/trigger-dispatch.js';
+import { createFrontendLuaBackend, type FrontendLuaHostContract } from './frontend-lua/backend.js';
 import { createRepairOrchestrator } from './state/repair-orchestrator.js';
 import { retranslateCharacterFromCurrentSource } from './state/character-retranslate.js';
 import { installCurrentCharacterRegexScripts } from './state/character-regex-install.js';
@@ -198,6 +204,7 @@ import {
   writeGlobalModuleArtifacts,
 } from './state/modules-store.js';
 import { registerLumiagentPhoneline } from './lumiagent-phoneline.js';
+import { probeLumiagentBridge } from './bridge-permissions.js';
 
 const runtimeVersionInfo = readRuntimeVersionInfo(spindle);
 const EXTENSION_VERSION = runtimeVersionInfo.extensionVersion;
@@ -216,12 +223,12 @@ function logUid(): string | null {
 // ALS frame. System events without a userId run unwrapped (currentUserId
 // stays null, so log entries get tagged null = system).
 function userScoped(
-  handler: (raw: unknown, userId: string | undefined) => Promise<void>,
-): (raw: unknown, userId: string | undefined) => Promise<void> {
-  return (raw, userId) =>
+  handler: (raw: unknown, userId: string | undefined, frontendSessionId?: string) => Promise<void>,
+): (raw: unknown, userId: string | undefined, frontendSessionId?: string) => Promise<void> {
+  return (raw, userId, frontendSessionId) =>
     userId
-      ? userIdAls.run(userId, () => handler(raw, userId))
-      : handler(raw, userId);
+      ? userIdAls.run(userId, () => handler(raw, userId, frontendSessionId))
+      : handler(raw, userId, frontendSessionId);
 }
 
 const log = {
@@ -293,29 +300,12 @@ function broadcastBridgeStatus(payload: {
   }
 }
 
-// Probes lumiagent.phoneline_probe and returns the parsed missing-perms list
-// when the host inheritance check rejects. Returns null on success or when
-// the endpoint is not registered (LumiAgent absent), so the caller does not
-// fire a banner in those cases.
-async function probeLumiagentBridge(): Promise<readonly string[] | null> {
-  try {
-    await spindle.rpcPool.read('lumiagent.phoneline_probe');
-    return null;
-  } catch (err) {
-    const message = (err as Error).message;
-    const m = /requires requester "[^"]+" to inherit owner "[^"]+" permissions: ([^]+?)$/.exec(message);
-    if (!m) return null;
-    const perms = m[1]!.split(/,\s*/).map((s) => s.trim()).filter((s) => s.length > 0);
-    return perms.length > 0 ? perms : null;
-  }
-}
-
 // On any permission change in this extension, probe the LumiAgent bridge to
 // surface a banner immediately rather than waiting for LumiAgent to dial in.
 // Symmetric to LumiAgent's own re-dial-on-perm-change behaviour.
 subscribeToMissingChanges(() => {
   void (async () => {
-    const missing = await probeLumiagentBridge();
+    const missing = await probeLumiagentBridge(spindle);
     if (missing && missing.length > 0) {
       log.warn(`permissions.changed: lumiagent bridge probe failed, LumiRealm missing=[${missing.join(',')}]`);
       broadcastBridgeStatus({
@@ -386,7 +376,9 @@ function scheduleStateChangedRefresh(chatId: string, userId: string | undefined)
       invalidateRenderMcpForChat(chatId);
       invalidateMacroInterceptorForChat(chatId);
       await refreshBgHtml(active, chatId, userId);
-      await refreshVariables(active, chatId, userId);
+      // Risu's reloadDisplay/v2UpdateGUI bump ReloadGUIPointer (full repaint).
+      // guiReload makes the FE invalidate ['*'] once the fresh snapshot lands.
+      await refreshVariables(active, chatId, userId, { guiReload: true });
       log.debug(`scheduleStateChangedRefresh: completed chat=${chatId} elapsed=${Date.now() - t0}ms`);
     },
     (err) => log.error(`scheduleStateChangedRefresh: refresh threw chat=${chatId}: ${errMsg(err)}`),
@@ -414,6 +406,8 @@ const settingsService = createSettingsService({
   errMsg,
 });
 const getSettingsForUser = settingsService.getSettingsForUser;
+const getSkipAssetThumbnails = async (uid: string): Promise<boolean> =>
+  (await getSettingsForUser(uid)).skipAssetThumbnails;
 const getCachedSettingsSync = settingsService.getCachedSettingsSync;
 const applySettingsPatch = settingsService.applySettingsPatch;
 const makeAuxDebugCapture = settingsService.makeAuxDebugCapture;
@@ -540,7 +534,7 @@ const deleteRepairRegexRows = async (userId: string, ids: readonly string[]): Pr
   return result.deleted;
 };
 
-const captureUserId = makeCaptureUserId({
+const { captureUserId, markFrontendReady } = makeCaptureUserId({
   capturedUserIds,
   getSettingsForUser,
   seedGlobalModules: async (uid) => {
@@ -589,6 +583,7 @@ const importCardOrchestrator = createImportCardOrchestrator({
   pendingImportCompletions,
   enterAssetUpload: () => { assetUploadsInFlight++; },
   exitAssetUpload: () => { assetUploadsInFlight--; },
+  getSkipAssetThumbnails,
   // Trampolines for wiring declared further down.
   nudgeGc: (reason) => nudgeGc(reason),
   refreshRisuAssetMap: (charId, userId) => refreshRisuAssetMap(charId, userId),
@@ -855,6 +850,12 @@ async function touchCharacterRecency(
   return recencyWriteChain;
 }
 
+function setChatStyleMode(chatId: string, mode: 'bounded' | 'extension-relaxed', userId: string | undefined): void {
+  spindle.chat.setStyleMode(chatId, mode, userId).catch((err: unknown) => {
+    log.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
+  });
+}
+
 function sendSetActiveChat(
   activeChatId: string | null,
   activeCharacterId: string | null,
@@ -955,49 +956,11 @@ const readonlyResolver = createReadonlyResolver({
 const resolveReadonly = readonlyResolver.resolve;
 const resolveReadonlyMany = readonlyResolver.resolveMany;
 
-// Page size 200 matches Lumi's server-side clamp. Module-installed rows live
-// at character scope too, so we exclude them by metadata._risu.module_id.
-async function listLiveCharacterCrossRuleRules(
-  characterId: string,
-  userId: string,
-): Promise<readonly { replace_string: string }[]> {
-  const regexApi = spindle.regex_scripts;
-  const PAGE_SIZE = 200;
-  const out: { replace_string: string }[] = [];
-  let offset = 0;
-  while (true) {
-    const page = await regexApi.list({ userId, limit: PAGE_SIZE, offset });
-    if (!Array.isArray(page.data) || page.data.length === 0) break;
-    for (const r of page.data) {
-      const row = r as {
-        scope?: unknown;
-        scope_id?: unknown;
-        disabled?: unknown;
-        replace_string?: unknown;
-        metadata?: { _risu?: { module_id?: unknown } };
-      };
-      if (row.scope !== 'character') continue;
-      if (row.scope_id !== characterId) continue;
-      if (row.disabled === true) continue;
-      const mid = row.metadata?._risu?.module_id;
-      if (typeof mid === 'string' && mid.length > 0) continue;
-      if (typeof row.replace_string === 'string') {
-        out.push({ replace_string: row.replace_string });
-      }
-    }
-    offset += page.data.length;
-    if (typeof page.total === 'number' && offset >= page.total) break;
-  }
-  return out;
-}
-
 const bgHtmlRefresher = createBgHtmlRefresher({
   resolveReadonly,
   lastSentBgHtmlByChat,
-  listLiveCharacterCrossRuleRules,
   send,
   log,
-  errMsg,
 });
 const refreshBgHtml = bgHtmlRefresher.refresh;
 
@@ -1017,7 +980,33 @@ const applySvgRasterIndex = createApplySvgRasterIndex({
 
 const TRANSLATE_TARGET_LANG = 'en';
 
+let runtimeConfigVersion = 0;
+async function assembleRuntimeSnapshot(active: ActiveCard, chatId: string, userId: string, vars: import('./display/snapshot.js').DisplaySnapshot['vars']) {
+  const configVersion = ++runtimeConfigVersion;
+  const snapshot = await assembleDisplaySnapshot({
+    modulesByNamespaceFromCard,
+    legacyMediaFindings: uid => getCachedSettingsSync(uid).legacyMediaFindings,
+    getCompiledLibraries: active => {
+      const id = active.card.character_id;
+      let compiled = compiledByCharacter.get(id);
+      if (!compiled) { compiled = prepareTriggers(active.card.risuPayload, id); compiledByCharacter.set(id, compiled); }
+      return compiled.filter(entry => entry.type === 'library');
+    },
+  }, active, chatId, userId, vars);
+  return { ...snapshot, configVersion };
+}
+
 const variablesTogglesService = createVariablesTogglesService({
+  visibleChatForUser: (userId) => lastActiveChatByUser.get(userId),
+  invalidateUserToggleReaders: (userId) => {
+    invalidateToggleMacroCache(userId);
+    for (const [chatId, active] of activeCardByChat) {
+      if (active.ownerUserId !== userId) continue;
+      invalidateRenderMcpForChat(chatId);
+      invalidateMacroInterceptorForChat(chatId);
+      invalidateListenEditPreload(chatId);
+    }
+  },
   translateLang: TRANSLATE_TARGET_LANG,
   variableState,
   toggleState,
@@ -1026,32 +1015,16 @@ const variablesTogglesService = createVariablesTogglesService({
   ensureActiveCardForChat,
   refreshBgHtml,
   send,
-  pushDisplaySnapshot: (active, chatId, userId, vars) => {
+  pushDisplaySnapshot: (active, chatId, userId, vars, opts) => {
     if (!FE_DISPLAY_ENABLED) return;
-    void assembleDisplaySnapshot(
-      {
-        modulesByNamespaceFromCard,
-        legacyMediaFindings: (uid) => getCachedSettingsSync(uid).legacyMediaFindings,
-        getCompiledLibraries: (a) => {
-          const cid = a.card.character_id;
-          let compiled = compiledByCharacter.get(cid);
-          if (!compiled) {
-            try {
-              compiled = prepareTriggers(a.card.risuPayload, cid);
-              compiledByCharacter.set(cid, compiled);
-            } catch {
-              compiled = [];
-            }
-          }
-          return compiled.filter((e) => e.type === 'library');
-        },
-      },
-      active,
-      chatId,
-      userId,
-      vars,
-    )
-      .then((snapshot) => { send({ type: 'display_snapshot', snapshot }, userId); })
+    void assembleRuntimeSnapshot(active, chatId, userId, vars)
+      .then((snapshot) => {
+        send({
+          type: 'display_snapshot',
+          snapshot,
+          ...(opts?.guiReload ? { reason: 'gui-reload' as const } : {}),
+        }, userId);
+      })
       .catch((err) => { log.warn(`pushDisplaySnapshot: assemble failed chat=${chatId}: ${errMsg(err)}`); });
   },
   log,
@@ -1062,18 +1035,22 @@ const writeLocalVariable = variablesTogglesService.writeLocalVariable;
 const refreshToggleDefinitions = variablesTogglesService.refreshToggleDefinitions;
 const writeToggleValue = variablesTogglesService.writeToggleValue;
 
+const frontendLua = createFrontendLuaBackend(spindle as typeof spindle & FrontendLuaHostContract, async (chatId, characterId, userId) => {
+  const active = await ensureActiveCardForChat(chatId, characterId, userId);
+  if (!active) throw new Error('The chat has no active Risu runtime');
+  const snapshot = await assembleRuntimeSnapshot(active, chatId, userId, { local: {}, global: {}, chat: {} });
+  return { snapshot, settings: getCachedSettingsSync(userId) };
+});
+spindle.on('FRONTEND_SESSION_CLOSED', userScoped(async (raw, userId) => {
+  const sessionId = (raw as { frontendSessionId?: string })?.frontendSessionId;
+  if (userId && sessionId) frontendLua.disconnect(userId, sessionId);
+}));
+
 const triggerDispatcher = createTriggerDispatcher({
-  compiledByCharacter,
-  getCachedSettingsSync,
-  makeStateChangedCallback,
-  makeAuxDebugCapture,
-  resolveReadonly,
+  execute: frontendLua.call,
   ensureActiveCardForChat,
   refreshBgHtml,
   refreshVariables,
-  toastFor,
-  log,
-  errMsg,
 });
 const runBinding = triggerDispatcher.runBinding;
 const dispatchManualTrigger = triggerDispatcher.dispatchManualTrigger;
@@ -1082,6 +1059,8 @@ const dispatchButtonClick = triggerDispatcher.dispatchButtonClick;
 const feDisplayShadowOptOut = new Set<string>();
 
 createLumiInterceptors({
+  executeFrontend: frontendLua.call,
+  prepareTriggerContext: readonlyResolver.prepareTriggerContext,
   activeCardByChat,
   captureUserId,
   isFeDisplayAuthoritative: (chatId) => FE_DISPLAY_ENABLED && !feDisplayShadowOptOut.has(chatId),
@@ -1101,6 +1080,12 @@ createLumiInterceptors({
   errMsg,
 }).registerAll();
 
+try {
+  registerSpindleMacros();
+} catch (err) {
+  log.warn(`registerSpindleMacros failed: ${errMsg(err)}`);
+}
+
 // Strip msgs[0] when it's the greeting (non-user) so cached array sits in
 // Risu frame, currentMessageIndex (also Risu-frame) indexes correctly.
 const messagesCacheInflight = new Map<string, Promise<void>>();
@@ -1116,9 +1101,7 @@ async function refreshMessagesCache(chatId: string, _userId: string | undefined)
       const msgs = sliced.map((m) => {
         const role = m.role === 'user' ? ('user' as const) : ('assistant' as const);
         const content = typeof m.content === 'string' ? m.content : '';
-        const sendDate = typeof m.send_date === 'number' ? m.send_date : null;
-        const createdAt = typeof m.created_at === 'number' ? m.created_at : null;
-        return { role, content, createdAt: sendDate ?? createdAt ?? 0 };
+        return { role, content, createdAt: hostMessageTime(m) };
       });
       setCachedMessages(chatId, msgs);
     } catch (err) {
@@ -1180,11 +1163,7 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   consumeIfOurWrite,
   send,
   sendSetActiveChat,
-  setChatStyleMode: (chatId, mode, userId) => {
-    spindle.chat.setStyleMode(chatId, mode, userId).catch((err: unknown) => {
-      log.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
-    });
-  },
+  setChatStyleMode,
   listCards,
   pushCards,
   deleteCardByChar,
@@ -1278,6 +1257,7 @@ const moduleUploader = createModuleUploader({
   pairAssets: pairModuleAssetsForUpload,
   guessMimeType,
   sniffImageMime,
+  getSkipAssetThumbnails,
   uploadImageOne: (input, userId) => spindle.images.upload(input, userId),
   uploadImageMany: (items, opts) => spindle.images.uploadMany(items as never, opts),
   appendToJournal: (uid, moduleId, ids) =>
@@ -1322,6 +1302,7 @@ async function processRisumUpload(
 
 
 const modulePushes = createModulePushes({
+  listWorldBookEntries: (bookId, opts) => spindle.world_books.entries.list(bookId, opts),
   translateLang: TRANSLATE_TARGET_LANG,
   readGlobalModuleIds: (userId) => readGlobalModuleIds(moduleStorage(), userId),
   readLumirealm: (charId, userId) => readLumirealm(charactersApi(), charId, userId),
@@ -1462,6 +1443,10 @@ const regexImporter = createRegexImporter({
 
 
 const migrationsRunner = createMigrationsRunner({
+  requestCardAccess: (characterName, message, userId) => spindle.modal.confirm({
+    title: `Low-level access: ${characterName}`, message, userId,
+    confirmLabel: 'Grant access', cancelLabel: 'Keep blocked', variant: 'warning',
+  }),
   extensionVersion: EXTENSION_VERSION,
   currentModuleSchemaVersion: CURRENT_MODULE_SCHEMA_VERSION,
   translatorMigrationChecked,
@@ -1623,6 +1608,51 @@ const viewerPushDeps: ViewerPushDeps = {
 
 
 
+type PresetLabelGenerationInput = {
+  type: 'raw';
+  messages: readonly { role: string; content: string }[];
+  connection_id: string;
+  model?: string;
+  userId?: string;
+};
+
+// `generate.raw` reads `model` off the top level of the request, but the
+// installed DTO declares only connection_id/parameters/userId there, so the
+// call is typed locally. `provider` is left out on purpose: the host's
+// resolveRawProviderAndKey returns early on connection_id and ignores it.
+const rawGenerate = spindle.generate.raw as unknown as (
+  input: PresetLabelGenerationInput,
+) => Promise<unknown>;
+
+// Preset label translation runs on the connection profile the user picked in
+// the import panel. The host call needs a model, so it comes from that profile.
+const generatePresetLabels = async (request: {
+  system: string;
+  user: string;
+  connectionId: string;
+  userId: string;
+}): Promise<string> => {
+  const conn = await spindle.connections.get(request.connectionId, request.userId);
+  if (!conn) {
+    throw new Error(`Connection profile ${request.connectionId.slice(0, 8)}... not found`);
+  }
+  const result = await rawGenerate({
+    type: 'raw',
+    messages: [
+      { role: 'system', content: request.system },
+      { role: 'user', content: request.user },
+    ],
+    connection_id: conn.id,
+    ...(conn.model ? { model: conn.model } : {}),
+    userId: request.userId,
+  });
+  const content = (result as { content?: unknown } | undefined)?.content;
+  if (typeof content !== 'string' || content.trim().length === 0) {
+    throw new Error('Preset label translation: connection returned no content');
+  }
+  return content;
+};
+
 const realmHandle: RealmBackendHandle = setupRealmBackend({
   send: (msg: RealmBackendToFrontend, userId: string | undefined) => send(msg, userId),
   log: {
@@ -1632,9 +1662,18 @@ const realmHandle: RealmBackendHandle = setupRealmBackend({
   },
   importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) =>
     importCardFromBytes(bytes, fileName, userId),
+  createPreset: (input, uid) => spindle.presets.create(input, uid),
+  deletePreset: (presetId, uid) => spindle.presets.delete(presetId, uid),
+  translatePresetLabels: (preset, opts) =>
+    translatePresetLabels(preset, opts, { generate: generatePresetLabels }),
+  regexApi: spindle.regex_scripts,
+  notifyImportProgress: (progress, uid) => send(progress as any, uid),
+  toast: (msg, kind) => {
+    if (kind === 'error') spindle.toast?.error(msg);
+    else if (kind === 'warning') spindle.toast?.warning(msg);
+    else spindle.toast?.success(msg);
+  },
 });
-
-const HIGH_VOLUME_FRONTEND_MSG_TYPES: ReadonlySet<string> = new Set<string>();
 
 const screenHandlers = createScreenHandlers({ setScreenDims, log });
 const consentHandlers = createConsentHandlers({
@@ -1643,7 +1682,26 @@ const consentHandlers = createConsentHandlers({
   resolvePickResolution,
   log,
 });
-const connectionsHandlers = createConnectionsHandlers({ listConnectionsForUser, log });
+const connectionsHandlers = createConnectionsHandlers({
+  listConnectionsForUser,
+  listImageConnectionsForUser: async (uid) => {
+    if (!spindle.imageGen?.listConnections) return [];
+    try {
+      const list = await spindle.imageGen.listConnections(uid);
+      return list.map((c) => ({
+        id: c.id,
+        name: c.name,
+        provider: c.provider,
+        model: c.model,
+        is_default: c.is_default,
+      }));
+    } catch (err) {
+      log.warn(`listImageConnectionsForUser failed: ${err}`);
+      return [];
+    }
+  },
+  log,
+});
 const logHandlers = createLogHandlers({
   extensionVersion: EXTENSION_VERSION,
   logStore,
@@ -1719,6 +1777,9 @@ const viewerHandlers = createViewerHandlers({
   charactersApi,
   updateLumirealm,
   mutateTriggerLua,
+  getWorldBookEntry: (entryId, userId) => spindle.world_books.entries.get(entryId, userId),
+  updateWorldBookEntry: (entryId, input, userId) =>
+    spindle.world_books.entries.update(entryId, input, userId),
   viewerAssembly,
   viewerPushDeps,
   charactersAttachedTo,
@@ -1741,11 +1802,12 @@ const importHandlers = createImportHandlers({
   pushCards,
   ensureActiveCardForChat,
   sendSetActiveChat,
+  setChatStyleMode,
   invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
   refreshVariables,
-  importAnyFormat: (bytes, name, uid) => realmHandle.importAnyFormat(bytes, name, uid),
+  importAnyFormat: (bytes, name, uid, opts) => realmHandle.importAnyFormat(bytes, name, uid, opts),
   getUpload,
   deleteUpload,
   applySvgRasterIndex,
@@ -1764,6 +1826,7 @@ const importHandlers = createImportHandlers({
   errMsg,
 });
 const orphanHandlers = createOrphanHandlers({
+  getImage: (id, userId) => spindle.images.get(id, userId),
   assetUploadsInFlightRef: { get current() { return assetUploadsInFlight; } } as { current: number },
   scanOrphanedImages,
   buildOrphanDetectDeps,
@@ -1956,12 +2019,16 @@ const handlerRegistry: HandlerRegistry = {
     if (msg.authoritative) feDisplayShadowOptOut.delete(msg.chatId);
     else feDisplayShadowOptOut.add(msg.chatId);
   },
+  active_preset: async (msg, ctx) => {
+    await applyActivePreset(spindle.regex_scripts, ctx.userId, msg.presetId);
+  },
 };
 
-spindle.onFrontendMessage(userScoped(async (raw, userId) => {
+spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {
   captureUserId(userId, 'frontend-message');
+  markFrontendReady(userId);
   const msg = raw as FrontendToBackend;
-  if (!HIGH_VOLUME_FRONTEND_MSG_TYPES.has(msg.type)) {
+  if (!isLogTransportNoise(msg.type)) {
     log.trace(`frontend msg type=${msg.type} userId=${userId ?? '<none>'}`);
   }
   // Operator-scoped extension contract: every FE WS arrives with a real userId
@@ -1971,7 +2038,8 @@ spindle.onFrontendMessage(userScoped(async (raw, userId) => {
     log.warn(`frontend msg type=${msg.type} dropped: no userId`);
     return;
   }
-  const ctx: HandlerCallCtx = { userId, send, log, errMsg };
+  if (await frontendLua.receive(raw, userId, frontendSessionId)) return;
+  const ctx: HandlerCallCtx = { userId, send, log, errMsg, ...(frontendSessionId ? { frontendSessionId } : {}) };
   try {
     if (isRealmFrontendMessage(msg)) {
       await realmHandle.handle(msg, userId);

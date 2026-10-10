@@ -18,6 +18,7 @@ export interface ImportCardOrchestratorDeps {
   readonly pendingImportCompletions: Map<string, PendingImportCompletion>;
   readonly enterAssetUpload: () => void;
   readonly exitAssetUpload: () => void;
+  readonly getSkipAssetThumbnails: (userId: string) => Promise<boolean>;
   readonly nudgeGc: (reason: string) => void;
   readonly refreshRisuAssetMap: (characterId: string, userId: string) => Promise<void>;
   readonly send: (msg: BackendToFrontend, userId: string | undefined) => void;
@@ -50,6 +51,7 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
     pendingImportCompletions,
     enterAssetUpload,
     exitAssetUpload,
+    getSkipAssetThumbnails,
     nudgeGc,
     refreshRisuAssetMap,
     send,
@@ -108,6 +110,7 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
       },
       requestConsent: (opts) => requestConsent(opts, userId),
     };
+    const skipAssetThumbnails = await getSkipAssetThumbnails(userId);
     enterAssetUpload();
     try {
       const result = await importCard({
@@ -115,6 +118,7 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
         fileName,
         extensionVersion,
         userId,
+        skipAssetThumbnails,
         spindle: spindleImportApi,
         userStorage: userStorage(),
         onProgress: (phase, message, fraction) => {

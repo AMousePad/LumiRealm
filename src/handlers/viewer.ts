@@ -12,6 +12,7 @@ import {
 import type { Handler } from './types.js';
 
 type SetTriggerLuaMsg = Extract<FrontendToBackend, { type: 'set_trigger_lua' }>;
+type ViewerSourceRef = Extract<FrontendToBackend, { type: 'request_viewer_data' }>['source'];
 
 export interface ViewerHandlerDeps {
   readonly blockedByRepair: (userId: string, messageType: string) => boolean;
@@ -23,6 +24,15 @@ export interface ViewerHandlerDeps {
     mut: (data: LumirealmCharacterData) => LumirealmCharacterData,
   ) => Promise<LumirealmCharacterData | null>;
   readonly mutateTriggerLua: (msg: SetTriggerLuaMsg, userId: string) => Promise<{ ok: boolean; reason?: string }>;
+  readonly getWorldBookEntry: (
+    entryId: string,
+    userId: string,
+  ) => Promise<{ readonly world_book_id: string } | null>;
+  readonly updateWorldBookEntry: (
+    entryId: string,
+    input: { readonly disabled: boolean },
+    userId: string,
+  ) => Promise<unknown>;
   readonly viewerAssembly: ViewerAssembly;
   readonly viewerPushDeps: ViewerPushDeps;
   readonly charactersAttachedTo: (moduleId: string, userId: string) => Promise<readonly string[]>;
@@ -40,13 +50,18 @@ export function createViewerHandlers(deps: ViewerHandlerDeps): {
   readonly set_background_html: Handler<'set_background_html'>;
   readonly set_module_background_embedding: Handler<'set_module_background_embedding'>;
   readonly set_trigger_lua: Handler<'set_trigger_lua'>;
+  readonly set_viewer_lorebook_entry_disabled: Handler<'set_viewer_lorebook_entry_disabled'>;
 } {
+  async function assembleViewerSource(source: ViewerSourceRef, userId: string) {
+    return source.kind === 'character'
+      ? deps.viewerAssembly.assembleCharacter(source.characterId, userId)
+      : deps.viewerAssembly.assembleModule(source.moduleId, userId);
+  }
+
   return {
     request_viewer_data: async (msg, ctx) => {
       try {
-        const data = msg.source.kind === 'character'
-          ? await deps.viewerAssembly.assembleCharacter(msg.source.characterId, ctx.userId)
-          : await deps.viewerAssembly.assembleModule(msg.source.moduleId, ctx.userId);
+        const data = await assembleViewerSource(msg.source, ctx.userId);
         if (data) ctx.send({ type: 'viewer_data_pushed', data }, ctx.userId);
         else ctx.send({
           type: 'error',
@@ -197,6 +212,47 @@ export function createViewerHandlers(deps: ViewerHandlerDeps): {
         for (const charId of attached) deps.invalidateActiveForCharacter(charId, ctx.userId);
       } else {
         deps.invalidateActiveForCharacter(msg.source.characterId, ctx.userId);
+      }
+    },
+    set_viewer_lorebook_entry_disabled: async (msg, ctx) => {
+      const sendResult = (ok: boolean, error?: string): void => {
+        ctx.send({
+          type: 'viewer_lorebook_entry_disabled_result',
+          source: msg.source,
+          worldBookId: msg.worldBookId,
+          entryId: msg.entryId,
+          disabled: msg.disabled,
+          ok,
+          ...(error ? { error } : {}),
+        }, ctx.userId);
+      };
+      if (deps.blockedByRepair(ctx.userId, msg.type)) {
+        sendResult(false, 'A repair is in progress. Try again once it finishes.');
+        return;
+      }
+      try {
+        // Fail closed against stale or forged viewer rows: the book and entry
+        // must still belong to the source currently represented by the request.
+        const data = await assembleViewerSource(msg.source, ctx.userId);
+        const group = data?.lorebook.find((candidate) => candidate.groupId === msg.worldBookId);
+        if (!group?.entries.some((entry) => entry.id === msg.entryId)) {
+          sendResult(false, 'This lorebook entry is no longer part of the selected source. Refresh and try again.');
+          return;
+        }
+        const live = await deps.getWorldBookEntry(msg.entryId, ctx.userId);
+        if (!live || live.world_book_id !== msg.worldBookId) {
+          sendResult(false, 'This lorebook entry no longer exists in that Lumiverse lorebook.');
+          return;
+        }
+        await deps.updateWorldBookEntry(msg.entryId, { disabled: msg.disabled }, ctx.userId);
+        sendResult(true);
+        deps.log.info(
+          `${msg.type}: book=${msg.worldBookId} entry=${msg.entryId} disabled=${msg.disabled}`,
+        );
+      } catch (err) {
+        const error = deps.errMsg(err);
+        deps.log.warn(`${msg.type}: entry=${msg.entryId} failed: ${error}`);
+        sendResult(false, error);
       }
     },
   };

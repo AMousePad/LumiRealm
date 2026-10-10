@@ -6,12 +6,14 @@ export interface DispatchHandlerDeps {
     triggerName: string,
     triggerId: string | undefined,
     userId: string,
+    frontendSessionId?: string,
   ) => Promise<void>;
   readonly dispatchButtonClick: (
     chatId: string,
     btn: string,
     btnId: string | undefined,
     userId: string,
+    frontendSessionId?: string,
   ) => Promise<void>;
   readonly log: { readonly info: (m: string) => void };
 }
@@ -23,11 +25,11 @@ export function createDispatchHandlers(deps: DispatchHandlerDeps): {
   return {
     manual_trigger: async (msg, ctx) => {
       deps.log.info(`manual_trigger: triggerName=${msg.triggerName} triggerId=${msg.triggerId ?? '<none>'} chatId=${msg.chatId}`);
-      await deps.dispatchManualTrigger(msg.chatId, msg.triggerName, msg.triggerId, ctx.userId);
+      await deps.dispatchManualTrigger(msg.chatId, msg.triggerName, msg.triggerId, ctx.userId, ctx.frontendSessionId);
     },
     manual_button_click: async (msg, ctx) => {
       deps.log.info(`manual_button_click: btn=${msg.btn} btnId=${msg.btnId ?? '<none>'} chatId=${msg.chatId}`);
-      await deps.dispatchButtonClick(msg.chatId, msg.btn, msg.btnId, ctx.userId);
+      await deps.dispatchButtonClick(msg.chatId, msg.btn, msg.btnId, ctx.userId, ctx.frontendSessionId);
     },
   };
 }

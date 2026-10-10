@@ -3,10 +3,10 @@
 // Lumi's `useDisplayRegex` hook bumps a global `displayRegexCacheVersion`
 // counter on every CHAT_CHANGED / MESSAGE_* event and re-issues
 // `/api/v1/chats/:id/display-preprocess` for every visible bubble. There's
-// no batching, no abort, and no per-message gating, so a Cheongwon-grade
-// chat with 30 visible messages and a 65 KB editDisplay Lua hook burns
+// no batching, no abort, and no per-message gating, so a heavy chat
+// with 30 visible messages and a 65 KB editDisplay Lua hook burns
 // 50+ seconds of CPU on identical-input → identical-output chains during
-// a single streaming session (see `local/docs/architecture.md` §3.35).
+// a single streaming session.
 //
 // Until Lumi gains FE-side abort + per-message cache keying, mitigate
 // extension-side: cache the editDisplay chain's result keyed by

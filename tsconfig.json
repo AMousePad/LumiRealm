@@ -16,12 +16,14 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "include": ["src/**/*", "local/tests/**/*", "local/tools/**/*", "local/scripts/**/*"],
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*", "tools/**/*", "local/tests/**/*", "local/tools/**/*", "local/scripts/**/*"],
   "exclude": [
     "node_modules",
     "dist",
     "packages",
+    "tests/local_library",
     "local/tools/_archive",
-    "local/tools/parity"
+    "local/tools/parity",
+    "local/tools/__*"
   ]
 }

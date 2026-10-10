@@ -13,13 +13,20 @@ import type {
   HostPersona,
   HostWorldInfoEntry,
   InjectOpts,
+  HostCorsFetch,
+  HostCorsResponse,
 } from './host.js';
+import { readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { presetToggleValues } from '../state/preset-toggle-values.js';
+import { toStr } from '../util/coerce.js';
 import { expectChatChange } from '../state/own-chat-change.js';
 import { expectCharacterEdit } from '../state/own-character-edit.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import { filterSamplerParamsForProvider } from '../util/samplers-wire.js';
 import { awaitAlertDismissal } from './alert-bridge.js';
 import { awaitPickResolution } from './pick-bridge.js';
+import { backendLuaStateScope, hostCharacterState } from './runtime/lua-state.js';
+import { hostMessageTime } from '../util/message-time.js';
 
 const log = makeSafeLogger('spindle-host.llm.generate');
 
@@ -39,6 +46,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       id: m.id,
       content: typeof m.content === 'string' ? m.content : '',
       role: m.role,
+      createdAt: hostMessageTime(m),
     }));
   }
 
@@ -93,15 +101,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   async function charGet(id: string): Promise<HostCharacter> {
     const ch = await spindle.characters.get(id, uid) as Record<string, unknown> | null;
     if (!ch) return { id, description: '' };
-    const rawImageId = ch['image_id'];
-    return {
-      id,
-      name: typeof ch['name'] === 'string' ? ch['name'] as string : '',
-      description: typeof ch['description'] === 'string' ? ch['description'] as string : '',
-      firstMessage: typeof ch['first_mes'] === 'string' ? ch['first_mes'] as string : '',
-      worldBookIds: Array.isArray(ch['world_book_ids']) ? ch['world_book_ids'] as string[] : [],
-      imageId: typeof rawImageId === 'string' && rawImageId.length > 0 ? rawImageId : null,
-    };
+    return hostCharacterState({ ...ch, id });
   }
 
   async function charUpdate(id: string, patch: Partial<HostCharacter>): Promise<void> {
@@ -162,6 +162,29 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   };
 
   const host: HostApi = {
+    luaStateScope: backendLuaStateScope(userId),
+    ...(uid !== undefined ? { userId: uid } : {}),
+    // Permission-gated CORS proxy (`spindle.cors`; `cors_proxy` is declared in
+    // spindle.json and the host enforces the grant). Backs Lua `request`, and is
+    // left out on hosts that predate the API — the runtime then reports a
+    // transport failure instead of rejecting the Lua call.
+    ...(typeof spindle.cors === 'function'
+      ? {
+          // Upstream Risu: fetchNative(url, { method: 'GET' }) — GET only, no
+          // headers, no body.
+          corsFetch: async (url: string, init?: { readonly method?: string }) =>
+            (await spindle.cors(url, { method: init?.method ?? 'GET' })) as HostCorsResponse,
+        }
+      : {}),
+    getGlobalVariables: async () => {
+      if (!uid) throw new TypeError('Global variables require a user ID');
+      const raw = await getMetadata('macro_variables');
+      const global = (raw as { global?: unknown } | null)?.global;
+      const legacy = global && typeof global === 'object'
+        ? Object.fromEntries(Object.entries(global).map(([key, value]) => [key, toStr(value)]))
+        : {};
+      return readEffectiveGlobals(uid, legacy, presetToggleValues(chatId, uid));
+    },
     chat: {
       getChatId: () => chatId,
       getMessages,
@@ -276,6 +299,21 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
           value: { id: conn.id, model: conn.model || undefined, provider: conn.provider || '' },
         };
       }
+      const chat = await spindle.chats.get(chatId, uid);
+      const metadata = chat?.metadata;
+      const boundId = typeof metadata?.connection_profile_id === 'string'
+        ? metadata.connection_profile_id.trim() : '';
+      if (boundId) {
+        const conn = await spindle.connections.get(boundId, uid);
+        if (conn) {
+          const model = typeof metadata?.connection_model === 'string'
+            ? metadata.connection_model.trim() : '';
+          return {
+            ok: true,
+            value: { id: conn.id, model: model || conn.model || undefined, provider: conn.provider || '' },
+          };
+        }
+      }
       const list = await spindle.connections.list(uid);
       if (list.length === 0) {
         return {
@@ -385,6 +423,40 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       }
     },
   };
+
+  if (typeof spindle !== 'undefined' && spindle.imageGen) {
+    (host as { imageGen?: HostApi['imageGen'] }).imageGen = {
+      async generate(prompt: string, opts) {
+        const input: Record<string, unknown> = {
+          prompt,
+          owner_chat_id: chatId,
+          negativePrompt: opts?.negativePrompt,
+          ...(opts?.connectionId ? { connection_id: opts.connectionId } : {}),
+          ...(opts?.model ? { model: opts.model } : {}),
+          ...(opts?.parameters ? { parameters: opts.parameters } : {}),
+          ...(uid !== undefined ? { userId: uid } : {}),
+          ...(opts?.includeDataUrl !== undefined ? { includeDataUrl: opts.includeDataUrl } : {}),
+        };
+        const res = await spindle.imageGen.generate(input as any);
+        return res as { imageId?: string; imageUrl?: string; imageDataUrl?: string } | string;
+      },
+    };
+  }
+
+  if (typeof spindle !== 'undefined' && spindle.images) {
+    (host as { images?: HostApi['images'] }).images = {
+      async uploadFromDataUrl(dataUrl: string, name?: string): Promise<string | { id: string }> {
+        const res = await spindle.images.uploadFromDataUrl(dataUrl, {
+          ...(name ? { originalFilename: name } : {}), owner_chat_id: chatId,
+          ...(uid !== undefined ? { userId: uid } : {}),
+        });
+        return typeof res === 'string' ? res : res.id;
+      },
+      getUrl(id: string): string {
+        return `/api/v1/images/${id}`;
+      },
+    };
+  }
 
   void characterId; // surfaced via ctx for future expansion
   return host;

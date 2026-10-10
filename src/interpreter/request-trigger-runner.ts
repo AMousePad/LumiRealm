@@ -2,7 +2,8 @@ import type { TriggerScript } from '../core/schemas/triggerscript.js';
 import type { LlmMessage } from '../adapters/spindle-extras.js';
 import { mergeLlmText, projectLlmText } from '../util/llm-message-content.js';
 import { makeDispatcherScriptNS } from './dispatcher.js';
-import type { HostApi } from './host.js';
+import type { HostApi, TriggerRuntimeOpts } from './host.js';
+import type { DispatcherScriptNS } from './dispatcher.js';
 import { selectRestrictedTriggers } from './restricted-trigger.js';
 import { makeRisuTriggerRuntime } from './runtime.js';
 import {
@@ -18,6 +19,9 @@ const quietConsole: InterpConsole = {
 };
 
 export interface RequestTriggerChainOptions {
+  readonly runtimeOpts?: TriggerRuntimeOpts;
+  readonly scriptNS?: DispatcherScriptNS;
+  readonly templateContext?: import('./runtime/template.js').TriggerTemplateContext;
   readonly api: HostApi;
   readonly chatId: string;
   readonly characterId: string;
@@ -40,12 +44,14 @@ export async function runRequestTriggerChain(
       characterName: opts.characterName ?? '',
       userName: opts.userName ?? '',
     },
-    makeDispatcherScriptNS(),
+    opts.scriptNS ?? makeDispatcherScriptNS(),
     {
+      ...opts.runtimeOpts,
       chatId: opts.chatId,
       characterId: opts.characterId,
       binding: 'request',
       displayMode: true,
+      ...(opts.templateContext ? { templateContext: opts.templateContext } : {}),
       requestData: messages.map(({ role, content }) => ({
         role,
         content: projectLlmText(content),
@@ -55,10 +61,11 @@ export async function runRequestTriggerChain(
 
   try {
     for (const trigger of triggers) {
-      await interpretTrigger(trigger, runtime, quietConsole, {
+      const result = await interpretTrigger(trigger, runtime, quietConsole, {
         displayMode: true,
         lowLevelAccess: Boolean(trigger.lowLevelAccess),
       });
+      if (result === 'abort') return messages.slice();
     }
 
     const state = runtime.getRequestStateMessages();
