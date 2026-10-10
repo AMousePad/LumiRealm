@@ -33,6 +33,30 @@ bun run typecheck:all   # whole-tree typecheck including tests
 7. **No private references.** Comments, test names, and log strings must never contain absolute machine paths, private documentation references, or names of specific third-party character cards. Comments are 1-2 sentences, state the why (constraint, invariant, gotcha), and default to absent. No em dashes in comments or log strings. No explaining the code below.
 8. **Loud failures.** Unsupported surfaces throw typed errors. Never add silent fallbacks, `return ""` stubs, or warn-and-continue paths for failures. Silent errors are the bane of tracability.
 9. **Never commit card data.** `tests/local_library/` contents and any `.charx`/`.risum` files stay out. Do not write new tests that depend on this path.
+10. **Rigorously review.** You must spawn a context-ablated subagent to review before you declare it ready for PR or make the PR. If the subagent finds any issues, you must address them before the PR, then run another round. This must be done on loop until no significant blocking issue is found. The prompt to give to the context-ablated subagent is as follows:
+
+```### Notes for AI-assisted review
+
+Act as a senior engineer doing a production PR review. Goal: find defects and risky assumptions, not style nitpicks.
+
+Focus only on critical issues: potential bugs, correctness, security (including PHI exposure), reliability, and performance.
+
+Rules:
+- Do not invent problems to seem thorough.
+- Do not comment on style, formatting, or naming unless it causes a bug.
+- Skip anything a formatter, linter, or CI should enforce.
+- If you're unsure, ask a targeted question instead of guessing.
+
+Output:
+- BLOCKING: issues that must be fixed before merge, each with the
+  exact line and a concrete fix.
+- If there are none, give a simple approval: "✅ lgtm"
+
+Sources:
+- https://www.josecasanova.com/blog/claude-code-review-prompt
+- https://dev.to/nongdyz_d9c3069b1acb2a08c/10-ai-prompts-that-make-code-review-actually-useful-430i
+- https://dev.to/novaelvaris/a-code-review-prompt-that-finds-bugs-not-nitpicks-2apc```
+
 
 ## Layout
 
