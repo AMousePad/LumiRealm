@@ -156,7 +156,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   const charDesc = document.createElement('div');
   charDesc.className = 'lrm-section-desc';
   charDesc.textContent =
-    'Upload Risu character cards (.charx, .png, .json, .jpg/.jpeg). Click any row to manage attached modules. Delete characters through Lumiverse.';
+    'Upload Risu character cards (.charx, .png, .json, .jpg/.jpeg). Delete characters through Lumiverse.';
   charBody.appendChild(charDesc);
 
   const charHeaderSlot = document.createElement('div');
@@ -251,7 +251,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   const rxDesc = document.createElement('div');
   rxDesc.className = 'lrm-section-desc';
   rxDesc.textContent =
-    'Upload a Risu regex export (.json). Choose Global (applies to every chat) or a character. Rules group under a folder named after the file.';
+    'Upload a Risu regex export (.json). Choose Global (applies to every chat) or a character.';
   regexBody.appendChild(rxDesc);
 
   const rxToolbar = document.createElement('div');
@@ -388,7 +388,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     head.appendChild(title);
     const hint = document.createElement('span');
     hint.className = 'lrm-globalbox-hint';
-    hint.textContent = 'Applied to every character, on top of its own attachments.';
+    hint.textContent = 'Applied to all LumiRealm characters.';
     head.appendChild(hint);
     globalBox.appendChild(head);
 
