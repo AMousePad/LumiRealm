@@ -80,6 +80,10 @@ for (const engine of [chromium, firefox]) {
       await page.locator('.lr-realm-grid').evaluate(el => { (window as any).previousGrid = el; (window as any).previousCard = el.firstChild; });
       const toolbarBefore = await page.locator('.lr-realm-toolbar').boundingBox();
       const pagerBefore = await page.locator('.lr-realm-pager').boundingBox();
+      const resultsBefore = await page.locator('.lr-realm-body').boundingBox();
+      assert(pagerBefore && pagerBefore.width < 150 && pagerBefore.height <= 42, 'pagination must be a compact pill');
+      assert(resultsBefore && pagerBefore.y < resultsBefore.y + resultsBefore.height, 'pagination must float over the results');
+      assert.equal(await page.getByRole('spinbutton', { name: 'Page number', exact: true }).evaluate(el => getComputedStyle(el).appearance), 'textfield');
       await page.locator('.lr-realm-body').evaluate(el => { el.scrollTop = 500; });
       const before = await page.locator('.lr-realm-body').evaluate(el => el.scrollTop);
       assert.deepEqual(await page.locator('.lr-realm-toolbar').boundingBox(), toolbarBefore);
@@ -144,6 +148,11 @@ for (const engine of [chromium, firefox]) {
       }
       assert.equal(await page.locator('#host-scroll').evaluate(el => el.scrollHeight > el.clientHeight + 1), false);
       assert.equal(await page.locator('.lr-realm-root').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
+      await page.locator('.lr-realm-body').evaluate(el => { el.scrollTop = el.scrollHeight; });
+      const lastCard = await page.locator('.lr-realm-card').last().boundingBox();
+      const floatingPager = await page.locator('.lr-realm-pager').boundingBox();
+      assert(lastCard && floatingPager && lastCard.y + lastCard.height < floatingPager.y, 'last result must scroll clear of the floating pill');
+      await page.locator('.lr-realm-body').evaluate(el => { el.scrollTop = 0; });
       await page.waitForFunction(() => (document.querySelector('.lr-realm-card img') as HTMLImageElement)?.complete);
       await page.screenshot({ path: `${process.env.TEMP}/lumirealm-grid-${engine.name()}-${width}.png` });
       await page.reload();
