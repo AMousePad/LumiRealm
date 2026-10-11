@@ -175,14 +175,24 @@ div:has(> .lr-realm-modal-root) {
 
 .lr-realm-grid.lr-realm-loading { filter: blur(4px); }
 .lr-realm-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--lumiverse-btn-icon, 32px);
+  height: var(--lumiverse-btn-icon, 32px);
   border: 1px solid var(--lumiverse-border, #2a2a2a);
-  border-radius: var(--lumiverse-radius, 8px);
-  padding: 6px 10px;
-  background: var(--lumiverse-bg, #1c1f24);
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
+  border-radius: 6px;
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04));
+  color: var(--lumiverse-text-dim, #8b8b8b);
+  cursor: pointer;
+  transition: background var(--lumiverse-transition-fast, 120ms), color var(--lumiverse-transition-fast, 120ms);
 }
+.lr-realm-view:hover:not(:disabled) {
+  background: var(--lumiverse-fill-hover, rgba(255, 255, 255, 0.08));
+  color: var(--lumiverse-text, #e6e6e6);
+}
+.lr-realm-view:disabled { opacity: 0.4; cursor: not-allowed; }
 .lr-realm-grid[data-view="grid"] {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, max(200px, calc((100% - 48px) / 5))), 1fr));
 }

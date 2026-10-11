@@ -123,10 +123,9 @@ test('pagination waits for a typed query to start on its first page', async () =
 
 test('grid preference keeps cards mounted, saves the choice, and survives reopening', async () => {
   const previous = root.querySelector('.lr-realm-card');
-  const select = root.querySelector('.lr-realm-view') as HTMLSelectElement;
-  expect(select.value).toBe('default');
-  select.value = 'grid';
-  select.dispatchEvent(new win.Event('change') as unknown as Event);
+  const toggle = root.querySelector('.lr-realm-view') as HTMLButtonElement;
+  expect(toggle.getAttribute('aria-label')).toBe('Switch to grid view');
+  toggle.click();
   await Bun.sleep(0);
   expect(root.querySelector('.lr-realm-grid')!.getAttribute('data-view')).toBe('grid');
   expect(root.querySelector('.lr-realm-card')).toBe(previous);
@@ -134,33 +133,31 @@ test('grid preference keeps cards mounted, saves the choice, and survives reopen
   realm.close();
   root.replaceChildren();
   realm.open();
-  expect((root.querySelector('.lr-realm-view') as HTMLSelectElement).value).toBe('grid');
+  expect(button('Switch to default view')).toBeDefined();
 });
 
 test('loads the saved view without sending another search', async () => {
   const count = sent.length;
   viewRead.resolve('grid');
   await Bun.sleep(0);
-  expect((root.querySelector('.lr-realm-view') as HTMLSelectElement).value).toBe('grid');
+  expect(button('Switch to default view')).toBeDefined();
   expect(sent).toHaveLength(count);
 });
 
 test('a late preference read cannot override a newer choice', async () => {
-  const select = root.querySelector('.lr-realm-view') as HTMLSelectElement;
-  select.value = 'grid';
-  select.dispatchEvent(new win.Event('change') as unknown as Event);
+  const toggle = root.querySelector('.lr-realm-view') as HTMLButtonElement;
+  toggle.click();
   viewRead.resolve('default');
   await Bun.sleep(0);
-  expect(select.value).toBe('grid');
+  expect(toggle.getAttribute('aria-label')).toBe('Switch to default view');
 });
 
 test('preference save failure is visible and leaves the view selector usable', async () => {
   viewSaveError = new Error('Unavailable');
-  const select = root.querySelector('.lr-realm-view') as HTMLSelectElement;
-  select.value = 'grid';
-  select.dispatchEvent(new win.Event('change') as unknown as Event);
+  const toggle = root.querySelector('.lr-realm-view') as HTMLButtonElement;
+  toggle.click();
   await Bun.sleep(0);
-  expect(select.disabled).toBe(false);
+  expect(toggle.disabled).toBe(false);
   expect(root.querySelector('.lr-realm-feedback')!.textContent).toContain('Could not save');
 });
 
@@ -222,4 +219,23 @@ test('rapid paging accepts only the latest response and resets scroll only on su
   body.scrollTop = 150;
   reply([card], stale);
   expect(body.scrollTop).toBe(150);
+});
+
+
+test('view button cycles both ways with matching icons and accessible labels', async () => {
+  const toggle = button('Switch to grid view');
+  const gridIcon = toggle.innerHTML;
+  toggle.click();
+  expect(toggle.disabled).toBe(true);
+  await Bun.sleep(0);
+  expect(toggle.title).toBe('Switch to default view');
+  expect(toggle.getAttribute('aria-label')).toBe(toggle.title);
+  expect(toggle.innerHTML).not.toBe(gridIcon);
+  toggle.click();
+  await Bun.sleep(0);
+  expect(toggle.title).toBe('Switch to grid view');
+  expect(toggle.getAttribute('aria-label')).toBe(toggle.title);
+  expect(toggle.innerHTML).toBe(gridIcon);
+  expect(savedView).toBe('default');
+  expect(root.querySelector('.lr-realm-grid')!.getAttribute('data-view')).toBe('default');
 });
