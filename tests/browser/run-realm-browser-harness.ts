@@ -80,6 +80,16 @@ for (const engine of [chromium, firefox]) {
       await page.locator('.lr-realm-grid').evaluate(el => { (window as any).previousGrid = el; (window as any).previousCard = el.firstChild; });
       const toolbarBefore = await page.locator('.lr-realm-toolbar').boundingBox();
       const pagerBefore = await page.locator('.lr-realm-pager').boundingBox();
+      const scrollbar = await page.locator('.lr-realm-body').evaluate(el => {
+        (el as HTMLElement).style.setProperty('--lumiverse-primary', '#ad46e5');
+        const style = getComputedStyle(el);
+        const value = { color: style.scrollbarColor, gutter: style.scrollbarGutter, gap: style.paddingRight };
+        (el as HTMLElement).style.removeProperty('--lumiverse-primary');
+        return value;
+      });
+      assert(scrollbar.color.startsWith('rgb(173, 70, 229)'), 'scrollbar must use the theme primary color');
+      assert.equal(scrollbar.gutter, 'stable');
+      assert.equal(scrollbar.gap, '6px');
       const resultsBefore = await page.locator('.lr-realm-body').boundingBox();
       assert(pagerBefore && pagerBefore.width < 150 && pagerBefore.height <= 42, 'pagination must be a compact pill');
       assert(resultsBefore && pagerBefore.y < resultsBefore.y + resultsBefore.height, 'pagination must float over the results');

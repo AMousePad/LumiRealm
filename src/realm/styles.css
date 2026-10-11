@@ -163,9 +163,16 @@ div:has(> .lr-realm-modal-root) {
   overflow-y: auto;
   min-height: 0;
   padding-bottom: 52px;
+  padding-right: 6px;
   scroll-padding-bottom: 52px;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lumiverse-primary, #5b8cff) transparent;
 }
+.lr-realm-body::-webkit-scrollbar { width: 6px; }
+.lr-realm-body::-webkit-scrollbar-thumb { background: var(--lumiverse-primary, #5b8cff); border-radius: 999px; }
+.lr-realm-body::-webkit-scrollbar-track { background: transparent; }
 
 .lr-realm-grid {
   display: grid;
