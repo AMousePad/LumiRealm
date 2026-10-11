@@ -36695,6 +36695,18 @@ var UPLOAD_CHUNK_BYTES3 = 16 * 1024 * 1024;
 var EXTENSION_IDENTIFIER3 = "lumirealm";
 var PROCESSING_TIMEOUT_MS2 = 120000;
 var ACCEPT_EXTENSIONS2 = [".risum", ".charx"];
+function invalidResumeResponse(error) {
+  if (!(error instanceof error_default) || error.originalRequest.getMethod() !== "HEAD")
+    return false;
+  const response = error.originalResponse;
+  return response?.getStatus() === 200 && ["Upload-Offset", "Upload-Length"].some((header) => !/^\d+$/.test(response.getHeader(header) ?? ""));
+}
+async function forgetUploadResume(upload) {
+  for (const previous of await upload.findPreviousUploads()) {
+    if (previous.uploadUrl === upload.url)
+      await upload.options.urlStorage?.removeUpload(previous.urlStorageKey);
+  }
+}
 var liveVizTimers = new Set;
 function vizStartTimer(t) {
   t.startedAt = Date.now();
@@ -37684,12 +37696,7 @@ filename: ${m.filename}`;
         const stopped = activeTus;
         const uploadId = (stopped.url ?? "").split("/").filter(Boolean).pop();
         activeTus = null;
-        stopped.abort(false).then(async () => {
-          for (const previous of await stopped.findPreviousUploads()) {
-            if (previous.uploadUrl === stopped.url)
-              await stopped.options.urlStorage?.removeUpload(previous.urlStorageKey);
-          }
-        }).catch((err) => {
+        stopped.abort(false).then(() => forgetUploadResume(stopped)).catch((err) => {
           log.warn("Module upload abort failed", err);
         }).finally(() => {
           if (uploadId)
@@ -37711,18 +37718,30 @@ filename: ${m.filename}`;
       endpoint: UPLOAD_ENDPOINT3,
       chunkSize: UPLOAD_CHUNK_BYTES3,
       retryDelays: [0, 1000, 3000, 5000, 1e4],
+      onShouldRetry: (error, attempt, options) => !invalidResumeResponse(error) && defaultOptions2.onShouldRetry(error, attempt, options),
       removeFingerprintOnSuccess: true,
       metadata: {
         filename: fileName,
         extension: EXTENSION_IDENTIFIER3,
         ...fileName.toLowerCase().endsWith(".risum") ? { spindle_read_mode: "chunked" } : {}
       },
-      onError: (err) => {
+      onError: async (err) => {
+        if (cancelled)
+          return;
+        let message = `Upload failed: ${errMsg(err)}`;
+        if (invalidResumeResponse(err)) {
+          try {
+            await forgetUploadResume(upload);
+            message = "The server cannot resume this upload. Select the file again to restart from the beginning.";
+          } catch (cleanupError) {
+            message += ` Could not clear the saved upload: ${errMsg(cleanupError)}`;
+          }
+        }
         if (cancelled)
           return;
         activeTus = null;
         log.error("modules-panel: tus upload failed", err);
-        lastError = `Upload failed: ${errMsg(err)}`;
+        lastError = message;
         moduleImportInFlight = false;
         setStatus(lastError, true);
         opts.onImportError?.(lastError);
