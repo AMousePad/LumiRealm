@@ -1,3 +1,4 @@
+import type { ModuleUploadControl } from '../state/module-upload.js';
 import type { ModuleEnvelope } from '../state/modules-store.js';
 import type { LumirealmCharacterData, LumirealmUserOverrides } from '../payload/types.js';
 import type { SpindleCharactersApi } from '../state/lumirealm-character.js';
@@ -14,11 +15,13 @@ export interface ModuleHandlerDeps {
     bytes: Uint8Array,
     fileName: string,
     userId: string,
+    control: ModuleUploadControl,
   ) => Promise<{ envelope: ModuleEnvelope }>;
   readonly processRisumUpload: (
     uploadId: string,
     fileName: string,
     userId: string,
+    control: ModuleUploadControl,
   ) => Promise<{ envelope: ModuleEnvelope }>;
   readonly getUpload: (
     uploadId: string,
@@ -84,6 +87,7 @@ export interface ModuleHandlerDeps {
 
 export function createModuleHandlers(deps: ModuleHandlerDeps): {
   readonly process_module_from_upload: Handler<'process_module_from_upload'>;
+  readonly cancel_module_import: Handler<'cancel_module_import'>;
   readonly request_modules: Handler<'request_modules'>;
   readonly set_global_modules: Handler<'set_global_modules'>;
   readonly delete_module: Handler<'delete_module'>;
@@ -92,8 +96,11 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
   readonly module_artifacts_installed: Handler<'module_artifacts_installed'>;
   readonly module_artifacts_uninstalled: Handler<'module_artifacts_uninstalled'>;
 } {
+  const activeImports = new Map<string, { uploadId: string; controller: AbortController; saving: boolean }>();
+
   async function finalizeModuleUpload(
     process: () => Promise<{ envelope: ModuleEnvelope }>,
+    signal: AbortSignal,
     ctx: { userId: string; send: (msg: import('../types/messages.js').BackendToFrontend, userId: string) => void },
   ): Promise<void> {
     try {
@@ -113,6 +120,10 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       }
       ctx.send({ type: 'import_progress', phase: 'done', message: `Imported ${moduleName}`, fraction: 1 }, ctx.userId);
     } catch (err) {
+      if (signal.aborted && err === signal.reason) {
+        ctx.send({ type: 'import_progress', phase: 'done', message: 'Module import cancelled', fraction: null, cancelled: true }, ctx.userId);
+        return;
+      }
       ctx.send({ type: 'import_progress', phase: 'error', message: 'Module upload failed', fraction: null, error: deps.errMsg(err) }, ctx.userId);
       ctx.send({ type: 'error', message: `Module decode/save failed: ${deps.errMsg(err)}` }, ctx.userId);
     }
@@ -120,43 +131,50 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
 
   return {
     process_module_from_upload: async (msg, ctx) => {
-      deps.log.info(`process_module_from_upload: uploadId=${msg.uploadId} file=${msg.fileName} userId=${ctx.userId}`);
-      if (msg.fileName.toLowerCase().endsWith('.risum')) {
-        ctx.send({ type: 'import_progress', phase: 'translating', message: `Translating ${msg.fileName}…`, fraction: 0.3 }, ctx.userId);
+      if (activeImports.has(ctx.userId)) {
+        if (activeImports.get(ctx.userId)!.uploadId === msg.uploadId) return;
+        ctx.send({ type: 'error', message: 'A module import is already running.' }, ctx.userId);
+        return;
+      }
+      const entry = { uploadId: msg.uploadId, controller: new AbortController(), saving: false };
+      activeImports.set(ctx.userId, entry);
+      const control: ModuleUploadControl = {
+        signal: entry.controller.signal,
+        beginSave() {
+          entry.controller.signal.throwIfAborted();
+          entry.saving = true;
+          ctx.send({ type: 'import_progress', phase: 'saving_payload', message: 'Saving module…', fraction: 0.94, cancellable: false }, ctx.userId);
+        },
+      };
+      try {
+      await finalizeModuleUpload(async () => {
         try {
-          await finalizeModuleUpload(
-            () => deps.processRisumUpload(msg.uploadId, msg.fileName, ctx.userId),
-            ctx,
-          );
+          ctx.send({ type: 'import_progress', phase: 'translating', message: `Translating ${msg.fileName}…`, fraction: 0.3, cancellable: true }, ctx.userId);
+          if (msg.fileName.toLowerCase().endsWith('.risum')) {
+            return await deps.processRisumUpload(msg.uploadId, msg.fileName, ctx.userId, control);
+          }
+          const upload = await deps.getUpload(msg.uploadId, ctx.userId);
+          control.signal.throwIfAborted();
+          if (!upload) throw new Error('Module upload not found or expired. Re-import the module.');
+          return await deps.processModuleUpload(upload.data, msg.fileName || upload.fileName, ctx.userId, control);
         } finally {
-          await deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => false);
+          await deps.deleteUpload(msg.uploadId, ctx.userId).catch(err => {
+            deps.log.warn(`Module staged upload cleanup failed: ${deps.errMsg(err)}`);
+          });
         }
-        return;
-      }
-      let upload: { fileName: string; size: number; data: Uint8Array } | null;
-      try {
-        upload = await deps.getUpload(msg.uploadId, ctx.userId);
-      } catch (err) {
-        deps.log.warn(`process_module_from_upload: getUpload threw: ${deps.errMsg(err)}`);
-        ctx.send({ type: 'import_progress', phase: 'error', message: 'Upload retrieval failed', fraction: null, error: deps.errMsg(err) }, ctx.userId);
-        ctx.send({ type: 'error', message: `Module upload retrieval failed: ${deps.errMsg(err)}` }, ctx.userId);
-        return;
-      }
-      if (!upload) {
-        deps.log.warn(`process_module_from_upload: uploadId=${msg.uploadId} not found or expired`);
-        ctx.send({ type: 'import_progress', phase: 'error', message: 'Upload not found or expired. Re-import the module.', fraction: null, error: 'upload_missing' }, ctx.userId);
-        ctx.send({ type: 'error', message: 'Module upload not found or expired. Re-import the module.' }, ctx.userId);
-        return;
-      }
-      deps.log.info(`process_module_from_upload: got ${upload.data.byteLength} bytes, processing`);
-      ctx.send({ type: 'import_progress', phase: 'translating', message: `Translating ${msg.fileName || upload.fileName}…`, fraction: 0.3 }, ctx.userId);
-      try {
-        await finalizeModuleUpload(
-          () => deps.processModuleUpload(upload.data, msg.fileName || upload.fileName, ctx.userId),
-          ctx,
-        );
-      } finally {
-        void deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
+      }, control.signal, ctx);
+      } finally { activeImports.delete(ctx.userId); }
+    },
+    cancel_module_import: async (msg, ctx) => {
+      const entry = activeImports.get(ctx.userId);
+      if (entry?.uploadId === msg.uploadId && !entry.saving) entry.controller.abort();
+      else if (!entry && msg.stagedUpload === true) {
+        try {
+          await deps.deleteUpload(msg.uploadId, ctx.userId);
+          ctx.send({ type: 'import_progress', phase: 'done', message: 'Module import cancelled', fraction: null, cancelled: true }, ctx.userId);
+        } catch (error) {
+          ctx.send({ type: 'import_progress', phase: 'error', message: 'Cancelled upload cleanup failed', fraction: null, error: deps.errMsg(error) }, ctx.userId);
+        }
       }
     },
     request_modules: async (_msg, ctx) => {

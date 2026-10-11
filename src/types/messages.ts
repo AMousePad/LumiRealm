@@ -279,6 +279,7 @@ export type FrontendToBackend =
   | {
       type: 'request_image_connections_list';
     }
+  | { type: 'cancel_module_import'; uploadId: string; stagedUpload?: boolean }
   | { type: 'process_module_from_upload'; uploadId: string; fileName: string }
   | { type: 'request_modules' }
   | { type: 'delete_module'; moduleId: string; requestId?: string }
@@ -473,6 +474,8 @@ export type BackendToFrontend =
   | {
       type: 'import_progress';
       phase: ImportProgress['phase'];
+      cancellable?: boolean;
+      cancelled?: boolean;
       message: string;
       /** 0..1 fractional progress or null when indeterminate. */
       fraction: number | null;

@@ -11,7 +11,7 @@ export interface ImportOverlayHandle {
   notifyImportStart(
     label: string,
     source: 'realm' | 'drawer' | 'module',
-    onCancel?: () => void,
+    onCancel?: () => boolean | void,
     totalBytes?: number,
   ): boolean;
   notifyImportError(message: string): void;
@@ -121,7 +121,7 @@ export function setupImportOverlay(
   let lastPhase: string = '';
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingConsentRequestId: string | null = null;
-  let pendingCancel: (() => void) | null = null;
+  let pendingCancel: (() => boolean | void) | null = null;
   let uploadTotalBytes = 0;
   let importing = false;
   const queuedOperations = new Map<string, Extract<BackendToFrontend, { type: 'operation_progress' }>>();
@@ -170,7 +170,14 @@ export function setupImportOverlay(
     pendingCancel = null;
     cancelBtn.hidden = true;
     if (cb) {
-      try { cb(); } catch (err) { log.warn('import-overlay: cancel callback threw', err); }
+      try {
+        if (cb() === true) {
+          phaseEl.textContent = 'Cancelling';
+          messageEl.textContent = 'Waiting for the current batch and removing temporary assets…';
+          consentEl.hidden = true;
+          return;
+        }
+      } catch (err) { log.warn('import-overlay: cancel callback threw', err); }
     }
     importing = false;
     finishTask('import');
@@ -200,8 +207,9 @@ export function setupImportOverlay(
     phaseEl.textContent = PHASE_LABEL[phase] ?? phase;
     messageEl.textContent = message || '';
     lastPhase = phase;
-    lockCancel();
+    if (phase === 'done' || phase === 'error' || phase === 'saving_payload') lockCancel();
     if (phase === 'done') {
+      pendingConsentRequestId = null;
       importing = false;
       finishTask('import');
       titleEl.classList.remove('lr-busy');
@@ -213,6 +221,7 @@ export function setupImportOverlay(
       return;
     }
     if (phase === 'error') {
+      pendingConsentRequestId = null;
       expand();
       importing = false;
       finishTask('import');
@@ -318,7 +327,7 @@ export function setupImportOverlay(
   function notifyImportStart(
     newLabel: string,
     source: 'realm' | 'drawer' | 'module',
-    onCancel?: () => void,
+    onCancel?: () => boolean | void,
     totalBytes?: number,
   ): boolean {
     if (!startTask({ id: 'import', kind: 'import', label: newLabel })) return false;
@@ -341,7 +350,6 @@ export function setupImportOverlay(
     if (total > 0) {
       messageEl.textContent = `Sent ${formatBytes(Math.min(sent, total))} of ${formatBytes(total)}…`;
       setFraction(sent / total);
-      if (sent >= total) lockCancel();
     } else {
       messageEl.textContent = `Sent ${formatBytes(sent)}…`;
     }
@@ -364,7 +372,11 @@ export function setupImportOverlay(
         if (!visible && msg.phase !== 'done' && msg.phase !== 'error') {
           showOverlay(label || 'character');
         }
-        if (visible) applyProgress(msg.phase, msg.message, msg.fraction ?? null);
+        if (visible) {
+          cancelBtn.hidden = !pendingCancel || msg.cancellable !== true;
+          applyProgress(msg.phase, msg.error ?? msg.message, msg.fraction ?? null);
+          if (msg.cancelled) { phaseEl.textContent = 'Cancelled'; setFraction(0); }
+        }
         break;
       }
       case 'consent_prompt': {

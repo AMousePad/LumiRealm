@@ -37616,14 +37616,35 @@ filename: ${m.filename}`;
     uploadBtn.disabled = true;
     log.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
     let cancelled = false;
+    let processingUploadId = null;
     const accepted = opts.onImportStart?.(fileName, () => {
-      cancelled = true;
-      moduleImportInFlight = false;
-      if (activeTus) {
-        activeTus.abort(true).catch(() => {});
-        activeTus = null;
+      if (processingUploadId) {
+        sendToBackend({ type: "cancel_module_import", uploadId: processingUploadId });
+        setStatus("Cancelling module import…");
+        return true;
       }
+      cancelled = true;
+      setStatus(null);
       clearProcessingTimer();
+      if (activeTus) {
+        const stopped = activeTus;
+        const uploadId = (stopped.url ?? "").split("/").filter(Boolean).pop();
+        activeTus = null;
+        stopped.abort(false).then(async () => {
+          for (const previous of await stopped.findPreviousUploads()) {
+            if (previous.uploadUrl === stopped.url)
+              await stopped.options.urlStorage?.removeUpload(previous.urlStorageKey);
+          }
+        }).catch((err) => {
+          log.warn("Module upload abort failed", err);
+        }).finally(() => {
+          if (uploadId)
+            sendToBackend({ type: "cancel_module_import", uploadId, stagedUpload: true });
+        });
+        if (uploadId)
+          return true;
+      }
+      moduleImportInFlight = false;
       uploadBtn.disabled = false;
       log.info("modules-panel: upload cancel requested");
     }, totalBytes);
@@ -37643,9 +37664,9 @@ filename: ${m.filename}`;
         ...fileName.toLowerCase().endsWith(".risum") ? { spindle_read_mode: "chunked" } : {}
       },
       onError: (err) => {
-        activeTus = null;
         if (cancelled)
           return;
+        activeTus = null;
         log.error("modules-panel: tus upload failed", err);
         lastError = `Upload failed: ${errMsg(err)}`;
         moduleImportInFlight = false;
@@ -37654,14 +37675,16 @@ filename: ${m.filename}`;
         uploadBtn.disabled = false;
       },
       onProgress: (sent, total) => {
+        if (cancelled)
+          return;
         const pct = total > 0 ? Math.round(sent / total * 100) : 0;
         setStatus(`Uploading ${fileName}… (${pct}%)`);
         opts.onUploadProgress?.(sent, total);
       },
       onSuccess: () => {
-        activeTus = null;
         if (cancelled)
           return;
+        activeTus = null;
         const uploadId = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
         if (!uploadId) {
           lastError = "Upload finished but no id was returned";
@@ -37673,6 +37696,7 @@ filename: ${m.filename}`;
         }
         log.info(`modules-panel: upload complete uploadId=${uploadId} — requesting processing`);
         setStatus("Processing on server…");
+        processingUploadId = uploadId;
         sendToBackend({ type: "process_module_from_upload", uploadId, fileName });
         armProcessingTimer();
       }
@@ -41486,7 +41510,12 @@ function setupImportOverlay(log, sendToBackend) {
     cancelBtn.hidden = true;
     if (cb) {
       try {
-        cb();
+        if (cb() === true) {
+          phaseEl.textContent = "Cancelling";
+          messageEl.textContent = "Waiting for the current batch and removing temporary assets…";
+          consentEl.hidden = true;
+          return;
+        }
       } catch (err) {
         log.warn("import-overlay: cancel callback threw", err);
       }
@@ -41519,8 +41548,10 @@ function setupImportOverlay(log, sendToBackend) {
     phaseEl.textContent = PHASE_LABEL[phase] ?? phase;
     messageEl.textContent = message || "";
     lastPhase = phase;
-    lockCancel();
+    if (phase === "done" || phase === "error" || phase === "saving_payload")
+      lockCancel();
     if (phase === "done") {
+      pendingConsentRequestId = null;
       importing = false;
       finishTask("import");
       titleEl.classList.remove("lr-busy");
@@ -41532,6 +41563,7 @@ function setupImportOverlay(log, sendToBackend) {
       return;
     }
     if (phase === "error") {
+      pendingConsentRequestId = null;
       expand();
       importing = false;
       finishTask("import");
@@ -41651,8 +41683,6 @@ function setupImportOverlay(log, sendToBackend) {
     if (total > 0) {
       messageEl.textContent = `Sent ${formatBytes(Math.min(sent, total))} of ${formatBytes(total)}…`;
       setFraction(sent / total);
-      if (sent >= total)
-        lockCancel();
     } else {
       messageEl.textContent = `Sent ${formatBytes(sent)}…`;
     }
@@ -41676,8 +41706,14 @@ function setupImportOverlay(log, sendToBackend) {
         if (!visible && msg.phase !== "done" && msg.phase !== "error") {
           showOverlay(label || "character");
         }
-        if (visible)
-          applyProgress(msg.phase, msg.message, msg.fraction ?? null);
+        if (visible) {
+          cancelBtn.hidden = !pendingCancel || msg.cancellable !== true;
+          applyProgress(msg.phase, msg.error ?? msg.message, msg.fraction ?? null);
+          if (msg.cancelled) {
+            phaseEl.textContent = "Cancelled";
+            setFraction(0);
+          }
+        }
         break;
       }
       case "consent_prompt": {

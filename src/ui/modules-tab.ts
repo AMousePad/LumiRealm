@@ -100,7 +100,7 @@ export interface MountModulesPanelOptions {
     readonly handleBackendMessage: (msg: BackendToFrontend) => void;
     readonly destroy: () => void;
   };
-  readonly onImportStart?: (label: string, onCancel?: () => void, totalBytes?: number) => boolean | void;
+  readonly onImportStart?: (label: string, onCancel?: () => boolean | void, totalBytes?: number) => boolean | void;
   readonly onImportError?: (message: string) => void;
   readonly onUploadProgress?: (sent: number, total: number) => void;
 }
@@ -1121,11 +1121,30 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     log.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
 
     let cancelled = false;
+    let processingUploadId: string | null = null;
     const accepted = opts.onImportStart?.(fileName, () => {
+      if (processingUploadId) {
+        sendToBackend({ type: 'cancel_module_import', uploadId: processingUploadId });
+        setStatus('Cancelling module import…');
+        return true;
+      }
       cancelled = true;
-      moduleImportInFlight = false;
-      if (activeTus) { void activeTus.abort(true).catch(() => {}); activeTus = null; }
+      setStatus(null);
       clearProcessingTimer();
+      if (activeTus) {
+        const stopped = activeTus;
+        const uploadId = (stopped.url ?? '').split('/').filter(Boolean).pop();
+        activeTus = null;
+        void stopped.abort(false).then(async () => {
+          for (const previous of await stopped.findPreviousUploads()) {
+            if (previous.uploadUrl === stopped.url) await stopped.options.urlStorage?.removeUpload(previous.urlStorageKey);
+          }
+        }).catch(err => { log.warn('Module upload abort failed', err); }).finally(() => {
+          if (uploadId) sendToBackend({ type: 'cancel_module_import', uploadId, stagedUpload: true });
+        });
+        if (uploadId) return true;
+      }
+      moduleImportInFlight = false;
       uploadBtn.disabled = false;
       log.info('modules-panel: upload cancel requested');
     }, totalBytes);
@@ -1144,8 +1163,8 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
           : {}),
       },
       onError: (err) => {
-        activeTus = null;
         if (cancelled) return;
+        activeTus = null;
         log.error('modules-panel: tus upload failed', err);
         lastError = `Upload failed: ${errMsg(err)}`;
         moduleImportInFlight = false;
@@ -1154,13 +1173,14 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         uploadBtn.disabled = false;
       },
       onProgress: (sent, total) => {
+        if (cancelled) return;
         const pct = total > 0 ? Math.round((sent / total) * 100) : 0;
         setStatus(`Uploading ${fileName}… (${pct}%)`);
         opts.onUploadProgress?.(sent, total);
       },
       onSuccess: () => {
-        activeTus = null;
         if (cancelled) return;
+        activeTus = null;
         const uploadId = (upload.url ?? '').split('/').filter(Boolean).pop() ?? '';
         if (!uploadId) {
           lastError = 'Upload finished but no id was returned';
@@ -1172,6 +1192,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         }
         log.info(`modules-panel: upload complete uploadId=${uploadId} — requesting processing`);
         setStatus('Processing on server…');
+        processingUploadId = uploadId;
         sendToBackend({ type: 'process_module_from_upload', uploadId, fileName });
         // List refreshes can arrive before attachment refresh and asset processing finish.
         armProcessingTimer();

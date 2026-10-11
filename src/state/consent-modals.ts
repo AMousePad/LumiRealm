@@ -21,6 +21,7 @@ export interface ConsentApi {
   readonly requestConsent: (
     opts: { title: string; message: string; confirmLabel: string; cancelLabel: string },
     userId: string,
+    signal?: AbortSignal,
   ) => Promise<{ confirmed: boolean }>;
   readonly pendingConsents: Map<string, PendingConsent>;
 }
@@ -39,13 +40,22 @@ export function createConsentApi(deps: ConsentApiDeps): ConsentApi {
   function requestConsent(
     opts: { title: string; message: string; confirmLabel: string; cancelLabel: string },
     userId: string,
+    signal?: AbortSignal,
   ): Promise<{ confirmed: boolean }> {
     const run = (): Promise<{ confirmed: boolean }> =>
       new Promise((resolve) => {
+        if (signal?.aborted) { resolve({ confirmed: false }); return; }
         const requestId = crypto.randomUUID();
+        const abort = (): void => {
+          pendingConsents.delete(requestId);
+          clearTimeout(timeoutHandle);
+          resolve({ confirmed: false });
+        };
+        signal?.addEventListener('abort', abort, { once: true });
         const timeoutHandle = setTimeout(() => {
           if (!pendingConsents.has(requestId)) return;
           pendingConsents.delete(requestId);
+          signal?.removeEventListener('abort', abort);
           log.warn(`requestConsent: timed out requestId=${requestId} userId=${userId} (auto-decline)`);
           resolve({ confirmed: false });
         }, CONSENT_TIMEOUT_MS);
@@ -56,6 +66,7 @@ export function createConsentApi(deps: ConsentApiDeps): ConsentApi {
           ownerUserId: userId,
           resolver: (confirmed) => {
             clearTimeout(timeoutHandle);
+            signal?.removeEventListener('abort', abort);
             resolve({ confirmed });
           },
         });

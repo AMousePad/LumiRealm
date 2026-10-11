@@ -38,6 +38,7 @@ function uploader(
       return uploadMany(items, opts);
     },
     appendToJournal: async (_userId, _moduleId, ids) => { journaled.push([...ids]); },
+    discardCancelled: async () => {},
     syncWorldBook: async () => null,
     writeEnvelope: async () => {},
     emitProgress: () => {},
