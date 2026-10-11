@@ -37,7 +37,7 @@ for (const engine of [chromium, firefox]) {
         };
         const realm = window.realm = setupRealmModal({ ctx, mountTarget: document.body, sendToBackend: msg => sent.push(msg), log: { info() {}, warn() {}, error() {} } });
         window.reply = (prefix, count = 60) => realm.handleBackendMessage({ type:'realm_search_result', requestId: sent.at(-1).requestId, ok:true,
-          cards: Array.from({ length: count }, (_, i) => ({ id: prefix+i, name: prefix+i, desc:'A longer description for this example card that wraps across multiple lines and should stay close to the tags.', img:i === 1 ? '' : 'example.svg', tags:['First tag','Another tag','Longer tag name','Fourth tag','Last tag'], download:1, hot:0, hasLore:false, hasEmotion:false, hasAsset:false, type:'character', viewScreen:'none', license:'' })) });
+          cards: Array.from({ length: count }, (_, i) => ({ id: prefix+i, name: prefix+i, desc:'A longer description for this example card that wraps across multiple lines and should stay close to the tags.', img:i === 1 ? '' : 'example.svg', tags:['First tag','Another tag','Longer tag name','Fourth tag','Fifth tag','Sixth tag','Last tag'], download:1, hot:0, hasLore:false, hasEmotion:false, hasAsset:false, type:'character', viewScreen:'none', license:'' })) });
         realm.open(); window.reply('Initial');
       ` });
       assert(await page.locator('.lr-realm-pager').isVisible(), 'navigation must be visible on opening Recommended');
@@ -48,6 +48,35 @@ for (const engine of [chromium, firefox]) {
       assert(await page.getByTitle('Next page', { exact: true }).isDisabled());
       await page.getByRole('button', { name: 'Recent', exact: true }).click();
       await page.evaluate(() => (window as any).reply('Recent'));
+      const tagLayout = await page.locator('.lr-realm-card').first().evaluate(el => {
+        const tags = el.querySelector('.lr-realm-tags')!;
+        const footer = tags.parentElement!;
+        const stats = el.querySelector('.lr-realm-card-stats')!.getBoundingClientRect();
+        const tagBox = tags.getBoundingClientRect();
+        const before = el.getBoundingClientRect().height;
+        tags.remove();
+        const withoutTags = el.getBoundingClientRect().height;
+        footer.append(tags);
+        return { before, withoutTags, beside: tagBox.left >= stats.right, aligned: Math.abs((tagBox.top + tagBox.bottom) / 2 - (stats.top + stats.bottom) / 2) < 1 };
+      });
+      assert.equal(tagLayout.before, tagLayout.withoutTags, 'tags must not increase list-card height');
+      assert(tagLayout.beside && tagLayout.aligned, 'tags must sit beside the download count');
+      const tagTrack = page.locator('.lr-realm-tags-track').first();
+      await page.locator('.lr-realm-card-footer .lr-realm-tags').first().hover();
+      await page.waitForFunction(() => {
+        const track = document.querySelector('.lr-realm-tags-track')!;
+        return new DOMMatrix(getComputedStyle(track).transform).m41 < -1;
+      });
+      await page.mouse.move(0, 0);
+      assert.equal(await tagTrack.evaluate(el => getComputedStyle(el).transform), 'none');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.locator('.lr-realm-card-footer .lr-realm-tags').first().hover();
+      assert.equal(await tagTrack.evaluate(el => getComputedStyle(el).animationName), 'none');
+      await page.locator('.lr-realm-card-footer .lr-realm-tags').first().evaluate(el => { el.scrollLeft = 30; });
+      assert(await page.locator('.lr-realm-card-footer .lr-realm-tags').first().evaluate(el => el.scrollLeft > 0));
+      await page.locator('.lr-realm-card-footer .lr-realm-tags').first().evaluate(el => { el.scrollLeft = 0; });
+      await page.mouse.move(0, 0);
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
       await page.locator('.lr-realm-grid').evaluate(el => { (window as any).previousGrid = el; (window as any).previousCard = el.firstChild; });
       const toolbarBefore = await page.locator('.lr-realm-toolbar').boundingBox();
       const pagerBefore = await page.locator('.lr-realm-pager').boundingBox();
@@ -91,16 +120,16 @@ for (const engine of [chromium, firefox]) {
         const tags = el.querySelector('.lr-realm-tags')!;
         const stats = el.querySelector('.lr-realm-card-stats')!.getBoundingClientRect();
         const description = el.querySelector('.lr-realm-card-desc')!.getBoundingClientRect();
-        return { squareRatio: rect.width / rect.height, tagGap: tags.getBoundingClientRect().top - description.bottom, gradient: getComputedStyle(el, '::after').backgroundImage, statsBottom: stats.bottom, textBottom: text.bottom, imageRatio: image.height / rect.height, bottom: Math.abs(text.bottom - rect.bottom), tagRows: new Set(Array.from(tags.children).map(tag => tag.getBoundingClientRect().top)).size, overflow: getComputedStyle(tags).overflow };
+        return { squareRatio: rect.width / rect.height, tagGap: tags.getBoundingClientRect().top - description.bottom, gradient: getComputedStyle(el, '::after').backgroundImage, statsBottom: stats.bottom, textBottom: text.bottom, imageRatio: image.height / rect.height, bottom: Math.abs(text.bottom - rect.bottom), tagRows: new Set(Array.from(tags.querySelectorAll('.lr-realm-tag')).map(tag => tag.getBoundingClientRect().top)).size, overflow: getComputedStyle(tags).overflowX };
       });
       assert(Math.abs(layout.squareRatio - 1) < 0.01, 'grid cards must stay square');
       assert(layout.bottom < 2);
-      assert(layout.tagGap >= 0 && layout.tagGap <= 4, 'tags must sit directly under the description');
+      assert(layout.tagGap >= 0 && layout.tagGap <= 6, 'tags must sit directly under the description');
       assert(layout.gradient.includes('rgba(0, 0, 0, 0) 20%'), 'gradient must begin transparent');
       assert(layout.gradient.includes('rgba(0, 0, 0, 0.95)'), 'gradient must darken smoothly beneath the text');
       assert(layout.imageRatio > 0.98);
       assert.equal(layout.tagRows, 1);
-      assert.equal(layout.overflow, 'hidden');
+      assert.equal(layout.overflow, 'auto');
       assert(layout.statsBottom <= layout.textBottom, 'card statistics must fit inside the overlay');
       assert.equal(await page.locator('.lr-realm-card').nth(1).locator('.lr-realm-thumb-fallback').count(), 1);
       await page.locator('.lr-realm-body').evaluate(el => { el.scrollTop = 0; });
