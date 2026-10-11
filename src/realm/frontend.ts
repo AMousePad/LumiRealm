@@ -399,7 +399,12 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     const pagingBusy = state.loading || searchDebounceTimer !== undefined;
     (pagerEl.querySelector('[title="Previous page"]') as HTMLButtonElement).disabled = pagingBusy || state.page === 0;
     (pagerEl.querySelector('[title="Next page"]') as HTMLButtonElement).disabled = pagingBusy || state.cards.length === 0;
-    pagerEl.querySelector('.lr-realm-pager-page')!.textContent = String(state.page + 1);
+    const pageInput = pagerEl.querySelector('.lr-realm-pager-page') as HTMLInputElement;
+    pageInput.disabled = pagingBusy;
+    if (document.activeElement !== pageInput || state.loading) {
+      pageInput.value = String(state.page + 1);
+      pageInput.setCustomValidity('');
+    }
 
     for (const [el, top] of scrollPositions) el.scrollTop = top;
     syncOverlays();
@@ -519,10 +524,32 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     });
     pager.appendChild(prev);
 
-    const label = document.createElement('div');
-    label.className = 'lr-realm-pager-page';
-    label.textContent = String(state.page + 1);
-    pager.appendChild(label);
+    const pageInput = document.createElement('input');
+    pageInput.type = 'number';
+    pageInput.min = '1';
+    pageInput.max = String(Number.MAX_SAFE_INTEGER);
+    pageInput.step = '1';
+    pageInput.inputMode = 'numeric';
+    pageInput.enterKeyHint = 'go';
+    pageInput.className = 'lr-realm-pager-page';
+    pageInput.setAttribute('aria-label', 'Page number');
+    pageInput.title = 'Page number (press Enter to go)';
+    pageInput.value = String(state.page + 1);
+    pageInput.addEventListener('input', () => pageInput.setCustomValidity(''));
+    pageInput.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      const page = pageInput.valueAsNumber;
+      if (!Number.isSafeInteger(page) || page < 1) {
+        pageInput.setCustomValidity('Enter a whole page number of 1 or greater.');
+        pageInput.reportValidity();
+        return;
+      }
+      if (state.loading || searchDebounceTimer !== undefined || page - 1 === state.page) return;
+      state.page = page - 1;
+      doSearch();
+    });
+    pager.appendChild(pageInput);
 
     const next = document.createElement('button');
     next.type = 'button';
