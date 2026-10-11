@@ -42298,7 +42298,6 @@ div:has(> .lr-realm-modal-root) {\r
   flex: 1;\r
   overflow-y: auto;\r
   min-height: 0;\r
-  container-type: size;\r
   overscroll-behavior: contain;\r
 }\r
 \r
@@ -42337,7 +42336,7 @@ div:has(> .lr-realm-modal-root) {\r
   display: block;\r
   padding: 0;\r
   min-width: 0;\r
-  aspect-ratio: 2 / 3;\r
+  aspect-ratio: 1;\r
   overflow: hidden;\r
 }\r
 .lr-realm-grid[data-view="grid"] :is(.lr-realm-thumb, .lr-realm-thumb-fallback) {\r
@@ -42347,20 +42346,27 @@ div:has(> .lr-realm-modal-root) {\r
   height: 100%;\r
   border-radius: 0;\r
 }\r
+.lr-realm-grid[data-view="grid"] .lr-realm-card::after {\r
+  content: '';\r
+  position: absolute;\r
+  inset: 0;\r
+  background: linear-gradient(to bottom, transparent 20%, rgba(0, 0, 0, 0.2) 40%, rgba(0, 0, 0, 0.75) 70%, rgba(0, 0, 0, 0.95));\r
+  pointer-events: none;\r
+}\r
 .lr-realm-grid[data-view="grid"] .lr-realm-card-body {\r
   position: absolute;\r
   inset: auto 0 0;\r
-  height: 33.333%;\r
+  z-index: 1;\r
   box-sizing: border-box;\r
-  padding: 8px 10px;\r
+  padding: 10px;\r
   gap: 3px;\r
   overflow: hidden;\r
   color: #fff;\r
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.92));\r
 }\r
 .lr-realm-grid[data-view="grid"] .lr-realm-card-name { flex-shrink: 0; }\r
 .lr-realm-grid[data-view="grid"] .lr-realm-card-desc { color: #e6e6e6; min-height: 0; }\r
 .lr-realm-grid[data-view="grid"] .lr-realm-tags {\r
+  margin-top: 0;\r
   flex-wrap: nowrap;\r
   overflow: hidden;\r
   flex-shrink: 0;\r
@@ -42381,15 +42387,6 @@ div:has(> .lr-realm-modal-root) {\r
   white-space: nowrap;\r
   overflow: hidden;\r
   text-overflow: ellipsis;\r
-}\r
-@container (min-width: 1200px) and (min-height: 1140px) {\r
-  .lr-realm-grid[data-view="grid"] {\r
-    grid-template-columns: repeat(5, minmax(0, 1fr));\r
-    grid-auto-rows: calc((100cqh - 60px) / 6);\r
-  }\r
-  .lr-realm-grid[data-view="grid"] .lr-realm-card { aspect-ratio: auto; }\r
-  .lr-realm-grid[data-view="grid"] .lr-realm-card-body { padding: 4px 8px; gap: 2px; line-height: 1.2; }\r
-  .lr-realm-grid[data-view="grid"] .lr-realm-card-desc { display: none; }\r
 }\r
 .lr-realm-feedback {\r
   display: flex;\r

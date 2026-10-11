@@ -37,7 +37,7 @@ for (const engine of [chromium, firefox]) {
         };
         const realm = window.realm = setupRealmModal({ ctx, mountTarget: document.body, sendToBackend: msg => sent.push(msg), log: { info() {}, warn() {}, error() {} } });
         window.reply = (prefix, count = 60) => realm.handleBackendMessage({ type:'realm_search_result', requestId: sent.at(-1).requestId, ok:true,
-          cards: Array.from({ length: count }, (_, i) => ({ id: prefix+i, name: prefix+i, desc:'A description for this example card.', img:i === 1 ? '' : 'example.svg', tags:['First tag','Another tag','Longer tag name','Fourth tag','Last tag'], download:1, hot:0, hasLore:false, hasEmotion:false, hasAsset:false, type:'character', viewScreen:'none', license:'' })) });
+          cards: Array.from({ length: count }, (_, i) => ({ id: prefix+i, name: prefix+i, desc:'A longer description for this example card that wraps across multiple lines and should stay close to the tags.', img:i === 1 ? '' : 'example.svg', tags:['First tag','Another tag','Longer tag name','Fourth tag','Last tag'], download:1, hot:0, hasLore:false, hasEmotion:false, hasAsset:false, type:'character', viewScreen:'none', license:'' })) });
         realm.open(); window.reply('Initial');
       ` });
       await page.getByRole('button', { name: 'Recent', exact: true }).click();
@@ -84,9 +84,14 @@ for (const engine of [chromium, firefox]) {
         const text = el.querySelector('.lr-realm-card-body')!.getBoundingClientRect();
         const tags = el.querySelector('.lr-realm-tags')!;
         const stats = el.querySelector('.lr-realm-card-stats')!.getBoundingClientRect();
-        return { statsBottom: stats.bottom, textBottom: text.bottom, ratio: text.height / rect.height, imageRatio: image.height / rect.height, bottom: Math.abs(text.bottom - rect.bottom), tagRows: new Set(Array.from(tags.children).map(tag => tag.getBoundingClientRect().top)).size, overflow: getComputedStyle(tags).overflow };
+        const description = el.querySelector('.lr-realm-card-desc')!.getBoundingClientRect();
+        return { squareRatio: rect.width / rect.height, tagGap: tags.getBoundingClientRect().top - description.bottom, gradient: getComputedStyle(el, '::after').backgroundImage, statsBottom: stats.bottom, textBottom: text.bottom, imageRatio: image.height / rect.height, bottom: Math.abs(text.bottom - rect.bottom), tagRows: new Set(Array.from(tags.children).map(tag => tag.getBoundingClientRect().top)).size, overflow: getComputedStyle(tags).overflow };
       });
-      assert(Math.abs(layout.ratio - 1 / 3) < 0.01 && layout.bottom < 2);
+      assert(Math.abs(layout.squareRatio - 1) < 0.01, 'grid cards must stay square');
+      assert(layout.bottom < 2);
+      assert(layout.tagGap >= 0 && layout.tagGap <= 4, 'tags must sit directly under the description');
+      assert(layout.gradient.includes('rgba(0, 0, 0, 0) 20%'), 'gradient must begin transparent');
+      assert(layout.gradient.includes('rgba(0, 0, 0, 0.95)'), 'gradient must darken smoothly beneath the text');
       assert(layout.imageRatio > 0.98);
       assert.equal(layout.tagRows, 1);
       assert.equal(layout.overflow, 'hidden');
@@ -95,15 +100,12 @@ for (const engine of [chromium, firefox]) {
       await page.locator('.lr-realm-body').evaluate(el => { el.scrollTop = 0; });
       const gridLayout = await page.locator('.lr-realm-body').evaluate(el => {
         const cards = Array.from(el.querySelectorAll('.lr-realm-card')).map(card => card.getBoundingClientRect());
-        const bounds = el.getBoundingClientRect();
-        return { columns: cards.filter(card => Math.abs(card.top - cards[0]!.top) < 1).length,
-          visibleRows: new Set(cards.filter(card => card.bottom <= bounds.bottom + 1).map(card => card.top)).size };
+        return { columns: cards.filter(card => Math.abs(card.top - cards[0]!.top) < 1).length };
       });
       assert(gridLayout.columns <= 5);
       if (width === 1920) {
         assert.equal(Math.round((await page.locator('#host-modal').boundingBox())!.width), 1696);
         assert.equal(gridLayout.columns, 5);
-        assert.equal(gridLayout.visibleRows, 6);
       }
       assert.equal(await page.locator('#host-scroll').evaluate(el => el.scrollHeight > el.clientHeight + 1), false);
       assert.equal(await page.locator('.lr-realm-root').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
