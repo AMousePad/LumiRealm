@@ -15,11 +15,14 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Window } from 'happy-dom';
 import { mountModulesPanel, type ModulesPanelHandle } from '../../src/ui/modules-tab.js';
+import { currentTask, startTask, finishTask } from '../../src/ui/busy.js';
+import { mountSettingsPanel } from '../../src/ui/settings-tab.js';
 import type { BackendToFrontend, FrontendToBackend, ModuleSummary } from '../../src/types/messages.js';
 
 let window: Window;
 let originalDocument: Document | undefined;
 let originalGlobalConfirm: typeof globalThis.confirm | undefined;
+const mountedPanels: ModulesPanelHandle[] = [];
 
 beforeEach(() => {
   window = new Window();
@@ -36,6 +39,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const panel of mountedPanels.splice(0)) panel.destroy();
+  const task = currentTask();
+  if (task) finishTask(task.id);
   if (originalDocument === undefined) {
     delete (globalThis as unknown as { document?: Document }).document;
   } else {
@@ -61,6 +67,7 @@ function build(): {
     sendToBackend: send,
     log: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {} },
   });
+  mountedPanels.push(panel);
   return { root, send, panel };
 }
 
@@ -114,6 +121,55 @@ function ssPick(triggerId: string, value: string): void {
   const opt = panel.querySelector(`.lr-ss-option[data-value="${value}"]`) as unknown as HTMLElement;
   opt.click();
 }
+
+test.each(['done', 'error'] as const)('module deletion stays busy until its own %s response', phase => {
+  const { panel, root, send } = build();
+  const snapshot: BackendToFrontend = { type: 'modules_pushed', modules: [M_REIMU], attached_by_character: {} };
+  panel.handleBackendMessage(snapshot);
+  const button = (label: string) => Array.from(root.querySelectorAll('button')).find(b => b.textContent === label)!;
+  button('Delete').click();
+  const request = send.mock.calls.map(call => call[0]).find(msg => msg.type === 'delete_module')!;
+  expect(request.requestId).toBeString();
+  expect(button('Deleting…').disabled).toBe(true);
+  expect(button('Deleting…').classList.contains('lr-busy')).toBe(true);
+  expect(button('Characters').disabled).toBe(false);
+  panel.handleBackendMessage(snapshot);
+  panel.handleBackendMessage({ type: 'operation_progress', operationId: 'other', title: 'Other', phase: 'done', message: '', fraction: 1 });
+  expect(currentTask()?.id).toBe(request.requestId);
+  expect(button('Deleting…').disabled).toBe(true);
+  panel.handleBackendMessage({ type: 'operation_progress', operationId: request.requestId!, title: 'Delete', phase, message: 'Result', fraction: 1 });
+  expect(currentTask()).toBeNull();
+  expect(button('Delete').disabled).toBe(false);
+  if (phase === 'error') expect(root.querySelector('.lrm-status')!.textContent).toBe('Result');
+});
+
+test.each([false, true])('repair and module actions exclude each other, including repair failure=%s', failed => {
+  const { root: modulesRoot } = build();
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const settings = mountSettingsPanel({ root, sendToBackend() {}, log: { info() {}, warn() {}, error() {}, debug() {}, trace() {} } });
+  mountedPanels.push(settings);
+  settings.handleBackendMessage({ type: 'repair_scan_result', summary: {
+    staleCharRegex: 1, staleModuleRegex: 0, deadJournals: 0, charactersToRetranslate: 0,
+    modulesToReattach: 0, danglingModuleRefs: 0, cardTargets: [], moduleTargets: [], elapsedMs: 1,
+  } });
+  const apply = Array.from(root.querySelectorAll('button')).find(b => b.textContent === 'Apply repair')!;
+  startTask({ id: 'module-action', kind: 'module', label: 'Delete' });
+  expect(apply.disabled).toBe(true);
+  finishTask('module-action');
+  expect(apply.disabled).toBe(false);
+  apply.click();
+  expect(currentTask()?.kind).toBe('repair');
+  expect(startTask({ id: 'module-action', kind: 'module', label: 'Delete' })).toBe(false);
+  const upload = Array.from(modulesRoot.querySelectorAll('button')).find(b => b.textContent === 'Upload .risum / .charx')!;
+  expect(upload.disabled).toBe(true);
+  settings.handleBackendMessage({ type: 'repair_apply_result', result: {
+    staleCharRegexDeleted: 1, staleModuleRegexDeleted: 0, deadJournalsCleared: 0,
+    charactersRetranslated: 0, charactersSkippedLegacy: 0, modulesReattached: 0, modulesScrubbed: 0, elapsedMs: 1,
+  }, ...(failed ? { error: 'Repair failed' } : {}) });
+  expect(currentTask()).toBeNull();
+  expect(upload.disabled).toBe(false);
+});
 
 describe('mountModulesPanel — initial state', () => {
   test('sends request_modules + get_cards on mount', () => {
@@ -311,7 +367,7 @@ describe('mountModulesPanel — character rows + attachment', () => {
     const sendCalls = (send as unknown as { mock: { calls: FrontendToBackend[][] } }).mock.calls;
     const attachCall = sendCalls.find((c) => c[0]!.type === 'attach_module');
     expect(attachCall).toBeDefined();
-    expect(attachCall![0]).toEqual({
+    expect(attachCall![0]).toMatchObject({
       type: 'attach_module',
       characterId: 'c1',
       moduleId: 'mod-reimu',
@@ -346,7 +402,7 @@ describe('mountModulesPanel — character rows + attachment', () => {
     btn.click();
     const sendCalls = (send as unknown as { mock: { calls: FrontendToBackend[][] } }).mock.calls;
     const attachCall = sendCalls.find((c) => c[0]!.type === 'attach_module');
-    expect(attachCall![0]).toEqual({
+    expect(attachCall![0]).toMatchObject({
       type: 'attach_module',
       characterId: 'c1',
       moduleId: 'mod-reimu',
@@ -406,7 +462,7 @@ describe('mountModulesPanel — character rows + attachment', () => {
     const sendCalls = (send as unknown as { mock: { calls: FrontendToBackend[][] } }).mock.calls;
     const detachCall = sendCalls.find((c) => c[0]!.type === 'detach_module');
     expect(detachCall).toBeDefined();
-    expect(detachCall![0]).toEqual({
+    expect(detachCall![0]).toMatchObject({
       type: 'detach_module',
       characterId: 'c1',
       moduleId: 'mod-reimu',
@@ -453,7 +509,7 @@ describe('mountModulesPanel — delete module', () => {
     const calls = (send as unknown as { mock: { calls: FrontendToBackend[][] } }).mock.calls;
     const delCall = calls.find((c) => c[0]!.type === 'delete_module');
     expect(delCall).toBeDefined();
-    expect(delCall![0]).toEqual({ type: 'delete_module', moduleId: 'mod-reimu' });
+    expect(delCall![0]).toMatchObject({ type: 'delete_module', moduleId: 'mod-reimu' });
   });
 
   test('clicking Delete with confirm=false does NOT send delete_module', () => {

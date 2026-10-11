@@ -16,6 +16,8 @@ import { renderDescription } from '../realm/markdown.js';
 import { sendImportText } from './import-text-upload.js';
 import * as tus from 'tus-js-client';
 import { pickNativeFile } from './native-file-picker.js';
+import { currentTask, startTask, finishTask, subscribeTask, setButtonBusy } from './busy.js';
+import { v4 } from 'uuid';
 
 type ConnectionWire = Extract<BackendToFrontend, { type: 'connections_list_pushed' }>['connections'][number];
 
@@ -98,7 +100,8 @@ export interface MountModulesPanelOptions {
     readonly handleBackendMessage: (msg: BackendToFrontend) => void;
     readonly destroy: () => void;
   };
-  readonly onImportStart?: (label: string, onCancel?: () => void, totalBytes?: number) => void;
+  readonly onImportStart?: (label: string, onCancel?: () => void, totalBytes?: number) => boolean | void;
+  readonly onImportError?: (message: string) => void;
   readonly onUploadProgress?: (sent: number, total: number) => void;
 }
 
@@ -119,6 +122,17 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   const expandedCharacters = new Set<string>();
   const expandedModules = new Set<string>();
   let lastError: string | null = null;
+  let moduleImportInFlight = false;
+  let pendingAction: { id: string; key: string } | null = null;
+
+  function sendModuleAction(message: Extract<FrontendToBackend, { type: 'attach_module' | 'detach_module' | 'delete_module' | 'set_global_modules' }>, label: string, key: string): void {
+    if (currentTask()) return;
+    const id = v4();
+    pendingAction = { id, key };
+    if (!startTask({ id, kind: 'module', label })) { pendingAction = null; return; }
+    try { sendToBackend({ ...message, requestId: id }); }
+    catch (error) { pendingAction = null; finishTask(id); setStatus(errMsg(error), true); }
+  }
 
   // Subtab nav (Characters / Modules / Lorebooks). Each subtab is a flat
   // body , no outer `<details>` chrome since the tab itself isolates content.
@@ -203,6 +217,10 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   refreshBtn.title = 'Re-fetch the module list.';
   libToolbar.appendChild(refreshBtn);
   libBody.appendChild(libToolbar);
+  const moduleStatus = document.createElement('div');
+  moduleStatus.className = 'lrm-status';
+  moduleStatus.setAttribute('role', 'status');
+  libBody.appendChild(moduleStatus);
 
   let moduleSearchTerm = '';
   const libFilterRow = document.createElement('div');
@@ -365,7 +383,10 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   }
   activateSubTab(activeSubTab);
 
-  function setStatus(_msg: string | null, _isError = false): void { /* no-op */ }
+  function setStatus(message: string | null, isError = false): void {
+    moduleStatus.textContent = message ?? '';
+    moduleStatus.classList.toggle('lrm-status-error', isError);
+  }
 
   // Chips + an add dropdown. Mirrors the per-character attach control rather
   // than introducing a second idiom for "pick a module".
@@ -417,14 +438,14 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       onChange: sendGlobalModules,
     });
     globalPickerHandle = picker;
+    picker.setDisabled(currentTask() !== null);
+    head.classList.toggle('lr-busy', pendingAction?.key === 'global');
     globalBox.appendChild(picker.root);
   }
 
   function sendGlobalModules(next: readonly string[]): void {
     log.info(`modules-panel: set_global_modules count=${next.length}`);
-    globalModuleIds = next;
-    renderGlobalBox();
-    sendToBackend({ type: 'set_global_modules', moduleIds: next });
+    sendModuleAction({ type: 'set_global_modules', moduleIds: next }, 'Updating global modules', 'global');
   }
 
   function renderModuleList(): void {
@@ -546,6 +567,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     exportBtn.type = 'button';
     exportBtn.className = 'lrm-btn';
     exportBtn.textContent = 'Export';
+    exportBtn.disabled = currentTask() !== null;
     exportBtn.title = `Download "${displayName}" as a .lumirealm.module.charx archive.`;
     exportBtn.addEventListener('click', () => {
       log.info(`modules-panel: export_module id=${m.id}`);
@@ -556,11 +578,12 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     del.type = 'button';
     del.className = 'lrm-btn lrm-btn-danger';
     del.textContent = 'Delete';
+    setButtonBusy(del, pendingAction?.key === `delete:${m.id}` ? 'Deleting…' : 'Delete', pendingAction?.key === `delete:${m.id}`, currentTask() !== null);
     del.title = `Remove "${displayName}" and detach from all characters.`;
     del.addEventListener('click', () => {
       if (!window.confirm(`Delete module "${displayName}"?`)) return;
       log.info(`modules-panel: delete_module id=${m.id}`);
-      sendToBackend({ type: 'delete_module', moduleId: m.id });
+      sendModuleAction({ type: 'delete_module', moduleId: m.id }, 'Deleting module', `delete:${m.id}`);
     });
     actions.appendChild(del);
     body.appendChild(actions);
@@ -668,6 +691,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     exportCharBtn.type = 'button';
     exportCharBtn.className = 'lrm-btn';
     exportCharBtn.textContent = 'Export card';
+    exportCharBtn.disabled = currentTask() !== null;
     exportCharBtn.title =
       `Download "${original}" as a .lumirealm.charx archive. Attached modules are not included.`;
     exportCharBtn.addEventListener('click', () => {
@@ -704,14 +728,16 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         detach.type = 'button';
         detach.className = 'lrm-btn-mini lrm-btn-danger';
         detach.textContent = 'Detach';
+        const detachKey = `detach:${card.character_id}:${a.id}`;
+        setButtonBusy(detach, pendingAction?.key === detachKey ? 'Removing…' : 'Detach', pendingAction?.key === detachKey, currentTask() !== null);
         detach.title = `Detach "${displayAttached || a.name}" from this character.`;
         detach.addEventListener('click', () => {
           log.info(`modules-panel: detach_module char=${card.character_id} module=${a.id}`);
-          sendToBackend({
+          sendModuleAction({
             type: 'detach_module',
             characterId: card.character_id,
             moduleId: a.id,
-          });
+          }, 'Removing module', detachKey);
         });
         li.appendChild(detach);
         ul.appendChild(li);
@@ -747,6 +773,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       attachBtn.textContent = 'Attach';
       attachBtn.title = 'Attach the selected module.';
       attachBtn.disabled = true;
+      setButtonBusy(attachBtn, pendingAction?.key === `attach:${card.character_id}` ? 'Attaching…' : 'Attach', pendingAction?.key === `attach:${card.character_id}`, true);
 
       const ss = createSearchableSelect({
         id: selectId,
@@ -769,23 +796,22 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
           };
         }),
         onChange(selected) {
-          attachBtn.disabled = selected === null;
+          attachBtn.disabled = selected === null || currentTask() !== null;
         },
       });
       attachSelectHandles.push(ss);
+      ss.setDisabled(currentTask() !== null);
       attachWrap.appendChild(ss.root);
 
       attachBtn.addEventListener('click', () => {
         const moduleId = ss.getValue();
         if (!moduleId) return;
         log.info(`modules-panel: attach_module char=${card.character_id} module=${moduleId}`);
-        sendToBackend({
+        sendModuleAction({
           type: 'attach_module',
           characterId: card.character_id,
           moduleId,
-        });
-        ss.setValue(null);
-        attachBtn.disabled = true;
+        }, 'Attaching module', `attach:${card.character_id}`);
       });
       attachWrap.appendChild(attachBtn);
       body.appendChild(attachWrap);
@@ -859,7 +885,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   renderPresetLabelControls();
 
   async function onPresetUploadClicked(): Promise<void> {
-    if (presetImportInFlight) return;
+    if (presetImportInFlight || currentTask()) return;
     let file: File | null = null;
     try {
       file = await pickNativeFile(['.risup', '.risupreset', '.json']);
@@ -876,13 +902,14 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     setPresetStatus(`Uploading "${fileName}" (${(totalBytes / 1024).toFixed(1)} KB)…`, false);
 
     let cancelled = false;
-    opts.onImportStart?.(fileName, () => {
+    const accepted = opts.onImportStart?.(fileName, () => {
       cancelled = true;
       if (activeTus) { void activeTus.abort(true).catch(() => {}); activeTus = null; }
       presetImportInFlight = false;
       presetUploadBtn.disabled = false;
       setPresetStatus('Import cancelled', false);
     }, totalBytes);
+    if (accepted === false) { presetImportInFlight = false; updateBusyControls(); return; }
 
     const upload = new tus.Upload(file, {
       endpoint: UPLOAD_ENDPOINT,
@@ -899,6 +926,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         presetImportInFlight = false;
         presetUploadBtn.disabled = false;
         setPresetStatus(`Upload failed: ${errMsg(err)}`, true);
+        opts.onImportError?.(`Upload failed: ${errMsg(err)}`);
       },
       onProgress: (bytesSent, bytesTotal) => {
         opts.onUploadProgress?.(bytesSent, bytesTotal);
@@ -911,6 +939,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
           presetImportInFlight = false;
           presetUploadBtn.disabled = false;
           setPresetStatus('Could not read upload ID from endpoint', true);
+          opts.onImportError?.('Could not read upload ID from endpoint');
           return;
         }
         const labelTranslation = presetTranslateCheck.checked && presetConnectionId !== null
@@ -946,7 +975,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   lbUploadBtn.addEventListener('click', () => { void onLorebookUploadClicked(); });
 
   async function onLorebookUploadClicked(): Promise<void> {
-    if (lorebookImportInFlight) return;
+    if (lorebookImportInFlight || currentTask()) return;
     let file: File | null;
     try {
       file = await pickLorebookFile();
@@ -962,6 +991,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       setLorebookStatus(`Read failed: ${errMsg(err)}`, true);
       return;
     }
+    if (currentTask()) return;
     lorebookImportInFlight = true;
     lbUploadBtn.disabled = true;
     setLorebookStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
@@ -978,6 +1008,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   function setLorebookStatus(msg: string, isError: boolean): void {
     lbStatus.textContent = msg;
     lbStatus.classList.toggle('lrm-lorebook-status-error', isError);
+    updateBusyControls();
   }
 
   // Backend parses + translates, the FE POSTs the resulting rows since only the
@@ -996,7 +1027,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   }
 
   async function onRegexUploadClicked(): Promise<void> {
-    if (regexImportInFlight) return;
+    if (regexImportInFlight || currentTask()) return;
     let file: File | null;
     try {
       file = await pickLorebookFile();
@@ -1012,6 +1043,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       setRegexStatus(`Read failed: ${errMsg(err)}`, true);
       return;
     }
+    if (currentTask()) return;
     const targetId = regexTargetSelect.getValue() || null;
     regexImportInFlight = true;
     rxUploadBtn.disabled = true;
@@ -1029,6 +1061,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   function setRegexStatus(msg: string, isError: boolean): void {
     rxStatus.textContent = msg;
     rxStatus.classList.toggle('lrm-lorebook-status-error', isError);
+    updateBusyControls();
   }
 
   async function onStandaloneRegexInstall(
@@ -1058,12 +1091,12 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       setRegexStatus(`Install failed: ${errMsg(err)}`, true);
     } finally {
       regexImportInFlight = false;
-      rxUploadBtn.disabled = false;
+      updateBusyControls();
     }
   }
 
   async function onUploadClicked(): Promise<void> {
-    if (uploadBtn.disabled) return;
+    if (uploadBtn.disabled || currentTask()) return;
     log.info('modules-panel: upload clicked');
     let file: File | null = null;
     try {
@@ -1080,6 +1113,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     }
 
     lastError = null;
+    moduleImportInFlight = true;
     const fileName = file.name;
     const totalBytes = file.size;
     setStatus(`Uploading ${fileName}…`);
@@ -1087,13 +1121,15 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
     log.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
 
     let cancelled = false;
-    opts.onImportStart?.(fileName, () => {
+    const accepted = opts.onImportStart?.(fileName, () => {
       cancelled = true;
+      moduleImportInFlight = false;
       if (activeTus) { void activeTus.abort(true).catch(() => {}); activeTus = null; }
       clearProcessingTimer();
       uploadBtn.disabled = false;
       log.info('modules-panel: upload cancel requested');
     }, totalBytes);
+    if (accepted === false) { moduleImportInFlight = false; updateBusyControls(); return; }
 
     const upload = new tus.Upload(file, {
       endpoint: UPLOAD_ENDPOINT,
@@ -1112,7 +1148,9 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         if (cancelled) return;
         log.error('modules-panel: tus upload failed', err);
         lastError = `Upload failed: ${errMsg(err)}`;
+        moduleImportInFlight = false;
         setStatus(lastError, true);
+        opts.onImportError?.(lastError);
         uploadBtn.disabled = false;
       },
       onProgress: (sent, total) => {
@@ -1122,17 +1160,20 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       },
       onSuccess: () => {
         activeTus = null;
+        if (cancelled) return;
         const uploadId = (upload.url ?? '').split('/').filter(Boolean).pop() ?? '';
         if (!uploadId) {
           lastError = 'Upload finished but no id was returned';
+          moduleImportInFlight = false;
           setStatus(lastError, true);
+          opts.onImportError?.(lastError);
           uploadBtn.disabled = false;
           return;
         }
         log.info(`modules-panel: upload complete uploadId=${uploadId} — requesting processing`);
         setStatus('Processing on server…');
         sendToBackend({ type: 'process_module_from_upload', uploadId, fileName });
-        // Backend signals done via modules_pushed and failure via an `error` frame.
+        // List refreshes can arrive before attachment refresh and asset processing finish.
         armProcessingTimer();
       },
     });
@@ -1156,13 +1197,12 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
       processingTimer = null;
       lastError = 'Server did not respond after upload. The module may still be processing.';
       setStatus(lastError, true);
-      uploadBtn.disabled = false;
     });
   }
 
-  // A module upload finished server-side: modules_pushed lands on success.
   function finishModuleUpload(): void {
-    if (!processingTimer) return;
+    if (!moduleImportInFlight) return;
+    moduleImportInFlight = false;
     clearProcessingTimer();
     uploadBtn.disabled = false;
     setStatus(null);
@@ -1202,7 +1242,6 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
             attachedByCharacter.set(charId, list);
           }
         }
-        finishModuleUpload();
         render();
         break;
       case 'attached_modules_pushed':
@@ -1244,10 +1283,11 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
             setPresetStatus(msg.message, false);
           }
         }
-        if (processingTimer) {
+        if (moduleImportInFlight) {
           if (msg.phase === 'done') {
             finishModuleUpload();
           } else if (msg.phase === 'error') {
+            moduleImportInFlight = false;
             clearProcessingTimer();
             uploadBtn.disabled = false;
             lastError = msg.error ?? msg.message;
@@ -1259,20 +1299,31 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
         }
         break;
       case 'error':
-        if (processingTimer) {
-          clearProcessingTimer();
-          uploadBtn.disabled = false;
-        }
         if (lastError === null) {
           lastError = msg.message;
           setStatus(lastError, true);
         }
         break;
+      case 'operation_progress':
+        if (pendingAction?.id === msg.operationId && (msg.phase === 'done' || msg.phase === 'error')) {
+          const id = pendingAction.id;
+          pendingAction = null;
+          finishTask(id);
+          if (msg.phase === 'error') setStatus(msg.error ?? msg.message, true);
+          render();
+        }
+        break;
     }
+    updateBusyControls();
   }
 
   function destroy(): void {
     log.info('modules-panel: destroy');
+    unsubBusy();
+    if (pendingAction) { const id = pendingAction.id; pendingAction = null; finishTask(id); }
+    clearProcessingTimer();
+    if (charSearchTimer !== undefined) window.clearTimeout(charSearchTimer);
+    if (moduleSearchTimer !== undefined) window.clearTimeout(moduleSearchTimer);
     destroyAttachSelects();
     try { globalPickerHandle?.destroy(); } catch { void 0; }
     globalPickerHandle = null;
@@ -1287,6 +1338,15 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
   sendToBackend({ type: 'get_cards' });
   sendToBackend({ type: 'request_modules' });
 
+  function updateBusyControls(): void {
+    const busy = currentTask() !== null;
+    setButtonBusy(uploadBtn, moduleImportInFlight ? 'Importing module…' : 'Upload .risum / .charx', moduleImportInFlight, busy || moduleImportInFlight);
+    setButtonBusy(presetUploadBtn, presetImportInFlight ? 'Importing preset…' : 'Upload preset (.risup)…', presetImportInFlight, busy || presetImportInFlight);
+    setButtonBusy(lbUploadBtn, lorebookImportInFlight ? 'Importing lorebook…' : 'Upload lorebook…', lorebookImportInFlight, busy || lorebookImportInFlight);
+    setButtonBusy(rxUploadBtn, regexImportInFlight ? 'Importing regex…' : 'Upload regex…', regexImportInFlight, busy || regexImportInFlight);
+  }
+  const unsubBusy = subscribeTask(() => { updateBusyControls(); render(); });
+  updateBusyControls();
   render();
   log.info('modules-panel: ready');
 

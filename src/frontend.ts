@@ -263,9 +263,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (presetTracking && settings.core.isReady()) reportActivePreset(state.get<string | null>('loom.activePresetId'));
   };
 
-  // Blocking import-progress overlay shown from picker-click and realm-Import
-  // through phase=done. Locks UI to prevent mid-import navigation. Created
-  // before the sidebar so notifyImportStart wires into the cards-panel picker.
+  // Progress stays mounted when the user navigates away from the import panel.
   const importOverlay = setupImportOverlay(flog, sendToBackend);
   cleanups.push(() => importOverlay.destroy());
 
@@ -278,6 +276,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       onImportStart: (fileName, onCancel, totalBytes) =>
         importOverlay.notifyImportStart(fileName, 'drawer', onCancel, totalBytes),
       onUploadProgress: (sent, total) => importOverlay.setUploadProgress(sent, total),
+      onImportError: message => importOverlay.notifyImportError(message),
       onModuleImportStart: (fileName, onCancel, totalBytes) =>
         importOverlay.notifyImportStart(fileName, 'module', onCancel, totalBytes),
     });
@@ -625,7 +624,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       try { importOverlay.handleBackendMessage(msg as unknown as BackendToFrontend); } catch (err) { flog.warn('importOverlay realm dispatch threw:', err); }
       return;
     }
-    // Import-related backend messages drive the blocking overlay (start /
+    // Import-related backend messages drive the progress panel (start /
     // phase / asset upload / done / error). Fire BEFORE the sidebar fan-out
     // so the overlay state stays consistent with the cards-panel status UI.
     try { importOverlay.handleBackendMessage(msg); } catch (err) { flog.warn('importOverlay dispatch threw:', err); }

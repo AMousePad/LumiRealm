@@ -163,16 +163,22 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       await deps.pushModules(ctx.userId);
     },
     set_global_modules: async (msg, ctx) => {
-      await deps.setGlobalModules(msg.moduleIds, ctx.userId);
-      await deps.pushModules(ctx.userId);
+      const id = msg.requestId ?? crypto.randomUUID();
+      deps.emitOperationProgress(ctx.userId, id, 'started', 'Update global modules', 'Applying modules…', null);
+      try {
+        await deps.setGlobalModules(msg.moduleIds, ctx.userId);
+        await deps.pushModules(ctx.userId);
+        deps.emitOperationProgress(ctx.userId, id, 'done', 'Update global modules', 'Global modules updated', 1);
+      } catch (error) {
+        deps.emitOperationProgress(ctx.userId, id, 'error', 'Update global modules', '', null, deps.errMsg(error));
+      }
     },
     delete_module: async (msg, ctx) => {
-      const envelopeForDelete = await deps.readModuleEnvelope(ctx.userId, msg.moduleId);
-      const moduleName = envelopeForDelete?.module?.name || msg.moduleId.slice(0, 8);
-      const opId = `delete-module-${msg.moduleId}-${Date.now()}`;
-      const opTitle = `Deleting module "${moduleName}"`;
+      const opId = msg.requestId ?? crypto.randomUUID();
+      const opTitle = 'Delete module';
       deps.emitOperationProgress(ctx.userId, opId, 'started', opTitle, 'Detaching from characters…', null);
       try {
+        const envelopeForDelete = await deps.readModuleEnvelope(ctx.userId, msg.moduleId);
         const sharedWbId = envelopeForDelete?.installed_world_book_id ?? null;
         // Capture the journal's image-id list now, before the envelope is
         // gone. Re-uploads append to the journal, the journal is the
@@ -272,11 +278,11 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       }
     },
     attach_module: async (msg, ctx) => {
-      if (deps.blockedByRepair(ctx.userId, 'attach_module')) return;
-      const operationId = crypto.randomUUID();
+      const operationId = msg.requestId ?? crypto.randomUUID();
       const title = 'Attach module';
       deps.emitOperationProgress(ctx.userId, operationId, 'started', title, 'Installing module…', null);
       try {
+        if (deps.blockedByRepair(ctx.userId, 'attach_module')) throw new Error('Wait for the current repair to finish');
         const result = await deps.attachModuleToCharacter(msg.characterId, msg.moduleId, ctx.userId);
         if (!result.ok) throw new Error(result.reason ?? 'Attachment failed');
         deps.emitOperationProgress(ctx.userId, operationId, 'progress', title, 'Refreshing module list…', null);
@@ -290,14 +296,18 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
       }
     },
     detach_module: async (msg, ctx) => {
-      if (deps.blockedByRepair(ctx.userId, 'detach_module')) return;
-      const result = await deps.detachModuleFromCharacter(msg.characterId, msg.moduleId, ctx.userId);
-      if (!result.ok) {
-        ctx.send({ type: 'error', message: `detach_module: ${result.reason ?? 'failed'}` }, ctx.userId);
-        return;
+      const id = msg.requestId ?? crypto.randomUUID();
+      deps.emitOperationProgress(ctx.userId, id, 'started', 'Detach module', 'Removing module…', null);
+      try {
+        if (deps.blockedByRepair(ctx.userId, 'detach_module')) throw new Error('Wait for the current repair to finish');
+        const result = await deps.detachModuleFromCharacter(msg.characterId, msg.moduleId, ctx.userId);
+        if (!result.ok) throw new Error(result.reason ?? 'Detach failed');
+        await deps.pushAttachedForCharacter(msg.characterId, ctx.userId);
+        await deps.pushModules(ctx.userId);
+        deps.emitOperationProgress(ctx.userId, id, 'done', 'Detach module', 'Module detached', 1);
+      } catch (error) {
+        deps.emitOperationProgress(ctx.userId, id, 'error', 'Detach module', '', null, deps.errMsg(error));
       }
-      await deps.pushAttachedForCharacter(msg.characterId, ctx.userId);
-      await deps.pushModules(ctx.userId);
     },
     module_artifacts_installed: async (msg, ctx) => {
       // Global installs have no character to stash against; their ids go in the

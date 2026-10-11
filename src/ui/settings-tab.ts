@@ -1,4 +1,5 @@
 import { hostCall } from '../host-services/client.js';
+import { currentTask, startTask, finishTask, subscribeTask, setButtonBusy } from './busy.js';
 import type {
   BackendToFrontend,
   FrontendToBackend,
@@ -776,7 +777,7 @@ export function mountSettingsPanel(
 
   function refreshCleanupActionState(): void {
     const sel = cleanupSelected.size;
-    const repairBlocking = repairScanning || repairApplying;
+    const repairBlocking = repairScanning || repairApplying || currentTask() !== null;
     deleteBtn.textContent = `Delete selected (${sel})`;
     deleteBtn.disabled = sel === 0 || cleanupDeleting || cleanupScanning || repairBlocking;
     selectAllBtn.disabled = cleanupOrphans.length === 0 || cleanupScanning || cleanupDeleting || repairBlocking;
@@ -877,7 +878,7 @@ export function mountSettingsPanel(
   }
 
   scanBtn.addEventListener('click', () => {
-    if (cleanupScanning) return;
+    if (cleanupScanning || currentTask()) return;
     log.info('settings-tab: orphan scan requested');
     cleanupScanning = true;
     cleanupOrphans = [];
@@ -899,7 +900,7 @@ export function mountSettingsPanel(
     refreshCleanupActionState();
   });
   deleteBtn.addEventListener('click', () => {
-    if (cleanupSelected.size === 0 || cleanupDeleting) return;
+    if (cleanupSelected.size === 0 || cleanupDeleting || currentTask()) return;
     const count = cleanupSelected.size;
     if (!confirm(
       `Delete ${count} orphan asset${count === 1 ? '' : 's'}? This cannot be undone.`,
@@ -951,6 +952,7 @@ export function mountSettingsPanel(
   };
   let repairScanning = false;
   let repairApplying = false;
+  let refreshRepairApply = (): void => {};
   let repairLastSummary: RepairScanSummary | null = null;
   const repairSelectedCharacterIds = new Set<string>();
   const repairSelectedModuleIds = new Set<string>();
@@ -965,7 +967,7 @@ export function mountSettingsPanel(
   }
 
   function refreshRepairUi(): void {
-    repairScanBtn.disabled = repairScanning || repairApplying || cleanupScanning || cleanupDeleting;
+    repairScanBtn.disabled = repairScanning || repairApplying || cleanupScanning || cleanupDeleting || currentTask() !== null;
     repairScanBtn.textContent = repairScanning ? 'Scanning…' : 'Scan for problems';
     refreshCleanupActionState();
   }
@@ -1006,7 +1008,7 @@ export function mountSettingsPanel(
     );
     let targetCountSpan: HTMLSpanElement | null = null;
     const refreshApplyBtn = (): void => {
-      applyBtn.disabled = repairApplying || !hasApplicableSelection();
+      setButtonBusy(applyBtn, repairApplying ? 'Applying…' : 'Apply repair', repairApplying, currentTask() !== null || repairApplying || !hasApplicableSelection());
       if (targetCountSpan) {
         targetCountSpan.textContent =
           `${repairSelectedCharacterIds.size} cards · ${repairSelectedModuleIds.size} modules`;
@@ -1149,7 +1151,7 @@ export function mountSettingsPanel(
 
     refreshApplyBtn();
     applyBtn.addEventListener('click', () => {
-      if (!hasApplicableSelection()) return;
+      if (!hasApplicableSelection() || currentTask()) return;
       const willRetranslate = repairChecked.forceRetranslate
         && (repairSelectedCharacterIds.size > 0 || repairSelectedModuleIds.size > 0);
       const willDeleteRows = (repairChecked.staleCharRegex && s.staleCharRegex > 0)
@@ -1188,6 +1190,7 @@ export function mountSettingsPanel(
           `cards=${repairSelectedCharacterIds.size} modules=${repairSelectedModuleIds.size}`,
       );
       repairApplying = true;
+      if (!startTask({ id: 'repair', kind: 'repair', label: 'Repair' })) { repairApplying = false; return; }
       applyBtn.disabled = true;
       applyBtn.textContent = 'Applying…';
       repairCardPicker?.setDisabled(true);
@@ -1205,10 +1208,11 @@ export function mountSettingsPanel(
       });
     });
     repairResultBox.appendChild(applyBtn);
+    refreshRepairApply = refreshApplyBtn;
   }
 
   repairScanBtn.addEventListener('click', () => {
-    if (repairScanning || repairApplying) return;
+    if (repairScanning || repairApplying || currentTask()) return;
     log.info('settings-tab: repair scan requested');
     repairScanning = true;
     repairLastSummary = null;
@@ -1811,7 +1815,7 @@ export function mountSettingsPanel(
     }
     if (msg.type === 'open_settings_cleanup') {
       activateSubTab('cleanup');
-      if (!cleanupScanning && !cleanupDeleting) {
+      if (!cleanupScanning && !cleanupDeleting && !currentTask()) {
         log.info('settings-tab: open_settings_cleanup, auto-firing scan');
         cleanupScanning = true;
         cleanupOrphans = [];
@@ -1923,6 +1927,8 @@ export function mountSettingsPanel(
     }
     if (msg.type === 'repair_apply_result') {
       repairApplying = false;
+      finishTask('repair');
+      refreshRepairApply = () => {};
       destroyRepairPickers();
       const r = msg.result;
       const parts: string[] = [];
@@ -1945,6 +1951,7 @@ export function mountSettingsPanel(
       rescanBtn.className = 'lrm-btn';
       rescanBtn.textContent = 'Re-scan';
       rescanBtn.addEventListener('click', () => {
+        if (currentTask()) return;
         log.info('settings-tab: repair re-scan after apply');
         repairScanning = true;
         repairLastSummary = null;
@@ -1965,11 +1972,14 @@ export function mountSettingsPanel(
   }
 
   render();
+  const unsubBusy = subscribeTask(() => { refreshRepairUi(); refreshRepairApply(); });
+  refreshRepairUi();
   log.info('settings-panel: ready');
 
   return {
     handleBackendMessage,
     destroy(): void {
+      unsubBusy();
       log.info('settings-panel: destroy');
       try { connSelect.destroy(); } catch { /* */ }
       try { submodelConnSelect.destroy(); } catch { /* */ }

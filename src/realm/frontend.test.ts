@@ -93,7 +93,7 @@ describe('RisuRealm import browsing session', () => {
       mountTarget,
       sendToBackend: (msg) => h.sent.push(msg),
       log: { info: () => undefined, warn: () => undefined, error: () => undefined },
-      onImportStart: (label) => importStarts.push(label),
+      onImportStart: (label) => { importStarts.push(label); },
     });
 
     realm.open();

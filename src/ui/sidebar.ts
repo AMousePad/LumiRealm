@@ -73,9 +73,10 @@ export interface CreateSidebarOptions {
   readonly sendToBackend: (msg: FrontendToBackend) => void;
   readonly log: FrontendLog;
   readonly initialTab?: SidebarTabId;
-  readonly onImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => void;
+  readonly onImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => boolean | void;
+  readonly onImportError?: (message: string) => void;
   readonly onUploadProgress?: (sent: number, total: number) => void;
-  readonly onModuleImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => void;
+  readonly onModuleImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => boolean | void;
 }
 
 export function createSidebar(opts: CreateSidebarOptions): SidebarHandle {
@@ -170,9 +171,11 @@ export function createSidebar(opts: CreateSidebarOptions): SidebarHandle {
               sendToBackend,
               log,
               ...(opts.onImportStart ? { onImportStart: opts.onImportStart } : {}),
+              ...(opts.onImportError ? { onImportError: opts.onImportError } : {}),
               ...(opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}),
             }),
           ...(opts.onModuleImportStart ? { onImportStart: opts.onModuleImportStart } : {}),
+          ...(opts.onImportError ? { onImportError: opts.onImportError } : {}),
           ...(opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}),
         });
         handle = {

@@ -1,4 +1,5 @@
 import { hostCall } from '../host-services/client.js';
+import { currentTask, subscribeTask, setButtonBusy } from './busy.js';
 import * as tus from 'tus-js-client';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend, CardSummary, ImportProgress } from '../types/messages.js';
@@ -51,7 +52,8 @@ export interface MountCardsPanelOptions {
   readonly ctx: SpindleFrontendContext;
   readonly sendToBackend: (msg: FrontendToBackend) => void;
   readonly log: FrontendLog;
-  readonly onImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => void;
+  readonly onImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => boolean | void;
+  readonly onImportError?: (message: string) => void;
   readonly onUploadProgress?: (sent: number, total: number) => void;
 }
 
@@ -83,7 +85,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   function render(): void { /* no-op */ }
 
   async function onImportClicked(): Promise<void> {
-    if (importBtn.disabled) return;
+    if (importBtn.disabled || currentTask()) return;
     log.info('drawer: Import button clicked — opening file picker');
     let file: File | null = null;
     try {
@@ -110,12 +112,15 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     log.info(`drawer: upload file=${fileName} bytes=${totalBytes}`);
 
     let cancelled = false;
-    opts.onImportStart?.(fileName, () => {
+    const accepted = opts.onImportStart?.(fileName, () => {
       cancelled = true;
+      state.optimistic = false;
+      importBtn.disabled = false;
       if (activeTus) { void activeTus.abort(true).catch(() => {}); activeTus = null; }
       clearNoProgress();
       log.info('drawer: upload cancel requested');
     }, totalBytes);
+    if (accepted === false) { state.optimistic = false; updateBusy(); return; }
 
     state.progress = { phase: 'decoding', message: 'Starting upload…', fraction: 0 };
     render();
@@ -133,6 +138,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
         state.optimistic = false;
         state.progress = { phase: 'error', message: `Upload failed: ${errMsg(err)}`, fraction: null };
         state.notices = [errMsg(err)];
+        opts.onImportError?.(`Upload failed: ${errMsg(err)}`);
         importBtn.disabled = false;
         render();
       },
@@ -148,10 +154,12 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
       },
       onSuccess: () => {
         activeTus = null;
+        if (cancelled) return;
         const uploadId = (upload.url ?? '').split('/').filter(Boolean).pop() ?? '';
         if (!uploadId) {
           state.optimistic = false;
           state.progress = { phase: 'error', message: 'Upload finished but no id was returned', fraction: null };
+          opts.onImportError?.('Upload finished but no id was returned');
           importBtn.disabled = false;
           render();
           return;
@@ -184,18 +192,13 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     clearNoProgress();
     noProgressTimer = setTimeout(() => {
       noProgressTimer = undefined;
-      log.error(`drawer: no import_progress within ${timeoutMs}ms after upload — failing`);
-      state.optimistic = false;
-      state.progress = {
-        phase: 'error',
-        message: `Server didn't respond within ${Math.round(timeoutMs / 1000)}s after upload. The backend may have crashed.`,
-        fraction: null,
-      };
-      importBtn.disabled = false;
-      render();
+      log.warn(`drawer: no import_progress within ${timeoutMs}ms; the import may still be processing`);
     }, timeoutMs);
   }
 
+  const updateBusy = (): void => setButtonBusy(importBtn, state.optimistic ? 'Importing…' : 'Upload file…', state.optimistic, state.optimistic || currentTask() !== null);
+  const unsubBusy = subscribeTask(updateBusy);
+  updateBusy();
   importBtn.addEventListener('click', () => { void onImportClicked(); });
 
   async function listAllRegexRows(query: string): Promise<RegexCleanupRow[]> {
@@ -405,10 +408,11 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
           message: msg.message,
           fraction: msg.fraction ?? null,
         };
-        state.optimistic = false;
         if (msg.phase === 'done') {
+          state.optimistic = false;
           importBtn.disabled = false;
         } else if (msg.phase === 'error') {
+          state.optimistic = false;
           importBtn.disabled = false;
           if (msg.error) state.notices = [msg.error];
           log.warn(`drawer: import error surfaced: ${msg.error ?? '(no detail)'}`);
@@ -423,17 +427,9 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
         break;
       case 'error':
         log.error(`drawer.error: ${msg.message}`);
-        clearNoProgress();
-        state.progress = {
-          phase: 'error',
-          message: msg.message,
-          fraction: null,
-        };
-        state.optimistic = false;
-        importBtn.disabled = false;
-        render();
         break;
     }
+    updateBusy();
   }
 
   render();
@@ -443,6 +439,8 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     handleBackendMessage,
     destroy(): void {
       log.info('cards-panel: destroy');
+      unsubBusy();
+      clearNoProgress();
       try { root.replaceChildren(); } catch { /* ignore */ }
     },
   };
