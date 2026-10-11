@@ -29021,7 +29021,7 @@ var styles_default = `.risu-compat-drawer {\r
   pointer-events: auto;\r
   max-height: calc(100dvh - 48px);\r
   overflow-y: auto;\r
-  background: var(--lumiverse-fill, #1c1f24);\r
+  background: var(--lumiverse-card-bg, #1c1f24);\r
   border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.1));\r
   border-radius: 10px;\r
   padding: 22px 24px;\r

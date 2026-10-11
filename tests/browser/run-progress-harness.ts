@@ -22,7 +22,7 @@ for (const engine of [chromium, firefox]) {
         status: route.request().method() === 'POST' ? 201 : 204,
         headers: { 'Tus-Resumable': '1.0.0', Location: '/api/v1/spindle-uploads/upload-1', 'Upload-Offset': '4' },
       }));
-      await page.addStyleTag({ content: styles });
+      await page.addStyleTag({ content: ':root { --lumiverse-fill: rgba(0, 0, 0, 0.15); --lumiverse-bg-opaque: rgb(28, 24, 38); --lumiverse-card-bg: linear-gradient(165deg, rgb(28, 24, 38), rgb(20, 17, 30)); --lumiverse-text: #eee; } body { background: repeating-linear-gradient(45deg, #888 0 12px, #ddd 12px 24px); }' + styles });
       await page.addScriptTag({ type: 'module', content: `
         import { setupImportOverlay, mountModulesPanel } from '/fixture.js';
         const log = { info() {}, warn() {}, error() {}, debug() {}, trace() {} };
@@ -39,11 +39,18 @@ for (const engine of [chromium, firefox]) {
         overlay.setUploadProgress(40, 100);
       ` });
       await page.getByRole('dialog', { name: 'Operation progress' }).waitFor();
+      const progressCard = page.locator('.lr-import-card');
+      assert.equal(await progressCard.evaluate(el => getComputedStyle(el).backgroundImage), 'linear-gradient(165deg, rgb(28, 24, 38), rgb(20, 17, 30))', 'progress window must use the opaque theme surface');
+      await page.evaluate(() => document.documentElement.style.setProperty('--lumiverse-card-bg', 'linear-gradient(165deg, rgb(252, 252, 252), rgb(242, 242, 242))'));
+      assert.equal(await progressCard.evaluate(el => getComputedStyle(el).backgroundImage), 'linear-gradient(165deg, rgb(252, 252, 252), rgb(242, 242, 242))', 'progress window must follow light themes too');
+      await page.evaluate(() => document.documentElement.style.removeProperty('--lumiverse-card-bg'));
+      await page.screenshot({ path: `${process.env.TEMP}/lumirealm-progress-${engine.name()}-${width}.png` });
       await page.getByRole('button', { name: 'Continue browsing' }).click({ timeout: 2000 });
       assert.equal(await page.locator('body').getAttribute('data-clicked'), 'yes');
       assert.equal(await page.locator('.lr-import-progress-fill').evaluate(el => (el as HTMLElement).style.width), '40%');
       assert.equal(await page.getByRole('button', { name: 'Upload .risum / .charx', exact: true, includeHidden: true }).isDisabled(), true);
       await page.getByRole('button', { name: 'Minimize', exact: true }).click();
+      assert.equal(await progressCard.evaluate(el => getComputedStyle(el).backgroundImage), 'linear-gradient(165deg, rgb(28, 24, 38), rgb(20, 17, 30))');
       assert.equal(await page.locator('.lr-import-progress').isVisible(), true);
       assert.equal(await page.locator('.lr-import-message').isVisible(), false);
       await page.getByRole('button', { name: 'Expand', exact: true }).click();
