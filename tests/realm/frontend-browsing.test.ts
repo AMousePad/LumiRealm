@@ -52,7 +52,7 @@ function button(label: string): HTMLButtonElement {
   return Array.from(root.querySelectorAll('button')).find(el => el.textContent === label || el.title === label)!;
 }
 
-test('keeps existing cards and scroll during requests and unrelated renders', () => {
+test('keeps existing cards and scroll until successful results arrive', () => {
   const previous = root.querySelector('.lr-realm-card');
   const body = root.querySelector('.lr-realm-body')!;
   body.scrollTop = 300;
@@ -60,9 +60,9 @@ test('keeps existing cards and scroll during requests and unrelated renders', ()
   expect(root.querySelector('.lr-realm-card')).toBe(previous);
   expect(body.scrollTop).toBe(300);
   expect(root.querySelector('.lr-realm-grid')!.classList.contains('lr-realm-loading')).toBe(true);
-  expect(button('Next page').disabled).toBe(true);
+  expect(button('Next page').disabled).toBe(false);
   reply([{ ...card, id: 'two', name: 'Replacement' }]);
-  expect(body.scrollTop).toBe(300);
+  expect(body.scrollTop).toBe(0);
   expect(root.querySelector('.lr-realm-card')!.textContent).toContain('Replacement');
   expect(root.querySelector('.lr-realm-grid')!.getAttribute('aria-busy')).toBe('false');
   expect(button('Next page').disabled).toBe(false);
@@ -164,7 +164,7 @@ test('preference save failure is visible and leaves the view selector usable', a
   expect(root.querySelector('.lr-realm-feedback')!.textContent).toContain('Could not save');
 });
 
-test('manual page entry uses one-based numbering and preserves scroll', () => {
+test('manual page entry uses one-based numbering and resets scroll on success', () => {
   button('Recent').click();
   reply([card]);
   const input = root.querySelector('.lr-realm-pager-page') as HTMLInputElement;
@@ -173,10 +173,11 @@ test('manual page entry uses one-based numbering and preserves scroll', () => {
   input.value = '7';
   input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }) as unknown as Event);
   expect(sent.at(-1)).toMatchObject({ page: 6 });
-  expect(input.disabled).toBe(true);
+  expect(input.disabled).toBe(false);
+  expect(body.scrollTop).toBe(200);
   reply([card]);
   expect(input.value).toBe('7');
-  expect(body.scrollTop).toBe(200);
+  expect(body.scrollTop).toBe(0);
   const count = sent.length;
   input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }) as unknown as Event);
   expect(sent).toHaveLength(count);
@@ -191,4 +192,34 @@ test.each(['', '0', '-1', '1.5', '9007199254740992'])('rejects invalid page inpu
   input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }) as unknown as Event);
   expect(sent).toHaveLength(count);
   expect(input.validationMessage).not.toBe('');
+});
+
+
+test('toolbar and pager sit outside the results scroller', () => {
+  const body = root.querySelector('.lr-realm-body')!;
+  expect(body.contains(root.querySelector('.lr-realm-toolbar'))).toBe(false);
+  expect(body.contains(root.querySelector('.lr-realm-pager'))).toBe(false);
+  expect(body.contains(root.querySelector('.lr-realm-grid'))).toBe(true);
+});
+
+test('rapid paging accepts only the latest response and resets scroll only on success', () => {
+  button('Recent').click();
+  reply([card]);
+  const body = root.querySelector('.lr-realm-body')!;
+  body.scrollTop = 300;
+  button('Next page').click();
+  const stale = sent.at(-1)!.requestId;
+  button('Next page').click();
+  expect(sent.at(-1)).toMatchObject({ page: 2 });
+  reply([{ ...card, name: 'Stale' }], stale);
+  expect(body.scrollTop).toBe(300);
+  expect(root.querySelector('.lr-realm-card')!.textContent).toContain('Example');
+  reply([], undefined, 'Connection failed');
+  expect(body.scrollTop).toBe(300);
+  button('Previous page').click();
+  reply([{ ...card, name: 'Latest' }]);
+  expect(body.scrollTop).toBe(0);
+  body.scrollTop = 150;
+  reply([card], stale);
+  expect(body.scrollTop).toBe(150);
 });
