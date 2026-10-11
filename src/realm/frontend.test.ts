@@ -73,6 +73,7 @@ function makeHarness(): {
     },
   };
   const ctx = {
+    settings: { get: async () => undefined, set: async () => {} },
     dom: { addStyle: () => () => undefined },
     ui: {
       showModal(_options: SpindleModalOptions): SpindleModalHandle {

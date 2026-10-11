@@ -9,6 +9,9 @@ let win: Window;
 let realm: ReturnType<typeof setupRealmModal>;
 let root: HTMLElement;
 let sent: RealmFrontendToBackend[];
+let savedView: unknown;
+let viewRead: ReturnType<typeof Promise.withResolvers<unknown>>;
+let viewSaveError: Error | null;
 const globals = new Map<string, PropertyDescriptor | undefined>();
 
 beforeEach(() => {
@@ -20,9 +23,12 @@ beforeEach(() => {
   root = document.createElement('div');
   document.body.appendChild(root);
   sent = [];
+  savedView = undefined;
+  viewRead = Promise.withResolvers<unknown>();
+  viewSaveError = null;
   let dismiss = () => {};
   realm = setupRealmModal({
-    ctx: { dom: { addStyle: () => () => {} }, ui: { showModal: () => ({ root, dismiss: () => dismiss(), onDismiss: (fn: () => void) => { dismiss = fn; } }) } } as unknown as SpindleFrontendContext,
+    ctx: { settings: { get: () => viewRead.promise, set: async (_key: string, value: unknown) => { if (viewSaveError) throw viewSaveError; savedView = value; } }, dom: { addStyle: () => () => {} }, ui: { showModal: () => ({ root, dismiss: () => dismiss(), onDismiss: (fn: () => void) => { dismiss = fn; } }) } } as unknown as SpindleFrontendContext,
     mountTarget: document.body, sendToBackend: msg => sent.push(msg), log: { info() {}, warn() {}, error() {} },
   });
   realm.open();
@@ -113,4 +119,47 @@ test('pagination waits for a typed query to start on its first page', async () =
   button('Previous page').click();
   await Bun.sleep(400);
   expect(sent.at(-1)).toMatchObject({ search: 'new query', page: 0 });
+});
+
+test('grid preference keeps cards mounted, saves the choice, and survives reopening', async () => {
+  const previous = root.querySelector('.lr-realm-card');
+  const select = root.querySelector('.lr-realm-view') as HTMLSelectElement;
+  expect(select.value).toBe('default');
+  select.value = 'grid';
+  select.dispatchEvent(new win.Event('change') as unknown as Event);
+  await Bun.sleep(0);
+  expect(root.querySelector('.lr-realm-grid')!.getAttribute('data-view')).toBe('grid');
+  expect(root.querySelector('.lr-realm-card')).toBe(previous);
+  expect(savedView).toBe('grid');
+  realm.close();
+  root.replaceChildren();
+  realm.open();
+  expect((root.querySelector('.lr-realm-view') as HTMLSelectElement).value).toBe('grid');
+});
+
+test('loads the saved view without sending another search', async () => {
+  const count = sent.length;
+  viewRead.resolve('grid');
+  await Bun.sleep(0);
+  expect((root.querySelector('.lr-realm-view') as HTMLSelectElement).value).toBe('grid');
+  expect(sent).toHaveLength(count);
+});
+
+test('a late preference read cannot override a newer choice', async () => {
+  const select = root.querySelector('.lr-realm-view') as HTMLSelectElement;
+  select.value = 'grid';
+  select.dispatchEvent(new win.Event('change') as unknown as Event);
+  viewRead.resolve('default');
+  await Bun.sleep(0);
+  expect(select.value).toBe('grid');
+});
+
+test('preference save failure is visible and leaves the view selector usable', async () => {
+  viewSaveError = new Error('Unavailable');
+  const select = root.querySelector('.lr-realm-view') as HTMLSelectElement;
+  select.value = 'grid';
+  select.dispatchEvent(new win.Event('change') as unknown as Event);
+  await Bun.sleep(0);
+  expect(select.disabled).toBe(false);
+  expect(root.querySelector('.lr-realm-feedback')!.textContent).toContain('Could not save');
 });

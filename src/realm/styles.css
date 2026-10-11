@@ -156,6 +156,68 @@
 }
 
 .lr-realm-grid.lr-realm-loading { filter: blur(4px); }
+.lr-realm-view {
+  border: 1px solid var(--lumiverse-border, #2a2a2a);
+  border-radius: var(--lumiverse-radius, 8px);
+  padding: 6px 10px;
+  background: var(--lumiverse-bg, #1c1f24);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+.lr-realm-grid[data-view="grid"] {
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+}
+.lr-realm-grid[data-view="grid"] .lr-realm-card {
+  position: relative;
+  display: block;
+  padding: 0;
+  min-width: 0;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+}
+.lr-realm-grid[data-view="grid"] :is(.lr-realm-thumb, .lr-realm-thumb-fallback) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+.lr-realm-grid[data-view="grid"] .lr-realm-card-body {
+  position: absolute;
+  inset: auto 0 0;
+  height: 33.333%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  gap: 3px;
+  overflow: hidden;
+  color: #fff;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.92));
+}
+.lr-realm-grid[data-view="grid"] .lr-realm-card-name { flex-shrink: 0; }
+.lr-realm-grid[data-view="grid"] .lr-realm-card-desc { color: #e6e6e6; min-height: 0; }
+.lr-realm-grid[data-view="grid"] .lr-realm-tags {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.lr-realm-grid[data-view="grid"] .lr-realm-tag {
+  flex: 0 0 auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #c9ddff;
+  background: rgba(112, 157, 255, 0.18);
+}
+.lr-realm-grid[data-view="grid"] .lr-realm-card-stats {
+  flex-shrink: 0;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .lr-realm-feedback {
   display: flex;
   align-items: center;
