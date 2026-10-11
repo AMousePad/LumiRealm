@@ -42320,7 +42320,6 @@ div:has(> .lr-realm-modal-root) {\r
   color: var(--lumiverse-text-muted, #8b8b8b);\r
 }\r
 .lr-realm-feedback.error { color: #ff8a8a; }\r
-.lr-realm-pager[hidden] { display: none; }\r
 @media (prefers-reduced-motion: reduce) {\r
   .lr-realm-grid { transition: none; }\r
   .lr-realm-spinner { animation: none; }\r
@@ -43099,8 +43098,7 @@ function setupRealmModal(deps) {
     } else if (viewError) {
       statusEl.textContent = viewError;
     }
-    pagerEl.hidden = state.sort === "random" || state.sort === "recommended";
-    const pagingBusy = searchDebounceTimer !== undefined;
+    const pagingBusy = searchDebounceTimer !== undefined || state.sort === "random" || state.sort === "recommended";
     pagerEl.querySelector('[title="Previous page"]').disabled = pagingBusy || state.page === 0;
     pagerEl.querySelector('[title="Next page"]').disabled = pagingBusy || state.cards.length === 0;
     const pageInput = pagerEl.querySelector(".lr-realm-pager-page");

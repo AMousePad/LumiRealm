@@ -262,7 +262,6 @@ div:has(> .lr-realm-modal-root) {
   color: var(--lumiverse-text-muted, #8b8b8b);
 }
 .lr-realm-feedback.error { color: #ff8a8a; }
-.lr-realm-pager[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .lr-realm-grid { transition: none; }
   .lr-realm-spinner { animation: none; }

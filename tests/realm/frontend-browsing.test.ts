@@ -199,6 +199,21 @@ test('toolbar and pager sit outside the results scroller', () => {
   expect(body.contains(root.querySelector('.lr-realm-grid'))).toBe(true);
 });
 
+test.each(['Recommended', 'Random'])('keeps pagination visible but inactive for %s', sort => {
+  button(sort).click();
+  reply([card]);
+  expect((root.querySelector('.lr-realm-pager') as HTMLElement).hidden).toBe(false);
+  expect(button('Previous page').disabled).toBe(true);
+  expect(button('Next page').disabled).toBe(true);
+  expect((root.querySelector('.lr-realm-pager-page') as HTMLInputElement).disabled).toBe(true);
+  const count = sent.length;
+  button('Next page').click();
+  expect(sent).toHaveLength(count);
+  button('Recent').click();
+  reply([card]);
+  expect(button('Next page').disabled).toBe(false);
+});
+
 test('rapid paging accepts only the latest response and resets scroll only on success', () => {
   button('Recent').click();
   reply([card]);

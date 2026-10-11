@@ -40,6 +40,12 @@ for (const engine of [chromium, firefox]) {
           cards: Array.from({ length: count }, (_, i) => ({ id: prefix+i, name: prefix+i, desc:'A longer description for this example card that wraps across multiple lines and should stay close to the tags.', img:i === 1 ? '' : 'example.svg', tags:['First tag','Another tag','Longer tag name','Fourth tag','Last tag'], download:1, hot:0, hasLore:false, hasEmotion:false, hasAsset:false, type:'character', viewScreen:'none', license:'' })) });
         realm.open(); window.reply('Initial');
       ` });
+      assert(await page.locator('.lr-realm-pager').isVisible(), 'navigation must be visible on opening Recommended');
+      assert(await page.getByTitle('Next page', { exact: true }).isDisabled());
+      await page.getByRole('button', { name: 'Random', exact: true }).click();
+      await page.evaluate(() => (window as any).reply('Random'));
+      assert(await page.locator('.lr-realm-pager').isVisible(), 'navigation must remain visible on Random');
+      assert(await page.getByTitle('Next page', { exact: true }).isDisabled());
       await page.getByRole('button', { name: 'Recent', exact: true }).click();
       await page.evaluate(() => (window as any).reply('Recent'));
       await page.locator('.lr-realm-grid').evaluate(el => { (window as any).previousGrid = el; (window as any).previousCard = el.firstChild; });
