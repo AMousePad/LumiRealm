@@ -397,8 +397,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     } else if (viewError) {
       statusEl.textContent = viewError;
     }
-    pagerEl.hidden = state.sort === 'random' || state.sort === 'recommended';
-    const pagingBusy = searchDebounceTimer !== undefined;
+    const pagingBusy = searchDebounceTimer !== undefined || state.sort === 'random' || state.sort === 'recommended';
     (pagerEl.querySelector('[title="Previous page"]') as HTMLButtonElement).disabled = pagingBusy || state.page === 0;
     (pagerEl.querySelector('[title="Next page"]') as HTMLButtonElement).disabled = pagingBusy || state.cards.length === 0;
     const pageInput = pagerEl.querySelector('.lr-realm-pager-page') as HTMLInputElement;
