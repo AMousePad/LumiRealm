@@ -230,7 +230,7 @@
 
 .lr-ss-panel {
   position: fixed;
-  z-index: 9000;
+  z-index: 10005;
   display: none;
   flex-direction: column;
   min-width: 200px;
