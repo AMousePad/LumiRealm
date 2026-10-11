@@ -12,6 +12,7 @@ let sent: RealmFrontendToBackend[];
 let savedView: unknown;
 let viewRead: ReturnType<typeof Promise.withResolvers<unknown>>;
 let viewSaveError: Error | null;
+let loggedErrors: unknown[][];
 const globals = new Map<string, PropertyDescriptor | undefined>();
 
 beforeEach(() => {
@@ -26,10 +27,11 @@ beforeEach(() => {
   savedView = undefined;
   viewRead = Promise.withResolvers<unknown>();
   viewSaveError = null;
+  loggedErrors = [];
   let dismiss = () => {};
   realm = setupRealmModal({
     ctx: { settings: { get: () => viewRead.promise, set: async (_key: string, value: unknown) => { if (viewSaveError) throw viewSaveError; savedView = value; } }, dom: { addStyle: () => () => {} }, ui: { showModal: () => ({ root, dismiss: () => dismiss(), onDismiss: (fn: () => void) => { dismiss = fn; } }) } } as unknown as SpindleFrontendContext,
-    mountTarget: document.body, sendToBackend: msg => sent.push(msg), log: { info() {}, warn() {}, error() {} },
+    mountTarget: document.body, sendToBackend: msg => sent.push(msg), log: { info() {}, warn() {}, error(...args: unknown[]) { loggedErrors.push(args); } },
   });
   realm.open();
   reply([card]);
@@ -265,4 +267,27 @@ test('card footer puts every tag after the download count without changing popup
   expect(Array.from(footer.querySelectorAll('.lr-realm-tag')).map(el => el.textContent)).toEqual(tags);
   (root.querySelector('.lr-realm-card') as HTMLButtonElement).click();
   expect(document.querySelector('.lr-realm-popup .lr-realm-tags-track')).toBeNull();
+});
+
+
+test('ignores a preference read rejected after the Realm browser is destroyed', async () => {
+  realm.destroy();
+  viewRead.reject(new Error('SETTINGS_BRIDGE_DISPOSED'));
+  await Bun.sleep(0);
+  expect(loggedErrors).toHaveLength(0);
+});
+
+test('ignores a preference save rejected after the Realm browser is destroyed', async () => {
+  viewSaveError = new Error('SETTINGS_BRIDGE_DISPOSED');
+  button('Switch to grid view').click();
+  realm.destroy();
+  await Bun.sleep(0);
+  expect(loggedErrors).toHaveLength(0);
+});
+
+test('still reports preference read errors while the Realm browser is active', async () => {
+  viewRead.reject(new Error('Settings unavailable'));
+  await Bun.sleep(0);
+  expect(loggedErrors).toHaveLength(1);
+  expect(root.querySelector('.lr-realm-feedback')!.textContent).toContain('Could not load the saved view preference.');
 });
