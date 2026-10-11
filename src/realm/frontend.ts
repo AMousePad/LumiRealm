@@ -95,6 +95,10 @@ interface ModalSurface {
   readonly sortBtns: ReadonlyMap<RealmSort, HTMLButtonElement>;
   readonly nsfwBtn: HTMLButtonElement;
   readonly additionalEl: HTMLDivElement;
+  readonly resultsEl: HTMLDivElement;
+  readonly statusEl: HTMLDivElement;
+  readonly pagerEl: HTMLElement;
+  renderedCards: readonly RealmCard[] | null;
 }
 
 export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
@@ -181,6 +185,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
         }
         doSearch();
       }, SEARCH_DEBOUNCE_MS);
+      render();
     });
     searchInput.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') {
@@ -262,9 +267,18 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     additionalEl.hidden = true;
     root.appendChild(additionalEl);
 
+    const status = document.createElement('div');
+    status.className = 'lr-realm-feedback';
+    status.setAttribute('role', 'status');
+    root.appendChild(status);
+
     const body = document.createElement('div');
     body.className = 'lr-realm-body';
     root.appendChild(body);
+    const results = document.createElement('div');
+    results.className = 'lr-realm-grid';
+    const pager = renderPager();
+    body.append(results, pager);
 
     surface = {
       handle: modalHandle,
@@ -274,6 +288,10 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
       sortBtns,
       nsfwBtn,
       additionalEl,
+      resultsEl: results,
+      statusEl: status,
+      pagerEl: pager,
+      renderedCards: null,
     };
 
     modalHandle.onDismiss(() => {
@@ -306,7 +324,11 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
 
   function render(): void {
     if (!surface) return;
-    const { sortBtns, nsfwBtn, additionalEl, bodyEl } = surface;
+    const { sortBtns, nsfwBtn, additionalEl, bodyEl, resultsEl, statusEl, pagerEl } = surface;
+    const scrollPositions: [HTMLElement, number][] = [];
+    for (let el: HTMLElement | null = bodyEl; el; el = el.parentElement) {
+      if (el.scrollTop > 0) scrollPositions.push([el, el.scrollTop]);
+    }
 
     nsfwBtn.classList.toggle('active', state.nsfw);
     for (const [id, btn] of sortBtns) {
@@ -316,39 +338,33 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     additionalEl.hidden = true;
     additionalEl.textContent = '';
 
-    bodyEl.replaceChildren();
+    resultsEl.classList.toggle('lr-realm-loading', state.loading);
+    resultsEl.setAttribute('aria-busy', String(state.loading));
+    resultsEl.inert = state.loading;
+    if (surface.renderedCards !== state.cards) {
+      resultsEl.replaceChildren(...state.cards.map(renderCard));
+      surface.renderedCards = state.cards;
+    }
+    statusEl.replaceChildren();
+    statusEl.classList.toggle('error', state.errorText.length > 0);
     if (state.loading) {
-      const status = document.createElement('div');
-      status.className = 'lr-realm-status';
       const spinner = document.createElement('span');
       spinner.className = 'lr-realm-spinner';
       const label = document.createElement('span');
       label.textContent = 'Loading…';
-      status.append(spinner, label);
-      bodyEl.appendChild(status);
+      statusEl.append(spinner, label);
     } else if (state.errorText.length > 0) {
-      const status = document.createElement('div');
-      status.className = 'lr-realm-status error';
-      status.textContent = state.errorText;
-      bodyEl.appendChild(status);
+      statusEl.textContent = state.errorText + (state.cards.length > 0 ? ' Previous results are still shown.' : '');
     } else if (state.cards.length === 0) {
-      const status = document.createElement('div');
-      status.className = 'lr-realm-status';
-      status.textContent = 'No characters found.';
-      bodyEl.appendChild(status);
-    } else {
-      const grid = document.createElement('div');
-      grid.className = 'lr-realm-grid';
-      for (const card of state.cards) {
-        grid.appendChild(renderCard(card));
-      }
-      bodyEl.appendChild(grid);
-      if (state.sort !== 'random' && state.sort !== 'recommended') {
-        bodyEl.appendChild(renderPager());
-      }
+      statusEl.textContent = 'No characters found.';
     }
+    pagerEl.hidden = state.sort === 'random' || state.sort === 'recommended';
+    const pagingBusy = state.loading || searchDebounceTimer !== undefined;
+    (pagerEl.querySelector('[title="Previous page"]') as HTMLButtonElement).disabled = pagingBusy || state.page === 0;
+    (pagerEl.querySelector('[title="Next page"]') as HTMLButtonElement).disabled = pagingBusy || state.cards.length === 0;
+    pagerEl.querySelector('.lr-realm-pager-page')!.textContent = String(state.page + 1);
 
-    if (toastEl) bodyEl.appendChild(toastEl);
+    for (const [el, top] of scrollPositions) el.scrollTop = top;
     syncOverlays();
   }
 
@@ -718,6 +734,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
   }
 
   function doSearch(): void {
+    if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = undefined; }
     state.loading = true;
     state.errorText = '';
     const requestId = nextRequestId('search');
@@ -750,7 +767,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
   function handleBackendMessage(msg: RealmBackendToFrontend): void {
     switch (msg.type) {
       case 'realm_search_result': {
-        if (state.pendingSearchReq && msg.requestId !== state.pendingSearchReq) return;
+        if (msg.requestId !== state.pendingSearchReq) return;
         state.pendingSearchReq = null;
         state.loading = false;
         if (msg.ok) {
@@ -758,7 +775,6 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
           state.errorText = '';
           state.additionalHTML = msg.additionalHTML ?? '';
         } else {
-          state.cards = [];
           state.errorText = msg.error ?? 'Search failed';
           state.additionalHTML = '';
         }
