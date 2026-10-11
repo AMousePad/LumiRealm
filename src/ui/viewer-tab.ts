@@ -1,3 +1,4 @@
+import { uploadImageFile } from '../host-services/client.js';
 import type {
   AttachedModuleSummary,
   BackendToFrontend,
@@ -1395,23 +1396,7 @@ export function mountViewerPanel(opts: MountViewerPanelOptions): ViewerPanelHand
   }
 
   async function uploadOne(file: File): Promise<string> {
-    const fd = new FormData();
-    fd.set('image', file, file.name);
-    const resp = await fetch('/api/v1/images', {
-      method: 'POST',
-      body: fd,
-      credentials: 'include',
-    });
-    if (!resp.ok) {
-      let detail = '';
-      try { detail = ` — ${(await resp.text()).slice(0, 200)}`; } catch { /* */ }
-      throw new Error(`HTTP ${resp.status}${detail}`);
-    }
-    const body = (await resp.json()) as { id?: string };
-    if (typeof body?.id !== 'string' || body.id.length === 0) {
-      throw new Error('upload response missing id');
-    }
-    return body.id;
+    return uploadImageFile(file, file.name);
   }
 
   function splitName(filename: string): { baseName: string; ext: string | undefined } {

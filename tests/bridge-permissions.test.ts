@@ -5,13 +5,13 @@ import { filterBridgePermissions, parseBridgePermissionError, probeLumiagentBrid
 const inherited = (permissions: string) => `Shared RPC endpoint "lumiagent.phoneline_probe" requires requester "lumirealm" to inherit owner "lumiagent" permissions: ${permissions}`;
 
 describe('bridge permission reporting', () => {
-  test.each(['memories', 'regex_scripts_unrestricted', 'mcp_servers', 'mcp_servers.create', 'future_agent_permission'])('does not request an undeclared grant: %s', (permission) => {
+  test.each(['memories', 'mcp_servers', 'mcp_servers.create', 'future_agent_permission'])('does not request an undeclared grant: %s', (permission) => {
     expect(parseBridgePermissionError(inherited(permission))).toBeNull();
     expect(filterBridgePermissions([permission])).toEqual([]);
   });
 
   test('keeps declared permissions in a mixed failure and removes duplicate grants', () => {
-    expect(parseBridgePermissionError(inherited('mcp_servers, characters, regex_scripts_unrestricted, chats, characters, mcp_servers.create'))).toEqual(['characters', 'chats']);
+    expect(parseBridgePermissionError(inherited('mcp_servers, characters, regex_scripts_unrestricted, chats, characters, mcp_servers.create'))).toEqual(['characters', 'chats', 'regex_scripts_unrestricted']);
   });
 
   test.each(['requester', 'owner'])('recognizes explicit endpoint policy failures for the %s', (side) => {
@@ -34,7 +34,7 @@ describe('bridge permission reporting', () => {
 
   test.each([
     ['mcp_servers, mcp_servers.create', null],
-    ['memories, regex_scripts_unrestricted', null],
+    ['memories, regex_scripts_unrestricted', ['regex_scripts_unrestricted']],
     ['characters, mcp_servers', ['characters']],
   ] as const)('the permission-change probe applies the same filter: %s', async (permissions, expected) => {
     const spindle = { rpcPool: { async read(endpoint: string) {

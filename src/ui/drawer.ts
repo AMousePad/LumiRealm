@@ -1,3 +1,4 @@
+import { hostCall } from '../host-services/client.js';
 import * as tus from 'tus-js-client';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend, CardSummary, ImportProgress } from '../types/messages.js';
@@ -198,24 +199,29 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   importBtn.addEventListener('click', () => { void onImportClicked(); });
 
   async function listAllRegexRows(query: string): Promise<RegexCleanupRow[]> {
+    const params = new URLSearchParams(query);
+    const characterId = params.get('character_id');
     const rows: RegexCleanupRow[] = [];
     let total = 0;
     do {
-      const resp = await fetch(
-        `/api/v1/regex-scripts?${query}&limit=1000&offset=${rows.length}`,
-        { credentials: 'include' },
-      );
-      if (!resp.ok) throw new Error(`list HTTP ${resp.status}`);
-      const page = (await resp.json()) as { data?: RegexCleanupRow[]; total?: number };
-      const data = page.data ?? [];
-      rows.push(...data);
-      total = page.total ?? rows.length;
-      if (data.length === 0) break;
+      const page = await hostCall('regex.list', {
+        scope: characterId ? 'character' : 'global',
+        ...(characterId ? { scopeId: characterId } : {}),
+        limit: 200, offset: rows.length,
+      });
+      rows.push(...page.data);
+      total = page.total;
+      if (page.data.length === 0) break;
     } while (rows.length < total);
     return rows;
   }
 
-  // Verify backend-installed rows, then clean legacy rows via cookie-auth REST.
+  async function deleteRegexRows(ids: readonly string[]): Promise<void> {
+    const count = await hostCall('regex.delete', { ids: [...ids] });
+    if (count !== ids.length) throw new Error(`Regex deletion count ${count}/${ids.length}`);
+  }
+
+  // Verify replacement ownership before deleting superseded rows.
   async function onInstallRegexScripts(
     msg: Extract<BackendToFrontend, { type: 'install_regex_scripts' }>,
   ): Promise<void> {
@@ -242,17 +248,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
       replacementVerified = true;
       if (msg.cleanupStale) {
         if (plan.staleIds.length > 0) {
-          const delResp = await fetch('/api/v1/regex-scripts/bulk-delete', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ ids: plan.staleIds }),
-            credentials: 'include',
-          });
-          if (!delResp.ok) throw new Error(`bulk-delete HTTP ${delResp.status}`);
-          const deleted = (await delResp.json()) as { count?: number };
-          if (deleted.count !== plan.staleIds.length) {
-            throw new Error(`bulk-delete count ${deleted.count ?? 0}/${plan.staleIds.length}`);
-          }
+          await deleteRegexRows(plan.staleIds);
           log.info(`drawer: removed ${plan.staleIds.length} verified stale card regex row(s) char=${msg.characterId}`);
         }
         cleanupCompleted = true;
@@ -270,69 +266,19 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     }
   }
 
-  async function cleanupCharacterArtifacts(
-    characterId: string,
-    worldBookIds: readonly string[],
-  ): Promise<void> {
-    log.info(
-      `drawer.cleanup: characterId=${characterId} worldBookCount=${worldBookIds.length}`,
-    );
+  async function cleanupCharacterArtifacts(characterId: string, worldBookIds: readonly string[]): Promise<void> {
     try {
-      const listResp = await fetch(
-        `/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(characterId)}&limit=2000`,
-        { credentials: 'include' },
-      );
-      if (listResp.ok) {
-        const body = (await listResp.json()) as {
-          data?: Array<{ id: string; scope?: string; scope_id?: string }>;
-        };
-        const ids = (body.data ?? [])
-          .filter((r) => r.scope === 'character' && r.scope_id === characterId)
-          .map((r) => r.id);
-        if (ids.length > 0) {
-          const delResp = await fetch('/api/v1/regex-scripts/bulk-delete', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ ids }),
-            credentials: 'include',
-          });
-          if (delResp.ok) {
-            const delBody = (await delResp.json()) as { count?: number };
-            log.info(
-              `drawer.cleanup: regex deleted=${delBody?.count ?? '?'} (sent ${ids.length})`,
-            );
-          } else {
-            log.warn(`drawer.cleanup: regex bulk-delete HTTP ${delResp.status}`);
-          }
-        } else {
-          log.info(`drawer.cleanup: no character-scoped regex to remove for ${characterId}`);
-        }
-      } else {
-        log.warn(`drawer.cleanup: regex list HTTP ${listResp.status}`);
-      }
-    } catch (err) {
-      log.warn(`drawer.cleanup: regex cleanup threw`, err);
-    }
-    for (const wbId of worldBookIds) {
-      try {
-        const resp = await fetch(`/api/v1/world-books/${encodeURIComponent(wbId)}`, {
-          method: 'DELETE',
-          credentials: 'include',
-        });
-        if (resp.ok) {
-          log.info(`drawer.cleanup: world_book deleted id=${wbId}`);
-        } else if (resp.status === 404) {
-          log.info(`drawer.cleanup: world_book ${wbId} already absent`);
-        } else {
-          log.warn(`drawer.cleanup: world_book delete HTTP ${resp.status} id=${wbId}`);
-        }
-      } catch (err) {
-        log.warn(`drawer.cleanup: world_book delete threw id=${wbId}`, err);
-      }
+      const rows = await listAllRegexRows(`scope=character&character_id=${encodeURIComponent(characterId)}`);
+      const ids = rows.filter(row => row.scope === 'character' && row.scope_id === characterId).map(row => row.id);
+      if (ids.length) await deleteRegexRows(ids);
+    } catch (error) { log.warn('Character regex cleanup failed', error); }
+    for (const id of worldBookIds) {
+      try { await hostCall('worldbook.delete', { id }); }
+      catch (error) { log.warn(`World book cleanup failed id=${id}`, error); }
     }
   }
 
-  // Cookie-auth module install; replies with resource ids for detach.
+  // Replies with resource ids retained for detach.
   async function installModuleArtifacts(
     msg: Extract<BackendToFrontend, { type: 'install_module_artifacts' }>,
   ): Promise<void> {
@@ -342,76 +288,6 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
     );
     let worldBookId: string | null = null;
     const regexScriptIds: string[] = [];
-
-    // Global installs carry no lorebook entries (the module's world book is
-    // attached through world_books.setGlobal on the backend), so this block is
-    // character-only and its character fetches stay safe.
-    if (msg.lorebookEntries.length > 0 && msg.characterId !== null) {
-      try {
-        const createResp = await fetch('/api/v1/world-books', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: msg.worldBookName }),
-          credentials: 'include',
-        });
-        if (createResp.ok) {
-          const body = (await createResp.json()) as { id?: string };
-          if (typeof body?.id === 'string') {
-            worldBookId = body.id;
-            const importResp = await fetch(
-              `/api/v1/world-books/${encodeURIComponent(worldBookId)}/entries/import`,
-              {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ entries: msg.lorebookEntries }),
-                credentials: 'include',
-              },
-            );
-            if (!importResp.ok) {
-              log.warn(
-                `drawer.installModuleArtifacts: world_book entries import HTTP ${importResp.status} ` +
-                  `for module=${msg.moduleId} — book created but entries may be missing`,
-              );
-            }
-            const charResp = await fetch(
-              `/api/v1/characters/${encodeURIComponent(msg.characterId)}`,
-              { credentials: 'include' },
-            );
-            if (charResp.ok) {
-              const cur = (await charResp.json()) as { world_book_ids?: unknown };
-              const existing = Array.isArray(cur.world_book_ids)
-                ? cur.world_book_ids.filter((x): x is string => typeof x === 'string')
-                : [];
-              if (!existing.includes(worldBookId)) {
-                const updResp = await fetch(
-                  `/api/v1/characters/${encodeURIComponent(msg.characterId)}`,
-                  {
-                    method: 'PUT',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({
-                      world_book_ids: [...existing, worldBookId],
-                    }),
-                    credentials: 'include',
-                  },
-                );
-                if (!updResp.ok) {
-                  log.warn(
-                    `drawer.installModuleArtifacts: character world_book_ids update HTTP ${updResp.status} ` +
-                      `for module=${msg.moduleId} — book exists but isn't attached`,
-                  );
-                }
-              }
-            }
-          }
-        } else {
-          log.warn(
-            `drawer.installModuleArtifacts: world_book create HTTP ${createResp.status} for module=${msg.moduleId}`,
-          );
-        }
-      } catch (err) {
-        log.warn(`drawer.installModuleArtifacts: world_book pipeline threw`, err);
-      }
-    }
 
     let regexInstallOk = msg.cleanupStale;
     let cleanupCompleted = !msg.cleanupStale;
@@ -427,17 +303,7 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
           const plan = planModuleRegexCleanup(liveRows, msg.moduleId, msg.regexScripts);
           if (!plan.verified) throw new Error('replacement rows could not be verified');
           if (plan.staleIds.length > 0) {
-            const delResp = await fetch('/api/v1/regex-scripts/bulk-delete', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ ids: plan.staleIds }),
-              credentials: 'include',
-            });
-            if (!delResp.ok) throw new Error(`bulk-delete HTTP ${delResp.status}`);
-            const deleted = (await delResp.json()) as { count?: number };
-            if (deleted.count !== plan.staleIds.length) {
-              throw new Error(`bulk-delete count ${deleted.count ?? 0}/${plan.staleIds.length}`);
-            }
+            await deleteRegexRows(plan.staleIds);
             const stale = new Set(plan.staleIds);
             liveRows = liveRows.filter((row) => !stale.has(row.id));
           }
@@ -483,103 +349,29 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
         `worldBookId=${msg.worldBookId ?? 'null'} regex=${msg.regexScriptIds.length}`,
     );
     let ok = true;
-    // Global scope has no character row to unlink from; the backend drops the
-    // book from world_books.setGlobal before sending this.
     if (msg.worldBookId && msg.characterId !== null) {
       try {
-        const charResp = await fetch(
-          `/api/v1/characters/${encodeURIComponent(msg.characterId)}`,
-          { credentials: 'include' },
-        );
-        if (charResp.ok) {
-          const cur = (await charResp.json()) as { world_book_ids?: unknown };
-          const existing = Array.isArray(cur.world_book_ids)
-            ? cur.world_book_ids.filter((x): x is string => typeof x === 'string')
-            : [];
-          if (existing.includes(msg.worldBookId)) {
-            await fetch(`/api/v1/characters/${encodeURIComponent(msg.characterId)}`, {
-              method: 'PUT',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                world_book_ids: existing.filter((id) => id !== msg.worldBookId),
-              }),
-              credentials: 'include',
-            });
-          }
+        const character = await hostCall('character.get', { id: msg.characterId });
+        if (character?.world_book_ids?.includes(msg.worldBookId)) {
+          await hostCall('character.linkBooks', { id: msg.characterId,
+            worldBookIds: character.world_book_ids.filter(id => id !== msg.worldBookId) });
         }
-        const delResp = await fetch(
-          `/api/v1/world-books/${encodeURIComponent(msg.worldBookId)}`,
-          { method: 'DELETE', credentials: 'include' },
-        );
-        if (!delResp.ok && delResp.status !== 404) {
-          ok = false;
-          log.warn(
-            `drawer.uninstallModuleArtifacts: world_book delete HTTP ${delResp.status} id=${msg.worldBookId}`,
-          );
-        }
-      } catch (err) {
-        ok = false;
-        log.warn(`drawer.uninstallModuleArtifacts: world_book pipeline threw`, err);
-      }
+        await hostCall('worldbook.delete', { id: msg.worldBookId });
+      } catch (error) { ok = false; log.warn('Module world book removal failed', error); }
     }
-    // Metadata-keyed delete catches stale stashed IDs + orphans from prior
-    // install/refresh races. Falls back to stashed IDs if listing fails.
-    const idsToDelete = new Set<string>(msg.regexScriptIds);
     try {
-      const uninstallQuery = msg.characterId === null
-        ? 'scope=global'
-        : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
-      const listResp = await fetch(
-        `/api/v1/regex-scripts?${uninstallQuery}&limit=2000`,
-        { credentials: 'include' },
-      );
-      if (listResp.ok) {
-        const body = (await listResp.json()) as {
-          data?: Array<{
-            id: string;
-            scope?: string;
-            scope_id?: string;
-            metadata?: { _risu?: { module_id?: string } };
-          }>;
-        };
-        for (const r of body.data ?? []) {
-          if (
-            r.scope === 'character'
-              && r.scope_id === msg.characterId
-              && r.metadata?._risu?.module_id === msg.moduleId
-          ) {
-            idsToDelete.add(r.id);
-          }
-        }
-      } else {
-        log.warn(`drawer.uninstallModuleArtifacts: list HTTP ${listResp.status}, falling back to stashed IDs only`);
+      const query = msg.characterId === null ? 'scope=global' : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
+      const rows = await listAllRegexRows(query);
+      const ids = new Set(msg.regexScriptIds);
+      for (const row of rows) {
+        const metadata = row.metadata?._risu as { module_id?: string } | undefined;
+        if (row.scope === (msg.characterId === null ? 'global' : 'character')
+            && (msg.characterId === null || row.scope_id === msg.characterId)
+            && metadata?.module_id === msg.moduleId) ids.add(row.id);
       }
-    } catch (err) {
-      log.warn(`drawer.uninstallModuleArtifacts: list threw, falling back to stashed IDs only`, err);
-    }
-    if (idsToDelete.size > 0) {
-      try {
-        const resp = await fetch('/api/v1/regex-scripts/bulk-delete', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ids: [...idsToDelete] }),
-          credentials: 'include',
-        });
-        if (!resp.ok) {
-          ok = false;
-          log.warn(
-            `drawer.uninstallModuleArtifacts: regex bulk-delete HTTP ${resp.status} (sent ${idsToDelete.size})`,
-          );
-        } else {
-          log.info(
-            `drawer.uninstallModuleArtifacts: regex bulk-deleted ${idsToDelete.size} (stashed=${msg.regexScriptIds.length})`,
-          );
-        }
-      } catch (err) {
-        ok = false;
-        log.warn(`drawer.uninstallModuleArtifacts: regex pipeline threw`, err);
-      }
-    }
+      if (ids.size) await deleteRegexRows([...ids]);
+    } catch (error) { ok = false; log.warn('Module regex removal failed', error); }
+
     sendToBackend({
       type: 'module_artifacts_uninstalled',
       characterId: msg.characterId,

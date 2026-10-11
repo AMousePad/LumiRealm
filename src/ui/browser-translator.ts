@@ -1,3 +1,4 @@
+import { hostCall } from '../host-services/client.js';
 // Wraps Chrome 138+ Built-in AI APIs (Translator + LanguageDetector).
 // Display-only, never persisted from here.
 
@@ -124,12 +125,9 @@ export function isUsingFallback(): boolean {
 
 // Unofficial gtx endpoint, no auth. 429 disables and surfaces to UI.
 async function googleTranslateFallback(text: string, src: string): Promise<string | null> {
-  const url =
-    'https://translate.googleapis.com/translate_a/single?client=gtx' +
-    `&sl=${encodeURIComponent(src)}&tl=${TARGET}&dt=t&q=${encodeURIComponent(text)}`;
-  let res: Response;
+  let res: { status: number; body: string };
   try {
-    res = await fetch(url);
+    res = await hostCall('translation', { text, source: src });
   } catch (err) {
     flog.warn('google-translate fetch failed:', err);
     return null;
@@ -138,13 +136,13 @@ async function googleTranslateFallback(text: string, src: string): Promise<strin
     disableFallback('rate limited (429)');
     return null;
   }
-  if (!res.ok) {
+  if (res.status < 200 || res.status >= 300) {
     flog.warn(`google-translate http ${res.status}`);
     return null;
   }
   let data: unknown;
   try {
-    data = await res.json();
+    data = JSON.parse(res.body);
   } catch {
     return null;
   }

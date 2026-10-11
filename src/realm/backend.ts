@@ -1,6 +1,10 @@
 import type { RealmFrontendToBackend, RealmBackendToFrontend } from './messages.js';
 import { searchRealm, getRealmInfo, downloadRealmCard } from './api.js';
 import { convertToCharx, type ImportFormatConversion } from './import-formats/index.js';
+import { withStagedCard, type PreparedCard } from '../core/charx/staged-reader.js';
+import { readStagedBytes } from '../host-services/files.js';
+import type { SpindleFileSource } from 'lumiverse-spindle-types';
+declare const spindle: SpindleAPI;
 import type { RegexScriptCreateDTO, RegexScriptDTO, SpindleAPI, UserPresetCreateDTO, UserPresetDTO } from 'lumiverse-spindle-types';
 import { isRisuPresetBytes, decodeRisuPreset } from '../core/preset/risup-decoder.js';
 import { translateRisuPreset } from '../core/preset/risup-translator.js';
@@ -14,6 +18,7 @@ export interface RealmBackendLog {
 }
 
 export interface RealmBackendDeps {
+  readonly importPreparedCard: (prepared: PreparedCard, fileName: string, userId: string) => Promise<void>;
   readonly send: (msg: RealmBackendToFrontend, userId: string | undefined) => void;
   readonly log: RealmBackendLog;
   readonly importCardFromBytes: (bytes: Uint8Array, fileName: string, userId: string) => Promise<void>;
@@ -45,6 +50,7 @@ export interface PresetImportOptions {
 }
 
 export interface RealmBackendHandle {
+  importFile(source: SpindleFileSource, fileName: string, userId: string, opts?: PresetImportOptions): Promise<void>;
   handle(msg: RealmFrontendToBackend, userId: string | undefined): Promise<void>;
   importAnyFormat(bytes: Uint8Array, fileName: string, userId: string, opts?: PresetImportOptions): Promise<void>;
 }
@@ -115,36 +121,22 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
           break;
         }
         try {
-          const dl = await downloadRealmCard(msg.id);
-          log.info(
-            `realm_download: req=${msg.requestId} id=${msg.id} contentType=${dl.contentType} bytes=${dl.bytes.byteLength} file=${dl.fileName}`,
-          );
-          let conv: ImportFormatConversion;
+          const dl = await downloadRealmCard(msg.id, userId);
           try {
-            conv = convertToCharx(dl.bytes, dl.fileName);
-          } catch (err) {
-            const error = errMessage(err);
-            log.error(`realm_download convert failed req=${msg.requestId} id=${msg.id}: ${error}`);
-            send({
-              type: 'realm_download_started',
-              requestId: msg.requestId,
-              ok: false,
-              id: msg.id,
-              error,
-            }, userId);
-            break;
-          }
-          for (const note of conv.notes) log.info(`realm_download: ${note}`);
+          log.info(
+            `realm_download: req=${msg.requestId} id=${msg.id} contentType=${dl.contentType} bytes=${dl.file.size} file=${dl.fileName}`,
+          );
           send({
             type: 'realm_download_started',
             requestId: msg.requestId,
             ok: true,
             id: msg.id,
-            fileName: conv.fileName,
+            fileName: dl.fileName,
             contentType: dl.contentType,
-            bytes: conv.bytes.byteLength,
+            bytes: dl.file.size,
           }, userId);
-          await importCardFromBytes(conv.bytes, conv.fileName, userId);
+          await importFile({ fileId: dl.file.fileId }, dl.fileName, userId);
+          } finally { await spindle.files.delete(dl.file.fileId, userId); }
         } catch (err) {
           const error = errMessage(err);
           log.error(`realm_download failed req=${msg.requestId} id=${msg.id}: ${error}`);
@@ -277,7 +269,16 @@ export function setupRealmBackend(deps: RealmBackendDeps): RealmBackendHandle {
     await importCardFromBytes(conv.bytes, conv.fileName, userId);
   }
 
-  return { handle, importAnyFormat };
+  async function importFile(source: SpindleFileSource, fileName: string, userId: string, opts?: PresetImportOptions): Promise<void> {
+    const first = await spindle.files.readChunk(source, 0, userId);
+    if (isRisuPresetBytes(first.data, fileName)) {
+      const bytes = await readStagedBytes(spindle.files, source, userId, 64 * 1024 * 1024);
+      await importPresetFromBytes(bytes, fileName, userId, opts);
+    } else {
+      await withStagedCard(spindle, source, fileName, userId, card => deps.importPreparedCard(card, fileName, userId));
+    }
+  }
+  return { handle, importAnyFormat, importFile };
 }
 
 function errMessage(err: unknown): string {

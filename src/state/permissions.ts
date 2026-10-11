@@ -16,7 +16,9 @@ export const REQUIRED_PERMISSIONS: readonly string[] = [
   'personas',
   'app_manipulation',
   'images',
+  'cors_proxy',
   'regex_scripts',
+  'regex_scripts_unrestricted',
 ];
 
 export const PERMISSION_PURPOSE: Readonly<Record<string, string>> = {
@@ -33,6 +35,8 @@ export const PERMISSION_PURPOSE: Readonly<Record<string, string>> = {
   personas: 'read the active persona for {{user}} resolution',
   app_manipulation: 'inject the bg-html host and message overlay',
   images: 'upload and serve card-bundled assets and SVG rasters',
+  cors_proxy: 'browse and download Realm cards and translate labels',
+  regex_scripts_unrestricted: 'remove superseded Risu regex rows created before extension ownership tracking',
   regex_scripts: 'patch character + module display regex rows during translator migrations and orphan cleanup',
 };
 

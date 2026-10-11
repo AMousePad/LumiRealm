@@ -43,16 +43,12 @@ export interface ImportHandlerDeps {
     userId: string,
     opts?: { force?: boolean },
   ) => Promise<void>;
-  readonly importAnyFormat: (
-    bytes: Uint8Array,
+  readonly importFile: (
+    source: import('lumiverse-spindle-types').SpindleFileSource,
     fileName: string,
     userId: string,
     opts?: PresetImportOptions,
   ) => Promise<void>;
-  readonly getUpload: (
-    uploadId: string,
-    userId: string,
-  ) => Promise<{ fileName: string; size: number; data: Uint8Array } | null>;
   readonly deleteUpload: (uploadId: string, userId: string) => Promise<boolean>;
   readonly applySvgRasterIndex: (args: {
     characterId: string;
@@ -162,31 +158,15 @@ export function createImportHandlers(deps: ImportHandlerDeps): {
     },
     import_card_from_upload: async (msg, ctx) => {
       deps.log.info(`import_card_from_upload: uploadId=${msg.uploadId} file=${msg.fileName} userId=${ctx.userId}`);
-      let upload: { fileName: string; size: number; data: Uint8Array } | null;
       try {
-        upload = await deps.getUpload(msg.uploadId, ctx.userId);
-      } catch (err) {
-        deps.log.error(`import_card_from_upload: getUpload threw: ${deps.errMsg(err)}`);
-        ctx.send({ type: 'import_progress', phase: 'error', message: 'Upload retrieval failed', fraction: null, error: deps.errMsg(err) }, ctx.userId);
-        return;
-      }
-      if (!upload) {
-        deps.log.warn(`import_card_from_upload: uploadId=${msg.uploadId} not found or expired`);
-        ctx.send({ type: 'import_progress', phase: 'error', message: 'Upload not found or expired. Re-import the card.', fraction: null, error: 'upload_missing' }, ctx.userId);
-        return;
-      }
-      deps.log.info(`import_card_from_upload: got ${upload.data.byteLength} bytes, running importCard`);
-      try {
-        await deps.importAnyFormat(
-          upload.data,
-          msg.fileName || upload.fileName,
-          ctx.userId,
-          msg.presetLabelTranslation === undefined
-            ? undefined
-            : { labelTranslation: msg.presetLabelTranslation },
+        await deps.importFile(
+          { uploadId: msg.uploadId }, msg.fileName, ctx.userId,
+          msg.presetLabelTranslation === undefined ? undefined : { labelTranslation: msg.presetLabelTranslation },
         );
+      } catch (error) {
+        ctx.send({ type: 'import_progress', phase: 'error', message: 'Import failed', fraction: null, error: deps.errMsg(error) }, ctx.userId);
       } finally {
-        void deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
+        await deps.deleteUpload(msg.uploadId, ctx.userId);
       }
     },
     register_svg_raster_index: async (msg, ctx) => {

@@ -526,6 +526,7 @@ describe('Preset import via Realm backend', () => {
       send: () => {},
       log: { info: () => {}, warn: () => {}, error: () => {} },
       importCardFromBytes: async () => {},
+      importPreparedCard: async () => {},
       createPreset: async (input) => {
         createdPresetInput = input;
         return {

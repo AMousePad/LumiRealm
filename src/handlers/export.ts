@@ -9,6 +9,7 @@ import type { LiveRegexRow } from '../core/export/regex-back-projection.js';
 import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ModuleEnvelope } from '../state/modules-store.js';
 import type { Handler } from './types.js';
+import type { ArchivePlan } from '../core/export/archive-types.js';
 
 export interface ExportCharacterFetch {
   readonly character: LiveCharacterFields & { readonly image_id?: string | null };
@@ -17,6 +18,7 @@ export interface ExportCharacterFetch {
 }
 
 export interface ExportHandlerDeps {
+  readonly exportArchive: (plan: ArchivePlan, userId: string, frontendSessionId?: string) => Promise<void>;
   readonly readModuleEnvelope: (userId: string, moduleId: string) => Promise<ModuleEnvelope | null>;
   readonly readCharacterForExport: (
     characterId: string,
@@ -79,7 +81,7 @@ export function createExportHandlers(deps: ExportHandlerDeps): {
           `export_module: module=${env.id} entries=${plan.entries.length} ` +
             `missing=${plan.missingAssets.length} file=${plan.fileName}`,
         );
-        ctx.send({ type: 'export_archive', plan }, ctx.userId);
+        await deps.exportArchive(plan, ctx.userId, ctx.frontendSessionId);
       } catch (err) {
         ctx.send({ type: 'error', message: `Export failed: ${deps.errMsg(err)}` }, ctx.userId);
       }
@@ -137,7 +139,7 @@ export function createExportHandlers(deps: ExportHandlerDeps): {
             `lore=${worldBookEntries.length} regex=${liveRegex.length} ` +
             `missing=${plan.missingAssets.length} file=${plan.fileName}`,
         );
-        ctx.send({ type: 'export_archive', plan }, ctx.userId);
+        await deps.exportArchive(plan, ctx.userId, ctx.frontendSessionId);
       } catch (err) {
         ctx.send({ type: 'error', message: `Export failed: ${deps.errMsg(err)}` }, ctx.userId);
       }

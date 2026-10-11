@@ -1,6 +1,8 @@
 import { makeLowLevelAccessConsentMessage } from "./codec.js";
 import { translateFromCharxBundle } from '../core/pipeline/index.js';
 import { readCharx } from '../core/charx/reader.js';
+import { pickPreferredAvatar } from '../core/pipeline/translate.js';
+import type { PreparedCard, DeferredAsset } from '../core/charx/staged-reader.js';
 import type { LumiBundle } from '../core/pipeline/index.js';
 import { CURRENT_CHARACTER_SCHEMA_VERSION } from '../migrations/character.js';
 import type { LumirealmStoredSource } from './types.js';
@@ -193,9 +195,9 @@ function latin1(b: Uint8Array, from: number, to: number): string {
   return out;
 }
 
-function pickAvatar(
-  assets: ReadonlyMap<string, Uint8Array>,
-): { path: string; data: Uint8Array } | null {
+function pickAvatar<T>(
+  assets: ReadonlyMap<string, T>,
+): { path: string; data: T } | null {
   const isImage = (p: string) => /\.(png|jpe?g|webp|gif|avif|jxl|heic|heif|bmp)$/i.test(p);
   // Canonical first.
   for (const [path, data] of assets) {
@@ -251,8 +253,7 @@ export interface SpindleImportApi {
   };
 }
 
-export interface ImportCardArgs {
-  readonly bytes: Uint8Array;
+export type ImportCardArgs = ({ readonly bytes: Uint8Array; readonly prepared?: never } | { readonly prepared: PreparedCard; readonly bytes?: never }) & {
   readonly fileName: string;
   readonly sourceId?: string;
   readonly extensionVersion: string;
@@ -266,15 +267,13 @@ export interface ImportCardArgs {
 export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   const progress = args.onProgress ?? (() => {});
   const tImport = Date.now();
-  logInfo(`start file=${args.fileName} bytes=${args.bytes.byteLength} userId=${args.userId ?? '<none>'}`);
+  logInfo(`start file=${args.fileName} userId=${args.userId ?? '<none>'}`);
 
   progress('decoding', `Decoding ${args.fileName}…`, 0.05);
-  const bytes = args.bytes;
 
   progress('translating', 'Translating Risu card…', 0.15);
   const tTranslate = Date.now();
-  logInfo(`(2) translate: starting translateCharx bytes=${bytes.byteLength}`);
-  const charxBundle = readCharx(bytes);
+  const charxBundle = args.prepared?.bundle ?? readCharx(args.bytes!);
   const bundle: LumiBundle = translateFromCharxBundle(charxBundle, {
     sourceId: args.sourceId ?? `file:${args.fileName}`,
     mode: 'full',
@@ -282,10 +281,14 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
     // are absent in dist/backend.js, so disable pack-script generation.
     emitPackScripts: false,
   });
+  const assets = new Map<string, Uint8Array | DeferredAsset>(args.prepared?.assets);
+  for (const [path, bytes] of bundle.assets) assets.set(path, bytes);
+  const readAsset = (asset: Uint8Array | DeferredAsset): Promise<Uint8Array> =>
+    asset instanceof Uint8Array ? Promise.resolve(asset) : asset.read();
   logInfo(
     `(2) translate: done in ${Date.now() - tTranslate}ms — char="${bundle.character.name}" ` +
       `lore=${bundle.worldBookEntries.length} regex=${bundle.regexScripts.length} ` +
-      `assets=${bundle.assets.size} payload.triggers=${bundle.risuPayload?.triggers.length ?? 0} ` +
+      `assets=${assets.size} payload.triggers=${bundle.risuPayload?.triggers.length ?? 0} ` +
       `payload.lua=${bundle.risuPayload?.lua_scripts.length ?? 0}`,
   );
   // Deliberate diagnostic: emitted only when at least one lorebook entry
@@ -466,11 +469,11 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   // Prefer the format-canonical avatar (JPEG preview from .charx polyglot;
   // PNG card body) over scanning the asset map. Fall back to the asset scan
   // for pure-ZIP charx without a preferred avatar.
-  const preferred = bundle.preferredAvatar;
+  const preferred = pickPreferredAvatar(charxBundle.card, assets);
   const avatar = preferred
     ? { path: preferred.filename, data: preferred.data, filename: preferred.filename, mime: preferred.mime }
     : (() => {
-        const picked = pickAvatar(bundle.assets);
+        const picked = pickAvatar(assets);
         return picked
           ? { path: picked.path, data: picked.data, filename: picked.path.split('/').pop() ?? 'avatar.png', mime: guessMimeType(picked.path) }
           : null;
@@ -478,11 +481,12 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   if (avatar) {
     const tAvatar = Date.now();
     try {
+      const data = await readAsset(avatar.data);
       logInfo(`(5a) setAvatar source=${preferred ? 'preferred' : 'asset-scan'} path=${avatar.path} bytes=${avatar.data.byteLength} mime=${avatar.mime}`);
       const avatarResult = await args.spindle.characters.setAvatar(
         characterId,
         {
-          data: avatar.data,
+          data,
           filename: avatar.filename,
           mime_type: avatar.mime,
         },
@@ -524,7 +528,7 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
     journalBuffer.push(avatarImageId);
     flushJournal();
   }
-  const assetEntries = [...bundle.assets];
+  const assetEntries = [...assets];
   const totalAssetCount = assetEntries.length;
   let totalAssetBytes = 0;
   for (const [, data] of assetEntries) totalAssetBytes += data.byteLength;
@@ -557,8 +561,9 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
       while (i < totalAssetCount && batchItems.length < BATCH_MAX_ITEMS) {
         const entry = assetEntries[i];
         if (!entry) { i += 1; continue; }
-        const [path, data] = entry;
-        if (batchItems.length > 0 && batchBytes + data.byteLength > BATCH_MAX_BYTES) break;
+        const [path, asset] = entry;
+        if (batchItems.length > 0 && batchBytes + asset.byteLength > BATCH_MAX_BYTES) break;
+        const data = await readAsset(asset);
         batchItems.push({
           data,
           mime_type: guessMimeType(path),

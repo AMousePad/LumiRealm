@@ -15,7 +15,7 @@ export interface FrontendLuaHostContract {
   sendToFrontend(payload: unknown, userId: string, options: { frontendSessionId: string }): void;
 }
 
-export function createFrontendLuaBackend(host: SpindleAPI & FrontendLuaHostContract, bootstrap: (chatId: string, characterId: string, userId: string) => Promise<Omit<RuntimeBootstrap, 'state'>>) {
+export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLuaHostContract> & FrontendLuaHostContract, bootstrap: (chatId: string, characterId: string, userId: string) => Promise<Omit<RuntimeBootstrap, 'state'>>) {
   for (const capability of ['frontend-session-routing-v1', 'runtime-state-v1', 'required-context-handlers-v1', 'required-interceptors-v1']) {
     if (!host.host?.capabilities?.[capability]) throw new FrontendLuaUnavailableError(`Frontend Lua requires Lumiverse capability: ${capability}`);
   }

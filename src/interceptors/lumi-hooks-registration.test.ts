@@ -237,7 +237,7 @@ describe('createLumiInterceptors registration', () => {
     expect(result[0]).toEqual({ ...message, content: [keptText, image, { ...strippedText, text: 'Hello world' }] });
     expect(parts[0]).toBe(keptText);
     expect(parts[1]).toBe(image);
-    expect(parts[2]!.cache_control).toBe(strippedText.cache_control);
+    expect(parts[2]).toHaveProperty('cache_control', strippedText.cache_control);
   });
 
   test('runs display processing exactly once through the message content processor', async () => {

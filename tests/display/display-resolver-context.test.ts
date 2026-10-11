@@ -266,15 +266,21 @@ describe('frontend display resolver message context', () => {
 
   test('native activation finds use prepared literal patterns in every macro mode', async () => {
     setDisplaySnapshot({ ...snapshot(), charName: 'A.B' });
-    const originalFetch = globalThis.fetch;
+    let receive: (message: unknown) => void = () => {};
     let requests = 0;
-    globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+    const { setupHostServices } = await import('../../src/host-services/client.js');
+    const stop = setupHostServices({
+      onBackendMessage(handler) { receive = handler; return () => {}; },
+      sendToBackend(raw) {
       requests++;
-      const body = JSON.parse(String(init.body));
+      const request = raw as { requestId: string; operation: string; input: { patterns: string[]; content?: unknown } };
+      expect(request.operation).toBe('activation.prepare');
+      const body = request.input;
       expect(body.patterns).toEqual(['^{{char}}$']);
       expect(body.content).toBeUndefined();
-      return Response.json({ patterns: [{ source: '^{{char}}$', resolved: '^(?:A\\.B)$' }] });
-    }) as typeof fetch;
+      receive({ type: 'host_service_reply', requestId: request.requestId, ok: true, value: { patterns: [{ source: '^{{char}}$', resolved: '^(?:A\\.B)$' }] } });
+      },
+    });
     try {
       const resolver = createDisplayResolver();
       for (const mode of ['none', 'find', 'escaped', 'raw', 'after'] as const) {
@@ -291,7 +297,7 @@ describe('frontend display resolver message context', () => {
         }
       }
       expect(requests).toBe(1);
-    } finally { globalThis.fetch = originalFetch; }
+    } finally { stop(); }
   });
 
   test('native local variables start empty instead of reading persisted Risu state', async () => {

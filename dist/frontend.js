@@ -14959,12 +14959,149 @@ var require_url_parse = __commonJS(function(exports, module) {
   Url.qs = qs;
   module.exports = Url;
 });
+// node_modules/uuid/dist/esm-browser/native.js
+var randomUUID = typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID.bind(crypto);
+var native_default = {
+  randomUUID
+};
+
+// node_modules/uuid/dist/esm-browser/rng.js
+var getRandomValues;
+var rnds8 = new Uint8Array(16);
+function rng() {
+  if (!getRandomValues) {
+    getRandomValues = typeof crypto !== "undefined" && crypto.getRandomValues && crypto.getRandomValues.bind(crypto);
+    if (!getRandomValues) {
+      throw new Error("crypto.getRandomValues() not supported. See https://github.com/uuidjs/uuid#getrandomvalues-not-supported");
+    }
+  }
+  return getRandomValues(rnds8);
+}
+
+// node_modules/uuid/dist/esm-browser/stringify.js
+var byteToHex = [];
+for (let i = 0;i < 256; ++i) {
+  byteToHex.push((i + 256).toString(16).slice(1));
+}
+function unsafeStringify(arr, offset = 0) {
+  return byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]];
+}
+
+// node_modules/uuid/dist/esm-browser/v4.js
+function v4(options, buf, offset) {
+  if (native_default.randomUUID && !buf && !options) {
+    return native_default.randomUUID();
+  }
+  options = options || {};
+  const rnds = options.random || (options.rng || rng)();
+  rnds[6] = rnds[6] & 15 | 64;
+  rnds[8] = rnds[8] & 63 | 128;
+  if (buf) {
+    offset = offset || 0;
+    for (let i = 0;i < 16; ++i) {
+      buf[offset + i] = rnds[i];
+    }
+    return buf;
+  }
+  return unsafeStringify(rnds);
+}
+var v4_default = v4;
+// src/host-services/protocol.ts
+class HostServiceError extends Error {
+  name = "HostServiceError";
+}
+
+// src/host-services/client.ts
+function createHostClient(ctx) {
+  const pending = new Map;
+  let disposed = false;
+  const unsubscribe = ctx.onBackendMessage((raw) => {
+    if (!raw || raw.type !== "host_service_reply")
+      return;
+    const reply = raw;
+    const call = pending.get(reply.requestId);
+    if (!call)
+      return;
+    pending.delete(reply.requestId);
+    clearTimeout(call.timer);
+    if (reply.ok)
+      call.resolve(reply.value);
+    else
+      call.reject(new HostServiceError(reply.error));
+  });
+  return {
+    call(operation, input) {
+      if (disposed)
+        return Promise.reject(new HostServiceError("Host service connection closed"));
+      return new Promise((resolve, reject) => {
+        const requestId = v4_default();
+        const timer = setTimeout(() => {
+          pending.delete(requestId);
+          reject(new HostServiceError(`Host operation timed out: ${operation}`));
+        }, 120000);
+        pending.set(requestId, { resolve: (value) => resolve(value), reject, timer });
+        try {
+          ctx.sendToBackend({ type: "host_service", requestId, operation, input });
+        } catch (error) {
+          clearTimeout(timer);
+          pending.delete(requestId);
+          reject(error);
+        }
+      });
+    },
+    dispose() {
+      disposed = true;
+      unsubscribe();
+      for (const call of pending.values()) {
+        clearTimeout(call.timer);
+        call.reject(new HostServiceError("Host service connection closed"));
+      }
+      pending.clear();
+    }
+  };
+}
+var active;
+function setupHostServices(ctx) {
+  active?.dispose();
+  const client = createHostClient(ctx);
+  active = client;
+  return () => {
+    client.dispose();
+    if (active === client)
+      active = undefined;
+  };
+}
+function hostCall(operation, input) {
+  if (!active)
+    return Promise.reject(new HostServiceError("Host services are not connected"));
+  return active.call(operation, input);
+}
+async function uploadImageFile(file, name) {
+  const staged = await hostCall("file.create", { name, size: file.size, mimeType: file.type });
+  try {
+    let offset = 0;
+    while (offset < file.size) {
+      const bytes = new Uint8Array(await file.slice(offset, offset + 1024 * 1024).arrayBuffer());
+      let binary = "";
+      for (let i = 0;i < bytes.length; i += 8192)
+        binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      const next = await hostCall("file.write", { id: staged.fileId, offset, base64: btoa(binary) });
+      if (next !== offset + bytes.length)
+        throw new HostServiceError("Invalid host upload offset");
+      offset = next;
+    }
+    await hostCall("file.finish", { id: staged.fileId });
+    return await hostCall("image.upload", { fileId: staged.fileId, name, mimeType: file.type });
+  } finally {
+    await hostCall("file.delete", { id: staged.fileId });
+  }
+}
 
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.12.0",
+  version: "0.12.1",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -14987,6 +15124,7 @@ var spindle_default = {
     "chats",
     "world_books",
     "regex_scripts",
+    "regex_scripts_unrestricted",
     "databanks",
     "personas",
     "presets",
@@ -15976,21 +16114,13 @@ class ActivationPatternError extends Error {
 }
 var ACTIVATION_INPUT_DEP_KEY = "__native_activation_inputs__";
 async function loadPatterns(presetId, patterns, context) {
-  const response = await fetch("/api/v1/regex-scripts/activation-patterns", {
-    method: "POST",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      preset_id: presetId,
-      patterns,
-      chat_id: context.chatId,
-      character_id: context.characterId,
-      persona_id: context.personaId
-    })
+  const body = await hostCall("activation.prepare", {
+    presetId,
+    patterns,
+    ...context.chatId ? { chatId: context.chatId } : {},
+    ...context.characterId ? { characterId: context.characterId } : {},
+    ...context.personaId ? { personaId: context.personaId } : {}
   });
-  if (!response.ok)
-    throw new ActivationPatternError(`Activation input preparation failed (${response.status}); the host must provide the activation-patterns endpoint`);
-  const body = await response.json();
   if (!Array.isArray(body.patterns))
     throw new ActivationPatternError("Invalid activation input response");
   return body.patterns;
@@ -16794,53 +16924,7 @@ async function prepareLuaHostState(api, characterId) {
     }
   };
 }
-// node_modules/uuid/dist/esm-browser/native.js
-var randomUUID = typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID.bind(crypto);
-var native_default = {
-  randomUUID
-};
 
-// node_modules/uuid/dist/esm-browser/rng.js
-var getRandomValues;
-var rnds8 = new Uint8Array(16);
-function rng() {
-  if (!getRandomValues) {
-    getRandomValues = typeof crypto !== "undefined" && crypto.getRandomValues && crypto.getRandomValues.bind(crypto);
-    if (!getRandomValues) {
-      throw new Error("crypto.getRandomValues() not supported. See https://github.com/uuidjs/uuid#getrandomvalues-not-supported");
-    }
-  }
-  return getRandomValues(rnds8);
-}
-
-// node_modules/uuid/dist/esm-browser/stringify.js
-var byteToHex = [];
-for (let i = 0;i < 256; ++i) {
-  byteToHex.push((i + 256).toString(16).slice(1));
-}
-function unsafeStringify(arr, offset = 0) {
-  return byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]];
-}
-
-// node_modules/uuid/dist/esm-browser/v4.js
-function v4(options, buf, offset) {
-  if (native_default.randomUUID && !buf && !options) {
-    return native_default.randomUUID();
-  }
-  options = options || {};
-  const rnds = options.random || (options.rng || rng)();
-  rnds[6] = rnds[6] & 15 | 64;
-  rnds[8] = rnds[8] & 63 | 128;
-  if (buf) {
-    offset = offset || 0;
-    for (let i = 0;i < 16; ++i) {
-      buf[offset + i] = rnds[i];
-    }
-    return buf;
-  }
-  return unsafeStringify(rnds);
-}
-var v4_default = v4;
 // src/interpreter/lua-wrapper.lua
 var lua_wrapper_default = `\r
 json = require 'json'\r
@@ -32206,20 +32290,28 @@ function mountCardsPanel(opts) {
     onImportClicked();
   });
   async function listAllRegexRows(query) {
+    const params = new URLSearchParams(query);
+    const characterId = params.get("character_id");
     const rows = [];
     let total = 0;
     do {
-      const resp = await fetch(`/api/v1/regex-scripts?${query}&limit=1000&offset=${rows.length}`, { credentials: "include" });
-      if (!resp.ok)
-        throw new Error(`list HTTP ${resp.status}`);
-      const page = await resp.json();
-      const data = page.data ?? [];
-      rows.push(...data);
-      total = page.total ?? rows.length;
-      if (data.length === 0)
+      const page = await hostCall("regex.list", {
+        scope: characterId ? "character" : "global",
+        ...characterId ? { scopeId: characterId } : {},
+        limit: 200,
+        offset: rows.length
+      });
+      rows.push(...page.data);
+      total = page.total;
+      if (page.data.length === 0)
         break;
     } while (rows.length < total);
     return rows;
+  }
+  async function deleteRegexRows(ids) {
+    const count = await hostCall("regex.delete", { ids: [...ids] });
+    if (count !== ids.length)
+      throw new Error(`Regex deletion count ${count}/${ids.length}`);
   }
   async function onInstallRegexScripts(msg) {
     log.info(`drawer: install_regex_scripts characterId=${msg.characterId} name=${msg.characterName} count=${msg.scripts.length}`);
@@ -32237,18 +32329,7 @@ function mountCardsPanel(opts) {
       replacementVerified = true;
       if (msg.cleanupStale) {
         if (plan.staleIds.length > 0) {
-          const delResp = await fetch("/api/v1/regex-scripts/bulk-delete", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ids: plan.staleIds }),
-            credentials: "include"
-          });
-          if (!delResp.ok)
-            throw new Error(`bulk-delete HTTP ${delResp.status}`);
-          const deleted = await delResp.json();
-          if (deleted.count !== plan.staleIds.length) {
-            throw new Error(`bulk-delete count ${deleted.count ?? 0}/${plan.staleIds.length}`);
-          }
+          await deleteRegexRows(plan.staleIds);
           log.info(`drawer: removed ${plan.staleIds.length} verified stale card regex row(s) char=${msg.characterId}`);
         }
         cleanupCompleted = true;
@@ -32266,49 +32347,19 @@ function mountCardsPanel(opts) {
     }
   }
   async function cleanupCharacterArtifacts(characterId, worldBookIds) {
-    log.info(`drawer.cleanup: characterId=${characterId} worldBookCount=${worldBookIds.length}`);
     try {
-      const listResp = await fetch(`/api/v1/regex-scripts?scope=character&character_id=${encodeURIComponent(characterId)}&limit=2000`, { credentials: "include" });
-      if (listResp.ok) {
-        const body = await listResp.json();
-        const ids = (body.data ?? []).filter((r) => r.scope === "character" && r.scope_id === characterId).map((r) => r.id);
-        if (ids.length > 0) {
-          const delResp = await fetch("/api/v1/regex-scripts/bulk-delete", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ids }),
-            credentials: "include"
-          });
-          if (delResp.ok) {
-            const delBody = await delResp.json();
-            log.info(`drawer.cleanup: regex deleted=${delBody?.count ?? "?"} (sent ${ids.length})`);
-          } else {
-            log.warn(`drawer.cleanup: regex bulk-delete HTTP ${delResp.status}`);
-          }
-        } else {
-          log.info(`drawer.cleanup: no character-scoped regex to remove for ${characterId}`);
-        }
-      } else {
-        log.warn(`drawer.cleanup: regex list HTTP ${listResp.status}`);
-      }
-    } catch (err) {
-      log.warn(`drawer.cleanup: regex cleanup threw`, err);
+      const rows = await listAllRegexRows(`scope=character&character_id=${encodeURIComponent(characterId)}`);
+      const ids = rows.filter((row) => row.scope === "character" && row.scope_id === characterId).map((row) => row.id);
+      if (ids.length)
+        await deleteRegexRows(ids);
+    } catch (error) {
+      log.warn("Character regex cleanup failed", error);
     }
-    for (const wbId of worldBookIds) {
+    for (const id of worldBookIds) {
       try {
-        const resp = await fetch(`/api/v1/world-books/${encodeURIComponent(wbId)}`, {
-          method: "DELETE",
-          credentials: "include"
-        });
-        if (resp.ok) {
-          log.info(`drawer.cleanup: world_book deleted id=${wbId}`);
-        } else if (resp.status === 404) {
-          log.info(`drawer.cleanup: world_book ${wbId} already absent`);
-        } else {
-          log.warn(`drawer.cleanup: world_book delete HTTP ${resp.status} id=${wbId}`);
-        }
-      } catch (err) {
-        log.warn(`drawer.cleanup: world_book delete threw id=${wbId}`, err);
+        await hostCall("worldbook.delete", { id });
+      } catch (error) {
+        log.warn(`World book cleanup failed id=${id}`, error);
       }
     }
   }
@@ -32316,53 +32367,6 @@ function mountCardsPanel(opts) {
     log.info(`drawer.installModuleArtifacts: char=${msg.characterId} module=${msg.moduleId} ` + `lorebookEntries=${msg.lorebookEntries.length} regexScripts=${msg.regexScripts.length}`);
     let worldBookId = null;
     const regexScriptIds = [];
-    if (msg.lorebookEntries.length > 0 && msg.characterId !== null) {
-      try {
-        const createResp = await fetch("/api/v1/world-books", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: msg.worldBookName }),
-          credentials: "include"
-        });
-        if (createResp.ok) {
-          const body = await createResp.json();
-          if (typeof body?.id === "string") {
-            worldBookId = body.id;
-            const importResp = await fetch(`/api/v1/world-books/${encodeURIComponent(worldBookId)}/entries/import`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ entries: msg.lorebookEntries }),
-              credentials: "include"
-            });
-            if (!importResp.ok) {
-              log.warn(`drawer.installModuleArtifacts: world_book entries import HTTP ${importResp.status} ` + `for module=${msg.moduleId} — book created but entries may be missing`);
-            }
-            const charResp = await fetch(`/api/v1/characters/${encodeURIComponent(msg.characterId)}`, { credentials: "include" });
-            if (charResp.ok) {
-              const cur = await charResp.json();
-              const existing = Array.isArray(cur.world_book_ids) ? cur.world_book_ids.filter((x) => typeof x === "string") : [];
-              if (!existing.includes(worldBookId)) {
-                const updResp = await fetch(`/api/v1/characters/${encodeURIComponent(msg.characterId)}`, {
-                  method: "PUT",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    world_book_ids: [...existing, worldBookId]
-                  }),
-                  credentials: "include"
-                });
-                if (!updResp.ok) {
-                  log.warn(`drawer.installModuleArtifacts: character world_book_ids update HTTP ${updResp.status} ` + `for module=${msg.moduleId} — book exists but isn't attached`);
-                }
-              }
-            }
-          }
-        } else {
-          log.warn(`drawer.installModuleArtifacts: world_book create HTTP ${createResp.status} for module=${msg.moduleId}`);
-        }
-      } catch (err) {
-        log.warn(`drawer.installModuleArtifacts: world_book pipeline threw`, err);
-      }
-    }
     let regexInstallOk = msg.cleanupStale;
     let cleanupCompleted = !msg.cleanupStale;
     let liveRows = [];
@@ -32375,18 +32379,7 @@ function mountCardsPanel(opts) {
           if (!plan.verified)
             throw new Error("replacement rows could not be verified");
           if (plan.staleIds.length > 0) {
-            const delResp = await fetch("/api/v1/regex-scripts/bulk-delete", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ ids: plan.staleIds }),
-              credentials: "include"
-            });
-            if (!delResp.ok)
-              throw new Error(`bulk-delete HTTP ${delResp.status}`);
-            const deleted = await delResp.json();
-            if (deleted.count !== plan.staleIds.length) {
-              throw new Error(`bulk-delete count ${deleted.count ?? 0}/${plan.staleIds.length}`);
-            }
+            await deleteRegexRows(plan.staleIds);
             const stale = new Set(plan.staleIds);
             liveRows = liveRows.filter((row) => !stale.has(row.id));
           }
@@ -32419,66 +32412,33 @@ function mountCardsPanel(opts) {
     let ok = true;
     if (msg.worldBookId && msg.characterId !== null) {
       try {
-        const charResp = await fetch(`/api/v1/characters/${encodeURIComponent(msg.characterId)}`, { credentials: "include" });
-        if (charResp.ok) {
-          const cur = await charResp.json();
-          const existing = Array.isArray(cur.world_book_ids) ? cur.world_book_ids.filter((x) => typeof x === "string") : [];
-          if (existing.includes(msg.worldBookId)) {
-            await fetch(`/api/v1/characters/${encodeURIComponent(msg.characterId)}`, {
-              method: "PUT",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                world_book_ids: existing.filter((id) => id !== msg.worldBookId)
-              }),
-              credentials: "include"
-            });
-          }
+        const character = await hostCall("character.get", { id: msg.characterId });
+        if (character?.world_book_ids?.includes(msg.worldBookId)) {
+          await hostCall("character.linkBooks", {
+            id: msg.characterId,
+            worldBookIds: character.world_book_ids.filter((id) => id !== msg.worldBookId)
+          });
         }
-        const delResp = await fetch(`/api/v1/world-books/${encodeURIComponent(msg.worldBookId)}`, { method: "DELETE", credentials: "include" });
-        if (!delResp.ok && delResp.status !== 404) {
-          ok = false;
-          log.warn(`drawer.uninstallModuleArtifacts: world_book delete HTTP ${delResp.status} id=${msg.worldBookId}`);
-        }
-      } catch (err) {
+        await hostCall("worldbook.delete", { id: msg.worldBookId });
+      } catch (error) {
         ok = false;
-        log.warn(`drawer.uninstallModuleArtifacts: world_book pipeline threw`, err);
+        log.warn("Module world book removal failed", error);
       }
     }
-    const idsToDelete = new Set(msg.regexScriptIds);
     try {
-      const uninstallQuery = msg.characterId === null ? "scope=global" : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
-      const listResp = await fetch(`/api/v1/regex-scripts?${uninstallQuery}&limit=2000`, { credentials: "include" });
-      if (listResp.ok) {
-        const body = await listResp.json();
-        for (const r of body.data ?? []) {
-          if (r.scope === "character" && r.scope_id === msg.characterId && r.metadata?._risu?.module_id === msg.moduleId) {
-            idsToDelete.add(r.id);
-          }
-        }
-      } else {
-        log.warn(`drawer.uninstallModuleArtifacts: list HTTP ${listResp.status}, falling back to stashed IDs only`);
+      const query = msg.characterId === null ? "scope=global" : `scope=character&character_id=${encodeURIComponent(msg.characterId)}`;
+      const rows = await listAllRegexRows(query);
+      const ids = new Set(msg.regexScriptIds);
+      for (const row of rows) {
+        const metadata = row.metadata?._risu;
+        if (row.scope === (msg.characterId === null ? "global" : "character") && (msg.characterId === null || row.scope_id === msg.characterId) && metadata?.module_id === msg.moduleId)
+          ids.add(row.id);
       }
-    } catch (err) {
-      log.warn(`drawer.uninstallModuleArtifacts: list threw, falling back to stashed IDs only`, err);
-    }
-    if (idsToDelete.size > 0) {
-      try {
-        const resp = await fetch("/api/v1/regex-scripts/bulk-delete", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ids: [...idsToDelete] }),
-          credentials: "include"
-        });
-        if (!resp.ok) {
-          ok = false;
-          log.warn(`drawer.uninstallModuleArtifacts: regex bulk-delete HTTP ${resp.status} (sent ${idsToDelete.size})`);
-        } else {
-          log.info(`drawer.uninstallModuleArtifacts: regex bulk-deleted ${idsToDelete.size} (stashed=${msg.regexScriptIds.length})`);
-        }
-      } catch (err) {
-        ok = false;
-        log.warn(`drawer.uninstallModuleArtifacts: regex pipeline threw`, err);
-      }
+      if (ids.size)
+        await deleteRegexRows([...ids]);
+    } catch (error) {
+      ok = false;
+      log.warn("Module regex removal failed", error);
     }
     sendToBackend({
       type: "module_artifacts_uninstalled",
@@ -35521,16 +35481,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     let deleted = 0;
     let ok = false;
     try {
-      const response = await fetch("/api/v1/regex-scripts/bulk-delete", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids: msg.ids }),
-        credentials: "include"
-      });
-      if (!response.ok)
-        throw new Error(`bulk-delete HTTP ${response.status}`);
-      const body = await response.json();
-      const count = body.count;
+      const count = await hostCall("regex.delete", { ids: [...msg.ids] });
       if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
         throw new Error("bulk-delete returned an invalid count");
       }
@@ -35908,10 +35859,9 @@ function isUsingFallback() {
   return chromeTranslator() === null && !fallbackDisabled;
 }
 async function googleTranslateFallback(text, src) {
-  const url = "https://translate.googleapis.com/translate_a/single?client=gtx" + `&sl=${encodeURIComponent(src)}&tl=${TARGET}&dt=t&q=${encodeURIComponent(text)}`;
   let res;
   try {
-    res = await fetch(url);
+    res = await hostCall("translation", { text, source: src });
   } catch (err) {
     flog.warn("google-translate fetch failed:", err);
     return null;
@@ -35920,13 +35870,13 @@ async function googleTranslateFallback(text, src) {
     disableFallback("rate limited (429)");
     return null;
   }
-  if (!res.ok) {
+  if (res.status < 200 || res.status >= 300) {
     flog.warn(`google-translate http ${res.status}`);
     return null;
   }
   let data;
   try {
-    data = await res.json();
+    data = JSON.parse(res.body);
   } catch {
     return null;
   }
@@ -39026,25 +38976,7 @@ ${preview}${more}
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
   async function uploadOne(file) {
-    const fd = new FormData;
-    fd.set("image", file, file.name);
-    const resp = await fetch("/api/v1/images", {
-      method: "POST",
-      body: fd,
-      credentials: "include"
-    });
-    if (!resp.ok) {
-      let detail = "";
-      try {
-        detail = ` — ${(await resp.text()).slice(0, 200)}`;
-      } catch {}
-      throw new Error(`HTTP ${resp.status}${detail}`);
-    }
-    const body = await resp.json();
-    if (typeof body?.id !== "string" || body.id.length === 0) {
-      throw new Error("upload response missing id");
-    }
-    return body.id;
+    return uploadImageFile(file, file.name);
   }
   function splitName(filename) {
     const lastDot = filename.lastIndexOf(".");
@@ -41793,17 +41725,7 @@ async function rasterizeOne(svg, width, height) {
 }
 async function uploadPng(png, filename) {
   try {
-    const fd = new FormData;
-    fd.set("image", new Blob([png], { type: "image/png" }), filename);
-    const resp = await fetch("/api/v1/images", {
-      method: "POST",
-      body: fd,
-      credentials: "include"
-    });
-    if (!resp.ok)
-      return null;
-    const js = await resp.json();
-    return typeof js?.id === "string" && js.id.length > 0 ? js.id : null;
+    return await uploadImageFile(new Blob([png], { type: "image/png" }), filename);
   } catch {
     return null;
   }
@@ -44011,1043 +43933,6 @@ function downloadBundle(bundle) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// node_modules/fflate/esm/browser.js
-var u8 = Uint8Array;
-var u16 = Uint16Array;
-var i32 = Int32Array;
-var fleb = new u8([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0, 0, 0, 0]);
-var fdeb = new u8([0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 0, 0]);
-var clim = new u8([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]);
-var freb = function(eb, start) {
-  var b = new u16(31);
-  for (var i = 0;i < 31; ++i) {
-    b[i] = start += 1 << eb[i - 1];
-  }
-  var r = new i32(b[30]);
-  for (var i = 1;i < 30; ++i) {
-    for (var j = b[i];j < b[i + 1]; ++j) {
-      r[j] = j - b[i] << 5 | i;
-    }
-  }
-  return { b, r };
-};
-var _a = freb(fleb, 2);
-var fl = _a.b;
-var revfl = _a.r;
-fl[28] = 258, revfl[258] = 28;
-var _b = freb(fdeb, 0);
-var fd = _b.b;
-var revfd = _b.r;
-var rev = new u16(32768);
-for (i = 0;i < 32768; ++i) {
-  x = (i & 43690) >> 1 | (i & 21845) << 1;
-  x = (x & 52428) >> 2 | (x & 13107) << 2;
-  x = (x & 61680) >> 4 | (x & 3855) << 4;
-  rev[i] = ((x & 65280) >> 8 | (x & 255) << 8) >> 1;
-}
-var x;
-var i;
-var hMap = function(cd, mb, r) {
-  var s = cd.length;
-  var i = 0;
-  var l = new u16(mb);
-  for (;i < s; ++i) {
-    if (cd[i])
-      ++l[cd[i] - 1];
-  }
-  var le = new u16(mb);
-  for (i = 1;i < mb; ++i) {
-    le[i] = le[i - 1] + l[i - 1] << 1;
-  }
-  var co;
-  if (r) {
-    co = new u16(1 << mb);
-    var rvb = 15 - mb;
-    for (i = 0;i < s; ++i) {
-      if (cd[i]) {
-        var sv = i << 4 | cd[i];
-        var r_1 = mb - cd[i];
-        var v = le[cd[i] - 1]++ << r_1;
-        for (var m = v | (1 << r_1) - 1;v <= m; ++v) {
-          co[rev[v] >> rvb] = sv;
-        }
-      }
-    }
-  } else {
-    co = new u16(s);
-    for (i = 0;i < s; ++i) {
-      if (cd[i]) {
-        co[i] = rev[le[cd[i] - 1]++] >> 15 - cd[i];
-      }
-    }
-  }
-  return co;
-};
-var flt = new u8(288);
-for (i = 0;i < 144; ++i)
-  flt[i] = 8;
-var i;
-for (i = 144;i < 256; ++i)
-  flt[i] = 9;
-var i;
-for (i = 256;i < 280; ++i)
-  flt[i] = 7;
-var i;
-for (i = 280;i < 288; ++i)
-  flt[i] = 8;
-var i;
-var fdt = new u8(32);
-for (i = 0;i < 32; ++i)
-  fdt[i] = 5;
-var i;
-var flm = /* @__PURE__ */ hMap(flt, 9, 0);
-var fdm = /* @__PURE__ */ hMap(fdt, 5, 0);
-var shft = function(p) {
-  return (p + 7) / 8 | 0;
-};
-var slc = function(v, s, e) {
-  if (s == null || s < 0)
-    s = 0;
-  if (e == null || e > v.length)
-    e = v.length;
-  return new u8(v.subarray(s, e));
-};
-var ec = [
-  "unexpected EOF",
-  "invalid block type",
-  "invalid length/literal",
-  "invalid distance",
-  "stream finished",
-  "no stream handler",
-  ,
-  "no callback",
-  "invalid UTF-8 data",
-  "extra field too long",
-  "date not in range 1980-2099",
-  "filename too long",
-  "stream finishing",
-  "invalid zip data"
-];
-var err = function(ind, msg, nt) {
-  var e = new Error(msg || ec[ind]);
-  e.code = ind;
-  if (Error.captureStackTrace)
-    Error.captureStackTrace(e, err);
-  if (!nt)
-    throw e;
-  return e;
-};
-var wbits = function(d, p, v) {
-  v <<= p & 7;
-  var o = p / 8 | 0;
-  d[o] |= v;
-  d[o + 1] |= v >> 8;
-};
-var wbits16 = function(d, p, v) {
-  v <<= p & 7;
-  var o = p / 8 | 0;
-  d[o] |= v;
-  d[o + 1] |= v >> 8;
-  d[o + 2] |= v >> 16;
-};
-var hTree = function(d, mb) {
-  var t = [];
-  for (var i = 0;i < d.length; ++i) {
-    if (d[i])
-      t.push({ s: i, f: d[i] });
-  }
-  var s = t.length;
-  var t2 = t.slice();
-  if (!s)
-    return { t: et, l: 0 };
-  if (s == 1) {
-    var v = new u8(t[0].s + 1);
-    v[t[0].s] = 1;
-    return { t: v, l: 1 };
-  }
-  t.sort(function(a, b) {
-    return a.f - b.f;
-  });
-  t.push({ s: -1, f: 25001 });
-  var l = t[0], r = t[1], i0 = 0, i1 = 1, i2 = 2;
-  t[0] = { s: -1, f: l.f + r.f, l, r };
-  while (i1 != s - 1) {
-    l = t[t[i0].f < t[i2].f ? i0++ : i2++];
-    r = t[i0 != i1 && t[i0].f < t[i2].f ? i0++ : i2++];
-    t[i1++] = { s: -1, f: l.f + r.f, l, r };
-  }
-  var maxSym = t2[0].s;
-  for (var i = 1;i < s; ++i) {
-    if (t2[i].s > maxSym)
-      maxSym = t2[i].s;
-  }
-  var tr = new u16(maxSym + 1);
-  var mbt = ln(t[i1 - 1], tr, 0);
-  if (mbt > mb) {
-    var i = 0, dt = 0;
-    var lft = mbt - mb, cst = 1 << lft;
-    t2.sort(function(a, b) {
-      return tr[b.s] - tr[a.s] || a.f - b.f;
-    });
-    for (;i < s; ++i) {
-      var i2_1 = t2[i].s;
-      if (tr[i2_1] > mb) {
-        dt += cst - (1 << mbt - tr[i2_1]);
-        tr[i2_1] = mb;
-      } else
-        break;
-    }
-    dt >>= lft;
-    while (dt > 0) {
-      var i2_2 = t2[i].s;
-      if (tr[i2_2] < mb)
-        dt -= 1 << mb - tr[i2_2]++ - 1;
-      else
-        ++i;
-    }
-    for (;i >= 0 && dt; --i) {
-      var i2_3 = t2[i].s;
-      if (tr[i2_3] == mb) {
-        --tr[i2_3];
-        ++dt;
-      }
-    }
-    mbt = mb;
-  }
-  return { t: new u8(tr), l: mbt };
-};
-var ln = function(n, l, d) {
-  return n.s == -1 ? Math.max(ln(n.l, l, d + 1), ln(n.r, l, d + 1)) : l[n.s] = d;
-};
-var lc = function(c) {
-  var s = c.length;
-  while (s && !c[--s])
-    ;
-  var cl = new u16(++s);
-  var cli = 0, cln = c[0], cls = 1;
-  var w = function(v) {
-    cl[cli++] = v;
-  };
-  for (var i = 1;i <= s; ++i) {
-    if (c[i] == cln && i != s)
-      ++cls;
-    else {
-      if (!cln && cls > 2) {
-        for (;cls > 138; cls -= 138)
-          w(32754);
-        if (cls > 2) {
-          w(cls > 10 ? cls - 11 << 5 | 28690 : cls - 3 << 5 | 12305);
-          cls = 0;
-        }
-      } else if (cls > 3) {
-        w(cln), --cls;
-        for (;cls > 6; cls -= 6)
-          w(8304);
-        if (cls > 2)
-          w(cls - 3 << 5 | 8208), cls = 0;
-      }
-      while (cls--)
-        w(cln);
-      cls = 1;
-      cln = c[i];
-    }
-  }
-  return { c: cl.subarray(0, cli), n: s };
-};
-var clen = function(cf, cl) {
-  var l = 0;
-  for (var i = 0;i < cl.length; ++i)
-    l += cf[i] * cl[i];
-  return l;
-};
-var wfblk = function(out, pos, dat) {
-  var s = dat.length;
-  var o = shft(pos + 2);
-  out[o] = s & 255;
-  out[o + 1] = s >> 8;
-  out[o + 2] = out[o] ^ 255;
-  out[o + 3] = out[o + 1] ^ 255;
-  for (var i = 0;i < s; ++i)
-    out[o + i + 4] = dat[i];
-  return (o + 4 + s) * 8;
-};
-var wblk = function(dat, out, final, syms, lf, df, eb, li, bs, bl, p) {
-  wbits(out, p++, final);
-  ++lf[256];
-  var _a = hTree(lf, 15), { t: dlt, l: mlb } = _a;
-  var _b = hTree(df, 15), { t: ddt, l: mdb } = _b;
-  var _c = lc(dlt), { c: lclt, n: nlc } = _c;
-  var _d = lc(ddt), { c: lcdt, n: ndc } = _d;
-  var lcfreq = new u16(19);
-  for (var i = 0;i < lclt.length; ++i)
-    ++lcfreq[lclt[i] & 31];
-  for (var i = 0;i < lcdt.length; ++i)
-    ++lcfreq[lcdt[i] & 31];
-  var _e = hTree(lcfreq, 7), { t: lct, l: mlcb } = _e;
-  var nlcc = 19;
-  for (;nlcc > 4 && !lct[clim[nlcc - 1]]; --nlcc)
-    ;
-  var flen = bl + 5 << 3;
-  var ftlen = clen(lf, flt) + clen(df, fdt) + eb;
-  var dtlen = clen(lf, dlt) + clen(df, ddt) + eb + 14 + 3 * nlcc + clen(lcfreq, lct) + 2 * lcfreq[16] + 3 * lcfreq[17] + 7 * lcfreq[18];
-  if (bs >= 0 && flen <= ftlen && flen <= dtlen)
-    return wfblk(out, p, dat.subarray(bs, bs + bl));
-  var lm, ll, dm, dl;
-  wbits(out, p, 1 + (dtlen < ftlen)), p += 2;
-  if (dtlen < ftlen) {
-    lm = hMap(dlt, mlb, 0), ll = dlt, dm = hMap(ddt, mdb, 0), dl = ddt;
-    var llm = hMap(lct, mlcb, 0);
-    wbits(out, p, nlc - 257);
-    wbits(out, p + 5, ndc - 1);
-    wbits(out, p + 10, nlcc - 4);
-    p += 14;
-    for (var i = 0;i < nlcc; ++i)
-      wbits(out, p + 3 * i, lct[clim[i]]);
-    p += 3 * nlcc;
-    var lcts = [lclt, lcdt];
-    for (var it = 0;it < 2; ++it) {
-      var clct = lcts[it];
-      for (var i = 0;i < clct.length; ++i) {
-        var len = clct[i] & 31;
-        wbits(out, p, llm[len]), p += lct[len];
-        if (len > 15)
-          wbits(out, p, clct[i] >> 5 & 127), p += clct[i] >> 12;
-      }
-    }
-  } else {
-    lm = flm, ll = flt, dm = fdm, dl = fdt;
-  }
-  for (var i = 0;i < li; ++i) {
-    var sym = syms[i];
-    if (sym > 255) {
-      var len = sym >> 18 & 31;
-      wbits16(out, p, lm[len + 257]), p += ll[len + 257];
-      if (len > 7)
-        wbits(out, p, sym >> 23 & 31), p += fleb[len];
-      var dst = sym & 31;
-      wbits16(out, p, dm[dst]), p += dl[dst];
-      if (dst > 3)
-        wbits16(out, p, sym >> 5 & 8191), p += fdeb[dst];
-    } else {
-      wbits16(out, p, lm[sym]), p += ll[sym];
-    }
-  }
-  wbits16(out, p, lm[256]);
-  return p + ll[256];
-};
-var deo = /* @__PURE__ */ new i32([65540, 131080, 131088, 131104, 262176, 1048704, 1048832, 2114560, 2117632]);
-var et = /* @__PURE__ */ new u8(0);
-var dflt = function(dat, lvl, plvl, pre, post, st) {
-  var s = st.z || dat.length;
-  var o = new u8(pre + s + 5 * (1 + Math.ceil(s / 7000)) + post);
-  var w = o.subarray(pre, o.length - post);
-  var lst = st.l;
-  var pos = (st.r || 0) & 7;
-  if (lvl) {
-    if (pos)
-      w[0] = st.r >> 3;
-    var opt = deo[lvl - 1];
-    var n = opt >> 13, c = opt & 8191;
-    var msk_1 = (1 << plvl) - 1;
-    var prev = st.p || new u16(32768), head = st.h || new u16(msk_1 + 1);
-    var bs1_1 = Math.ceil(plvl / 3), bs2_1 = 2 * bs1_1;
-    var hsh = function(i) {
-      return (dat[i] ^ dat[i + 1] << bs1_1 ^ dat[i + 2] << bs2_1) & msk_1;
-    };
-    var syms = new i32(25000);
-    var lf = new u16(288), df = new u16(32);
-    var lc_1 = 0, eb = 0, i = st.i || 0, li = 0, wi = st.w || 0, bs = 0;
-    for (;i + 2 < s; ++i) {
-      var hv = hsh(i);
-      var imod = i & 32767, pimod = head[hv];
-      prev[imod] = pimod;
-      head[hv] = imod;
-      if (wi <= i) {
-        var rem = s - i;
-        if ((lc_1 > 7000 || li > 24576) && (rem > 423 || !lst)) {
-          pos = wblk(dat, w, 0, syms, lf, df, eb, li, bs, i - bs, pos);
-          li = lc_1 = eb = 0, bs = i;
-          for (var j = 0;j < 286; ++j)
-            lf[j] = 0;
-          for (var j = 0;j < 30; ++j)
-            df[j] = 0;
-        }
-        var l = 2, d = 0, ch_1 = c, dif = imod - pimod & 32767;
-        if (rem > 2 && hv == hsh(i - dif)) {
-          var maxn = Math.min(n, rem) - 1;
-          var maxd = Math.min(32767, i);
-          var ml = Math.min(258, rem);
-          while (dif <= maxd && --ch_1 && imod != pimod) {
-            if (dat[i + l] == dat[i + l - dif]) {
-              var nl = 0;
-              for (;nl < ml && dat[i + nl] == dat[i + nl - dif]; ++nl)
-                ;
-              if (nl > l) {
-                l = nl, d = dif;
-                if (nl > maxn)
-                  break;
-                var mmd = Math.min(dif, nl - 2);
-                var md = 0;
-                for (var j = 0;j < mmd; ++j) {
-                  var ti = i - dif + j & 32767;
-                  var pti = prev[ti];
-                  var cd = ti - pti & 32767;
-                  if (cd > md)
-                    md = cd, pimod = ti;
-                }
-              }
-            }
-            imod = pimod, pimod = prev[imod];
-            dif += imod - pimod & 32767;
-          }
-        }
-        if (d) {
-          syms[li++] = 268435456 | revfl[l] << 18 | revfd[d];
-          var lin = revfl[l] & 31, din = revfd[d] & 31;
-          eb += fleb[lin] + fdeb[din];
-          ++lf[257 + lin];
-          ++df[din];
-          wi = i + l;
-          ++lc_1;
-        } else {
-          syms[li++] = dat[i];
-          ++lf[dat[i]];
-        }
-      }
-    }
-    for (i = Math.max(i, wi);i < s; ++i) {
-      syms[li++] = dat[i];
-      ++lf[dat[i]];
-    }
-    pos = wblk(dat, w, lst, syms, lf, df, eb, li, bs, i - bs, pos);
-    if (!lst) {
-      st.r = pos & 7 | w[pos / 8 | 0] << 3;
-      pos -= 7;
-      st.h = head, st.p = prev, st.i = i, st.w = wi;
-    }
-  } else {
-    for (var i = st.w || 0;i < s + lst; i += 65535) {
-      var e = i + 65535;
-      if (e >= s) {
-        w[pos / 8 | 0] = lst;
-        e = s;
-      }
-      pos = wfblk(w, pos + 1, dat.subarray(i, e));
-    }
-    st.i = s;
-  }
-  return slc(o, 0, pre + shft(pos) + post);
-};
-var crct = /* @__PURE__ */ function() {
-  var t = new Int32Array(256);
-  for (var i = 0;i < 256; ++i) {
-    var c = i, k = 9;
-    while (--k)
-      c = (c & 1 && -306674912) ^ c >>> 1;
-    t[i] = c;
-  }
-  return t;
-}();
-var crc = function() {
-  var c = -1;
-  return {
-    p: function(d) {
-      var cr = c;
-      for (var i = 0;i < d.length; ++i)
-        cr = crct[cr & 255 ^ d[i]] ^ cr >>> 8;
-      c = cr;
-    },
-    d: function() {
-      return ~c;
-    }
-  };
-};
-var dopt = function(dat, opt, pre, post, st) {
-  if (!st) {
-    st = { l: 1 };
-    if (opt.dictionary) {
-      var dict = opt.dictionary.subarray(-32768);
-      var newDat = new u8(dict.length + dat.length);
-      newDat.set(dict);
-      newDat.set(dat, dict.length);
-      dat = newDat;
-      st.w = dict.length;
-    }
-  }
-  return dflt(dat, opt.level == null ? 6 : opt.level, opt.mem == null ? st.l ? Math.ceil(Math.max(8, Math.min(13, Math.log(dat.length))) * 1.5) : 20 : 12 + opt.mem, pre, post, st);
-};
-var mrg = function(a, b) {
-  var o = {};
-  for (var k in a)
-    o[k] = a[k];
-  for (var k in b)
-    o[k] = b[k];
-  return o;
-};
-var wbytes = function(d, b, v) {
-  for (;v; ++b)
-    d[b] = v, v >>>= 8;
-};
-var Deflate = /* @__PURE__ */ function() {
-  function Deflate(opts, cb) {
-    if (typeof opts == "function")
-      cb = opts, opts = {};
-    this.ondata = cb;
-    this.o = opts || {};
-    this.s = { l: 0, i: 32768, w: 32768, z: 32768 };
-    this.b = new u8(98304);
-    if (this.o.dictionary) {
-      var dict = this.o.dictionary.subarray(-32768);
-      this.b.set(dict, 32768 - dict.length);
-      this.s.i = 32768 - dict.length;
-    }
-  }
-  Deflate.prototype.p = function(c, f) {
-    this.ondata(dopt(c, this.o, 0, 0, this.s), f);
-  };
-  Deflate.prototype.push = function(chunk, final) {
-    if (!this.ondata)
-      err(5);
-    if (this.s.l)
-      err(4);
-    var endLen = chunk.length + this.s.z;
-    if (endLen > this.b.length) {
-      if (endLen > 2 * this.b.length - 32768) {
-        var newBuf = new u8(endLen & -32768);
-        newBuf.set(this.b.subarray(0, this.s.z));
-        this.b = newBuf;
-      }
-      var split = this.b.length - this.s.z;
-      this.b.set(chunk.subarray(0, split), this.s.z);
-      this.s.z = this.b.length;
-      this.p(this.b, false);
-      this.b.set(this.b.subarray(-32768));
-      this.b.set(chunk.subarray(split), 32768);
-      this.s.z = chunk.length - split + 32768;
-      this.s.i = 32766, this.s.w = 32768;
-    } else {
-      this.b.set(chunk, this.s.z);
-      this.s.z += chunk.length;
-    }
-    this.s.l = final & 1;
-    if (this.s.z > this.s.w + 8191 || final) {
-      this.p(this.b, final || false);
-      this.s.w = this.s.i, this.s.i -= 2;
-    }
-  };
-  Deflate.prototype.flush = function() {
-    if (!this.ondata)
-      err(5);
-    if (this.s.l)
-      err(4);
-    this.p(this.b, false);
-    this.s.w = this.s.i, this.s.i -= 2;
-  };
-  return Deflate;
-}();
-var te = typeof TextEncoder != "undefined" && /* @__PURE__ */ new TextEncoder;
-var td = typeof TextDecoder != "undefined" && /* @__PURE__ */ new TextDecoder;
-var tds = 0;
-try {
-  td.decode(et, { stream: true });
-  tds = 1;
-} catch (e) {}
-function strToU8(str, latin1) {
-  if (latin1) {
-    var ar_1 = new u8(str.length);
-    for (var i = 0;i < str.length; ++i)
-      ar_1[i] = str.charCodeAt(i);
-    return ar_1;
-  }
-  if (te)
-    return te.encode(str);
-  var l = str.length;
-  var ar = new u8(str.length + (str.length >> 1));
-  var ai = 0;
-  var w = function(v) {
-    ar[ai++] = v;
-  };
-  for (var i = 0;i < l; ++i) {
-    if (ai + 5 > ar.length) {
-      var n = new u8(ai + 8 + (l - i << 1));
-      n.set(ar);
-      ar = n;
-    }
-    var c = str.charCodeAt(i);
-    if (c < 128 || latin1)
-      w(c);
-    else if (c < 2048)
-      w(192 | c >> 6), w(128 | c & 63);
-    else if (c > 55295 && c < 57344)
-      c = 65536 + (c & 1023 << 10) | str.charCodeAt(++i) & 1023, w(240 | c >> 18), w(128 | c >> 12 & 63), w(128 | c >> 6 & 63), w(128 | c & 63);
-    else
-      w(224 | c >> 12), w(128 | c >> 6 & 63), w(128 | c & 63);
-  }
-  return slc(ar, 0, ai);
-}
-var dbf = function(l) {
-  return l == 1 ? 3 : l < 6 ? 2 : l == 9 ? 1 : 0;
-};
-var exfl = function(ex) {
-  var le = 0;
-  if (ex) {
-    for (var k in ex) {
-      var l = ex[k].length;
-      if (l > 65535)
-        err(9);
-      le += l + 4;
-    }
-  }
-  return le;
-};
-var wzh = function(d, b, f, fn, u, c, ce, co) {
-  var fl = fn.length, ex = f.extra, col = co && co.length;
-  var exl = exfl(ex);
-  wbytes(d, b, ce != null ? 33639248 : 67324752), b += 4;
-  if (ce != null)
-    d[b++] = 20, d[b++] = f.os;
-  d[b] = 20, b += 2;
-  d[b++] = f.flag << 1 | (c < 0 && 8), d[b++] = u && 8;
-  d[b++] = f.compression & 255, d[b++] = f.compression >> 8;
-  var dt = new Date(f.mtime == null ? Date.now() : f.mtime), y = dt.getFullYear() - 1980;
-  if (y < 0 || y > 119)
-    err(10);
-  wbytes(d, b, y << 25 | dt.getMonth() + 1 << 21 | dt.getDate() << 16 | dt.getHours() << 11 | dt.getMinutes() << 5 | dt.getSeconds() >> 1), b += 4;
-  if (c != -1) {
-    wbytes(d, b, f.crc);
-    wbytes(d, b + 4, c < 0 ? -c - 2 : c);
-    wbytes(d, b + 8, f.size);
-  }
-  wbytes(d, b + 12, fl);
-  wbytes(d, b + 14, exl), b += 16;
-  if (ce != null) {
-    wbytes(d, b, col);
-    wbytes(d, b + 6, f.attrs);
-    wbytes(d, b + 10, ce), b += 14;
-  }
-  d.set(fn, b);
-  b += fl;
-  if (exl) {
-    for (var k in ex) {
-      var exf = ex[k], l = exf.length;
-      wbytes(d, b, +k);
-      wbytes(d, b + 2, l);
-      d.set(exf, b + 4), b += 4 + l;
-    }
-  }
-  if (col)
-    d.set(co, b), b += col;
-  return b;
-};
-var wzf = function(o, b, c, d, e) {
-  wbytes(o, b, 101010256);
-  wbytes(o, b + 8, c);
-  wbytes(o, b + 10, c);
-  wbytes(o, b + 12, d);
-  wbytes(o, b + 16, e);
-};
-var ZipPassThrough = /* @__PURE__ */ function() {
-  function ZipPassThrough(filename) {
-    this.filename = filename;
-    this.c = crc();
-    this.size = 0;
-    this.compression = 0;
-  }
-  ZipPassThrough.prototype.process = function(chunk, final) {
-    this.ondata(null, chunk, final);
-  };
-  ZipPassThrough.prototype.push = function(chunk, final) {
-    if (!this.ondata)
-      err(5);
-    this.c.p(chunk);
-    this.size += chunk.length;
-    if (final)
-      this.crc = this.c.d();
-    this.process(chunk, final || false);
-  };
-  return ZipPassThrough;
-}();
-var ZipDeflate = /* @__PURE__ */ function() {
-  function ZipDeflate(filename, opts) {
-    var _this = this;
-    if (!opts)
-      opts = {};
-    ZipPassThrough.call(this, filename);
-    this.d = new Deflate(opts, function(dat, final) {
-      _this.ondata(null, dat, final);
-    });
-    this.compression = 8;
-    this.flag = dbf(opts.level);
-  }
-  ZipDeflate.prototype.process = function(chunk, final) {
-    try {
-      this.d.push(chunk, final);
-    } catch (e) {
-      this.ondata(e, null, final);
-    }
-  };
-  ZipDeflate.prototype.push = function(chunk, final) {
-    ZipPassThrough.prototype.push.call(this, chunk, final);
-  };
-  return ZipDeflate;
-}();
-var Zip = /* @__PURE__ */ function() {
-  function Zip(cb) {
-    this.ondata = cb;
-    this.u = [];
-    this.d = 1;
-  }
-  Zip.prototype.add = function(file) {
-    var _this = this;
-    if (!this.ondata)
-      err(5);
-    if (this.d & 2)
-      this.ondata(err(4 + (this.d & 1) * 8, 0, 1), null, false);
-    else {
-      var f = strToU8(file.filename), fl_1 = f.length;
-      var com = file.comment, o = com && strToU8(com);
-      var u = fl_1 != file.filename.length || o && com.length != o.length;
-      var hl_1 = fl_1 + exfl(file.extra) + 30;
-      if (fl_1 > 65535)
-        this.ondata(err(11, 0, 1), null, false);
-      var header = new u8(hl_1);
-      wzh(header, 0, file, f, u, -1);
-      var chks_1 = [header];
-      var pAll_1 = function() {
-        for (var _i = 0, chks_2 = chks_1;_i < chks_2.length; _i++) {
-          var chk = chks_2[_i];
-          _this.ondata(null, chk, false);
-        }
-        chks_1 = [];
-      };
-      var tr_1 = this.d;
-      this.d = 0;
-      var ind_1 = this.u.length;
-      var uf_1 = mrg(file, {
-        f,
-        u,
-        o,
-        t: function() {
-          if (file.terminate)
-            file.terminate();
-        },
-        r: function() {
-          pAll_1();
-          if (tr_1) {
-            var nxt = _this.u[ind_1 + 1];
-            if (nxt)
-              nxt.r();
-            else
-              _this.d = 1;
-          }
-          tr_1 = 1;
-        }
-      });
-      var cl_1 = 0;
-      file.ondata = function(err, dat, final) {
-        if (err) {
-          _this.ondata(err, dat, final);
-          _this.terminate();
-        } else {
-          cl_1 += dat.length;
-          chks_1.push(dat);
-          if (final) {
-            var dd = new u8(16);
-            wbytes(dd, 0, 134695760);
-            wbytes(dd, 4, file.crc);
-            wbytes(dd, 8, cl_1);
-            wbytes(dd, 12, file.size);
-            chks_1.push(dd);
-            uf_1.c = cl_1, uf_1.b = hl_1 + cl_1 + 16, uf_1.crc = file.crc, uf_1.size = file.size;
-            if (tr_1)
-              uf_1.r();
-            tr_1 = 1;
-          } else if (tr_1)
-            pAll_1();
-        }
-      };
-      this.u.push(uf_1);
-    }
-  };
-  Zip.prototype.end = function() {
-    var _this = this;
-    if (this.d & 2) {
-      this.ondata(err(4 + (this.d & 1) * 8, 0, 1), null, true);
-      return;
-    }
-    if (this.d)
-      this.e();
-    else
-      this.u.push({
-        r: function() {
-          if (!(_this.d & 1))
-            return;
-          _this.u.splice(-1, 1);
-          _this.e();
-        },
-        t: function() {}
-      });
-    this.d = 3;
-  };
-  Zip.prototype.e = function() {
-    var bt = 0, l = 0, tl = 0;
-    for (var _i = 0, _a = this.u;_i < _a.length; _i++) {
-      var f = _a[_i];
-      tl += 46 + f.f.length + exfl(f.extra) + (f.o ? f.o.length : 0);
-    }
-    var out = new u8(tl + 22);
-    for (var _b = 0, _c = this.u;_b < _c.length; _b++) {
-      var f = _c[_b];
-      wzh(out, bt, f, f.f, f.u, -f.c - 2, l, f.o);
-      bt += 46 + f.f.length + exfl(f.extra) + (f.o ? f.o.length : 0), l += f.b;
-    }
-    wzf(out, bt, this.u.length, tl, l);
-    this.ondata(null, out, true);
-    this.d = 2;
-  };
-  Zip.prototype.terminate = function() {
-    for (var _i = 0, _a = this.u;_i < _a.length; _i++) {
-      var f = _a[_i];
-      f.t();
-    }
-    this.d = 2;
-  };
-  return Zip;
-}();
-
-// src/core/rpack/rpack-map-data.ts
-var RPACK_MAP_BYTES = new Uint8Array([196, 13, 30, 11, 189, 43, 63, 85, 252, 69, 110, 245, 102, 83, 79, 26, 224, 187, 48, 148, 134, 186, 107, 191, 65, 80, 111, 155, 239, 222, 183, 16, 97, 23, 32, 223, 50, 137, 168, 157, 109, 171, 201, 144, 0, 12, 93, 175, 210, 193, 86, 229, 22, 100, 145, 130, 101, 116, 151, 202, 35, 214, 82, 209, 255, 180, 160, 232, 47, 138, 88, 56, 90, 96, 25, 150, 73, 219, 215, 200, 59, 62, 67, 75, 165, 99, 71, 170, 106, 41, 146, 244, 21, 207, 98, 52, 120, 211, 29, 60, 226, 5, 142, 42, 87, 14, 27, 205, 76, 45, 242, 64, 44, 37, 121, 72, 15, 178, 122, 181, 167, 108, 55, 230, 156, 123, 84, 126, 254, 135, 220, 154, 2, 228, 51, 162, 235, 177, 46, 3, 221, 153, 166, 176, 231, 213, 136, 24, 131, 124, 246, 190, 225, 92, 159, 195, 33, 70, 31, 8, 78, 208, 118, 18, 95, 238, 253, 143, 68, 234, 163, 94, 139, 40, 9, 53, 158, 105, 204, 10, 199, 133, 7, 173, 74, 243, 119, 233, 103, 212, 218, 132, 128, 147, 182, 77, 115, 250, 39, 38, 127, 4, 198, 251, 241, 114, 57, 81, 194, 54, 169, 104, 172, 248, 237, 197, 185, 203, 206, 117, 164, 61, 129, 217, 66, 112, 28, 149, 17, 188, 216, 140, 152, 249, 89, 161, 19, 247, 20, 125, 179, 236, 113, 192, 227, 141, 240, 1, 174, 91, 49, 6, 36, 34, 58, 184, 44, 247, 132, 139, 201, 101, 251, 182, 159, 174, 179, 3, 45, 1, 105, 116, 31, 228, 163, 236, 238, 92, 52, 33, 147, 74, 15, 106, 226, 98, 2, 158, 34, 156, 253, 60, 252, 113, 199, 198, 173, 89, 103, 5, 112, 109, 138, 68, 18, 250, 36, 134, 95, 175, 209, 122, 71, 206, 254, 80, 99, 221, 81, 6, 111, 24, 224, 82, 168, 9, 157, 86, 115, 76, 184, 83, 108, 195, 160, 14, 25, 207, 62, 13, 126, 7, 50, 104, 70, 234, 72, 249, 153, 46, 171, 164, 73, 32, 94, 85, 53, 56, 12, 188, 211, 177, 88, 22, 121, 40, 10, 26, 225, 242, 205, 196, 57, 219, 162, 186, 96, 114, 118, 125, 149, 239, 127, 200, 192, 222, 55, 148, 191, 181, 20, 129, 146, 37, 69, 172, 231, 245, 102, 167, 43, 54, 90, 193, 19, 227, 75, 58, 232, 141, 131, 27, 124, 39, 176, 154, 66, 235, 135, 170, 220, 84, 142, 120, 38, 210, 87, 41, 212, 183, 248, 47, 143, 137, 117, 240, 65, 119, 194, 30, 255, 216, 21, 17, 229, 4, 151, 23, 243, 49, 208, 155, 0, 215, 202, 180, 79, 42, 59, 217, 178, 107, 218, 93, 161, 63, 48, 97, 189, 145, 61, 78, 230, 223, 190, 77, 130, 140, 29, 35, 16, 152, 100, 244, 133, 51, 123, 144, 67, 187, 169, 136, 241, 214, 165, 28, 246, 204, 110, 185, 91, 11, 150, 237, 213, 233, 197, 203, 8, 166, 128, 64]);
-
-// src/core/risum/codec.ts
-var DEFAULT_MAX_PAYLOAD_BYTES = 1 * 1024 * 1024 * 1024;
-var DEFAULT_MAX_ASSET_BYTES = 256 * 1024 * 1024;
-
-// src/core/export/asset-paths.ts
-var TYPE_DIRS = new Set([
-  "emotion",
-  "background",
-  "user_icon",
-  "icon"
-]);
-
-// src/core/export/module-archive.ts
-function latin1ToBytes(text) {
-  const out = new Uint8Array(text.length);
-  for (let i = 0;i < text.length; i++)
-    out[i] = text.charCodeAt(i) & 255;
-  return out;
-}
-
-// src/realm/import-formats/png-chunks.ts
-var PNG_SIGNATURE = [
-  137,
-  80,
-  78,
-  71,
-  13,
-  10,
-  26,
-  10
-];
-function isPngBytes(bytes) {
-  if (bytes.length < PNG_SIGNATURE.length)
-    return false;
-  for (let i = 0;i < PNG_SIGNATURE.length; i++) {
-    if (bytes[i] !== PNG_SIGNATURE[i])
-      return false;
-  }
-  return true;
-}
-function readU32BE(bytes, pos) {
-  return (bytes[pos] ?? 0) * 16777216 + ((bytes[pos + 1] ?? 0) << 16) + ((bytes[pos + 2] ?? 0) << 8) + (bytes[pos + 3] ?? 0) >>> 0;
-}
-function decodeText(bytes) {
-  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-}
-function readPngChunks(bytes) {
-  if (!isPngBytes(bytes)) {
-    throw new Error("not a PNG file");
-  }
-  const out = [];
-  let pos = 8;
-  while (pos + 8 <= bytes.length) {
-    const len = readU32BE(bytes, pos);
-    const typeBytes = bytes.subarray(pos + 4, pos + 8);
-    const type = decodeText(typeBytes);
-    const dataStart = pos + 8;
-    const dataEnd = dataStart + len;
-    if (dataEnd + 4 > bytes.length)
-      break;
-    const data = bytes.subarray(dataStart, dataEnd);
-    if (type === "tEXt") {
-      let nullIdx = -1;
-      for (let i = 0;i < data.length && i < 79; i++) {
-        if (data[i] === 0) {
-          nullIdx = i;
-          break;
-        }
-      }
-      if (nullIdx >= 0) {
-        const key = decodeText(data.subarray(0, nullIdx));
-        const value = data.subarray(nullIdx + 1);
-        out.push({ type, key, value, raw: data });
-      } else {
-        out.push({ type, raw: data });
-      }
-    } else if (type === "zTXt") {
-      let nullIdx = -1;
-      for (let i = 0;i < data.length && i < 79; i++) {
-        if (data[i] === 0) {
-          nullIdx = i;
-          break;
-        }
-      }
-      if (nullIdx >= 0) {
-        const key = decodeText(data.subarray(0, nullIdx));
-        out.push({ type, key, raw: data });
-      } else {
-        out.push({ type, raw: data });
-      }
-    } else {
-      out.push({ type, raw: data });
-    }
-    pos = dataEnd + 4;
-    if (type === "IEND")
-      break;
-  }
-  return out;
-}
-function extractPngTextChunks(bytes) {
-  const chunks = readPngChunks(bytes);
-  const out = [];
-  for (const c of chunks) {
-    if (c.type !== "tEXt")
-      continue;
-    if (!c.key || !c.value)
-      continue;
-    out.push({ key: c.key, text: decodeText(c.value) });
-  }
-  return out;
-}
-
-// src/export/archive-writer.ts
-var PINNED_MTIME = new Date(2000, 0, 1);
-function getImageType(a) {
-  if (a.length < 12)
-    return "Unknown";
-  if (a[0] === 255 && a[1] === 216 && a[a.length - 2] === 255 && a[a.length - 1] === 217)
-    return "JPEG";
-  if (a[0] === 137 && a[1] === 80 && a[2] === 78 && a[3] === 71 && a[4] === 13 && a[5] === 10 && a[6] === 26 && a[7] === 10)
-    return "PNG";
-  if (a[0] === 71 && a[1] === 73 && a[2] === 70 && a[3] === 56 && (a[4] === 55 || a[4] === 57) && a[5] === 97)
-    return "GIF";
-  if (a[0] === 66 && a[1] === 77)
-    return "BMP";
-  if (a[4] === 102 && a[5] === 116 && a[6] === 121 && a[7] === 112 && a[8] === 97 && a[9] === 118 && a[10] === 105 && a[11] === 102)
-    return "AVIF";
-  if (a[0] === 82 && a[1] === 73 && a[2] === 70 && a[3] === 70 && a[8] === 87 && a[9] === 69 && a[10] === 66 && a[11] === 80)
-    return "WEBP";
-  return "Unknown";
-}
-async function fetchImageBytes(imageId) {
-  const resp = await fetch(`/api/v1/images/${encodeURIComponent(imageId)}`, {
-    credentials: "include"
-  });
-  if (!resp.ok)
-    throw new Error(`HTTP ${resp.status}`);
-  return new Uint8Array(await resp.arrayBuffer());
-}
-function buildXMeta(bytes) {
-  const type = getImageType(bytes);
-  if (type === "PNG") {
-    let chunks = {};
-    try {
-      chunks = Object.fromEntries(extractPngTextChunks(bytes).map((c) => [c.key, c.text]));
-    } catch {
-      chunks = {};
-    }
-    if (Object.keys(chunks).length > 0)
-      return JSON.stringify(chunks, null, 4);
-  }
-  return JSON.stringify({ type });
-}
-
-class SequentialZip {
-  #zip;
-  #chunks = [];
-  #ended = false;
-  #error = null;
-  constructor() {
-    this.#zip = new Zip((err, data, final) => {
-      if (err)
-        this.#error = err;
-      if (data)
-        this.#chunks.push(data);
-      if (final)
-        this.#ended = true;
-    });
-  }
-  add(path, data, level) {
-    if (this.#error)
-      throw this.#error;
-    const file = new ZipDeflate(path, { level });
-    file.mtime = PINNED_MTIME;
-    this.#zip.add(file);
-    file.push(data, true);
-    if (this.#error)
-      throw this.#error;
-  }
-  finish() {
-    this.#zip.end();
-    if (this.#error)
-      throw this.#error;
-    if (!this.#ended)
-      throw new Error("zip stream did not finalize");
-    const parts = this.#chunks.map((c) => c.slice().buffer);
-    return new Blob(parts, { type: "application/zip" });
-  }
-}
-async function buildArchive(plan, log, onProgress) {
-  const zip = new SequentialZip;
-  const encoder = new TextEncoder;
-  const skippedAssets = [];
-  const total = plan.entries.length;
-  let done = 0;
-  for (const entry of plan.entries) {
-    if (entry.kind === "text") {
-      zip.add(entry.path, encoder.encode(entry.text), entry.level);
-    } else if (entry.kind === "binary") {
-      zip.add(entry.path, latin1ToBytes(entry.latin1), entry.level);
-    } else {
-      let bytes;
-      try {
-        bytes = await fetchImageBytes(entry.imageId);
-      } catch (err) {
-        skippedAssets.push(entry.path);
-        log.warn(`export: asset fetch failed path=${entry.path} image=${entry.imageId}: ` + (err instanceof Error ? err.message : String(err)));
-        done += 1;
-        onProgress?.(done, total);
-        continue;
-      }
-      zip.add(entry.metaPath, encoder.encode(buildXMeta(bytes)), 6);
-      zip.add(entry.path, bytes, entry.level);
-    }
-    done += 1;
-    onProgress?.(done, total);
-  }
-  return { blob: zip.finish(), fileName: plan.fileName, skippedAssets };
-}
-function downloadBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 // src/frontend.ts
 var HANDSHAKE_RETRY_MS = 3000;
 var flog2 = {
@@ -45153,6 +44038,7 @@ function setup(ctx) {
     });
   }, activationPatterns);
   cleanups.push(display.registerResolver(displayResolver));
+  cleanups.push(setupHostServices(ctx));
   const sendDisplayAuthority = (chatId) => {
     if (!chatId)
       return;
@@ -45448,6 +44334,8 @@ function setup(ctx) {
   });
   let ready = false;
   const unsub = ctx.onBackendMessage((raw) => {
+    if (raw?.type === "host_service_reply")
+      return;
     if (frontendLua.receive(raw))
       return;
     const msg = raw;
@@ -45482,14 +44370,13 @@ function setup(ctx) {
       }
       sendToBackend({ type: "log_set_state", enabled: false, includeChatData: false });
     }
-    if (msg.type === "export_archive") {
-      const plan = msg.plan;
+    if (msg.type === "export_ready") {
       (async () => {
         try {
-          const result = await buildArchive(plan, flog2);
-          downloadBlob(result.blob, result.fileName);
+          const result = msg;
+          await ctx.files.download(result.fileId);
           const skipped = result.skippedAssets.length;
-          flog2.info(`export_archive: wrote ${result.fileName} entries=${plan.entries.length}` + (skipped > 0 ? ` skipped=${skipped}` : ""));
+          flog2.info(`export_ready: wrote ${result.fileName}` + (skipped > 0 ? ` skipped=${skipped}` : ""));
           if (skipped > 0) {
             window.alert(`Exported ${result.fileName}, but ${skipped} asset(s) could not be read ` + `and were left out. The archive is incomplete.`);
           }

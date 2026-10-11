@@ -1,3 +1,4 @@
+import { setupHostServices } from './host-services/client.js';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
@@ -38,7 +39,6 @@ import {
   buildBundle,
   downloadBundle,
 } from './log/frontend-capture.js';
-import { buildArchive, downloadBlob } from './export/archive-writer.js';
 
 const HANDSHAKE_RETRY_MS = 3000;
 
@@ -149,6 +149,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     activationPatterns,
   );
   cleanups.push(display.registerResolver(displayResolver));
+  cleanups.push(setupHostServices(ctx));
   // Ownership is per-character: the host reads character.extensions.lumirealm.display_owner
   // (stamped by writeLumirealm + the boot backfill). display_authority is a separate signal
   // telling the backend to short-circuit ('on') or keep resolving ('off').
@@ -476,6 +477,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let ready = false;
 
   const unsub = ctx.onBackendMessage((raw) => {
+    if ((raw as { type?: string })?.type === 'host_service_reply') return;
     if (frontendLua.receive(raw)) return;
     const msg = raw as BackendToFrontend;
     if (!isLogTransportNoise(msg.type)) flog.trace(`frontend recv: ${msg.type}`, msg);
@@ -509,15 +511,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       sendToBackend({ type: 'log_set_state', enabled: false, includeChatData: false });
       // Fall through so the Logs panel can show "Downloaded".
     }
-    if (msg.type === 'export_archive') {
-      const plan = msg.plan;
+    if (msg.type === 'export_ready') {
       void (async () => {
         try {
-          const result = await buildArchive(plan, flog);
-          downloadBlob(result.blob, result.fileName);
+          const result = msg;
+          await ctx.files.download(result.fileId);
           const skipped = result.skippedAssets.length;
           flog.info(
-            `export_archive: wrote ${result.fileName} entries=${plan.entries.length}` +
+            `export_ready: wrote ${result.fileName}` +
               (skipped > 0 ? ` skipped=${skipped}` : ''),
           );
           if (skipped > 0) {

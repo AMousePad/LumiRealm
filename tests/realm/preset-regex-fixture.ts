@@ -188,6 +188,7 @@ export function makePresetBackend(
     send: () => {},
     log: { info: () => {}, warn: () => {}, error: () => {} },
     importCardFromBytes: async () => {},
+    importPreparedCard: async () => {},
     ...(extra.translatePresetLabels !== undefined
       ? { translatePresetLabels: extra.translatePresetLabels }
       : {}),

@@ -1,5 +1,6 @@
+import { uploadImageFile } from './host-services/client.js';
 // SVG rasterizer: Lumi's richHtmlSanitizer (dbda8a7) blocks inline SVG, so card SVGs are
-// rasterized to PNG at import time. blob-URL -> <img> -> canvas.drawImage -> POST /api/v1/images.
+// rasterized to PNG at import time and uploaded through Spindle.
 // Theme vars are snapshotted once per batch; colors are frozen to import-time theme.
 // Animated SVGs render first-frame only. Templated SVGs are excluded by the backend.
 
@@ -107,22 +108,12 @@ async function rasterizeOne(
   }
 }
 
-// Field name must be "image", not "file". // Workaround: Lumi /api/v1/images quirk
 async function uploadPng(
   png: Uint8Array,
   filename: string,
 ): Promise<string | null> {
   try {
-    const fd = new FormData();
-    fd.set("image", new Blob([png as BlobPart], { type: "image/png" }), filename);
-    const resp = await fetch("/api/v1/images", {
-      method: "POST",
-      body: fd,
-      credentials: "include",
-    });
-    if (!resp.ok) return null;
-    const js = (await resp.json()) as { id?: string };
-    return typeof js?.id === "string" && js.id.length > 0 ? js.id : null;
+    return await uploadImageFile(new Blob([png as BlobPart], { type: 'image/png' }), filename);
   } catch {
     return null;
   }

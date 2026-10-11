@@ -1,3 +1,4 @@
+import { createHostServices } from './host-services/backend.js';
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import type { FrontendToBackend, BackendToFrontend, CardSummary } from './types/messages.js';
@@ -120,6 +121,7 @@ import { createAssetsHandlers } from './handlers/assets.js';
 import { createViewerHandlers } from './handlers/viewer.js';
 import { createModuleHandlers } from './handlers/module.js';
 import { createExportHandlers } from './handlers/export.js';
+import { buildStagedArchive } from './export/staged-archive.js';
 import {
   createImportHandlers,
   type PendingImportCompletion,
@@ -1654,6 +1656,7 @@ const generatePresetLabels = async (request: {
 };
 
 const realmHandle: RealmBackendHandle = setupRealmBackend({
+  importPreparedCard: importCardOrchestrator.importPreparedCard,
   send: (msg: RealmBackendToFrontend, userId: string | undefined) => send(msg, userId),
   log: {
     info: (m: string) => log.info(m),
@@ -1807,8 +1810,7 @@ const importHandlers = createImportHandlers({
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
   refreshVariables,
-  importAnyFormat: (bytes, name, uid, opts) => realmHandle.importAnyFormat(bytes, name, uid, opts),
-  getUpload,
+  importFile: (source, name, uid, opts) => realmHandle.importFile(source, name, uid, opts),
   deleteUpload,
   applySvgRasterIndex,
   maybeFinalizeImport,
@@ -1929,6 +1931,11 @@ const moduleHandlers = createModuleHandlers({
 });
 
 const exportHandlers = createExportHandlers({
+  exportArchive: async (plan, userId, frontendSessionId) => {
+    if (!frontendSessionId) throw new Error('Export requires an authenticated browser session');
+    const result = await buildStagedArchive(spindle, plan, userId);
+    spindle.sendToFrontend({ type: 'export_ready', ...result }, userId, { frontendSessionId });
+  },
   readModuleEnvelope: (uid, moduleId) => readModuleEnvelope(moduleStorage(), uid, moduleId),
   readCharacterForExport: async (characterId, userId) => {
     const fetched = await readLumirealm(charactersApi(), characterId, userId);
@@ -2024,6 +2031,8 @@ const handlerRegistry: HandlerRegistry = {
   },
 };
 
+const receiveHostService = createHostServices(spindle);
+
 spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {
   captureUserId(userId, 'frontend-message');
   markFrontendReady(userId);
@@ -2038,6 +2047,7 @@ spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {
     log.warn(`frontend msg type=${msg.type} dropped: no userId`);
     return;
   }
+  if (await receiveHostService(raw, userId, frontendSessionId)) return;
   if (await frontendLua.receive(raw, userId, frontendSessionId)) return;
   const ctx: HandlerCallCtx = { userId, send, log, errMsg, ...(frontendSessionId ? { frontendSessionId } : {}) };
   try {

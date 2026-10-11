@@ -1,26 +1,4 @@
-// Browser half of the export path. The worker plans entries; only the browser
-// holds the session cookie needed to read image bytes back out of Lumiverse.
-//
-// Entry order, deflate levels and the x_meta companions mirror Risu's
-// CharXWriter so the output stays importable by RisuAI.
-
-import { Zip, ZipDeflate } from 'fflate';
-import type { ArchivePlan, PlannedEntry } from '../core/export/archive-types.js';
-import { latin1ToBytes } from '../core/export/module-archive.js';
 import { extractPngTextChunks } from '../realm/import-formats/png-chunks.js';
-
-export interface ArchiveWriterLog {
-  readonly info: (m: string) => void;
-  readonly warn: (m: string) => void;
-}
-
-export interface BuildArchiveResult {
-  readonly blob: Blob;
-  readonly fileName: string;
-  readonly skippedAssets: readonly string[];
-}
-
-const PINNED_MTIME = new Date(2000, 0, 1);
 
 type ImageType = 'JPEG' | 'PNG' | 'GIF' | 'BMP' | 'AVIF' | 'WEBP' | 'Unknown';
 
@@ -40,15 +18,7 @@ export function getImageType(a: Uint8Array): ImageType {
   return 'Unknown';
 }
 
-async function fetchImageBytes(imageId: string): Promise<Uint8Array> {
-  const resp = await fetch(`/api/v1/images/${encodeURIComponent(imageId)}`, {
-    credentials: 'include',
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return new Uint8Array(await resp.arrayBuffer());
-}
-
-function buildXMeta(bytes: Uint8Array): string {
+export function buildXMeta(bytes: Uint8Array): string {
   const type = getImageType(bytes);
   if (type === 'PNG') {
     let chunks: Record<string, string> = {};
@@ -60,93 +30,4 @@ function buildXMeta(bytes: Uint8Array): string {
     if (Object.keys(chunks).length > 0) return JSON.stringify(chunks, null, 4);
   }
   return JSON.stringify({ type });
-}
-
-/** Sequential sink over fflate's streaming Zip. Each entry is pushed to
- *  completion before the next is added, matching CharXWriter's write loop. */
-class SequentialZip {
-  readonly #zip: Zip;
-  readonly #chunks: Uint8Array[] = [];
-  #ended = false;
-  #error: Error | null = null;
-
-  constructor() {
-    this.#zip = new Zip((err, data, final) => {
-      if (err) this.#error = err;
-      if (data) this.#chunks.push(data);
-      if (final) this.#ended = true;
-    });
-  }
-
-  add(path: string, data: Uint8Array, level: 0 | 6): void {
-    if (this.#error) throw this.#error;
-    const file = new ZipDeflate(path, { level });
-    // Pinned so two exports of unchanged data produce identical bytes. fflate
-    // defaults to Date.now(), which Risu inherits. Must land in 1980..2099 in
-    // local time or fflate rejects the DOS date field.
-    file.mtime = PINNED_MTIME;
-    this.#zip.add(file);
-    file.push(data, true);
-    if (this.#error) throw this.#error;
-  }
-
-  finish(): Blob {
-    this.#zip.end();
-    if (this.#error) throw this.#error;
-    if (!this.#ended) throw new Error('zip stream did not finalize');
-    const parts = this.#chunks.map((c) => c.slice().buffer as ArrayBuffer);
-    return new Blob(parts, { type: 'application/zip' });
-  }
-}
-
-export async function buildArchive(
-  plan: ArchivePlan,
-  log: ArchiveWriterLog,
-  onProgress?: (done: number, total: number) => void,
-): Promise<BuildArchiveResult> {
-  const zip = new SequentialZip();
-  const encoder = new TextEncoder();
-  const skippedAssets: string[] = [];
-  const total = plan.entries.length;
-  let done = 0;
-
-  for (const entry of plan.entries as readonly PlannedEntry[]) {
-    if (entry.kind === 'text') {
-      zip.add(entry.path, encoder.encode(entry.text), entry.level);
-    } else if (entry.kind === 'binary') {
-      zip.add(entry.path, latin1ToBytes(entry.latin1), entry.level);
-    } else {
-      let bytes: Uint8Array;
-      try {
-        bytes = await fetchImageBytes(entry.imageId);
-      } catch (err) {
-        // A missing asset must not silently produce a broken card.
-        skippedAssets.push(entry.path);
-        log.warn(
-          `export: asset fetch failed path=${entry.path} image=${entry.imageId}: ` +
-            (err instanceof Error ? err.message : String(err)),
-        );
-        done += 1;
-        onProgress?.(done, total);
-        continue;
-      }
-      zip.add(entry.metaPath, encoder.encode(buildXMeta(bytes)), 6);
-      zip.add(entry.path, bytes, entry.level);
-    }
-    done += 1;
-    onProgress?.(done, total);
-  }
-
-  return { blob: zip.finish(), fileName: plan.fileName, skippedAssets };
-}
-
-export function downloadBlob(blob: Blob, fileName: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

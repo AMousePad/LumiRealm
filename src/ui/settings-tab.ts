@@ -1,3 +1,4 @@
+import { hostCall } from '../host-services/client.js';
 import type {
   BackendToFrontend,
   FrontendToBackend,
@@ -1743,15 +1744,7 @@ export function mountSettingsPanel(
     let deleted = 0;
     let ok = false;
     try {
-      const response = await fetch('/api/v1/regex-scripts/bulk-delete', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ids: msg.ids }),
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error(`bulk-delete HTTP ${response.status}`);
-      const body = await response.json() as { count?: unknown };
-      const count = body.count;
+      const count = await hostCall('regex.delete', { ids: [...msg.ids] });
       if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
         throw new Error('bulk-delete returned an invalid count');
       }

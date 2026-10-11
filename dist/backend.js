@@ -10887,6 +10887,116 @@ var init_lorebook_decorator_runtime = __esm(() => {
   RISU_SLOT_TOKENS = new Set(["{{slot}}", "{{original}}", ""]);
 });
 
+// src/host-services/protocol.ts
+class HostServiceError extends Error {
+  name = "HostServiceError";
+}
+
+// src/host-services/files.ts
+async function stageBytes(files, bytes, name, userId) {
+  const file = await files.create({ fileName: name, size: bytes.length, userId });
+  try {
+    for (let offset = 0;offset < bytes.length; ) {
+      const chunk = bytes.subarray(offset, offset + 1024 * 1024);
+      const next = await files.writeChunk(file.fileId, offset, chunk, userId);
+      if (next !== offset + chunk.length)
+        throw new HostServiceError("Invalid host upload offset");
+      offset = next;
+    }
+    return await files.finish(file.fileId, userId);
+  } catch (error) {
+    await files.delete(file.fileId, userId);
+    throw error;
+  }
+}
+async function readStagedBytes(files, source, userId, maxBytes) {
+  let offset = 0;
+  let bytes;
+  for (;; ) {
+    const chunk = await files.readChunk(source, offset, userId);
+    if (!Number.isSafeInteger(chunk.size) || chunk.size < 0 || chunk.size > maxBytes)
+      throw new HostServiceError(`File exceeds the ${maxBytes} byte read limit`);
+    bytes ??= new Uint8Array(chunk.size);
+    if (chunk.size !== bytes.length || chunk.offset !== offset || offset + chunk.data.length > bytes.length)
+      throw new HostServiceError("Invalid host file chunk");
+    bytes.set(chunk.data, offset);
+    offset += chunk.data.length;
+    if (chunk.eof) {
+      if (offset !== bytes.length)
+        throw new HostServiceError("Incomplete host file");
+      return bytes;
+    }
+    if (!chunk.data.length)
+      throw new HostServiceError("Host file read made no progress");
+  }
+}
+
+// src/host-services/backend.ts
+function createHostServices(host) {
+  async function execute(request, userId) {
+    switch (request.operation) {
+      case "activation.prepare":
+        return host.regex_scripts.prepareActivationPatterns({ ...request.input, userId });
+      case "regex.list":
+        return host.regex_scripts.list({ ...request.input, userId });
+      case "regex.delete": {
+        let count = 0;
+        for (const id of new Set(request.input.ids))
+          if (await host.regex_scripts.delete(id, userId))
+            count++;
+        return count;
+      }
+      case "worldbook.delete":
+        return host.world_books.delete(request.input.id, userId);
+      case "character.get":
+        return host.characters.get(request.input.id, userId);
+      case "character.linkBooks": {
+        await host.characters.update(request.input.id, { world_book_ids: request.input.worldBookIds }, userId);
+        return;
+      }
+      case "translation": {
+        const url = "https://translate.googleapis.com/translate_a/single?client=gtx" + `&sl=${encodeURIComponent(request.input.source)}&tl=en&dt=t&q=${encodeURIComponent(request.input.text)}`;
+        const response = await host.cors(url);
+        if (typeof response.status !== "number" || typeof response.body !== "string")
+          throw new HostServiceError("Invalid translation response");
+        return { status: response.status, body: response.body };
+      }
+      case "file.create":
+        return host.files.create({ fileName: request.input.name, size: request.input.size, mimeType: request.input.mimeType, userId });
+      case "file.write": {
+        if (typeof request.input.base64 !== "string" || request.input.base64.length > 4 * Math.ceil(1024 * 1024 / 3))
+          throw new HostServiceError("File chunk exceeds 1 MiB");
+        return host.files.writeChunk(request.input.id, request.input.offset, new Uint8Array(Buffer.from(request.input.base64, "base64")), userId);
+      }
+      case "file.finish":
+        return host.files.finish(request.input.id, userId);
+      case "file.delete":
+        return host.files.delete(request.input.id, userId);
+      case "image.upload": {
+        const data = await readStagedBytes(host.files, { fileId: request.input.fileId }, userId, 50 * 1024 * 1024);
+        return (await host.images.upload({ data, filename: request.input.name, mime_type: request.input.mimeType }, userId)).id;
+      }
+      default:
+        throw new HostServiceError("Unknown host operation");
+    }
+  }
+  return async (raw, userId, frontendSessionId) => {
+    if (!raw || raw.type !== "host_service")
+      return false;
+    if (!frontendSessionId)
+      throw new HostServiceError("Host services require an authenticated browser session");
+    const request = raw;
+    let reply;
+    try {
+      reply = { type: "host_service_reply", requestId: request.requestId, ok: true, value: await execute(request, userId) };
+    } catch (error) {
+      reply = { type: "host_service_reply", requestId: request.requestId, ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    host.sendToFrontend(reply, userId, { frontendSessionId });
+    return true;
+  };
+}
+
 // src/util/coerce.ts
 function errMsg(err) {
   return err instanceof Error ? err.message : String(err);
@@ -10914,21 +11024,22 @@ var REALM_HUB_API_URL = "https://sv.risuai.xyz";
 var REALM_DOWNLOAD_URL = "https://realm.risuai.net";
 
 // src/realm/api.ts
+class RealmRequestError extends Error {
+  name = "RealmRequestError";
+}
+async function requestJson(url, headers) {
+  const response = await spindle.cors(url, { responseType: "text", ...headers ? { headers } : {} });
+  if (response.status !== 200)
+    throw new RealmRequestError(`Realm request failed: HTTP ${response.status}`);
+  return JSON.parse(response.body);
+}
 var APP_VER = "0.1.0";
 var CLIENT_TAG = "web";
 async function searchRealm(arg) {
   const search = (arg.search ?? "") + " __shared";
   const stringArg = `search==${search}&&page==${arg.page}&&nsfw==${arg.nsfw}&&sort==${arg.sort}&&web==${CLIENT_TAG}`;
   const url = `${REALM_HUB_API_URL}/realm/${encodeURIComponent(stringArg)}?cache=30`;
-  const res = await fetch(url, {
-    headers: {
-      "x-risuai-info": `${APP_VER};lumirealm`
-    }
-  });
-  if (res.status !== 200) {
-    return { cards: [] };
-  }
-  const jso = await res.json();
+  const jso = await requestJson(url, { "x-risuai-info": `${APP_VER};lumirealm` });
   if (Array.isArray(jso)) {
     return { cards: jso };
   }
@@ -10940,30 +11051,24 @@ async function searchRealm(arg) {
 }
 async function getRealmInfo(realmPath) {
   const url = `${REALM_HUB_API_URL}/hub/info/${encodeURIComponent(realmPath)}`;
-  const res = await fetch(url);
-  if (res.status !== 200) {
-    throw new Error(`realm info HTTP ${res.status}: ${await res.text()}`);
-  }
-  return await res.json();
+  return await requestJson(url);
 }
-async function downloadRealmCard(id) {
+async function downloadRealmCard(id, userId) {
   const url = `${REALM_DOWNLOAD_URL}/api/v1/download/dynamic/${encodeURIComponent(id)}?cors=true`;
-  const res = await fetch(url, {
+  const file = await spindle.files.fetch(url, {
+    userId,
+    fileName: "realm-download",
+    maxBytes: 10 * 1024 ** 3,
     headers: { "x-risu-api-version": "4" }
   });
-  if (res.status !== 200) {
-    throw new Error(`realm download HTTP ${res.status}: ${await res.text()}`);
-  }
-  const ct = (res.headers.get("content-type") ?? "").toLowerCase();
-  const ab = await res.arrayBuffer();
-  const bytes = new Uint8Array(ab);
+  const ct = file.mimeType.toLowerCase();
   let ext = "charx";
   if (ct.includes("png"))
     ext = "png";
   else if (ct.includes("zip") && !ct.includes("charx"))
     ext = "zip";
   const fileName = `realm-${id}.${ext}`;
-  return { bytes, contentType: ct, fileName };
+  return { file, contentType: ct, fileName };
 }
 
 // src/realm/import-formats/png-chunks.ts
@@ -11441,6 +11546,732 @@ function convertToCharx(bytes, fileName) {
       const head = Array.from(bytes.subarray(0, 8)).map((b) => b.toString(16).padStart(2, "0")).join(" ");
       throw new Error(`Unrecognized character file format. First bytes: ${head}. ` + "Supported: .charx, JPEG+ZIP polyglot, PNG with `chara`/`ccv3` chunk, JSON V2/V3.");
     }
+  }
+}
+
+// src/core/errors.ts
+class TranslationError extends Error {
+  kind;
+  breadcrumb;
+  cause;
+  constructor(kind, message, opts = {}) {
+    super(message);
+    this.name = "TranslationError";
+    this.kind = kind;
+    this.breadcrumb = opts.breadcrumb ?? [];
+    if (opts.cause !== undefined)
+      this.cause = opts.cause;
+  }
+  at(...segments) {
+    return new TranslationError(this.kind, this.message, {
+      breadcrumb: [...segments, ...this.breadcrumb],
+      cause: this.cause
+    });
+  }
+}
+
+// src/core/rpack/rpack-map-data.ts
+var RPACK_MAP_BYTES = new Uint8Array([196, 13, 30, 11, 189, 43, 63, 85, 252, 69, 110, 245, 102, 83, 79, 26, 224, 187, 48, 148, 134, 186, 107, 191, 65, 80, 111, 155, 239, 222, 183, 16, 97, 23, 32, 223, 50, 137, 168, 157, 109, 171, 201, 144, 0, 12, 93, 175, 210, 193, 86, 229, 22, 100, 145, 130, 101, 116, 151, 202, 35, 214, 82, 209, 255, 180, 160, 232, 47, 138, 88, 56, 90, 96, 25, 150, 73, 219, 215, 200, 59, 62, 67, 75, 165, 99, 71, 170, 106, 41, 146, 244, 21, 207, 98, 52, 120, 211, 29, 60, 226, 5, 142, 42, 87, 14, 27, 205, 76, 45, 242, 64, 44, 37, 121, 72, 15, 178, 122, 181, 167, 108, 55, 230, 156, 123, 84, 126, 254, 135, 220, 154, 2, 228, 51, 162, 235, 177, 46, 3, 221, 153, 166, 176, 231, 213, 136, 24, 131, 124, 246, 190, 225, 92, 159, 195, 33, 70, 31, 8, 78, 208, 118, 18, 95, 238, 253, 143, 68, 234, 163, 94, 139, 40, 9, 53, 158, 105, 204, 10, 199, 133, 7, 173, 74, 243, 119, 233, 103, 212, 218, 132, 128, 147, 182, 77, 115, 250, 39, 38, 127, 4, 198, 251, 241, 114, 57, 81, 194, 54, 169, 104, 172, 248, 237, 197, 185, 203, 206, 117, 164, 61, 129, 217, 66, 112, 28, 149, 17, 188, 216, 140, 152, 249, 89, 161, 19, 247, 20, 125, 179, 236, 113, 192, 227, 141, 240, 1, 174, 91, 49, 6, 36, 34, 58, 184, 44, 247, 132, 139, 201, 101, 251, 182, 159, 174, 179, 3, 45, 1, 105, 116, 31, 228, 163, 236, 238, 92, 52, 33, 147, 74, 15, 106, 226, 98, 2, 158, 34, 156, 253, 60, 252, 113, 199, 198, 173, 89, 103, 5, 112, 109, 138, 68, 18, 250, 36, 134, 95, 175, 209, 122, 71, 206, 254, 80, 99, 221, 81, 6, 111, 24, 224, 82, 168, 9, 157, 86, 115, 76, 184, 83, 108, 195, 160, 14, 25, 207, 62, 13, 126, 7, 50, 104, 70, 234, 72, 249, 153, 46, 171, 164, 73, 32, 94, 85, 53, 56, 12, 188, 211, 177, 88, 22, 121, 40, 10, 26, 225, 242, 205, 196, 57, 219, 162, 186, 96, 114, 118, 125, 149, 239, 127, 200, 192, 222, 55, 148, 191, 181, 20, 129, 146, 37, 69, 172, 231, 245, 102, 167, 43, 54, 90, 193, 19, 227, 75, 58, 232, 141, 131, 27, 124, 39, 176, 154, 66, 235, 135, 170, 220, 84, 142, 120, 38, 210, 87, 41, 212, 183, 248, 47, 143, 137, 117, 240, 65, 119, 194, 30, 255, 216, 21, 17, 229, 4, 151, 23, 243, 49, 208, 155, 0, 215, 202, 180, 79, 42, 59, 217, 178, 107, 218, 93, 161, 63, 48, 97, 189, 145, 61, 78, 230, 223, 190, 77, 130, 140, 29, 35, 16, 152, 100, 244, 133, 51, 123, 144, 67, 187, 169, 136, 241, 214, 165, 28, 246, 204, 110, 185, 91, 11, 150, 237, 213, 233, 197, 203, 8, 166, 128, 64]);
+
+// src/core/rpack/rpack.ts
+var ENCODE_MAP = null;
+var DECODE_MAP = null;
+function loadMaps() {
+  if (ENCODE_MAP && DECODE_MAP)
+    return { encode: ENCODE_MAP, decode: DECODE_MAP };
+  const raw = RPACK_MAP_BYTES;
+  if (raw.byteLength !== 512) {
+    throw new TranslationError("rpack/bad_map", `rpack_map inline table must be 512 bytes, got ${raw.byteLength}`);
+  }
+  const encode = new Uint8Array(raw.buffer, raw.byteOffset, 256);
+  const decode = new Uint8Array(raw.buffer, raw.byteOffset + 256, 256);
+  assertInversePermutation(encode, decode);
+  ENCODE_MAP = encode;
+  DECODE_MAP = decode;
+  return { encode, decode };
+}
+function assertInversePermutation(encode, decode) {
+  for (let i = 0;i < 256; i++) {
+    const e = encode[i];
+    if (decode[e] !== i) {
+      throw new TranslationError("rpack/bad_map", `rpack maps are not inverse permutations at byte ${i}: encode[${i}]=${e}, decode[${e}]=${decode[e]}`);
+    }
+  }
+}
+function encodeRPack(data) {
+  const { encode } = loadMaps();
+  const out = new Uint8Array(data.length);
+  for (let i = 0;i < data.length; i++)
+    out[i] = encode[data[i]];
+  return out;
+}
+function decodeRPack(data) {
+  const out = new Uint8Array(data.length);
+  decodeRPackInto(data, out);
+  return out;
+}
+function decodeRPackInto(data, out, offset = 0) {
+  if (!Number.isInteger(offset) || offset < 0 || offset + data.length > out.length) {
+    throw new RangeError("RPack decode destination is too small");
+  }
+  const { decode } = loadMaps();
+  for (let i = 0;i < data.length; i++)
+    out[offset + i] = decode[data[i]];
+}
+
+// src/core/risum/codec.ts
+var RISUM_MAGIC = 111;
+var RISUM_VERSION = 0;
+var RISUM_MARK_ASSET = 1;
+var RISUM_MARK_END = 0;
+var DEFAULT_MAX_PAYLOAD_BYTES = 1 * 1024 * 1024 * 1024;
+var DEFAULT_MAX_ASSET_BYTES = 256 * 1024 * 1024;
+var DEFAULT_MAX_ASSET_COUNT = 262144;
+
+class Cursor {
+  buf;
+  offset = 0;
+  constructor(buf) {
+    this.buf = buf;
+  }
+  get pos() {
+    return this.offset;
+  }
+  get remaining() {
+    return this.buf.length - this.offset;
+  }
+  get atEnd() {
+    return this.offset >= this.buf.length;
+  }
+  readU8(label) {
+    this.requireBytes(1, label);
+    const b = this.buf[this.offset];
+    this.offset += 1;
+    return b;
+  }
+  readU32LE(label) {
+    this.requireBytes(4, label);
+    const b0 = this.buf[this.offset];
+    const b1 = this.buf[this.offset + 1];
+    const b2 = this.buf[this.offset + 2];
+    const b3 = this.buf[this.offset + 3];
+    this.offset += 4;
+    return (b0 | b1 << 8 | b2 << 16 | b3 << 24) >>> 0;
+  }
+  readSlice(len, label) {
+    if (len < 0 || !Number.isInteger(len)) {
+      throw new TranslationError("risum/bad_length", `${label}: length ${len} is not a non-negative integer`);
+    }
+    this.requireBytes(len, label);
+    const out = this.buf.subarray(this.offset, this.offset + len);
+    this.offset += len;
+    return out;
+  }
+  requireBytes(n, label) {
+    if (this.buf.length - this.offset < n) {
+      throw new TranslationError("risum/truncated", `${label}: need ${n} bytes at offset ${this.offset}, only ${this.buf.length - this.offset} remain`);
+    }
+  }
+}
+function assertUtf8(bytes) {
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+  try {
+    return decoder.decode(bytes);
+  } catch (cause) {
+    throw new TranslationError("risum/invalid_utf8", "RPack-decoded payload is not valid UTF-8", { cause });
+  }
+}
+function parseJson(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (cause) {
+    throw new TranslationError("risum/invalid_json", "RPack-decoded payload is not valid JSON", { cause });
+  }
+}
+function isPlainObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function decodeRisum(buf, opts = {}) {
+  const maxPayload = opts.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES;
+  const maxAsset = opts.maxAssetBytes ?? DEFAULT_MAX_ASSET_BYTES;
+  const maxAssetCount = opts.maxAssetCount ?? DEFAULT_MAX_ASSET_COUNT;
+  const cur = new Cursor(buf);
+  const magic = cur.readU8("magic");
+  if (magic !== RISUM_MAGIC) {
+    throw new TranslationError("risum/bad_magic", `expected magic 0x${RISUM_MAGIC.toString(16)}, got 0x${magic.toString(16)}`);
+  }
+  const version = cur.readU8("version");
+  if (version !== RISUM_VERSION) {
+    throw new TranslationError("risum/unsupported_version", `unsupported risum version ${version}`);
+  }
+  const payloadLen = cur.readU32LE("payload_length");
+  if (payloadLen > maxPayload) {
+    throw new TranslationError("risum/payload_too_large", `payload is ${payloadLen} bytes, exceeds limit ${maxPayload}`);
+  }
+  const encodedPayload = cur.readSlice(payloadLen, "payload");
+  const decodedPayload = decodeRPack(encodedPayload);
+  const payloadText = assertUtf8(decodedPayload);
+  const wrapper = parseJson(payloadText);
+  if (!isPlainObject(wrapper)) {
+    throw new TranslationError("risum/bad_wrapper", "payload JSON is not an object");
+  }
+  if (wrapper["type"] !== "risuModule") {
+    throw new TranslationError("risum/bad_wrapper", `payload type is ${JSON.stringify(wrapper["type"])}, expected "risuModule"`);
+  }
+  const module = wrapper["module"];
+  if (!isPlainObject(module)) {
+    throw new TranslationError("risum/bad_wrapper", "payload.module is not an object");
+  }
+  const assets = [];
+  while (!cur.atEnd) {
+    const mark = cur.readU8(`asset[${assets.length}].mark`);
+    if (mark === RISUM_MARK_END) {
+      if (!cur.atEnd) {
+        throw new TranslationError("risum/trailing_bytes", `${cur.remaining} unexpected bytes after end-of-file marker`);
+      }
+      break;
+    }
+    if (mark !== RISUM_MARK_ASSET) {
+      throw new TranslationError("risum/bad_mark", `asset[${assets.length}]: expected mark 0x00 or 0x01, got 0x${mark.toString(16)}`);
+    }
+    if (assets.length >= maxAssetCount) {
+      throw new TranslationError("risum/too_many_assets", `asset count exceeds limit ${maxAssetCount}`);
+    }
+    const len = cur.readU32LE(`asset[${assets.length}].length`);
+    if (len > maxAsset) {
+      throw new TranslationError("risum/asset_too_large", `asset[${assets.length}] is ${len} bytes, exceeds limit ${maxAsset}`);
+    }
+    const encoded = cur.readSlice(len, `asset[${assets.length}].data`);
+    assets.push(decodeRPack(encoded));
+  }
+  return { version, module, assets, payloadText };
+}
+function encodeRisum(input, opts = {}) {
+  let jsonText;
+  if (input.payloadText !== undefined) {
+    jsonText = input.payloadText;
+  } else if (input.module !== undefined) {
+    const indent = opts.jsonIndent === undefined ? 2 : opts.jsonIndent;
+    jsonText = indent === null ? JSON.stringify({ module: input.module, type: "risuModule" }) : JSON.stringify({ module: input.module, type: "risuModule" }, null, indent);
+  } else {
+    throw new TranslationError("risum/encode_no_input", "encodeRisum requires either payloadText or module");
+  }
+  const jsonBytes = new TextEncoder().encode(jsonText);
+  const encodedPayload = encodeRPack(jsonBytes);
+  const assets = input.assets ?? [];
+  let total = 2 + 4 + encodedPayload.length + 1;
+  for (const a of assets)
+    total += 1 + 4 + a.length;
+  const out = new Uint8Array(total);
+  const view = new DataView(out.buffer);
+  let o = 0;
+  out[o++] = RISUM_MAGIC;
+  out[o++] = RISUM_VERSION;
+  view.setUint32(o, encodedPayload.length, true);
+  o += 4;
+  out.set(encodedPayload, o);
+  o += encodedPayload.length;
+  for (const a of assets) {
+    out[o++] = RISUM_MARK_ASSET;
+    view.setUint32(o, a.length, true);
+    o += 4;
+    out.set(encodeRPack(a), o);
+    o += a.length;
+  }
+  out[o++] = RISUM_MARK_END;
+  return out;
+}
+
+// src/core/export/archive-types.ts
+var LUMIREALM_SIDECAR_ENTRY = "lumirealm.json";
+var LUMIREALM_ARCHIVE_SCHEMA_VERSION = 1;
+function isLumirealmSidecar(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v))
+    return false;
+  const o = v;
+  if (o["schema_version"] !== LUMIREALM_ARCHIVE_SCHEMA_VERSION)
+    return false;
+  return o["kind"] === "character" || o["kind"] === "module";
+}
+
+// src/core/charx/polyglot.ts
+var ZIP_LOCAL_HEADER = [80, 75, 3, 4];
+var JPEG_SOI = [255, 216, 255];
+var JPEG_EOI = [255, 217];
+var POLYGLOT_SCAN_LIMIT = 10 * 1024 * 1024;
+function startsWith2(buf, needle, offset = 0) {
+  if (buf.length - offset < needle.length)
+    return false;
+  for (let i = 0;i < needle.length; i++)
+    if (buf[offset + i] !== needle[i])
+      return false;
+  return true;
+}
+function findJpegZipBoundary2(data) {
+  if (data.length < 10 || !startsWith2(data, JPEG_SOI))
+    return -1;
+  const limit = Math.min(data.length - (JPEG_EOI.length + ZIP_LOCAL_HEADER.length), POLYGLOT_SCAN_LIMIT);
+  for (let i = 2;i < limit; i++) {
+    if (data[i] === JPEG_EOI[0] && data[i + 1] === JPEG_EOI[1] && data[i + 2] === ZIP_LOCAL_HEADER[0] && data[i + 3] === ZIP_LOCAL_HEADER[1] && data[i + 4] === ZIP_LOCAL_HEADER[2] && data[i + 5] === ZIP_LOCAL_HEADER[3]) {
+      return i + 2;
+    }
+  }
+  return -1;
+}
+function isZipArchive(data) {
+  return startsWith2(data, ZIP_LOCAL_HEADER);
+}
+
+// src/core/charx/zip.ts
+import { inflateRawSync } from "zlib";
+var SIG_EOCD2 = 101010256;
+var SIG_EOCD64_LOCATOR = 117853008;
+var SIG_EOCD64 = 101075792;
+var SIG_CENTRAL2 = 33639248;
+var SIG_LOCAL2 = 67324752;
+var EOCD_MAX_COMMENT = 65535;
+function findEocd(bytes) {
+  const from = Math.max(0, bytes.length - EOCD_MAX_COMMENT - 22);
+  for (let i = bytes.length - 22;i >= from; i--) {
+    if (readU32(bytes, i) === SIG_EOCD2)
+      return i;
+  }
+  throw new TranslationError("zip/no_eocd", "end-of-central-directory record not found");
+}
+function resolveCentralDirectory(bytes, eocdOff) {
+  let cdSize = readU32(bytes, eocdOff + 12);
+  let storedCdOffset = readU32(bytes, eocdOff + 16);
+  let cdCount = readU16(bytes, eocdOff + 10);
+  const locOff = eocdOff - 20;
+  let cdEnd = eocdOff;
+  if (locOff >= 0 && readU32(bytes, locOff) === SIG_EOCD64_LOCATOR) {
+    let eocd64Off = Number(readU64(bytes, locOff + 8));
+    if (readU32(bytes, eocd64Off) !== SIG_EOCD64) {
+      const prefix = findJpegZipBoundary2(bytes);
+      if (prefix > 0)
+        eocd64Off += prefix;
+    }
+    if (eocd64Off >= 0 && eocd64Off + 56 <= bytes.length && readU32(bytes, eocd64Off) === SIG_EOCD64) {
+      cdEnd = eocd64Off;
+      cdCount = Number(readU64(bytes, eocd64Off + 32));
+      cdSize = Number(readU64(bytes, eocd64Off + 40));
+      storedCdOffset = Number(readU64(bytes, eocd64Off + 48));
+    }
+  }
+  const realCdOffset = cdEnd - cdSize;
+  const prefixDelta = realCdOffset - storedCdOffset;
+  return { cdOffset: realCdOffset, cdSize, cdCount, prefixDelta };
+}
+function parseCentralDirectory(bytes, cdOff, cdSize, cdCount, prefixDelta) {
+  const records = [];
+  let p = cdOff;
+  const end = cdOff + cdSize;
+  for (let i = 0;i < cdCount && p < end; i++) {
+    if (readU32(bytes, p) !== SIG_CENTRAL2) {
+      throw new TranslationError("zip/bad_cd", `central directory record ${i} has wrong signature at offset ${p}`);
+    }
+    const flags = readU16(bytes, p + 8);
+    const method = readU16(bytes, p + 10);
+    let compressedSize = readU32(bytes, p + 20);
+    let uncompressedSize = readU32(bytes, p + 24);
+    const nameLen = readU16(bytes, p + 28);
+    const extraLen = readU16(bytes, p + 30);
+    const commentLen = readU16(bytes, p + 32);
+    let localHeaderOffset = readU32(bytes, p + 42);
+    const nameStart = p + 46;
+    const nameBytes = bytes.subarray(nameStart, nameStart + nameLen);
+    const extraStart = nameStart + nameLen;
+    if (extraLen > 0) {
+      let ex = extraStart;
+      const exEnd = extraStart + extraLen;
+      while (ex + 4 <= exEnd) {
+        const tag = readU16(bytes, ex);
+        const len = readU16(bytes, ex + 2);
+        const dataStart = ex + 4;
+        if (tag === 1) {
+          let q = dataStart;
+          if (uncompressedSize === 4294967295 && q + 8 <= dataStart + len) {
+            uncompressedSize = Number(readU64(bytes, q));
+            q += 8;
+          }
+          if (compressedSize === 4294967295 && q + 8 <= dataStart + len) {
+            compressedSize = Number(readU64(bytes, q));
+            q += 8;
+          }
+          if (localHeaderOffset === 4294967295 && q + 8 <= dataStart + len) {
+            localHeaderOffset = Number(readU64(bytes, q));
+            q += 8;
+          }
+          break;
+        }
+        ex = dataStart + len;
+      }
+    }
+    const utf8 = (flags & 2048) !== 0;
+    records.push({
+      method,
+      compressedSize,
+      uncompressedSize,
+      nameBytes,
+      localHeaderOffset: localHeaderOffset + prefixDelta,
+      utf8
+    });
+    p = extraStart + extraLen + commentLen;
+  }
+  return records;
+}
+function dataOffsetFor(bytes, rec) {
+  const lfhOff = rec.localHeaderOffset;
+  if (readU32(bytes, lfhOff) !== SIG_LOCAL2) {
+    throw new TranslationError("zip/bad_lfh", `local file header missing signature at offset ${lfhOff}`);
+  }
+  const nameLen = readU16(bytes, lfhOff + 26);
+  const extraLen = readU16(bytes, lfhOff + 28);
+  return lfhOff + 30 + nameLen + extraLen;
+}
+function decompress(bytes, rec, dataOff) {
+  const compressed = bytes.subarray(dataOff, dataOff + rec.compressedSize);
+  if (rec.method === 0) {
+    return Uint8Array.from(compressed);
+  }
+  if (rec.method === 8) {
+    return new Uint8Array(inflateRawSync(compressed));
+  }
+  throw new TranslationError("zip/unsupported_method", `unsupported compression method ${rec.method} for entry`);
+}
+function readZip(bytes, opts) {
+  const eocd = findEocd(bytes);
+  const { cdOffset, cdSize, cdCount, prefixDelta } = resolveCentralDirectory(bytes, eocd);
+  if (cdCount > opts.maxEntryCount) {
+    throw new TranslationError("zip/too_many_entries", `zip contains ${cdCount} entries, exceeds limit ${opts.maxEntryCount}`);
+  }
+  const records = parseCentralDirectory(bytes, cdOffset, cdSize, cdCount, prefixDelta);
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  const cp437 = cp437Decoder();
+  const entries = [];
+  const oversized = [];
+  let plannedTotal = 0;
+  for (const rec of records) {
+    if (rec.uncompressedSize > opts.maxEntryBytes)
+      continue;
+    plannedTotal += rec.uncompressedSize;
+    if (plannedTotal > opts.maxTotalBytes) {
+      throw new TranslationError("zip/total_size_exceeded", `declared decompressed size ${plannedTotal} exceeds limit ${opts.maxTotalBytes} bytes`);
+    }
+  }
+  let totalBytes = 0;
+  for (const rec of records) {
+    const name = rec.utf8 ? decoder.decode(rec.nameBytes) : cp437(rec.nameBytes);
+    if (rec.uncompressedSize > opts.maxEntryBytes) {
+      oversized.push({ name, uncompressedSize: rec.uncompressedSize });
+      continue;
+    }
+    const dataOff = dataOffsetFor(bytes, rec);
+    const data = decompress(bytes, rec, dataOff);
+    totalBytes += data.byteLength;
+    if (totalBytes > opts.maxTotalBytes) {
+      throw new TranslationError("zip/total_size_exceeded", `actual decompressed size ${totalBytes} exceeds limit ${opts.maxTotalBytes} bytes`);
+    }
+    entries.push({ name, data });
+  }
+  return { entries, oversized };
+}
+function readU16(b, p) {
+  return b[p] | b[p + 1] << 8;
+}
+function readU32(b, p) {
+  return (b[p] | b[p + 1] << 8 | b[p + 2] << 16 | b[p + 3] << 24) >>> 0;
+}
+function readU64(b, p) {
+  let lo = 0n;
+  let hi = 0n;
+  for (let i = 0;i < 4; i++)
+    lo |= BigInt(b[p + i]) << BigInt(i * 8);
+  for (let i = 0;i < 4; i++)
+    hi |= BigInt(b[p + 4 + i]) << BigInt(i * 8);
+  return hi << 32n | lo;
+}
+function cp437Decoder() {
+  const table = CP437_UPPER;
+  return (bytes) => {
+    let s = "";
+    for (let i = 0;i < bytes.length; i++) {
+      const c = bytes[i];
+      s += c < 128 ? String.fromCharCode(c) : table[c - 128];
+    }
+    return s;
+  };
+}
+var CP437_UPPER = ("\xC7\xFC\xE9\xE2\xE4\xE0\xE5\xE7\xEA\xEB\xE8\xEF\xEE\xEC\xC4\xC5" + "\xC9\xE6\xC6\xF4\xF6\xF2\xFB\xF9\xFF\xD6\xDC\xA2\xA3\xA5\u20A7\u0192" + "\xE1\xED\xF3\xFA\xF1\xD1\xAA\xBA\xBF\u2310\xAC\xBD\xBC\xA1\xAB\xBB" + "\u2591\u2592\u2593\u2502\u2524\u2561\u2562\u2556\u2555\u2563\u2551\u2557\u255D\u255C\u255B\u2510" + "\u2514\u2534\u252C\u251C\u2500\u253C\u255E\u255F\u255A\u2554\u2569\u2566\u2560\u2550\u256C\u2567" + "\u2568\u2564\u2565\u2559\u2558\u2552\u2553\u256B\u256A\u2518\u250C\u2588\u2584\u258C\u2590\u2580" + "\u03B1\xDF\u0393\u03C0\u03A3\u03C3\xB5\u03C4\u03A6\u0398\u03A9\u03B4\u221E\u03C6\u03B5\u2229" + "\u2261\xB1\u2265\u2264\u2320\u2321\xF7\u2248\xB0\u2219\xB7\u221A\u207F\xB2\u25A0 ").split("");
+
+// src/core/charx/reader.ts
+var DEFAULT_MAX_ASSET_BYTES2 = 64 * 1024 * 1024;
+var DEFAULT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
+var DEFAULT_MAX_ENTRY_COUNT = 1e5;
+function isUnsafePath(path) {
+  if (path.length === 0)
+    return true;
+  if (path[0] === "/" || path[0] === "\\")
+    return true;
+  if (path.length >= 2 && path[1] === ":")
+    return true;
+  for (let i = 0;i < path.length; i++) {
+    const c = path.charCodeAt(i);
+    if (c === 0)
+      return true;
+  }
+  const segments = [];
+  let start = 0;
+  for (let i = 0;i <= path.length; i++) {
+    if (i === path.length || path[i] === "/" || path[i] === "\\") {
+      segments.push(path.slice(start, i));
+      start = i + 1;
+    }
+  }
+  for (const seg of segments) {
+    if (seg === "..")
+      return true;
+  }
+  return false;
+}
+function isXMetaPath(path) {
+  if (!path.startsWith("x_meta/"))
+    return false;
+  if (!path.endsWith(".json"))
+    return false;
+  return true;
+}
+function isCardJsonPath(path) {
+  return path === "card.json";
+}
+function isModuleRisumPath(path) {
+  return path === "module.risum";
+}
+function isLumirealmSidecarPath(path) {
+  return path === LUMIREALM_SIDECAR_ENTRY;
+}
+function readCharx(bytes, opts = {}) {
+  const maxAssetBytes = opts.maxAssetBytes ?? DEFAULT_MAX_ASSET_BYTES2;
+  const maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  const maxEntryCount = opts.maxEntryCount ?? DEFAULT_MAX_ENTRY_COUNT;
+  let jpegPreview = null;
+  let isPolyglot = false;
+  if (!isZipArchive(bytes)) {
+    const off = findJpegZipBoundary2(bytes);
+    if (off < 0) {
+      throw new TranslationError("charx/not_zip", `input is not a ZIP or JPEG+ZIP polyglot (first bytes: ${Array.from(bytes.subarray(0, 8)).map((b) => b.toString(16).padStart(2, "0")).join(" ")})`);
+    }
+    jpegPreview = bytes.subarray(0, off);
+    isPolyglot = true;
+  }
+  let files;
+  let zipOversized;
+  try {
+    const result = readZip(bytes, {
+      maxEntryBytes: maxAssetBytes,
+      maxTotalBytes,
+      maxEntryCount
+    });
+    files = {};
+    for (const e of result.entries)
+      files[e.name] = e.data;
+    zipOversized = result.oversized;
+  } catch (cause) {
+    throw new TranslationError("charx/bad_zip", `unzip failed: ${String(cause)}`, { cause });
+  }
+  return readCharxEntries(Object.entries(files), { ...opts, zipOversized, isPolyglot, jpegPreview });
+}
+function readCharxEntries(files, opts = {}) {
+  const maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  const decodeModule = opts.decodeModule ?? true;
+  const zipOversized = opts.zipOversized ?? [];
+  const isPolyglot = opts.isPolyglot ?? false;
+  const jpegPreview = opts.jpegPreview ?? null;
+  let card = null;
+  let cardJsonText = null;
+  let moduleBytes = null;
+  let sidecar = null;
+  const assets = new Map;
+  const xMeta = new Map;
+  const oversizedEntries = zipOversized.map((o) => ({ path: o.name, bytes: o.uncompressedSize }));
+  const unsafeEntries = [];
+  const issues = [];
+  let totalBytes = 0;
+  for (const [path, data] of files) {
+    if (isUnsafePath(path)) {
+      unsafeEntries.push(path);
+      continue;
+    }
+    if (path.endsWith("/") && data.byteLength === 0)
+      continue;
+    if (isCardJsonPath(path)) {
+      try {
+        cardJsonText = new TextDecoder("utf-8", { fatal: true }).decode(data);
+      } catch (cause) {
+        issues.push({ path, message: `card.json is not valid UTF-8: ${String(cause)}` });
+        continue;
+      }
+      try {
+        card = JSON.parse(cardJsonText);
+      } catch (cause) {
+        issues.push({ path, message: `card.json is not valid JSON: ${String(cause)}` });
+        card = null;
+      }
+      totalBytes += data.byteLength;
+      continue;
+    }
+    if (isModuleRisumPath(path)) {
+      moduleBytes = data;
+      totalBytes += data.byteLength;
+      continue;
+    }
+    if (isLumirealmSidecarPath(path)) {
+      totalBytes += data.byteLength;
+      let parsed;
+      try {
+        parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(data));
+      } catch (cause) {
+        issues.push({ path, message: `lumirealm sidecar parse failed: ${String(cause)}` });
+        continue;
+      }
+      if (!isLumirealmSidecar(parsed)) {
+        const version = parsed?.schema_version;
+        issues.push({
+          path,
+          message: `lumirealm sidecar is not a supported shape (schema_version=${String(version)})`
+        });
+        continue;
+      }
+      sidecar = parsed;
+      continue;
+    }
+    if (isXMetaPath(path)) {
+      let text;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(data);
+      } catch (cause) {
+        issues.push({ path, message: `x_meta JSON is not valid UTF-8: ${String(cause)}` });
+        continue;
+      }
+      try {
+        xMeta.set(path, JSON.parse(text));
+      } catch (cause) {
+        issues.push({ path, message: `x_meta JSON parse failed: ${String(cause)}` });
+      }
+      totalBytes += data.byteLength;
+      continue;
+    }
+    if (path.endsWith(".json")) {
+      issues.push({ path, message: "unrecognized .json file (Risu also ignores)" });
+      continue;
+    }
+    assets.set(path, data);
+    totalBytes += data.byteLength;
+    if (totalBytes > maxTotalBytes) {
+      throw new TranslationError("charx/total_size_exceeded", `aggregate asset size exceeds limit ${maxTotalBytes} bytes`);
+    }
+  }
+  let moduleEnvelope = null;
+  if (moduleBytes && decodeModule) {
+    try {
+      moduleEnvelope = decodeRisum(moduleBytes);
+    } catch (cause) {
+      issues.push({
+        path: "module.risum",
+        message: `decode failed: ${cause instanceof Error ? cause.message : String(cause)}`
+      });
+    }
+  }
+  return {
+    card,
+    cardJsonText,
+    moduleBytes,
+    moduleEnvelope,
+    sidecar,
+    assets,
+    xMeta,
+    oversizedEntries,
+    unsafeEntries,
+    issues,
+    isPolyglot,
+    jpegPreview
+  };
+}
+
+// src/core/charx/staged-reader.ts
+var MAX_ENTRY = 64 * 1024 * 1024;
+async function withStagedCard(host, source, fileName, userId, consume) {
+  const cleanup = [];
+  try {
+    let first = await host.files.readChunk(source, 0, userId);
+    let archive = source;
+    let isPolyglot = false;
+    if (first.data[0] === 255 && first.data[1] === 216) {
+      const prefix = new Uint8Array(Math.min(first.size, 10 * 1024 * 1024 + 6));
+      let offset = 0;
+      while (offset < prefix.length) {
+        const part = first.data.subarray(0, prefix.length - offset);
+        if (!part.length)
+          throw new TranslationError("charx/bad_zip", "Incomplete JPEG preview");
+        prefix.set(part, offset);
+        offset += part.length;
+        if (offset < prefix.length)
+          first = await host.files.readChunk(source, offset, userId);
+      }
+      const boundary = findJpegZipBoundary2(prefix);
+      if (boundary < 0)
+        throw new TranslationError("charx/not_zip", "JPEG does not contain a ZIP archive");
+      const zip = await host.files.create({ fileName: "card.zip", size: first.size - boundary, userId });
+      cleanup.push(zip.fileId);
+      let written = 0;
+      for (let offset = boundary;offset < first.size; ) {
+        const chunk = await host.files.readChunk(source, offset, userId);
+        if (!chunk.data.length)
+          throw new TranslationError("charx/bad_zip", "Incomplete ZIP archive");
+        written = await host.files.writeChunk(zip.fileId, written, chunk.data, userId);
+        offset += chunk.data.length;
+      }
+      await host.files.finish(zip.fileId, userId);
+      archive = { fileId: zip.fileId };
+      isPolyglot = true;
+    } else if (!isZipArchive(first.data)) {
+      const bytes = await readStagedBytes(host.files, source, userId, 2 * 1024 ** 3);
+      const converted = convertToCharx(bytes, fileName);
+      return await consume({ bundle: readCharx(converted.bytes), assets: new Map });
+    }
+    const entries = await host.archives.extract(archive, { userId, maxDecompressedBytes: 20 * 1024 ** 3 });
+    cleanup.push(...entries.map((entry) => entry.file.fileId));
+    const metadata = new Map;
+    const assets = new Map;
+    const oversized = [];
+    let metadataBytes = 0;
+    for (const { name, file } of entries) {
+      if (file.size > MAX_ENTRY) {
+        oversized.push({ name, uncompressedSize: file.size });
+        continue;
+      }
+      const read = () => readStagedBytes(host.files, { fileId: file.fileId }, userId, MAX_ENTRY);
+      if (name.endsWith(".json") || name === "module.risum") {
+        metadataBytes += file.size;
+        if (metadataBytes > 2 * 1024 ** 3)
+          throw new TranslationError("charx/total_size_exceeded", "Card metadata exceeds 2 GiB");
+        metadata.set(name, await read());
+      } else
+        assets.set(name, { byteLength: file.size, read });
+    }
+    const bundle = readCharxEntries(metadata, { zipOversized: oversized, isPolyglot });
+    return await consume({ bundle, assets });
+  } finally {
+    const errors = [];
+    for (const id of cleanup) {
+      try {
+        await host.files.delete(id, userId);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length)
+      throw new AggregateError(errors, "Could not clean up imported files");
   }
 }
 
@@ -12715,76 +13546,6 @@ function decode(buffer, options) {
   const decoder = new Decoder(options);
   return decoder.decode(buffer);
 }
-// src/core/errors.ts
-class TranslationError extends Error {
-  kind;
-  breadcrumb;
-  cause;
-  constructor(kind, message, opts = {}) {
-    super(message);
-    this.name = "TranslationError";
-    this.kind = kind;
-    this.breadcrumb = opts.breadcrumb ?? [];
-    if (opts.cause !== undefined)
-      this.cause = opts.cause;
-  }
-  at(...segments) {
-    return new TranslationError(this.kind, this.message, {
-      breadcrumb: [...segments, ...this.breadcrumb],
-      cause: this.cause
-    });
-  }
-}
-
-// src/core/rpack/rpack-map-data.ts
-var RPACK_MAP_BYTES = new Uint8Array([196, 13, 30, 11, 189, 43, 63, 85, 252, 69, 110, 245, 102, 83, 79, 26, 224, 187, 48, 148, 134, 186, 107, 191, 65, 80, 111, 155, 239, 222, 183, 16, 97, 23, 32, 223, 50, 137, 168, 157, 109, 171, 201, 144, 0, 12, 93, 175, 210, 193, 86, 229, 22, 100, 145, 130, 101, 116, 151, 202, 35, 214, 82, 209, 255, 180, 160, 232, 47, 138, 88, 56, 90, 96, 25, 150, 73, 219, 215, 200, 59, 62, 67, 75, 165, 99, 71, 170, 106, 41, 146, 244, 21, 207, 98, 52, 120, 211, 29, 60, 226, 5, 142, 42, 87, 14, 27, 205, 76, 45, 242, 64, 44, 37, 121, 72, 15, 178, 122, 181, 167, 108, 55, 230, 156, 123, 84, 126, 254, 135, 220, 154, 2, 228, 51, 162, 235, 177, 46, 3, 221, 153, 166, 176, 231, 213, 136, 24, 131, 124, 246, 190, 225, 92, 159, 195, 33, 70, 31, 8, 78, 208, 118, 18, 95, 238, 253, 143, 68, 234, 163, 94, 139, 40, 9, 53, 158, 105, 204, 10, 199, 133, 7, 173, 74, 243, 119, 233, 103, 212, 218, 132, 128, 147, 182, 77, 115, 250, 39, 38, 127, 4, 198, 251, 241, 114, 57, 81, 194, 54, 169, 104, 172, 248, 237, 197, 185, 203, 206, 117, 164, 61, 129, 217, 66, 112, 28, 149, 17, 188, 216, 140, 152, 249, 89, 161, 19, 247, 20, 125, 179, 236, 113, 192, 227, 141, 240, 1, 174, 91, 49, 6, 36, 34, 58, 184, 44, 247, 132, 139, 201, 101, 251, 182, 159, 174, 179, 3, 45, 1, 105, 116, 31, 228, 163, 236, 238, 92, 52, 33, 147, 74, 15, 106, 226, 98, 2, 158, 34, 156, 253, 60, 252, 113, 199, 198, 173, 89, 103, 5, 112, 109, 138, 68, 18, 250, 36, 134, 95, 175, 209, 122, 71, 206, 254, 80, 99, 221, 81, 6, 111, 24, 224, 82, 168, 9, 157, 86, 115, 76, 184, 83, 108, 195, 160, 14, 25, 207, 62, 13, 126, 7, 50, 104, 70, 234, 72, 249, 153, 46, 171, 164, 73, 32, 94, 85, 53, 56, 12, 188, 211, 177, 88, 22, 121, 40, 10, 26, 225, 242, 205, 196, 57, 219, 162, 186, 96, 114, 118, 125, 149, 239, 127, 200, 192, 222, 55, 148, 191, 181, 20, 129, 146, 37, 69, 172, 231, 245, 102, 167, 43, 54, 90, 193, 19, 227, 75, 58, 232, 141, 131, 27, 124, 39, 176, 154, 66, 235, 135, 170, 220, 84, 142, 120, 38, 210, 87, 41, 212, 183, 248, 47, 143, 137, 117, 240, 65, 119, 194, 30, 255, 216, 21, 17, 229, 4, 151, 23, 243, 49, 208, 155, 0, 215, 202, 180, 79, 42, 59, 217, 178, 107, 218, 93, 161, 63, 48, 97, 189, 145, 61, 78, 230, 223, 190, 77, 130, 140, 29, 35, 16, 152, 100, 244, 133, 51, 123, 144, 67, 187, 169, 136, 241, 214, 165, 28, 246, 204, 110, 185, 91, 11, 150, 237, 213, 233, 197, 203, 8, 166, 128, 64]);
-
-// src/core/rpack/rpack.ts
-var ENCODE_MAP = null;
-var DECODE_MAP = null;
-function loadMaps() {
-  if (ENCODE_MAP && DECODE_MAP)
-    return { encode: ENCODE_MAP, decode: DECODE_MAP };
-  const raw = RPACK_MAP_BYTES;
-  if (raw.byteLength !== 512) {
-    throw new TranslationError("rpack/bad_map", `rpack_map inline table must be 512 bytes, got ${raw.byteLength}`);
-  }
-  const encode = new Uint8Array(raw.buffer, raw.byteOffset, 256);
-  const decode = new Uint8Array(raw.buffer, raw.byteOffset + 256, 256);
-  assertInversePermutation(encode, decode);
-  ENCODE_MAP = encode;
-  DECODE_MAP = decode;
-  return { encode, decode };
-}
-function assertInversePermutation(encode, decode) {
-  for (let i = 0;i < 256; i++) {
-    const e = encode[i];
-    if (decode[e] !== i) {
-      throw new TranslationError("rpack/bad_map", `rpack maps are not inverse permutations at byte ${i}: encode[${i}]=${e}, decode[${e}]=${decode[e]}`);
-    }
-  }
-}
-function encodeRPack(data) {
-  const { encode } = loadMaps();
-  const out = new Uint8Array(data.length);
-  for (let i = 0;i < data.length; i++)
-    out[i] = encode[data[i]];
-  return out;
-}
-function decodeRPack(data) {
-  const out = new Uint8Array(data.length);
-  decodeRPackInto(data, out);
-  return out;
-}
-function decodeRPackInto(data, out, offset = 0) {
-  if (!Number.isInteger(offset) || offset < 0 || offset + data.length > out.length) {
-    throw new RangeError("RPack decode destination is too small");
-  }
-  const { decode } = loadMaps();
-  for (let i = 0;i < data.length; i++)
-    out[offset + i] = decode[data[i]];
-}
-
 // src/core/preset/risup-decoder.ts
 async function decryptBuffer(data, keyStr) {
   const subtle = globalThis.crypto?.subtle;
@@ -14483,35 +15244,22 @@ function setupRealmBackend(deps) {
           break;
         }
         try {
-          const dl = await downloadRealmCard(msg.id);
-          log.info(`realm_download: req=${msg.requestId} id=${msg.id} contentType=${dl.contentType} bytes=${dl.bytes.byteLength} file=${dl.fileName}`);
-          let conv;
+          const dl = await downloadRealmCard(msg.id, userId);
           try {
-            conv = convertToCharx(dl.bytes, dl.fileName);
-          } catch (err) {
-            const error = errMessage(err);
-            log.error(`realm_download convert failed req=${msg.requestId} id=${msg.id}: ${error}`);
+            log.info(`realm_download: req=${msg.requestId} id=${msg.id} contentType=${dl.contentType} bytes=${dl.file.size} file=${dl.fileName}`);
             send({
               type: "realm_download_started",
               requestId: msg.requestId,
-              ok: false,
+              ok: true,
               id: msg.id,
-              error
+              fileName: dl.fileName,
+              contentType: dl.contentType,
+              bytes: dl.file.size
             }, userId);
-            break;
+            await importFile({ fileId: dl.file.fileId }, dl.fileName, userId);
+          } finally {
+            await spindle.files.delete(dl.file.fileId, userId);
           }
-          for (const note of conv.notes)
-            log.info(`realm_download: ${note}`);
-          send({
-            type: "realm_download_started",
-            requestId: msg.requestId,
-            ok: true,
-            id: msg.id,
-            fileName: conv.fileName,
-            contentType: dl.contentType,
-            bytes: conv.bytes.byteLength
-          }, userId);
-          await importCardFromBytes(conv.bytes, conv.fileName, userId);
         } catch (err) {
           const error = errMessage(err);
           log.error(`realm_download failed req=${msg.requestId} id=${msg.id}: ${error}`);
@@ -14608,7 +15356,16 @@ function setupRealmBackend(deps) {
     log.info(`importAnyFormat: converted ${conv.originalFormat} \u2192 charx file=${fileName} \u2192 ${conv.fileName} bytes=${conv.bytes.byteLength}`);
     await importCardFromBytes(conv.bytes, conv.fileName, userId);
   }
-  return { handle, importAnyFormat };
+  async function importFile(source, fileName, userId, opts) {
+    const first = await spindle.files.readChunk(source, 0, userId);
+    if (isRisuPresetBytes(first.data, fileName)) {
+      const bytes = await readStagedBytes(spindle.files, source, userId, 64 * 1024 * 1024);
+      await importPresetFromBytes(bytes, fileName, userId, opts);
+    } else {
+      await withStagedCard(spindle, source, fileName, userId, (card) => deps.importPreparedCard(card, fileName, userId));
+    }
+  }
+  return { handle, importAnyFormat, importFile };
 }
 function errMessage(err) {
   if (err instanceof Error)
@@ -14620,571 +15377,6 @@ function errMessage(err) {
   } catch {
     return String(err);
   }
-}
-
-// src/core/risum/codec.ts
-var RISUM_MAGIC = 111;
-var RISUM_VERSION = 0;
-var RISUM_MARK_ASSET = 1;
-var RISUM_MARK_END = 0;
-var DEFAULT_MAX_PAYLOAD_BYTES = 1 * 1024 * 1024 * 1024;
-var DEFAULT_MAX_ASSET_BYTES = 256 * 1024 * 1024;
-var DEFAULT_MAX_ASSET_COUNT = 262144;
-
-class Cursor {
-  buf;
-  offset = 0;
-  constructor(buf) {
-    this.buf = buf;
-  }
-  get pos() {
-    return this.offset;
-  }
-  get remaining() {
-    return this.buf.length - this.offset;
-  }
-  get atEnd() {
-    return this.offset >= this.buf.length;
-  }
-  readU8(label) {
-    this.requireBytes(1, label);
-    const b = this.buf[this.offset];
-    this.offset += 1;
-    return b;
-  }
-  readU32LE(label) {
-    this.requireBytes(4, label);
-    const b0 = this.buf[this.offset];
-    const b1 = this.buf[this.offset + 1];
-    const b2 = this.buf[this.offset + 2];
-    const b3 = this.buf[this.offset + 3];
-    this.offset += 4;
-    return (b0 | b1 << 8 | b2 << 16 | b3 << 24) >>> 0;
-  }
-  readSlice(len, label) {
-    if (len < 0 || !Number.isInteger(len)) {
-      throw new TranslationError("risum/bad_length", `${label}: length ${len} is not a non-negative integer`);
-    }
-    this.requireBytes(len, label);
-    const out = this.buf.subarray(this.offset, this.offset + len);
-    this.offset += len;
-    return out;
-  }
-  requireBytes(n, label) {
-    if (this.buf.length - this.offset < n) {
-      throw new TranslationError("risum/truncated", `${label}: need ${n} bytes at offset ${this.offset}, only ${this.buf.length - this.offset} remain`);
-    }
-  }
-}
-function assertUtf8(bytes) {
-  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
-  try {
-    return decoder.decode(bytes);
-  } catch (cause) {
-    throw new TranslationError("risum/invalid_utf8", "RPack-decoded payload is not valid UTF-8", { cause });
-  }
-}
-function parseJson(raw) {
-  try {
-    return JSON.parse(raw);
-  } catch (cause) {
-    throw new TranslationError("risum/invalid_json", "RPack-decoded payload is not valid JSON", { cause });
-  }
-}
-function isPlainObject(v) {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-function decodeRisum(buf, opts = {}) {
-  const maxPayload = opts.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES;
-  const maxAsset = opts.maxAssetBytes ?? DEFAULT_MAX_ASSET_BYTES;
-  const maxAssetCount = opts.maxAssetCount ?? DEFAULT_MAX_ASSET_COUNT;
-  const cur = new Cursor(buf);
-  const magic = cur.readU8("magic");
-  if (magic !== RISUM_MAGIC) {
-    throw new TranslationError("risum/bad_magic", `expected magic 0x${RISUM_MAGIC.toString(16)}, got 0x${magic.toString(16)}`);
-  }
-  const version = cur.readU8("version");
-  if (version !== RISUM_VERSION) {
-    throw new TranslationError("risum/unsupported_version", `unsupported risum version ${version}`);
-  }
-  const payloadLen = cur.readU32LE("payload_length");
-  if (payloadLen > maxPayload) {
-    throw new TranslationError("risum/payload_too_large", `payload is ${payloadLen} bytes, exceeds limit ${maxPayload}`);
-  }
-  const encodedPayload = cur.readSlice(payloadLen, "payload");
-  const decodedPayload = decodeRPack(encodedPayload);
-  const payloadText = assertUtf8(decodedPayload);
-  const wrapper = parseJson(payloadText);
-  if (!isPlainObject(wrapper)) {
-    throw new TranslationError("risum/bad_wrapper", "payload JSON is not an object");
-  }
-  if (wrapper["type"] !== "risuModule") {
-    throw new TranslationError("risum/bad_wrapper", `payload type is ${JSON.stringify(wrapper["type"])}, expected "risuModule"`);
-  }
-  const module = wrapper["module"];
-  if (!isPlainObject(module)) {
-    throw new TranslationError("risum/bad_wrapper", "payload.module is not an object");
-  }
-  const assets = [];
-  while (!cur.atEnd) {
-    const mark = cur.readU8(`asset[${assets.length}].mark`);
-    if (mark === RISUM_MARK_END) {
-      if (!cur.atEnd) {
-        throw new TranslationError("risum/trailing_bytes", `${cur.remaining} unexpected bytes after end-of-file marker`);
-      }
-      break;
-    }
-    if (mark !== RISUM_MARK_ASSET) {
-      throw new TranslationError("risum/bad_mark", `asset[${assets.length}]: expected mark 0x00 or 0x01, got 0x${mark.toString(16)}`);
-    }
-    if (assets.length >= maxAssetCount) {
-      throw new TranslationError("risum/too_many_assets", `asset count exceeds limit ${maxAssetCount}`);
-    }
-    const len = cur.readU32LE(`asset[${assets.length}].length`);
-    if (len > maxAsset) {
-      throw new TranslationError("risum/asset_too_large", `asset[${assets.length}] is ${len} bytes, exceeds limit ${maxAsset}`);
-    }
-    const encoded = cur.readSlice(len, `asset[${assets.length}].data`);
-    assets.push(decodeRPack(encoded));
-  }
-  return { version, module, assets, payloadText };
-}
-function encodeRisum(input, opts = {}) {
-  let jsonText;
-  if (input.payloadText !== undefined) {
-    jsonText = input.payloadText;
-  } else if (input.module !== undefined) {
-    const indent = opts.jsonIndent === undefined ? 2 : opts.jsonIndent;
-    jsonText = indent === null ? JSON.stringify({ module: input.module, type: "risuModule" }) : JSON.stringify({ module: input.module, type: "risuModule" }, null, indent);
-  } else {
-    throw new TranslationError("risum/encode_no_input", "encodeRisum requires either payloadText or module");
-  }
-  const jsonBytes = new TextEncoder().encode(jsonText);
-  const encodedPayload = encodeRPack(jsonBytes);
-  const assets = input.assets ?? [];
-  let total = 2 + 4 + encodedPayload.length + 1;
-  for (const a of assets)
-    total += 1 + 4 + a.length;
-  const out = new Uint8Array(total);
-  const view = new DataView(out.buffer);
-  let o = 0;
-  out[o++] = RISUM_MAGIC;
-  out[o++] = RISUM_VERSION;
-  view.setUint32(o, encodedPayload.length, true);
-  o += 4;
-  out.set(encodedPayload, o);
-  o += encodedPayload.length;
-  for (const a of assets) {
-    out[o++] = RISUM_MARK_ASSET;
-    view.setUint32(o, a.length, true);
-    o += 4;
-    out.set(encodeRPack(a), o);
-    o += a.length;
-  }
-  out[o++] = RISUM_MARK_END;
-  return out;
-}
-
-// src/core/export/archive-types.ts
-var LUMIREALM_SIDECAR_ENTRY = "lumirealm.json";
-var LUMIREALM_ARCHIVE_SCHEMA_VERSION = 1;
-function isLumirealmSidecar(v) {
-  if (!v || typeof v !== "object" || Array.isArray(v))
-    return false;
-  const o = v;
-  if (o["schema_version"] !== LUMIREALM_ARCHIVE_SCHEMA_VERSION)
-    return false;
-  return o["kind"] === "character" || o["kind"] === "module";
-}
-
-// src/core/charx/polyglot.ts
-var ZIP_LOCAL_HEADER = [80, 75, 3, 4];
-var JPEG_SOI = [255, 216, 255];
-var JPEG_EOI = [255, 217];
-var POLYGLOT_SCAN_LIMIT = 10 * 1024 * 1024;
-function startsWith2(buf, needle, offset = 0) {
-  if (buf.length - offset < needle.length)
-    return false;
-  for (let i = 0;i < needle.length; i++)
-    if (buf[offset + i] !== needle[i])
-      return false;
-  return true;
-}
-function findJpegZipBoundary2(data) {
-  if (data.length < 10 || !startsWith2(data, JPEG_SOI))
-    return -1;
-  const limit = Math.min(data.length - (JPEG_EOI.length + ZIP_LOCAL_HEADER.length), POLYGLOT_SCAN_LIMIT);
-  for (let i = 2;i < limit; i++) {
-    if (data[i] === JPEG_EOI[0] && data[i + 1] === JPEG_EOI[1] && data[i + 2] === ZIP_LOCAL_HEADER[0] && data[i + 3] === ZIP_LOCAL_HEADER[1] && data[i + 4] === ZIP_LOCAL_HEADER[2] && data[i + 5] === ZIP_LOCAL_HEADER[3]) {
-      return i + 2;
-    }
-  }
-  return -1;
-}
-function isZipArchive(data) {
-  return startsWith2(data, ZIP_LOCAL_HEADER);
-}
-
-// src/core/charx/zip.ts
-import { inflateRawSync } from "zlib";
-var SIG_EOCD2 = 101010256;
-var SIG_EOCD64_LOCATOR = 117853008;
-var SIG_EOCD64 = 101075792;
-var SIG_CENTRAL2 = 33639248;
-var SIG_LOCAL2 = 67324752;
-var EOCD_MAX_COMMENT = 65535;
-function findEocd(bytes) {
-  const from = Math.max(0, bytes.length - EOCD_MAX_COMMENT - 22);
-  for (let i = bytes.length - 22;i >= from; i--) {
-    if (readU32(bytes, i) === SIG_EOCD2)
-      return i;
-  }
-  throw new TranslationError("zip/no_eocd", "end-of-central-directory record not found");
-}
-function resolveCentralDirectory(bytes, eocdOff) {
-  let cdSize = readU32(bytes, eocdOff + 12);
-  let storedCdOffset = readU32(bytes, eocdOff + 16);
-  let cdCount = readU16(bytes, eocdOff + 10);
-  const locOff = eocdOff - 20;
-  if (locOff >= 0 && readU32(bytes, locOff) === SIG_EOCD64_LOCATOR) {
-    const eocd64Off = Number(readU64(bytes, locOff + 8));
-    if (eocd64Off >= 0 && eocd64Off + 56 <= bytes.length && readU32(bytes, eocd64Off) === SIG_EOCD64) {
-      cdCount = Number(readU64(bytes, eocd64Off + 32));
-      cdSize = Number(readU64(bytes, eocd64Off + 40));
-      storedCdOffset = Number(readU64(bytes, eocd64Off + 48));
-    }
-  }
-  const realCdOffset = eocdOff - cdSize;
-  const prefixDelta = realCdOffset - storedCdOffset;
-  return { cdOffset: realCdOffset, cdSize, cdCount, prefixDelta };
-}
-function parseCentralDirectory(bytes, cdOff, cdSize, cdCount, prefixDelta) {
-  const records = [];
-  let p = cdOff;
-  const end = cdOff + cdSize;
-  for (let i = 0;i < cdCount && p < end; i++) {
-    if (readU32(bytes, p) !== SIG_CENTRAL2) {
-      throw new TranslationError("zip/bad_cd", `central directory record ${i} has wrong signature at offset ${p}`);
-    }
-    const flags = readU16(bytes, p + 8);
-    const method = readU16(bytes, p + 10);
-    let compressedSize = readU32(bytes, p + 20);
-    let uncompressedSize = readU32(bytes, p + 24);
-    const nameLen = readU16(bytes, p + 28);
-    const extraLen = readU16(bytes, p + 30);
-    const commentLen = readU16(bytes, p + 32);
-    let localHeaderOffset = readU32(bytes, p + 42);
-    const nameStart = p + 46;
-    const nameBytes = bytes.subarray(nameStart, nameStart + nameLen);
-    const extraStart = nameStart + nameLen;
-    if (extraLen > 0) {
-      let ex = extraStart;
-      const exEnd = extraStart + extraLen;
-      while (ex + 4 <= exEnd) {
-        const tag = readU16(bytes, ex);
-        const len = readU16(bytes, ex + 2);
-        const dataStart = ex + 4;
-        if (tag === 1) {
-          let q = dataStart;
-          if (uncompressedSize === 4294967295 && q + 8 <= dataStart + len) {
-            uncompressedSize = Number(readU64(bytes, q));
-            q += 8;
-          }
-          if (compressedSize === 4294967295 && q + 8 <= dataStart + len) {
-            compressedSize = Number(readU64(bytes, q));
-            q += 8;
-          }
-          if (localHeaderOffset === 4294967295 && q + 8 <= dataStart + len) {
-            localHeaderOffset = Number(readU64(bytes, q));
-            q += 8;
-          }
-          break;
-        }
-        ex = dataStart + len;
-      }
-    }
-    const utf8 = (flags & 2048) !== 0;
-    records.push({
-      method,
-      compressedSize,
-      uncompressedSize,
-      nameBytes,
-      localHeaderOffset: localHeaderOffset + prefixDelta,
-      utf8
-    });
-    p = extraStart + extraLen + commentLen;
-  }
-  return records;
-}
-function dataOffsetFor(bytes, rec) {
-  const lfhOff = rec.localHeaderOffset;
-  if (readU32(bytes, lfhOff) !== SIG_LOCAL2) {
-    throw new TranslationError("zip/bad_lfh", `local file header missing signature at offset ${lfhOff}`);
-  }
-  const nameLen = readU16(bytes, lfhOff + 26);
-  const extraLen = readU16(bytes, lfhOff + 28);
-  return lfhOff + 30 + nameLen + extraLen;
-}
-function decompress(bytes, rec, dataOff) {
-  const compressed = bytes.subarray(dataOff, dataOff + rec.compressedSize);
-  if (rec.method === 0) {
-    return Uint8Array.from(compressed);
-  }
-  if (rec.method === 8) {
-    return new Uint8Array(inflateRawSync(compressed));
-  }
-  throw new TranslationError("zip/unsupported_method", `unsupported compression method ${rec.method} for entry`);
-}
-function readZip(bytes, opts) {
-  const eocd = findEocd(bytes);
-  const { cdOffset, cdSize, cdCount, prefixDelta } = resolveCentralDirectory(bytes, eocd);
-  if (cdCount > opts.maxEntryCount) {
-    throw new TranslationError("zip/too_many_entries", `zip contains ${cdCount} entries, exceeds limit ${opts.maxEntryCount}`);
-  }
-  const records = parseCentralDirectory(bytes, cdOffset, cdSize, cdCount, prefixDelta);
-  const decoder = new TextDecoder("utf-8", { fatal: false });
-  const cp437 = cp437Decoder();
-  const entries = [];
-  const oversized = [];
-  let plannedTotal = 0;
-  for (const rec of records) {
-    if (rec.uncompressedSize > opts.maxEntryBytes)
-      continue;
-    plannedTotal += rec.uncompressedSize;
-    if (plannedTotal > opts.maxTotalBytes) {
-      throw new TranslationError("zip/total_size_exceeded", `declared decompressed size ${plannedTotal} exceeds limit ${opts.maxTotalBytes} bytes`);
-    }
-  }
-  let totalBytes = 0;
-  for (const rec of records) {
-    const name = rec.utf8 ? decoder.decode(rec.nameBytes) : cp437(rec.nameBytes);
-    if (rec.uncompressedSize > opts.maxEntryBytes) {
-      oversized.push({ name, uncompressedSize: rec.uncompressedSize });
-      continue;
-    }
-    const dataOff = dataOffsetFor(bytes, rec);
-    const data = decompress(bytes, rec, dataOff);
-    totalBytes += data.byteLength;
-    if (totalBytes > opts.maxTotalBytes) {
-      throw new TranslationError("zip/total_size_exceeded", `actual decompressed size ${totalBytes} exceeds limit ${opts.maxTotalBytes} bytes`);
-    }
-    entries.push({ name, data });
-  }
-  return { entries, oversized };
-}
-function readU16(b, p) {
-  return b[p] | b[p + 1] << 8;
-}
-function readU32(b, p) {
-  return (b[p] | b[p + 1] << 8 | b[p + 2] << 16 | b[p + 3] << 24) >>> 0;
-}
-function readU64(b, p) {
-  let lo = 0n;
-  let hi = 0n;
-  for (let i = 0;i < 4; i++)
-    lo |= BigInt(b[p + i]) << BigInt(i * 8);
-  for (let i = 0;i < 4; i++)
-    hi |= BigInt(b[p + 4 + i]) << BigInt(i * 8);
-  return hi << 32n | lo;
-}
-function cp437Decoder() {
-  const table = CP437_UPPER;
-  return (bytes) => {
-    let s = "";
-    for (let i = 0;i < bytes.length; i++) {
-      const c = bytes[i];
-      s += c < 128 ? String.fromCharCode(c) : table[c - 128];
-    }
-    return s;
-  };
-}
-var CP437_UPPER = ("\xC7\xFC\xE9\xE2\xE4\xE0\xE5\xE7\xEA\xEB\xE8\xEF\xEE\xEC\xC4\xC5" + "\xC9\xE6\xC6\xF4\xF6\xF2\xFB\xF9\xFF\xD6\xDC\xA2\xA3\xA5\u20A7\u0192" + "\xE1\xED\xF3\xFA\xF1\xD1\xAA\xBA\xBF\u2310\xAC\xBD\xBC\xA1\xAB\xBB" + "\u2591\u2592\u2593\u2502\u2524\u2561\u2562\u2556\u2555\u2563\u2551\u2557\u255D\u255C\u255B\u2510" + "\u2514\u2534\u252C\u251C\u2500\u253C\u255E\u255F\u255A\u2554\u2569\u2566\u2560\u2550\u256C\u2567" + "\u2568\u2564\u2565\u2559\u2558\u2552\u2553\u256B\u256A\u2518\u250C\u2588\u2584\u258C\u2590\u2580" + "\u03B1\xDF\u0393\u03C0\u03A3\u03C3\xB5\u03C4\u03A6\u0398\u03A9\u03B4\u221E\u03C6\u03B5\u2229" + "\u2261\xB1\u2265\u2264\u2320\u2321\xF7\u2248\xB0\u2219\xB7\u221A\u207F\xB2\u25A0 ").split("");
-
-// src/core/charx/reader.ts
-var DEFAULT_MAX_ASSET_BYTES2 = 64 * 1024 * 1024;
-var DEFAULT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
-var DEFAULT_MAX_ENTRY_COUNT = 1e5;
-function isUnsafePath(path) {
-  if (path.length === 0)
-    return true;
-  if (path[0] === "/" || path[0] === "\\")
-    return true;
-  if (path.length >= 2 && path[1] === ":")
-    return true;
-  for (let i = 0;i < path.length; i++) {
-    const c = path.charCodeAt(i);
-    if (c === 0)
-      return true;
-  }
-  const segments = [];
-  let start = 0;
-  for (let i = 0;i <= path.length; i++) {
-    if (i === path.length || path[i] === "/" || path[i] === "\\") {
-      segments.push(path.slice(start, i));
-      start = i + 1;
-    }
-  }
-  for (const seg of segments) {
-    if (seg === "..")
-      return true;
-  }
-  return false;
-}
-function isXMetaPath(path) {
-  if (!path.startsWith("x_meta/"))
-    return false;
-  if (!path.endsWith(".json"))
-    return false;
-  return true;
-}
-function isCardJsonPath(path) {
-  return path === "card.json";
-}
-function isModuleRisumPath(path) {
-  return path === "module.risum";
-}
-function isLumirealmSidecarPath(path) {
-  return path === LUMIREALM_SIDECAR_ENTRY;
-}
-function readCharx(bytes, opts = {}) {
-  const maxAssetBytes = opts.maxAssetBytes ?? DEFAULT_MAX_ASSET_BYTES2;
-  const maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
-  const maxEntryCount = opts.maxEntryCount ?? DEFAULT_MAX_ENTRY_COUNT;
-  const decodeModule = opts.decodeModule ?? true;
-  let jpegPreview = null;
-  let isPolyglot = false;
-  if (!isZipArchive(bytes)) {
-    const off = findJpegZipBoundary2(bytes);
-    if (off < 0) {
-      throw new TranslationError("charx/not_zip", `input is not a ZIP or JPEG+ZIP polyglot (first bytes: ${Array.from(bytes.subarray(0, 8)).map((b) => b.toString(16).padStart(2, "0")).join(" ")})`);
-    }
-    jpegPreview = bytes.subarray(0, off);
-    isPolyglot = true;
-  }
-  let files;
-  let zipOversized;
-  try {
-    const result = readZip(bytes, {
-      maxEntryBytes: maxAssetBytes,
-      maxTotalBytes,
-      maxEntryCount
-    });
-    files = {};
-    for (const e of result.entries)
-      files[e.name] = e.data;
-    zipOversized = result.oversized;
-  } catch (cause) {
-    throw new TranslationError("charx/bad_zip", `unzip failed: ${String(cause)}`, { cause });
-  }
-  let card = null;
-  let cardJsonText = null;
-  let moduleBytes = null;
-  let sidecar = null;
-  const assets = new Map;
-  const xMeta = new Map;
-  const oversizedEntries = zipOversized.map((o) => ({ path: o.name, bytes: o.uncompressedSize }));
-  const unsafeEntries = [];
-  const issues = [];
-  let totalBytes = 0;
-  for (const [path, data] of Object.entries(files)) {
-    if (isUnsafePath(path)) {
-      unsafeEntries.push(path);
-      continue;
-    }
-    if (path.endsWith("/") && data.byteLength === 0)
-      continue;
-    if (isCardJsonPath(path)) {
-      try {
-        cardJsonText = new TextDecoder("utf-8", { fatal: true }).decode(data);
-      } catch (cause) {
-        issues.push({ path, message: `card.json is not valid UTF-8: ${String(cause)}` });
-        continue;
-      }
-      try {
-        card = JSON.parse(cardJsonText);
-      } catch (cause) {
-        issues.push({ path, message: `card.json is not valid JSON: ${String(cause)}` });
-        card = null;
-      }
-      totalBytes += data.byteLength;
-      continue;
-    }
-    if (isModuleRisumPath(path)) {
-      moduleBytes = data;
-      totalBytes += data.byteLength;
-      continue;
-    }
-    if (isLumirealmSidecarPath(path)) {
-      totalBytes += data.byteLength;
-      let parsed;
-      try {
-        parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(data));
-      } catch (cause) {
-        issues.push({ path, message: `lumirealm sidecar parse failed: ${String(cause)}` });
-        continue;
-      }
-      if (!isLumirealmSidecar(parsed)) {
-        const version = parsed?.schema_version;
-        issues.push({
-          path,
-          message: `lumirealm sidecar is not a supported shape (schema_version=${String(version)})`
-        });
-        continue;
-      }
-      sidecar = parsed;
-      continue;
-    }
-    if (isXMetaPath(path)) {
-      let text;
-      try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(data);
-      } catch (cause) {
-        issues.push({ path, message: `x_meta JSON is not valid UTF-8: ${String(cause)}` });
-        continue;
-      }
-      try {
-        xMeta.set(path, JSON.parse(text));
-      } catch (cause) {
-        issues.push({ path, message: `x_meta JSON parse failed: ${String(cause)}` });
-      }
-      totalBytes += data.byteLength;
-      continue;
-    }
-    if (path.endsWith(".json")) {
-      issues.push({ path, message: "unrecognized .json file (Risu also ignores)" });
-      continue;
-    }
-    assets.set(path, data);
-    totalBytes += data.byteLength;
-    if (totalBytes > maxTotalBytes) {
-      throw new TranslationError("charx/total_size_exceeded", `aggregate asset size exceeds limit ${maxTotalBytes} bytes`);
-    }
-  }
-  let moduleEnvelope = null;
-  if (moduleBytes && decodeModule) {
-    try {
-      moduleEnvelope = decodeRisum(moduleBytes);
-    } catch (cause) {
-      issues.push({
-        path: "module.risum",
-        message: `decode failed: ${cause instanceof Error ? cause.message : String(cause)}`
-      });
-    }
-  }
-  return {
-    card,
-    cardJsonText,
-    moduleBytes,
-    moduleEnvelope,
-    sidecar,
-    assets,
-    xMeta,
-    oversizedEntries,
-    unsafeEntries,
-    issues,
-    isPolyglot,
-    jpegPreview
-  };
 }
 
 // src/core/pipeline/translate.ts
@@ -19314,19 +19506,21 @@ function pickAvatar(assets) {
 async function importCard(args) {
   const progress = args.onProgress ?? (() => {});
   const tImport = Date.now();
-  logInfo(`start file=${args.fileName} bytes=${args.bytes.byteLength} userId=${args.userId ?? "<none>"}`);
+  logInfo(`start file=${args.fileName} userId=${args.userId ?? "<none>"}`);
   progress("decoding", `Decoding ${args.fileName}\u2026`, 0.05);
-  const bytes = args.bytes;
   progress("translating", "Translating Risu card\u2026", 0.15);
   const tTranslate = Date.now();
-  logInfo(`(2) translate: starting translateCharx bytes=${bytes.byteLength}`);
-  const charxBundle = readCharx(bytes);
+  const charxBundle = args.prepared?.bundle ?? readCharx(args.bytes);
   const bundle = translateFromCharxBundle(charxBundle, {
     sourceId: args.sourceId ?? `file:${args.fileName}`,
     mode: "full",
     emitPackScripts: false
   });
-  logInfo(`(2) translate: done in ${Date.now() - tTranslate}ms \u2014 char="${bundle.character.name}" ` + `lore=${bundle.worldBookEntries.length} regex=${bundle.regexScripts.length} ` + `assets=${bundle.assets.size} payload.triggers=${bundle.risuPayload?.triggers.length ?? 0} ` + `payload.lua=${bundle.risuPayload?.lua_scripts.length ?? 0}`);
+  const assets = new Map(args.prepared?.assets);
+  for (const [path, bytes] of bundle.assets)
+    assets.set(path, bytes);
+  const readAsset = (asset) => asset instanceof Uint8Array ? Promise.resolve(asset) : asset.read();
+  logInfo(`(2) translate: done in ${Date.now() - tTranslate}ms \u2014 char="${bundle.character.name}" ` + `lore=${bundle.worldBookEntries.length} regex=${bundle.regexScripts.length} ` + `assets=${assets.size} payload.triggers=${bundle.risuPayload?.triggers.length ?? 0} ` + `payload.lua=${bundle.risuPayload?.lua_scripts.length ?? 0}`);
   if (bundle.decoratorStats.decorators_seen > 0) {
     logInfo(`(2.1) lorebook decorators: ` + `entries_with_decorators=${bundle.decoratorStats.entries_with_decorators}/${bundle.worldBookEntries.length} ` + `seen=${bundle.decoratorStats.decorators_seen} ` + `mapped=${bundle.decoratorStats.mapped} ` + `stashed=${bundle.decoratorStats.stashed} ` + `dropped=${bundle.decoratorStats.dropped}`);
   }
@@ -19456,17 +19650,18 @@ async function importCard(args) {
     }
   }
   let avatarImageId = null;
-  const preferred = bundle.preferredAvatar;
+  const preferred = pickPreferredAvatar(charxBundle.card, assets);
   const avatar = preferred ? { path: preferred.filename, data: preferred.data, filename: preferred.filename, mime: preferred.mime } : (() => {
-    const picked = pickAvatar(bundle.assets);
+    const picked = pickAvatar(assets);
     return picked ? { path: picked.path, data: picked.data, filename: picked.path.split("/").pop() ?? "avatar.png", mime: guessMimeType(picked.path) } : null;
   })();
   if (avatar) {
     const tAvatar = Date.now();
     try {
+      const data = await readAsset(avatar.data);
       logInfo(`(5a) setAvatar source=${preferred ? "preferred" : "asset-scan"} path=${avatar.path} bytes=${avatar.data.byteLength} mime=${avatar.mime}`);
       const avatarResult = await args.spindle.characters.setAvatar(characterId, {
-        data: avatar.data,
+        data,
         filename: avatar.filename,
         mime_type: avatar.mime
       }, args.userId);
@@ -19506,7 +19701,7 @@ async function importCard(args) {
     journalBuffer.push(avatarImageId);
     flushJournal();
   }
-  const assetEntries = [...bundle.assets];
+  const assetEntries = [...assets];
   const totalAssetCount = assetEntries.length;
   let totalAssetBytes = 0;
   for (const [, data] of assetEntries)
@@ -19531,9 +19726,10 @@ async function importCard(args) {
           i += 1;
           continue;
         }
-        const [path, data] = entry;
-        if (batchItems.length > 0 && batchBytes + data.byteLength > BATCH_MAX_BYTES)
+        const [path, asset] = entry;
+        if (batchItems.length > 0 && batchBytes + asset.byteLength > BATCH_MAX_BYTES)
           break;
+        const data = await readAsset(asset);
         batchItems.push({
           data,
           mime_type: guessMimeType(path),
@@ -22020,7 +22216,7 @@ function getActiveScriptstateDefaults(chatId) {
 var _log = makeSafeLogger("runtime.setVar");
 // spindle.json
 var spindle_default = {
-  version: "0.12.0",
+  version: "0.12.1",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -22043,6 +22239,7 @@ var spindle_default = {
     "chats",
     "world_books",
     "regex_scripts",
+    "regex_scripts_unrestricted",
     "databanks",
     "personas",
     "presets",
@@ -23666,7 +23863,9 @@ var REQUIRED_PERMISSIONS = [
   "personas",
   "app_manipulation",
   "images",
-  "regex_scripts"
+  "cors_proxy",
+  "regex_scripts",
+  "regex_scripts_unrestricted"
 ];
 var PERMISSION_PURPOSE = {
   chat_mutation: "apply Risu setChat / addChat / editOutput writebacks",
@@ -23682,6 +23881,8 @@ var PERMISSION_PURPOSE = {
   personas: "read the active persona for {{user}} resolution",
   app_manipulation: "inject the bg-html host and message overlay",
   images: "upload and serve card-bundled assets and SVG rasters",
+  cors_proxy: "browse and download Realm cards and translate labels",
+  regex_scripts_unrestricted: "remove superseded Risu regex rows created before extension ownership tracking",
   regex_scripts: "patch character + module display regex rows during translator migrations and orphan cleanup"
 };
 var granted = new Set;
@@ -26378,6 +26579,12 @@ function bytesToLatin1(bytes) {
   }
   return out;
 }
+function latin1ToBytes(text) {
+  const out = new Uint8Array(text.length);
+  for (let i = 0;i < text.length; i++)
+    out[i] = text.charCodeAt(i) & 255;
+  return out;
+}
 function safeFileStem(name, fallback) {
   const raw = typeof name === "string" && name.trim().length > 0 ? name.trim() : fallback;
   const cleaned = raw.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").replace(/[. ]+$/, "");
@@ -27089,7 +27296,7 @@ function createExportHandlers(deps) {
           deps.log.warn(`export_module: ${plan.missingAssets.length} unresolved asset(s) on module=${env.id}: ` + plan.missingAssets.slice(0, 5).join(", "));
         }
         deps.log.info(`export_module: module=${env.id} entries=${plan.entries.length} ` + `missing=${plan.missingAssets.length} file=${plan.fileName}`);
-        ctx.send({ type: "export_archive", plan }, ctx.userId);
+        await deps.exportArchive(plan, ctx.userId, ctx.frontendSessionId);
       } catch (err) {
         ctx.send({ type: "error", message: `Export failed: ${deps.errMsg(err)}` }, ctx.userId);
       }
@@ -27131,12 +27338,96 @@ function createExportHandlers(deps) {
           deps.log.warn(`export_character: ${plan.missingAssets.length} unresolved asset(s) on ` + `character=${msg.characterId}: ${plan.missingAssets.slice(0, 5).join(", ")}`);
         }
         deps.log.info(`export_character: character=${msg.characterId} entries=${plan.entries.length} ` + `lore=${worldBookEntries.length} regex=${liveRegex.length} ` + `missing=${plan.missingAssets.length} file=${plan.fileName}`);
-        ctx.send({ type: "export_archive", plan }, ctx.userId);
+        await deps.exportArchive(plan, ctx.userId, ctx.frontendSessionId);
       } catch (err) {
         ctx.send({ type: "error", message: `Export failed: ${deps.errMsg(err)}` }, ctx.userId);
       }
     }
   };
+}
+
+// src/export/archive-writer.ts
+function getImageType(a) {
+  if (a.length < 12)
+    return "Unknown";
+  if (a[0] === 255 && a[1] === 216 && a[a.length - 2] === 255 && a[a.length - 1] === 217)
+    return "JPEG";
+  if (a[0] === 137 && a[1] === 80 && a[2] === 78 && a[3] === 71 && a[4] === 13 && a[5] === 10 && a[6] === 26 && a[7] === 10)
+    return "PNG";
+  if (a[0] === 71 && a[1] === 73 && a[2] === 70 && a[3] === 56 && (a[4] === 55 || a[4] === 57) && a[5] === 97)
+    return "GIF";
+  if (a[0] === 66 && a[1] === 77)
+    return "BMP";
+  if (a[4] === 102 && a[5] === 116 && a[6] === 121 && a[7] === 112 && a[8] === 97 && a[9] === 118 && a[10] === 105 && a[11] === 102)
+    return "AVIF";
+  if (a[0] === 82 && a[1] === 73 && a[2] === 70 && a[3] === 70 && a[8] === 87 && a[9] === 69 && a[10] === 66 && a[11] === 80)
+    return "WEBP";
+  return "Unknown";
+}
+function buildXMeta(bytes) {
+  const type = getImageType(bytes);
+  if (type === "PNG") {
+    let chunks = {};
+    try {
+      chunks = Object.fromEntries(extractPngTextChunks(bytes).map((c) => [c.key, c.text]));
+    } catch {
+      chunks = {};
+    }
+    if (Object.keys(chunks).length > 0)
+      return JSON.stringify(chunks, null, 4);
+  }
+  return JSON.stringify({ type });
+}
+
+// src/export/staged-archive.ts
+async function buildStagedArchive(host, plan, userId) {
+  const cleanup = [];
+  const entries = [];
+  const skippedAssets = [];
+  const encoder = new TextEncoder;
+  let size = 0;
+  async function add(name, bytes, store) {
+    const file = await stageBytes(host.files, bytes, "export-entry", userId);
+    cleanup.push(file.fileId);
+    entries.push({ name, source: { fileId: file.fileId }, store });
+    size += bytes.length;
+  }
+  try {
+    for (const entry of plan.entries) {
+      if (entry.kind === "text")
+        await add(entry.path, encoder.encode(entry.text), entry.level === 0);
+      else if (entry.kind === "binary")
+        await add(entry.path, latin1ToBytes(entry.latin1), entry.level === 0);
+      else {
+        let bytes;
+        try {
+          bytes = await host.images.readBinary(entry.imageId, userId);
+        } catch {
+          skippedAssets.push(entry.path);
+          continue;
+        }
+        await add(entry.metaPath, encoder.encode(buildXMeta(bytes)), false);
+        await add(entry.path, bytes, entry.level === 0);
+      }
+    }
+    const file = await host.archives.create(entries, {
+      fileName: plan.fileName,
+      userId,
+      maxBytes: Math.ceil(size * 1.01) + entries.length * 1024 + 1024 * 1024
+    });
+    return { fileId: file.fileId, fileName: plan.fileName, skippedAssets };
+  } finally {
+    const errors = [];
+    for (const id of cleanup) {
+      try {
+        await host.files.delete(id, userId);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length)
+      throw new AggregateError(errors, "Could not clean up export files");
+  }
 }
 
 // src/handlers/import.ts
@@ -27212,24 +27503,12 @@ function createImportHandlers(deps) {
     },
     import_card_from_upload: async (msg, ctx) => {
       deps.log.info(`import_card_from_upload: uploadId=${msg.uploadId} file=${msg.fileName} userId=${ctx.userId}`);
-      let upload;
       try {
-        upload = await deps.getUpload(msg.uploadId, ctx.userId);
-      } catch (err) {
-        deps.log.error(`import_card_from_upload: getUpload threw: ${deps.errMsg(err)}`);
-        ctx.send({ type: "import_progress", phase: "error", message: "Upload retrieval failed", fraction: null, error: deps.errMsg(err) }, ctx.userId);
-        return;
-      }
-      if (!upload) {
-        deps.log.warn(`import_card_from_upload: uploadId=${msg.uploadId} not found or expired`);
-        ctx.send({ type: "import_progress", phase: "error", message: "Upload not found or expired. Re-import the card.", fraction: null, error: "upload_missing" }, ctx.userId);
-        return;
-      }
-      deps.log.info(`import_card_from_upload: got ${upload.data.byteLength} bytes, running importCard`);
-      try {
-        await deps.importAnyFormat(upload.data, msg.fileName || upload.fileName, ctx.userId, msg.presetLabelTranslation === undefined ? undefined : { labelTranslation: msg.presetLabelTranslation });
+        await deps.importFile({ uploadId: msg.uploadId }, msg.fileName, ctx.userId, msg.presetLabelTranslation === undefined ? undefined : { labelTranslation: msg.presetLabelTranslation });
+      } catch (error) {
+        ctx.send({ type: "import_progress", phase: "error", message: "Import failed", fraction: null, error: deps.errMsg(error) }, ctx.userId);
       } finally {
-        deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
+        await deps.deleteUpload(msg.uploadId, ctx.userId);
       }
     },
     register_svg_raster_index: async (msg, ctx) => {
@@ -34663,9 +34942,9 @@ function createImportCardOrchestrator(deps) {
     log,
     errMsg
   } = deps;
-  async function importCardFromBytes(bytes, fileName, userId) {
+  async function importCardSource(source, fileName, userId) {
     const tStart = Date.now();
-    log.info(`importCardFromBytes: start file=${fileName} bytes=${bytes.byteLength} userId=${userId}`);
+    log.info(`importCard: start file=${fileName} userId=${userId}`);
     const spindleImportApi = {
       characters: {
         create: (input, uid) => {
@@ -34706,7 +34985,7 @@ function createImportCardOrchestrator(deps) {
     enterAssetUpload();
     try {
       const result = await importCard({
-        bytes,
+        ...source,
         fileName,
         extensionVersion,
         userId,
@@ -34816,7 +35095,10 @@ function createImportCardOrchestrator(deps) {
       exitAssetUpload();
     }
   }
-  return { importCardFromBytes };
+  return {
+    importCardFromBytes: (bytes, fileName, userId) => importCardSource({ bytes }, fileName, userId),
+    importPreparedCard: (prepared, fileName, userId) => importCardSource({ prepared }, fileName, userId)
+  };
 }
 
 // src/state/asset-index-mutate.ts
@@ -38233,6 +38515,7 @@ var generatePresetLabels = async (request) => {
   return content;
 };
 var realmHandle = setupRealmBackend({
+  importPreparedCard: importCardOrchestrator.importPreparedCard,
   send: (msg, userId) => send(msg, userId),
   log: {
     info: (m) => log8.info(m),
@@ -38383,8 +38666,7 @@ var importHandlers = createImportHandlers({
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
   refreshVariables,
-  importAnyFormat: (bytes, name, uid, opts) => realmHandle.importAnyFormat(bytes, name, uid, opts),
-  getUpload,
+  importFile: (source, name, uid, opts) => realmHandle.importFile(source, name, uid, opts),
   deleteUpload,
   applySvgRasterIndex,
   maybeFinalizeImport,
@@ -38499,6 +38781,12 @@ var moduleHandlers = createModuleHandlers({
   errMsg
 });
 var exportHandlers = createExportHandlers({
+  exportArchive: async (plan, userId, frontendSessionId) => {
+    if (!frontendSessionId)
+      throw new Error("Export requires an authenticated browser session");
+    const result = await buildStagedArchive(spindle, plan, userId);
+    spindle.sendToFrontend({ type: "export_ready", ...result }, userId, { frontendSessionId });
+  },
   readModuleEnvelope: (uid, moduleId) => readEnvelope(moduleStorage(), uid, moduleId),
   readCharacterForExport: async (characterId, userId) => {
     const fetched = await readLumirealm(charactersApi(), characterId, userId);
@@ -38597,6 +38885,7 @@ var handlerRegistry = {
     await applyActivePreset(spindle.regex_scripts, ctx.userId, msg.presetId);
   }
 };
+var receiveHostService = createHostServices(spindle);
 spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {
   captureUserId(userId, "frontend-message");
   markFrontendReady(userId);
@@ -38608,6 +38897,8 @@ spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {
     log8.warn(`frontend msg type=${msg.type} dropped: no userId`);
     return;
   }
+  if (await receiveHostService(raw, userId, frontendSessionId))
+    return;
   if (await frontendLua.receive(raw, userId, frontendSessionId))
     return;
   const ctx = { userId, send, log: log8, errMsg, ...frontendSessionId ? { frontendSessionId } : {} };

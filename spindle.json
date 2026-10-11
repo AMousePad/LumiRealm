@@ -1,5 +1,5 @@
 {
-  "version": "0.12.0",
+  "version": "0.12.1",
   "name": "LumiRealm",
   "identifier": "lumirealm",
   "author": "amousepad",
@@ -22,6 +22,7 @@
     "chats",
     "world_books",
     "regex_scripts",
+    "regex_scripts_unrestricted",
     "databanks",
     "personas",
     "presets",

@@ -9623,7 +9623,7 @@ var snapshots = new Map;
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.12.0",
+  version: "0.12.1",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -9646,6 +9646,7 @@ var spindle_default = {
     "chats",
     "world_books",
     "regex_scripts",
+    "regex_scripts_unrestricted",
     "databanks",
     "personas",
     "presets",

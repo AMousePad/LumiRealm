@@ -1,5 +1,18 @@
 import type { RealmCard, RealmSort } from './messages.js';
 import { REALM_HUB_API_URL, REALM_DOWNLOAD_URL } from './messages.js';
+import type { SpindleAPI, SpindleFileRef } from 'lumiverse-spindle-types';
+
+declare const spindle: SpindleAPI;
+
+export class RealmRequestError extends Error {
+  override readonly name = 'RealmRequestError';
+}
+
+async function requestJson(url: string, headers?: Record<string, string>): Promise<unknown> {
+  const response = await spindle.cors(url, { responseType: 'text', ...(headers ? { headers } : {}) }) as { status: number; body: string };
+  if (response.status !== 200) throw new RealmRequestError(`Realm request failed: HTTP ${response.status}`);
+  return JSON.parse(response.body);
+}
 
 const APP_VER = '0.1.0';
 const CLIENT_TAG = 'web';
@@ -21,15 +34,7 @@ export async function searchRealm(arg: RealmSearchArg): Promise<RealmSearchResul
   const stringArg =
     `search==${search}&&page==${arg.page}&&nsfw==${arg.nsfw}&&sort==${arg.sort}&&web==${CLIENT_TAG}`;
   const url = `${REALM_HUB_API_URL}/realm/${encodeURIComponent(stringArg)}?cache=30`;
-  const res = await fetch(url, {
-    headers: {
-      'x-risuai-info': `${APP_VER};lumirealm`,
-    },
-  });
-  if (res.status !== 200) {
-    return { cards: [] };
-  }
-  const jso = (await res.json()) as unknown;
+  const jso = await requestJson(url, { 'x-risuai-info': `${APP_VER};lumirealm` });
   if (Array.isArray(jso)) {
     return { cards: jso as readonly RealmCard[] };
   }
@@ -42,35 +47,27 @@ export async function searchRealm(arg: RealmSearchArg): Promise<RealmSearchResul
 
 export async function getRealmInfo(realmPath: string): Promise<RealmCard> {
   const url = `${REALM_HUB_API_URL}/hub/info/${encodeURIComponent(realmPath)}`;
-  const res = await fetch(url);
-  if (res.status !== 200) {
-    throw new Error(`realm info HTTP ${res.status}: ${await res.text()}`);
-  }
-  return (await res.json()) as RealmCard;
+  return await requestJson(url) as RealmCard;
 }
 
 export interface RealmDownload {
-  readonly bytes: Uint8Array;
+  readonly file: SpindleFileRef;
   readonly contentType: string;
   readonly fileName: string;
 }
 
-export async function downloadRealmCard(id: string): Promise<RealmDownload> {
+export async function downloadRealmCard(id: string, userId: string): Promise<RealmDownload> {
   const url = `${REALM_DOWNLOAD_URL}/api/v1/download/dynamic/${encodeURIComponent(id)}?cors=true`;
-  const res = await fetch(url, {
+  const file = await spindle.files.fetch(url, {
+    userId, fileName: 'realm-download', maxBytes: 10 * 1024 ** 3,
     headers: { 'x-risu-api-version': '4' },
   });
-  if (res.status !== 200) {
-    throw new Error(`realm download HTTP ${res.status}: ${await res.text()}`);
-  }
-  const ct = (res.headers.get('content-type') ?? '').toLowerCase();
-  const ab = await res.arrayBuffer();
-  const bytes = new Uint8Array(ab);
+  const ct = file.mimeType.toLowerCase();
   let ext = 'charx';
   if (ct.includes('png')) ext = 'png';
   else if (ct.includes('zip') && !ct.includes('charx')) ext = 'zip';
   const fileName = `realm-${id}.${ext}`;
-  return { bytes, contentType: ct, fileName };
+  return { file, contentType: ct, fileName };
 }
 
 export function extractRealmId(input: string): string | null {

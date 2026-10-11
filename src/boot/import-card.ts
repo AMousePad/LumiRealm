@@ -6,6 +6,7 @@ import type { UserStorageLike } from '../payload/installer.js';
 import { importCard, type SpindleImportApi } from '../payload/import.js';
 import { RisuConsentDeclinedError } from '../payload/codec.js';
 import { ensureRegexOwnership } from '../state/regex-ownership.js';
+import type { PreparedCard } from '../core/charx/staged-reader.js';
 
 export interface ImportCardOrchestratorDeps {
   readonly extensionVersion: string;
@@ -35,6 +36,7 @@ export interface ImportCardOrchestratorDeps {
 }
 
 export interface ImportCardOrchestrator {
+  readonly importPreparedCard: (prepared: PreparedCard, fileName: string, userId: string) => Promise<void>;
   readonly importCardFromBytes: (
     bytes: Uint8Array,
     fileName: string,
@@ -62,13 +64,13 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
     errMsg,
   } = deps;
 
-  async function importCardFromBytes(
-    bytes: Uint8Array,
+  async function importCardSource(
+    source: { bytes: Uint8Array } | { prepared: PreparedCard },
     fileName: string,
     userId: string,
   ): Promise<void> {
     const tStart = Date.now();
-    log.info(`importCardFromBytes: start file=${fileName} bytes=${bytes.byteLength} userId=${userId}`);
+    log.info(`importCard: start file=${fileName} userId=${userId}`);
 
     const spindleImportApi: SpindleImportApi = {
       characters: {
@@ -114,7 +116,7 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
     enterAssetUpload();
     try {
       const result = await importCard({
-        bytes,
+        ...source,
         fileName,
         extensionVersion,
         userId,
@@ -247,5 +249,8 @@ export function createImportCardOrchestrator(deps: ImportCardOrchestratorDeps): 
     }
   }
 
-  return { importCardFromBytes };
+  return {
+    importCardFromBytes: (bytes, fileName, userId) => importCardSource({ bytes }, fileName, userId),
+    importPreparedCard: (prepared, fileName, userId) => importCardSource({ prepared }, fileName, userId),
+  };
 }

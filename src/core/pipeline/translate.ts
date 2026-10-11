@@ -580,20 +580,20 @@ function filterValidTriggerScripts(
 }
 
 // Mirrors Risu icon-hoist: find {type:'icon',name:'main'}, last match wins.
-function pickPreferredAvatar(
+export function pickPreferredAvatar<T>(
   card: unknown,
-  assets: ReadonlyMap<string, Uint8Array>,
-): { data: Uint8Array; mime: string; filename: string } | null {
+  assets: ReadonlyMap<string, T>,
+): { data: T | Uint8Array; mime: string; filename: string } | null {
   const data = (card as { data?: unknown })?.data as { assets?: unknown } | undefined;
   if (!data || !Array.isArray(data.assets)) return null;
-  let resolved: { data: Uint8Array; mime: string; filename: string } | null = null;
+  let resolved: { data: T | Uint8Array; mime: string; filename: string } | null = null;
   for (const raw of data.assets as readonly unknown[]) {
     const a = raw as { type?: unknown; name?: unknown; uri?: unknown; ext?: unknown };
     if (a.type !== "icon" || a.name !== "main") continue;
     const uri = typeof a.uri === "string" ? a.uri : "";
     if (uri.length === 0) continue;
     const ext = typeof a.ext === "string" ? a.ext.toLowerCase() : "";
-    let bytes: Uint8Array | null = null;
+    let bytes: T | Uint8Array | null = null;
     if (uri.startsWith("embeded://")) {
       const path = uri.slice("embeded://".length);
       bytes = assets.get(path) ?? null;

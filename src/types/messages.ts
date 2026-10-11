@@ -5,7 +5,6 @@ import type {
   RealmBackendToFrontend,
 } from '../realm/messages.js';
 import type { DisplaySnapshot } from '../display/snapshot.js';
-import type { ArchivePlan } from '../core/export/archive-types.js';
 
 /** One-entry-per-imported-card summary. Backend composes from `StoredRisuCard`
  *  + `spindle.characters.get` name lookup. UI renders directly. */
@@ -688,8 +687,10 @@ export type BackendToFrontend =
   // metadata and a URL only), so it ships an entry plan and the FE fetches
   // each image with the session cookie before assembling the ZIP.
   | {
-      type: 'export_archive';
-      plan: ArchivePlan;
+      type: 'export_ready';
+      fileId: string;
+      fileName: string;
+      skippedAssets: readonly string[];
     }
   // `source.kind === 'character'` carries id+name; `'module'` carries id+display name.
   // Lorebook for characters is grouped by world_book; for modules it's a flat list.

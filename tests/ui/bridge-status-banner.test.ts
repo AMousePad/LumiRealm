@@ -27,7 +27,7 @@ function show(missingPermissions: string[]) {
 
 describe('bridge banner permission filter', () => {
   test('does not show MCP or other undeclared grants from backend notifications', () => {
-    show(['mcp_servers', 'mcp_servers.create', 'memories', 'regex_scripts_unrestricted']);
+    show(['mcp_servers', 'mcp_servers.create', 'memories']);
     expect(window.document.querySelector('.lr-bridge-banner')).toBeNull();
   });
 

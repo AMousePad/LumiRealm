@@ -55,9 +55,13 @@ The baseline requirement is **Lumiverse 1.2.0 or later**, as declared in [spindl
 Pick the branch that matches the Lumiverse you're running.
 
 - **`main`** is the default for released Lumiverse versions.
-- **`staging`** currently requires the companion Lumiverse frontend runtime changes, including active-browser execution routing, runtime state, required generation hooks, and display/macro processing contracts. The baseline version alone is insufficient. Features move to `main` when their host dependencies are released. Build a source checkout before deploying staging; source commits do not include rebuilt bundles.
+- **`staging`** requires the current Lumiverse frontend runtime, file/archive APIs, image-byte reads, and activation-pattern preparation. The baseline version alone is insufficient. Features move to `main` when their host dependencies are released. Build a source checkout before deploying staging.
 
 To switch branches after installing, go to the extensions tab and use the **Branch** button on the LumiRealm entry.
+
+After updating, restart the extension and refresh open browser tabs so the frontend and backend use the same version.
+
+Large ZIP/CHARX cards use temporary disk storage. The current host requires 10 GiB free before a Realm download and 20 GiB free before extraction, even for small cards. PNG and JSON cards still use the buffered importer; individual archive assets retain the 64 MiB limit.
 
 ## Compatibility
 

@@ -21,7 +21,7 @@ beforeEach(async () => {
 });
 
 describe('inbound bridge permission failures', () => {
-  test.each(['mcp_servers', 'mcp_servers.create', 'memories', 'regex_scripts_unrestricted'])('rethrows undeclared permission failures without showing a grant warning: %s', async (permission) => {
+  test.each(['mcp_servers', 'mcp_servers.create', 'memories'])('rethrows undeclared permission failures without showing a grant warning: %s', async (permission) => {
     failure = inherited(permission);
     await expect(Promise.resolve().then(() => handler(context))).rejects.toThrow(permission);
     expect(broadcasts).toEqual([]);

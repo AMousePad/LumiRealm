@@ -89,8 +89,6 @@ export function readCharx(bytes: Uint8Array, opts: ReadCharxOptions = {}): Charx
   const maxAssetBytes = opts.maxAssetBytes ?? DEFAULT_MAX_ASSET_BYTES;
   const maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   const maxEntryCount = opts.maxEntryCount ?? DEFAULT_MAX_ENTRY_COUNT;
-  const decodeModule = opts.decodeModule ?? true;
-
   let jpegPreview: Uint8Array | null = null;
   let isPolyglot = false;
   if (!isZipArchive(bytes)) {
@@ -120,6 +118,22 @@ export function readCharx(bytes: Uint8Array, opts: ReadCharxOptions = {}): Charx
     throw new TranslationError("charx/bad_zip", `unzip failed: ${String(cause)}`, { cause });
   }
 
+  return readCharxEntries(Object.entries(files), { ...opts, zipOversized, isPolyglot, jpegPreview });
+}
+
+export function readCharxEntries(
+  files: Iterable<readonly [string, Uint8Array]>,
+  opts: ReadCharxOptions & {
+    zipOversized?: readonly { name: string; uncompressedSize: number }[];
+    isPolyglot?: boolean;
+    jpegPreview?: Uint8Array | null;
+  } = {},
+): CharxBundle {
+  const maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  const decodeModule = opts.decodeModule ?? true;
+  const zipOversized = opts.zipOversized ?? [];
+  const isPolyglot = opts.isPolyglot ?? false;
+  const jpegPreview = opts.jpegPreview ?? null;
   let card: unknown | null = null;
   let cardJsonText: string | null = null;
   let moduleBytes: Uint8Array | null = null;
@@ -133,7 +147,7 @@ export function readCharx(bytes: Uint8Array, opts: ReadCharxOptions = {}): Charx
   const issues: { path: string; message: string }[] = [];
   let totalBytes = 0;
 
-  for (const [path, data] of Object.entries(files)) {
+  for (const [path, data] of files) {
     if (isUnsafePath(path)) {
       unsafeEntries.push(path);
       continue;

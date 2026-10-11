@@ -181,16 +181,16 @@ describe('frontend runtime setup', () => {
 
     expect(harness.events.filter((event) =>
       event === 'defer' || event === 'register' || event === 'subscribe' || event === 'ready',
-    )).toEqual(['defer', 'register', 'subscribe', 'ready']);
+    )).toEqual(['defer', 'register', 'subscribe', 'subscribe', 'ready']);
     expect(harness.events.slice(
-      harness.events.indexOf('subscribe') + 1,
+      harness.events.lastIndexOf('subscribe') + 1,
       harness.events.indexOf('ready'),
     )).toEqual(['send:get_cards', 'send:log_request_state', 'send:screen_dims', 'send:active_preset']);
 
     teardown();
     teardown = null;
     expect(harness.events.filter((event) => event === 'unregister' || event === 'unsubscribe'))
-      .toEqual(['unregister', 'unsubscribe']);
+      .toEqual(['unregister', 'unsubscribe', 'unsubscribe']);
   });
 
   test('reports the active preset once settings hydrate and on every change', () => {

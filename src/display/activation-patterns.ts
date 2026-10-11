@@ -1,3 +1,4 @@
+import { hostCall } from '../host-services/client.js';
 import type { SpindleDisplayContext, SpindleFrontendContext } from 'lumiverse-spindle-types';
 import { isRisuRegexScript, type FeRegexScript } from './regex-apply.js';
 
@@ -12,13 +13,12 @@ interface PreparedPattern { source: string; resolved?: string; error?: string }
 type Loader = (presetId: string, patterns: string[], context: SpindleDisplayContext) => Promise<PreparedPattern[]>;
 
 async function loadPatterns(presetId: string, patterns: string[], context: SpindleDisplayContext): Promise<PreparedPattern[]> {
-  const response = await fetch('/api/v1/regex-scripts/activation-patterns', {
-    method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ preset_id: presetId, patterns, chat_id: context.chatId,
-      character_id: context.characterId, persona_id: context.personaId }),
+  const body = await hostCall('activation.prepare', {
+    presetId, patterns,
+    ...(context.chatId ? { chatId: context.chatId } : {}),
+    ...(context.characterId ? { characterId: context.characterId } : {}),
+    ...(context.personaId ? { personaId: context.personaId } : {}),
   });
-  if (!response.ok) throw new ActivationPatternError(`Activation input preparation failed (${response.status}); the host must provide the activation-patterns endpoint`);
-  const body = await response.json() as { patterns?: PreparedPattern[] };
   if (!Array.isArray(body.patterns)) throw new ActivationPatternError('Invalid activation input response');
   return body.patterns;
 }
