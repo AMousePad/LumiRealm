@@ -74,7 +74,7 @@ const ICON_RIGHT =
 const SEARCH_DEBOUNCE_MS = 350;
 const TOAST_DURATION_MS = 4000;
 
-const MODAL_MAX_WIDTH = 1357;
+const MODAL_MAX_WIDTH = 1696;
 const MODAL_MAX_HEIGHT_CAP = 1600;
 const MODAL_VIEWPORT_MARGIN = 32;
 
@@ -170,6 +170,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
 
     const root = document.createElement('div');
     root.className = 'lr-realm-root';
+    modalHandle.root.classList.add('lr-realm-modal-root');
     modalHandle.root.appendChild(root);
 
     const toolbar = document.createElement('div');
@@ -309,7 +310,8 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     const results = document.createElement('div');
     results.className = 'lr-realm-grid';
     const pager = renderPager();
-    body.append(results, pager);
+    body.append(results);
+    root.append(pager);
 
     surface = {
       handle: modalHandle,
@@ -357,10 +359,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
   function render(): void {
     if (!surface) return;
     const { sortBtns, nsfwBtn, additionalEl, bodyEl, resultsEl, statusEl, pagerEl } = surface;
-    const scrollPositions: [HTMLElement, number][] = [];
-    for (let el: HTMLElement | null = bodyEl; el; el = el.parentElement) {
-      if (el.scrollTop > 0) scrollPositions.push([el, el.scrollTop]);
-    }
+    const scrollTop = bodyEl.scrollTop;
 
     nsfwBtn.classList.toggle('active', state.nsfw);
     for (const [id, btn] of sortBtns) {
@@ -396,7 +395,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
       statusEl.textContent = viewError;
     }
     pagerEl.hidden = state.sort === 'random' || state.sort === 'recommended';
-    const pagingBusy = state.loading || searchDebounceTimer !== undefined;
+    const pagingBusy = searchDebounceTimer !== undefined;
     (pagerEl.querySelector('[title="Previous page"]') as HTMLButtonElement).disabled = pagingBusy || state.page === 0;
     (pagerEl.querySelector('[title="Next page"]') as HTMLButtonElement).disabled = pagingBusy || state.cards.length === 0;
     const pageInput = pagerEl.querySelector('.lr-realm-pager-page') as HTMLInputElement;
@@ -406,7 +405,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
       pageInput.setCustomValidity('');
     }
 
-    for (const [el, top] of scrollPositions) el.scrollTop = top;
+    bodyEl.scrollTop = scrollTop;
     syncOverlays();
   }
 
@@ -545,7 +544,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
         pageInput.reportValidity();
         return;
       }
-      if (state.loading || searchDebounceTimer !== undefined || page - 1 === state.page) return;
+      if (searchDebounceTimer !== undefined || page - 1 === state.page) return;
       state.page = page - 1;
       doSearch();
     });
@@ -843,6 +842,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
           state.additionalHTML = '';
         }
         render();
+        if (msg.ok && surface) surface.bodyEl.scrollTop = 0;
         break;
       }
       case 'realm_info_result': {

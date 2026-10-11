@@ -42104,13 +42104,28 @@ var styles_default2 = `.lr-realm-launcher {\r
   flex-shrink: 0;\r
 }\r
 \r
+/* Keep the host's padded modal body from becoming a second scroll surface. */\r
+div:has(> .lr-realm-modal-root) {\r
+  display: flex;\r
+  flex-direction: column;\r
+  min-height: 0;\r
+}\r
+\r
+.lr-realm-modal-root {\r
+  display: flex;\r
+  flex: 1 1 auto;\r
+  min-width: 0;\r
+  min-height: 0;\r
+  height: min(1600px, calc(100dvh - 64px));\r
+}\r
+\r
 .lr-realm-root {\r
   display: flex;\r
   flex-direction: column;\r
   gap: 12px;\r
   position: relative;\r
   width: 100%;\r
-  height: 100%;\r
+  flex: 1;\r
   min-height: 0;\r
   font-family: inherit;\r
   color: var(--lumiverse-text, #e6e6e6);\r
@@ -42136,6 +42151,7 @@ var styles_default2 = `.lr-realm-launcher {\r
 \r
 .lr-realm-search input {\r
   flex: 1;\r
+  min-width: 0;\r
   background: transparent;\r
   border: 0;\r
   outline: 0;\r
@@ -42203,12 +42219,14 @@ var styles_default2 = `.lr-realm-launcher {\r
 .lr-realm-body {\r
   flex: 1;\r
   overflow-y: auto;\r
-  min-height: 200px;\r
+  min-height: 0;\r
+  container-type: size;\r
+  overscroll-behavior: contain;\r
 }\r
 \r
 .lr-realm-grid {\r
   display: grid;\r
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));\r
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, max(260px, calc((100% - 48px) / 5))), 1fr));\r
   gap: 12px;\r
   transition: filter 0.3s ease;\r
 }\r
@@ -42224,7 +42242,7 @@ var styles_default2 = `.lr-realm-launcher {\r
   font-size: 12px;\r
 }\r
 .lr-realm-grid[data-view="grid"] {\r
-  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));\r
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, max(200px, calc((100% - 48px) / 5))), 1fr));\r
 }\r
 .lr-realm-grid[data-view="grid"] .lr-realm-card {\r
   position: relative;\r
@@ -42275,6 +42293,15 @@ var styles_default2 = `.lr-realm-launcher {\r
   white-space: nowrap;\r
   overflow: hidden;\r
   text-overflow: ellipsis;\r
+}\r
+@container (min-width: 1200px) and (min-height: 1140px) {\r
+  .lr-realm-grid[data-view="grid"] {\r
+    grid-template-columns: repeat(5, minmax(0, 1fr));\r
+    grid-auto-rows: calc((100cqh - 60px) / 6);\r
+  }\r
+  .lr-realm-grid[data-view="grid"] .lr-realm-card { aspect-ratio: auto; }\r
+  .lr-realm-grid[data-view="grid"] .lr-realm-card-body { padding: 4px 8px; gap: 2px; line-height: 1.2; }\r
+  .lr-realm-grid[data-view="grid"] .lr-realm-card-desc { display: none; }\r
 }\r
 .lr-realm-feedback {\r
   display: flex;\r
@@ -42383,10 +42410,11 @@ var styles_default2 = `.lr-realm-launcher {\r
 \r
 .lr-realm-pager {\r
   display: flex;\r
+  flex-shrink: 0;\r
   justify-content: center;\r
   align-items: center;\r
   gap: 8px;\r
-  padding: 14px 0 6px 0;\r
+  padding: 0 0 6px;\r
 }\r
 \r
 .lr-realm-pager button {\r
@@ -42775,7 +42803,7 @@ var ICON_LEFT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fil
 var ICON_RIGHT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="9 18 15 12 9 6"/></svg>';
 var SEARCH_DEBOUNCE_MS = 350;
 var TOAST_DURATION_MS = 4000;
-var MODAL_MAX_WIDTH = 1357;
+var MODAL_MAX_WIDTH = 1696;
 var MODAL_MAX_HEIGHT_CAP = 1600;
 var MODAL_VIEWPORT_MARGIN = 32;
 function computeModalWidth() {
@@ -42850,6 +42878,7 @@ function setupRealmModal(deps) {
     }
     const root = document.createElement("div");
     root.className = "lr-realm-root";
+    modalHandle.root.classList.add("lr-realm-modal-root");
     modalHandle.root.appendChild(root);
     const toolbar = document.createElement("div");
     toolbar.className = "lr-realm-toolbar";
@@ -42987,7 +43016,8 @@ function setupRealmModal(deps) {
     const results = document.createElement("div");
     results.className = "lr-realm-grid";
     const pager = renderPager();
-    body.append(results, pager);
+    body.append(results);
+    root.append(pager);
     surface = {
       handle: modalHandle,
       bodyEl: body,
@@ -43031,11 +43061,7 @@ function setupRealmModal(deps) {
     if (!surface)
       return;
     const { sortBtns, nsfwBtn, additionalEl, bodyEl, resultsEl, statusEl, pagerEl } = surface;
-    const scrollPositions = [];
-    for (let el = bodyEl;el; el = el.parentElement) {
-      if (el.scrollTop > 0)
-        scrollPositions.push([el, el.scrollTop]);
-    }
+    const scrollTop = bodyEl.scrollTop;
     nsfwBtn.classList.toggle("active", state.nsfw);
     for (const [id, btn] of sortBtns) {
       btn.classList.toggle("active", id === state.sort);
@@ -43068,7 +43094,7 @@ function setupRealmModal(deps) {
       statusEl.textContent = viewError;
     }
     pagerEl.hidden = state.sort === "random" || state.sort === "recommended";
-    const pagingBusy = state.loading || searchDebounceTimer !== undefined;
+    const pagingBusy = searchDebounceTimer !== undefined;
     pagerEl.querySelector('[title="Previous page"]').disabled = pagingBusy || state.page === 0;
     pagerEl.querySelector('[title="Next page"]').disabled = pagingBusy || state.cards.length === 0;
     const pageInput = pagerEl.querySelector(".lr-realm-pager-page");
@@ -43077,8 +43103,7 @@ function setupRealmModal(deps) {
       pageInput.value = String(state.page + 1);
       pageInput.setCustomValidity("");
     }
-    for (const [el, top] of scrollPositions)
-      el.scrollTop = top;
+    bodyEl.scrollTop = scrollTop;
     syncOverlays();
   }
   function syncOverlays() {
@@ -43211,7 +43236,7 @@ function setupRealmModal(deps) {
         pageInput.reportValidity();
         return;
       }
-      if (state.loading || searchDebounceTimer !== undefined || page - 1 === state.page)
+      if (searchDebounceTimer !== undefined || page - 1 === state.page)
         return;
       state.page = page - 1;
       doSearch();
@@ -43493,6 +43518,8 @@ function setupRealmModal(deps) {
           state.additionalHTML = "";
         }
         render();
+        if (msg.ok && surface)
+          surface.bodyEl.scrollTop = 0;
         break;
       }
       case "realm_info_result": {
