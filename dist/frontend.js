@@ -42221,9 +42221,16 @@ div:has(> .lr-realm-modal-root) {\r
   overflow-y: auto;\r
   min-height: 0;\r
   padding-bottom: 52px;\r
+  padding-right: 6px;\r
   scroll-padding-bottom: 52px;\r
   overscroll-behavior: contain;\r
+  scrollbar-gutter: stable;\r
+  scrollbar-width: thin;\r
+  scrollbar-color: var(--lumiverse-primary, #5b8cff) transparent;\r
 }\r
+.lr-realm-body::-webkit-scrollbar { width: 6px; }\r
+.lr-realm-body::-webkit-scrollbar-thumb { background: var(--lumiverse-primary, #5b8cff); border-radius: 999px; }\r
+.lr-realm-body::-webkit-scrollbar-track { background: transparent; }\r
 \r
 .lr-realm-grid {\r
   display: grid;\r
