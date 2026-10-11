@@ -20,9 +20,21 @@ for (const engine of [chromium, firefox]) {
       await page.goto('http://progress.test/');
       let holdPatch = false;
       let patchStarted = false;
+      let failPatchOnce = false;
+      let resumeHeads = 0;
       let releasePatch = (): void => {};
       await page.route('http://progress.test/api/v1/spindle-uploads**', async route => {
         assert.notEqual(route.request().method(), 'DELETE', 'host does not support TUS termination');
+        if (route.request().method() === 'HEAD') {
+          resumeHeads++;
+          await route.fulfill({ status: 200 });
+          return;
+        }
+        if (route.request().method() === 'PATCH' && failPatchOnce) {
+          failPatchOnce = false;
+          await route.fulfill({ status: 503 });
+          return;
+        }
         if (route.request().method() === 'PATCH' && holdPatch) {
           patchStarted = true;
           await new Promise<void>(resolve => { releasePatch = resolve; });
@@ -131,6 +143,26 @@ for (const engine of [chromium, firefox]) {
       assert.equal(await page.locator('.lrm-status').textContent(), '');
       assert.equal(await page.locator('.lr-import-phase').textContent(), 'Cancelled');
       assert.equal(await page.locator('.lr-import-progress-fill').evaluate(el => (el as HTMLElement).style.width), '0%');
+      failPatchOnce = true;
+      const brokenChooser = page.waitForEvent('filechooser');
+      await page.getByRole('button', { name: 'Upload .risum / .charx', exact: true }).click();
+      await (await brokenChooser).setFiles({ name: 'resume.risum', mimeType: 'application/octet-stream', buffer: Buffer.from('test') });
+      await page.locator('.lr-import-message').filter({ hasText: 'The server cannot resume this upload.' }).waitFor({ timeout: 5000 });
+      assert.equal(resumeHeads, 1, 'do not repeatedly retry a malformed HEAD response');
+      assert.equal(await page.evaluate(() => Object.keys(localStorage).some(key => localStorage.getItem(key)?.includes('upload-1'))), false, 'remove the unusable resume record');
+      await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+      const retryChooser = page.waitForEvent('filechooser');
+      await page.getByRole('button', { name: 'Upload .risum / .charx', exact: true }).click();
+      await (await retryChooser).setFiles({ name: 'resume.risum', mimeType: 'application/octet-stream', buffer: Buffer.from('test') });
+      await page.waitForFunction(() => (window as any).sent.some((msg: any) => msg.type === 'process_module_from_upload' && msg.fileName === 'resume.risum'));
+      assert.equal(resumeHeads, 1);
+      await page.evaluate(() => {
+        const msg = { type: 'import_progress', phase: 'done', message: 'Imported', fraction: 1 };
+        (window as any).overlay.handleBackendMessage(msg);
+        (window as any).panel.handleBackendMessage(msg);
+      });
+      assert.equal(await page.getByRole('button', { name: 'Upload .risum / .charx', exact: true }).isDisabled(), false);
+      assert.equal(await page.locator('.lr-import-progress-fill').evaluate(el => (el as HTMLElement).style.width), '100%');
       await page.evaluate(() => { (window as any).overlay.destroy(); (window as any).panel.destroy(); });
       assert.deepEqual(errors, []);
       console.log(`${engine.name()} ${width}px: non-modal progress, minimize/expand/cancel, upload completion, shared busy controls and reduced motion pass`);
