@@ -25945,16 +25945,22 @@ function createModuleHandlers(deps) {
       await deps.pushModules(ctx.userId);
     },
     set_global_modules: async (msg, ctx) => {
-      await deps.setGlobalModules(msg.moduleIds, ctx.userId);
-      await deps.pushModules(ctx.userId);
+      const id = msg.requestId ?? crypto.randomUUID();
+      deps.emitOperationProgress(ctx.userId, id, "started", "Update global modules", "Applying modules\u2026", null);
+      try {
+        await deps.setGlobalModules(msg.moduleIds, ctx.userId);
+        await deps.pushModules(ctx.userId);
+        deps.emitOperationProgress(ctx.userId, id, "done", "Update global modules", "Global modules updated", 1);
+      } catch (error) {
+        deps.emitOperationProgress(ctx.userId, id, "error", "Update global modules", "", null, deps.errMsg(error));
+      }
     },
     delete_module: async (msg, ctx) => {
-      const envelopeForDelete = await deps.readModuleEnvelope(ctx.userId, msg.moduleId);
-      const moduleName = envelopeForDelete?.module?.name || msg.moduleId.slice(0, 8);
-      const opId = `delete-module-${msg.moduleId}-${Date.now()}`;
-      const opTitle = `Deleting module "${moduleName}"`;
+      const opId = msg.requestId ?? crypto.randomUUID();
+      const opTitle = "Delete module";
       deps.emitOperationProgress(ctx.userId, opId, "started", opTitle, "Detaching from characters\u2026", null);
       try {
+        const envelopeForDelete = await deps.readModuleEnvelope(ctx.userId, msg.moduleId);
         const sharedWbId = envelopeForDelete?.installed_world_book_id ?? null;
         const journalImageIds = await deps.readModuleImageJournalImageIds(ctx.userId, msg.moduleId);
         const touched = await deps.detachModuleFromAllCharacters(msg.moduleId, ctx.userId);
@@ -26016,12 +26022,12 @@ function createModuleHandlers(deps) {
       }
     },
     attach_module: async (msg, ctx) => {
-      if (deps.blockedByRepair(ctx.userId, "attach_module"))
-        return;
-      const operationId = crypto.randomUUID();
+      const operationId = msg.requestId ?? crypto.randomUUID();
       const title = "Attach module";
       deps.emitOperationProgress(ctx.userId, operationId, "started", title, "Installing module\u2026", null);
       try {
+        if (deps.blockedByRepair(ctx.userId, "attach_module"))
+          throw new Error("Wait for the current repair to finish");
         const result = await deps.attachModuleToCharacter(msg.characterId, msg.moduleId, ctx.userId);
         if (!result.ok)
           throw new Error(result.reason ?? "Attachment failed");
@@ -26036,15 +26042,20 @@ function createModuleHandlers(deps) {
       }
     },
     detach_module: async (msg, ctx) => {
-      if (deps.blockedByRepair(ctx.userId, "detach_module"))
-        return;
-      const result = await deps.detachModuleFromCharacter(msg.characterId, msg.moduleId, ctx.userId);
-      if (!result.ok) {
-        ctx.send({ type: "error", message: `detach_module: ${result.reason ?? "failed"}` }, ctx.userId);
-        return;
+      const id = msg.requestId ?? crypto.randomUUID();
+      deps.emitOperationProgress(ctx.userId, id, "started", "Detach module", "Removing module\u2026", null);
+      try {
+        if (deps.blockedByRepair(ctx.userId, "detach_module"))
+          throw new Error("Wait for the current repair to finish");
+        const result = await deps.detachModuleFromCharacter(msg.characterId, msg.moduleId, ctx.userId);
+        if (!result.ok)
+          throw new Error(result.reason ?? "Detach failed");
+        await deps.pushAttachedForCharacter(msg.characterId, ctx.userId);
+        await deps.pushModules(ctx.userId);
+        deps.emitOperationProgress(ctx.userId, id, "done", "Detach module", "Module detached", 1);
+      } catch (error) {
+        deps.emitOperationProgress(ctx.userId, id, "error", "Detach module", "", null, deps.errMsg(error));
       }
-      await deps.pushAttachedForCharacter(msg.characterId, ctx.userId);
-      await deps.pushModules(ctx.userId);
     },
     module_artifacts_installed: async (msg, ctx) => {
       if (msg.characterId === null) {
@@ -27228,6 +27239,8 @@ function createImportHandlers(deps) {
       deps.log.info(`import_card_from_upload: got ${upload.data.byteLength} bytes, running importCard`);
       try {
         await deps.importAnyFormat(upload.data, msg.fileName || upload.fileName, ctx.userId, msg.presetLabelTranslation === undefined ? undefined : { labelTranslation: msg.presetLabelTranslation });
+      } catch (error) {
+        ctx.send({ type: "import_progress", phase: "error", message: "Import failed", fraction: null, error: deps.errMsg(error) }, ctx.userId);
       } finally {
         deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
       }

@@ -1,4 +1,5 @@
 import type { BackendToFrontend, FrontendToBackend } from '../types/messages.js';
+import { currentTask, startTask, finishTask } from './busy.js';
 
 export interface ImportOverlayLog {
   info(msg: string, ...rest: unknown[]): void;
@@ -12,7 +13,8 @@ export interface ImportOverlayHandle {
     source: 'realm' | 'drawer' | 'module',
     onCancel?: () => void,
     totalBytes?: number,
-  ): void;
+  ): boolean;
+  notifyImportError(message: string): void;
   setUploadProgress(sent: number, total: number): void;
   destroy(): void;
 }
@@ -36,14 +38,26 @@ export function setupImportOverlay(
   const overlay = document.createElement('div');
   overlay.className = 'lr-import-overlay';
   overlay.hidden = true;
-  overlay.setAttribute('role', 'dialog');
-  overlay.setAttribute('aria-modal', 'true');
-  overlay.setAttribute('aria-live', 'polite');
   document.body.appendChild(overlay);
 
   const card = document.createElement('div');
   card.className = 'lr-import-card';
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-label', 'Operation progress');
+  card.setAttribute('aria-live', 'polite');
   overlay.appendChild(card);
+
+  const minimizeBtn = document.createElement('button');
+  minimizeBtn.type = 'button';
+  minimizeBtn.className = 'lrm-btn lr-import-minimize';
+  minimizeBtn.textContent = 'Minimize';
+  minimizeBtn.setAttribute('aria-expanded', 'true');
+  minimizeBtn.addEventListener('click', () => {
+    const minimized = overlay.classList.toggle('lr-import-minimized');
+    minimizeBtn.textContent = minimized ? 'Expand' : 'Minimize';
+    minimizeBtn.setAttribute('aria-expanded', String(!minimized));
+  });
+  card.appendChild(minimizeBtn);
 
   const titleEl = document.createElement('div');
   titleEl.className = 'lr-import-title';
@@ -109,6 +123,8 @@ export function setupImportOverlay(
   let pendingConsentRequestId: string | null = null;
   let pendingCancel: (() => void) | null = null;
   let uploadTotalBytes = 0;
+  let importing = false;
+  const queuedOperations = new Map<string, Extract<BackendToFrontend, { type: 'operation_progress' }>>();
 
   function setIndeterminate(): void {
     progressOuter.classList.add('lr-import-progress-indeterminate');
@@ -156,6 +172,8 @@ export function setupImportOverlay(
     if (cb) {
       try { cb(); } catch (err) { log.warn('import-overlay: cancel callback threw', err); }
     }
+    importing = false;
+    finishTask('import');
     hideNow();
   });
 
@@ -164,6 +182,9 @@ export function setupImportOverlay(
     visible = false;
     overlay.hidden = true;
     log.info('import-overlay: hidden');
+    activeOperationId = null;
+    const next = queuedOperations.values().next().value;
+    if (next) { queuedOperations.delete(next.operationId); applyOperationProgress(next); }
   }
 
   function scheduleHide(): void {
@@ -181,6 +202,9 @@ export function setupImportOverlay(
     lastPhase = phase;
     lockCancel();
     if (phase === 'done') {
+      importing = false;
+      finishTask('import');
+      titleEl.classList.remove('lr-busy');
       progressOuter.classList.remove('lr-import-progress-error');
       setFraction(1);
       dismissBtn.hidden = true;
@@ -189,6 +213,10 @@ export function setupImportOverlay(
       return;
     }
     if (phase === 'error') {
+      expand();
+      importing = false;
+      finishTask('import');
+      titleEl.classList.remove('lr-busy');
       progressOuter.classList.add('lr-import-progress-error');
       setFraction(1);
       dismissBtn.hidden = false;
@@ -202,13 +230,13 @@ export function setupImportOverlay(
     }
   }
 
-  // Generic operation driver for non-import flows (deletes, cleanup). Reuses
-  // the same modal so the user gets identical visual feedback.
+  // Background cleanup must not replace a running import or consent request.
   let activeOperationId: string | null = null;
   function applyOperationProgress(
     msg: Extract<BackendToFrontend, { type: 'operation_progress' }>,
   ): void {
     activeOperationId = msg.operationId;
+    titleEl.classList.toggle('lr-busy', msg.phase === 'started' || msg.phase === 'progress');
     cancelHide();
     if (msg.phase === 'started' || !visible) {
       visible = true;
@@ -222,6 +250,8 @@ export function setupImportOverlay(
     }
     titleEl.textContent = msg.title;
     if (msg.phase === 'error') {
+      expand();
+      finishTask(msg.operationId);
       progressOuter.classList.add('lr-import-progress-error');
       phaseEl.textContent = 'Error';
       messageEl.textContent = msg.error || msg.message || 'Operation failed';
@@ -230,6 +260,7 @@ export function setupImportOverlay(
       return;
     }
     if (msg.phase === 'done') {
+      finishTask(msg.operationId);
       progressOuter.classList.remove('lr-import-progress-error');
       phaseEl.textContent = 'Done';
       messageEl.textContent = msg.message || '';
@@ -246,10 +277,17 @@ export function setupImportOverlay(
     }
   }
 
+  function expand(): void {
+    overlay.classList.remove('lr-import-minimized');
+    minimizeBtn.textContent = 'Minimize';
+    minimizeBtn.setAttribute('aria-expanded', 'true');
+  }
+
   function showConsent(prompt: Extract<BackendToFrontend, { type: 'consent_prompt' }>): void {
     cancelHide();
     if (!visible) showOverlay(label || 'character');
     pendingConsentRequestId = prompt.requestId;
+    expand();
     titleEl.textContent = prompt.title;
     phaseEl.textContent = 'Awaiting consent';
     messageEl.textContent = '';
@@ -282,21 +320,28 @@ export function setupImportOverlay(
     source: 'realm' | 'drawer' | 'module',
     onCancel?: () => void,
     totalBytes?: number,
-  ): void {
+  ): boolean {
+    if (!startTask({ id: 'import', kind: 'import', label: newLabel })) return false;
+    importing = true;
+    activeOperationId = null;
     log.info(`import-overlay: notifyImportStart label=${newLabel} source=${source} cancellable=${!!onCancel} totalBytes=${totalBytes ?? '?'}`);
     uploadTotalBytes = typeof totalBytes === 'number' && totalBytes > 0 ? totalBytes : 0;
     showOverlay(newLabel);
     pendingCancel = onCancel ?? null;
     cancelBtn.hidden = !pendingCancel;
+    titleEl.classList.add('lr-busy');
+    return true;
   }
 
   function setUploadProgress(sent: number, total: number): void {
+    if (!importing) return;
     if (!visible) showOverlay(label || 'character');
     if (lastPhase !== '') return;
     phaseEl.textContent = 'Uploading';
     if (total > 0) {
       messageEl.textContent = `Sent ${formatBytes(Math.min(sent, total))} of ${formatBytes(total)}…`;
       setFraction(sent / total);
+      if (sent >= total) lockCancel();
     } else {
       messageEl.textContent = `Sent ${formatBytes(sent)}…`;
     }
@@ -327,6 +372,11 @@ export function setupImportOverlay(
         break;
       }
       case 'operation_progress': {
+        if (importing || pendingConsentRequestId || (activeOperationId && activeOperationId !== msg.operationId && visible)) {
+          queuedOperations.set(msg.operationId, msg);
+          if (msg.phase === 'done' || msg.phase === 'error') finishTask(msg.operationId);
+          break;
+        }
         applyOperationProgress(msg);
         break;
       }
@@ -338,19 +388,19 @@ export function setupImportOverlay(
         }
         break;
       }
-      case 'error': {
-        if (visible && lastPhase !== 'done') applyProgress('error', msg.message, null);
-        break;
-      }
     }
   }
 
   function destroy(): void {
     cancelHide();
+    if (importing) { pendingCancel?.(); finishTask('import'); }
+    if (activeOperationId) finishTask(activeOperationId);
+    const task = currentTask();
+    if (task) finishTask(task.id);
     overlay.remove();
   }
 
-  return { handleBackendMessage, notifyImportStart, setUploadProgress, destroy };
+  return { handleBackendMessage, notifyImportStart, setUploadProgress, notifyImportError: message => { if (importing) applyProgress('error', message, null); }, destroy };
 }
 
 function formatBytes(n: number): string {

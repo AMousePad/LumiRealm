@@ -185,6 +185,8 @@ export function createImportHandlers(deps: ImportHandlerDeps): {
             ? undefined
             : { labelTranslation: msg.presetLabelTranslation },
         );
+      } catch (error) {
+        ctx.send({ type: 'import_progress', phase: 'error', message: 'Import failed', fraction: null, error: deps.errMsg(error) }, ctx.userId);
       } finally {
         void deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
       }

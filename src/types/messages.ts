@@ -282,11 +282,11 @@ export type FrontendToBackend =
     }
   | { type: 'process_module_from_upload'; uploadId: string; fileName: string }
   | { type: 'request_modules' }
-  | { type: 'delete_module'; moduleId: string }
-  | { type: 'attach_module'; characterId: string; moduleId: string }
-  | { type: 'detach_module'; characterId: string; moduleId: string }
+  | { type: 'delete_module'; moduleId: string; requestId?: string }
+  | { type: 'attach_module'; characterId: string; moduleId: string; requestId?: string }
+  | { type: 'detach_module'; characterId: string; moduleId: string; requestId?: string }
   // Full replacement, not a delta: the chip list sends its whole set.
-  | { type: 'set_global_modules'; moduleIds: readonly string[] }
+  | { type: 'set_global_modules'; moduleIds: readonly string[]; requestId?: string }
   | { type: 'export_module'; moduleId: string }
   | { type: 'export_character'; characterId: string }
   | {

@@ -9,6 +9,7 @@ import { realmResourceUrl, realmShareUrl } from './messages.js';
 import { extractRealmId } from './api.js';
 import { REALM_STYLES } from './styles.js';
 import { renderDescription } from './markdown.js';
+import { currentTask, subscribeTask } from '../ui/busy.js';
 
 export interface RealmFrontendLog {
   info(msg: string, ...rest: unknown[]): void;
@@ -21,7 +22,7 @@ export interface RealmFrontendDeps {
   readonly sendToBackend: (msg: RealmFrontendToBackend) => void;
   readonly log: RealmFrontendLog;
   readonly mountTarget: HTMLElement;
-  readonly onImportStart?: (label: string, onCancel?: () => void, totalBytes?: number) => void;
+  readonly onImportStart?: (label: string, onCancel?: () => void, totalBytes?: number) => boolean | void;
 }
 
 export interface RealmFrontendHandle {
@@ -570,7 +571,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     const importBtn = document.createElement('button');
     importBtn.type = 'button';
     importBtn.className = 'lr-realm-primary';
-    importBtn.disabled = state.downloading;
+    importBtn.disabled = state.downloading || currentTask() !== null;
     if (state.downloading) {
       const spin = document.createElement('span');
       spin.className = 'lr-realm-spinner';
@@ -736,17 +737,14 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
   }
 
   function doDownload(id: string): void {
-    if (state.downloading) return;
+    if (state.downloading || currentTask()) return;
     state.downloading = true;
     const requestId = nextRequestId('download');
     state.pendingDownloadReq = requestId;
     log.info(`realm modal: download req=${requestId} id=${id}`);
     const label = state.selected?.name || `RisuRealm character ${id}`;
-    deps.onImportStart?.(label);
+    if (deps.onImportStart?.(label) === false) { state.downloading = false; state.pendingDownloadReq = null; render(); return; }
     sendToBackend({ type: 'realm_download', requestId, id });
-    // The blocking import overlay sits above this modal. Keep the Realm
-    // surface mounted underneath so the browsing session resumes when the
-    // import finishes and the overlay hides.
   }
 
   function handleBackendMessage(msg: RealmBackendToFrontend): void {
@@ -815,6 +813,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     }
   };
   document.addEventListener('keydown', onKeyDownCapture, /* capture */ true);
+  cleanups.push(subscribeTask(() => render()));
   cleanups.push(() => document.removeEventListener('keydown', onKeyDownCapture, /* capture */ true));
 
   function destroy(): void {

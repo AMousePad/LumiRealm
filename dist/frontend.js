@@ -29006,7 +29006,7 @@ var styles_default = `.risu-compat-drawer {\r
   position: fixed;\r
   inset: 0;\r
   z-index: 2147483700;\r
-  background: var(--lumiverse-bg-deep, rgba(8, 10, 14, 0.92));\r
+  pointer-events: none;\r
   display: flex;\r
   align-items: center;\r
   justify-content: center;\r
@@ -29018,6 +29018,9 @@ var styles_default = `.risu-compat-drawer {\r
   display: none;\r
 }\r
 .lr-import-card {\r
+  pointer-events: auto;\r
+  max-height: calc(100dvh - 48px);\r
+  overflow-y: auto;\r
   background: var(--lumiverse-fill, #1c1f24);\r
   border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.1));\r
   border-radius: 10px;\r
@@ -29029,6 +29032,25 @@ var styles_default = `.risu-compat-drawer {\r
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);\r
   color: var(--lumiverse-text, #e6e6e6);\r
   font-family: inherit;\r
+}\r
+.lr-import-minimize { align-self: flex-end; }\r
+.lr-import-minimized { align-items: flex-end; justify-content: flex-end; }\r
+.lr-import-minimized .lr-import-card > :not(.lr-import-title):not(.lr-import-progress):not(.lr-import-minimize) { display: none; }\r
+.lr-busy::before {\r
+  content: '';\r
+  display: inline-block;\r
+  width: 0.85em;\r
+  height: 0.85em;\r
+  margin-inline-end: 0.5em;\r
+  border: 2px solid currentColor;\r
+  border-right-color: transparent;\r
+  border-radius: 50%;\r
+  vertical-align: -0.1em;\r
+  animation: lr-busy-spin 800ms linear infinite;\r
+}\r
+@keyframes lr-busy-spin { to { transform: rotate(360deg); } }\r
+@media (prefers-reduced-motion: reduce) {\r
+  .lr-busy::before, .lr-import-progress.lr-import-progress-indeterminate .lr-import-progress-fill { animation: none; }\r
 }\r
 .lr-import-title {\r
   font-size: 16px;\r
@@ -29253,6 +29275,40 @@ var styles_default = `.risu-compat-drawer {\r
 
 // src/ui/styles.ts
 var STYLES = styles_default;
+
+// src/ui/busy.ts
+var current = null;
+var listeners = new Set;
+function currentTask() {
+  return current;
+}
+function startTask(task) {
+  if (current)
+    return false;
+  current = task;
+  for (const listener of listeners)
+    listener();
+  return true;
+}
+function finishTask(id) {
+  if (current?.id !== id)
+    return;
+  current = null;
+  for (const listener of listeners)
+    listener();
+}
+function subscribeTask(listener) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function setButtonBusy(button, label, busy, disabled = busy) {
+  button.textContent = label;
+  button.classList.toggle("lr-busy", busy);
+  button.setAttribute("aria-busy", String(busy));
+  button.disabled = disabled;
+}
 
 // node_modules/tus-js-client/lib.esm/error.js
 function _typeof(o) {
@@ -32090,7 +32146,7 @@ function mountCardsPanel(opts) {
   let noProgressTimer;
   function render() {}
   async function onImportClicked() {
-    if (importBtn.disabled)
+    if (importBtn.disabled || currentTask())
       return;
     log.info("drawer: Import button clicked — opening file picker");
     let file = null;
@@ -32115,8 +32171,10 @@ function mountCardsPanel(opts) {
     const totalBytes = file.size;
     log.info(`drawer: upload file=${fileName} bytes=${totalBytes}`);
     let cancelled = false;
-    opts.onImportStart?.(fileName, () => {
+    const accepted = opts.onImportStart?.(fileName, () => {
       cancelled = true;
+      state.optimistic = false;
+      importBtn.disabled = false;
       if (activeTus) {
         activeTus.abort(true).catch(() => {});
         activeTus = null;
@@ -32124,6 +32182,11 @@ function mountCardsPanel(opts) {
       clearNoProgress();
       log.info("drawer: upload cancel requested");
     }, totalBytes);
+    if (accepted === false) {
+      state.optimistic = false;
+      updateBusy();
+      return;
+    }
     state.progress = { phase: "decoding", message: "Starting upload…", fraction: 0 };
     render();
     const upload = new Upload(file, {
@@ -32140,6 +32203,7 @@ function mountCardsPanel(opts) {
         state.optimistic = false;
         state.progress = { phase: "error", message: `Upload failed: ${errMsg(err)}`, fraction: null };
         state.notices = [errMsg(err)];
+        opts.onImportError?.(`Upload failed: ${errMsg(err)}`);
         importBtn.disabled = false;
         render();
       },
@@ -32155,10 +32219,13 @@ function mountCardsPanel(opts) {
       },
       onSuccess: () => {
         activeTus = null;
+        if (cancelled)
+          return;
         const uploadId = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
         if (!uploadId) {
           state.optimistic = false;
           state.progress = { phase: "error", message: "Upload finished but no id was returned", fraction: null };
+          opts.onImportError?.("Upload finished but no id was returned");
           importBtn.disabled = false;
           render();
           return;
@@ -32191,17 +32258,12 @@ function mountCardsPanel(opts) {
     clearNoProgress();
     noProgressTimer = setTimeout(() => {
       noProgressTimer = undefined;
-      log.error(`drawer: no import_progress within ${timeoutMs}ms after upload — failing`);
-      state.optimistic = false;
-      state.progress = {
-        phase: "error",
-        message: `Server didn't respond within ${Math.round(timeoutMs / 1000)}s after upload. The backend may have crashed.`,
-        fraction: null
-      };
-      importBtn.disabled = false;
-      render();
+      log.warn(`drawer: no import_progress within ${timeoutMs}ms; the import may still be processing`);
     }, timeoutMs);
   }
+  const updateBusy = () => setButtonBusy(importBtn, state.optimistic ? "Importing…" : "Upload file…", state.optimistic, state.optimistic || currentTask() !== null);
+  const unsubBusy = subscribeTask(updateBusy);
+  updateBusy();
   importBtn.addEventListener("click", () => {
     onImportClicked();
   });
@@ -32513,10 +32575,11 @@ function mountCardsPanel(opts) {
           message: msg.message,
           fraction: msg.fraction ?? null
         };
-        state.optimistic = false;
         if (msg.phase === "done") {
+          state.optimistic = false;
           importBtn.disabled = false;
         } else if (msg.phase === "error") {
+          state.optimistic = false;
           importBtn.disabled = false;
           if (msg.error)
             state.notices = [msg.error];
@@ -32531,17 +32594,9 @@ function mountCardsPanel(opts) {
         break;
       case "error":
         log.error(`drawer.error: ${msg.message}`);
-        clearNoProgress();
-        state.progress = {
-          phase: "error",
-          message: msg.message,
-          fraction: null
-        };
-        state.optimistic = false;
-        importBtn.disabled = false;
-        render();
         break;
     }
+    updateBusy();
   }
   render();
   log.info("cards-panel: ready");
@@ -32549,6 +32604,8 @@ function mountCardsPanel(opts) {
     handleBackendMessage,
     destroy() {
       log.info("cards-panel: destroy");
+      unsubBusy();
+      clearNoProgress();
       try {
         root.replaceChildren();
       } catch {}
@@ -34610,7 +34667,7 @@ function mountSettingsPanel(opts) {
   let cleanupGrid = null;
   function refreshCleanupActionState() {
     const sel = cleanupSelected.size;
-    const repairBlocking = repairScanning || repairApplying;
+    const repairBlocking = repairScanning || repairApplying || currentTask() !== null;
     deleteBtn.textContent = `Delete selected (${sel})`;
     deleteBtn.disabled = sel === 0 || cleanupDeleting || cleanupScanning || repairBlocking;
     selectAllBtn.disabled = cleanupOrphans.length === 0 || cleanupScanning || cleanupDeleting || repairBlocking;
@@ -34706,7 +34763,7 @@ owner: ${o.ownerCharacterId}` : ""}`;
     cleanupSummary.textContent = extra ? `${head} ${extra}` : head;
   }
   scanBtn.addEventListener("click", () => {
-    if (cleanupScanning)
+    if (cleanupScanning || currentTask())
       return;
     log.info("settings-tab: orphan scan requested");
     cleanupScanning = true;
@@ -34730,7 +34787,7 @@ owner: ${o.ownerCharacterId}` : ""}`;
     refreshCleanupActionState();
   });
   deleteBtn.addEventListener("click", () => {
-    if (cleanupSelected.size === 0 || cleanupDeleting)
+    if (cleanupSelected.size === 0 || cleanupDeleting || currentTask())
       return;
     const count = cleanupSelected.size;
     if (!confirm(`Delete ${count} orphan asset${count === 1 ? "" : "s"}? This cannot be undone.`))
@@ -34772,6 +34829,7 @@ owner: ${o.ownerCharacterId}` : ""}`;
   };
   let repairScanning = false;
   let repairApplying = false;
+  let refreshRepairApply = () => {};
   let repairLastSummary = null;
   const repairSelectedCharacterIds = new Set;
   const repairSelectedModuleIds = new Set;
@@ -34788,7 +34846,7 @@ owner: ${o.ownerCharacterId}` : ""}`;
     repairModulePicker = null;
   }
   function refreshRepairUi() {
-    repairScanBtn.disabled = repairScanning || repairApplying || cleanupScanning || cleanupDeleting;
+    repairScanBtn.disabled = repairScanning || repairApplying || cleanupScanning || cleanupDeleting || currentTask() !== null;
     repairScanBtn.textContent = repairScanning ? "Scanning…" : "Scan for problems";
     refreshCleanupActionState();
   }
@@ -34818,7 +34876,7 @@ owner: ${o.ownerCharacterId}` : ""}`;
     const hasApplicableSelection = () => repairChecked.staleCharRegex && s.staleCharRegex > 0 || repairChecked.staleModuleRegex && s.staleModuleRegex > 0 || repairChecked.deadJournals && s.deadJournals > 0 || repairChecked.forceRetranslate && (repairSelectedCharacterIds.size > 0 || repairSelectedModuleIds.size > 0);
     let targetCountSpan = null;
     const refreshApplyBtn = () => {
-      applyBtn.disabled = repairApplying || !hasApplicableSelection();
+      setButtonBusy(applyBtn, repairApplying ? "Applying…" : "Apply repair", repairApplying, currentTask() !== null || repairApplying || !hasApplicableSelection());
       if (targetCountSpan) {
         targetCountSpan.textContent = `${repairSelectedCharacterIds.size} cards · ${repairSelectedModuleIds.size} modules`;
       }
@@ -34953,7 +35011,7 @@ ${target.moduleId}`
     }
     refreshApplyBtn();
     applyBtn.addEventListener("click", () => {
-      if (!hasApplicableSelection())
+      if (!hasApplicableSelection() || currentTask())
         return;
       const willRetranslate = repairChecked.forceRetranslate && (repairSelectedCharacterIds.size > 0 || repairSelectedModuleIds.size > 0);
       const willDeleteRows = repairChecked.staleCharRegex && s.staleCharRegex > 0 || repairChecked.staleModuleRegex && s.staleModuleRegex > 0;
@@ -34991,6 +35049,10 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       }
       log.info(`settings-tab: repair apply ${JSON.stringify(repairChecked)} ` + `cards=${repairSelectedCharacterIds.size} modules=${repairSelectedModuleIds.size}`);
       repairApplying = true;
+      if (!startTask({ id: "repair", kind: "repair", label: "Repair" })) {
+        repairApplying = false;
+        return;
+      }
       applyBtn.disabled = true;
       applyBtn.textContent = "Applying…";
       repairCardPicker?.setDisabled(true);
@@ -35008,9 +35070,10 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       });
     });
     repairResultBox.appendChild(applyBtn);
+    refreshRepairApply = refreshApplyBtn;
   }
   repairScanBtn.addEventListener("click", () => {
-    if (repairScanning || repairApplying)
+    if (repairScanning || repairApplying || currentTask())
       return;
     log.info("settings-tab: repair scan requested");
     repairScanning = true;
@@ -35590,7 +35653,7 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     }
     if (msg.type === "open_settings_cleanup") {
       activateSubTab("cleanup");
-      if (!cleanupScanning && !cleanupDeleting) {
+      if (!cleanupScanning && !cleanupDeleting && !currentTask()) {
         log.info("settings-tab: open_settings_cleanup, auto-firing scan");
         cleanupScanning = true;
         cleanupOrphans = [];
@@ -35693,6 +35756,8 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     }
     if (msg.type === "repair_apply_result") {
       repairApplying = false;
+      finishTask("repair");
+      refreshRepairApply = () => {};
       destroyRepairPickers();
       const r = msg.result;
       const parts = [];
@@ -35722,6 +35787,8 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
       rescanBtn.className = "lrm-btn";
       rescanBtn.textContent = "Re-scan";
       rescanBtn.addEventListener("click", () => {
+        if (currentTask())
+          return;
         log.info("settings-tab: repair re-scan after apply");
         repairScanning = true;
         repairLastSummary = null;
@@ -35744,10 +35811,16 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
     }
   }
   render();
+  const unsubBusy = subscribeTask(() => {
+    refreshRepairUi();
+    refreshRepairApply();
+  });
+  refreshRepairUi();
   log.info("settings-panel: ready");
   return {
     handleBackendMessage,
     destroy() {
+      unsubBusy();
       log.info("settings-panel: destroy");
       try {
         connSelect.destroy();
@@ -36677,6 +36750,25 @@ function mountModulesPanel(opts) {
   const expandedCharacters = new Set;
   const expandedModules = new Set;
   let lastError = null;
+  let moduleImportInFlight = false;
+  let pendingAction = null;
+  function sendModuleAction(message, label, key) {
+    if (currentTask())
+      return;
+    const id = v4_default();
+    pendingAction = { id, key };
+    if (!startTask({ id, kind: "module", label })) {
+      pendingAction = null;
+      return;
+    }
+    try {
+      sendToBackend({ ...message, requestId: id });
+    } catch (error) {
+      pendingAction = null;
+      finishTask(id);
+      setStatus(errMsg(error), true);
+    }
+  }
   const SUB_TABS = [
     { id: "characters", label: "Characters", title: "Imported Risu cards. Click any row to manage attached modules." },
     { id: "modules", label: "Modules", title: "Module library. Click any row for details / delete." },
@@ -36745,6 +36837,10 @@ function mountModulesPanel(opts) {
   refreshBtn.title = "Re-fetch the module list.";
   libToolbar.appendChild(refreshBtn);
   libBody.appendChild(libToolbar);
+  const moduleStatus = document.createElement("div");
+  moduleStatus.className = "lrm-status";
+  moduleStatus.setAttribute("role", "status");
+  libBody.appendChild(moduleStatus);
   let moduleSearchTerm = "";
   const libFilterRow = document.createElement("div");
   libFilterRow.className = "lrm-list-filter";
@@ -36877,7 +36973,10 @@ function mountModulesPanel(opts) {
     }
   }
   activateSubTab(activeSubTab);
-  function setStatus(_msg, _isError = false) {}
+  function setStatus(message, isError = false) {
+    moduleStatus.textContent = message ?? "";
+    moduleStatus.classList.toggle("lrm-status-error", isError);
+  }
   function renderGlobalBox() {
     if (globalPickerHandle) {
       globalPickerHandle.destroy();
@@ -36922,13 +37021,13 @@ function mountModulesPanel(opts) {
       onChange: sendGlobalModules
     });
     globalPickerHandle = picker;
+    picker.setDisabled(currentTask() !== null);
+    head.classList.toggle("lr-busy", pendingAction?.key === "global");
     globalBox.appendChild(picker.root);
   }
   function sendGlobalModules(next) {
     log.info(`modules-panel: set_global_modules count=${next.length}`);
-    globalModuleIds = next;
-    renderGlobalBox();
-    sendToBackend({ type: "set_global_modules", moduleIds: next });
+    sendModuleAction({ type: "set_global_modules", moduleIds: next }, "Updating global modules", "global");
   }
   function renderModuleList() {
     renderGlobalBox();
@@ -37049,6 +37148,7 @@ filename: ${m.filename}`;
     exportBtn.type = "button";
     exportBtn.className = "lrm-btn";
     exportBtn.textContent = "Export";
+    exportBtn.disabled = currentTask() !== null;
     exportBtn.title = `Download "${displayName}" as a .lumirealm.module.charx archive.`;
     exportBtn.addEventListener("click", () => {
       log.info(`modules-panel: export_module id=${m.id}`);
@@ -37059,12 +37159,13 @@ filename: ${m.filename}`;
     del.type = "button";
     del.className = "lrm-btn lrm-btn-danger";
     del.textContent = "Delete";
+    setButtonBusy(del, pendingAction?.key === `delete:${m.id}` ? "Deleting…" : "Delete", pendingAction?.key === `delete:${m.id}`, currentTask() !== null);
     del.title = `Remove "${displayName}" and detach from all characters.`;
     del.addEventListener("click", () => {
       if (!window.confirm(`Delete module "${displayName}"?`))
         return;
       log.info(`modules-panel: delete_module id=${m.id}`);
-      sendToBackend({ type: "delete_module", moduleId: m.id });
+      sendModuleAction({ type: "delete_module", moduleId: m.id }, "Deleting module", `delete:${m.id}`);
     });
     actions.appendChild(del);
     body.appendChild(actions);
@@ -37163,6 +37264,7 @@ filename: ${m.filename}`;
     exportCharBtn.type = "button";
     exportCharBtn.className = "lrm-btn";
     exportCharBtn.textContent = "Export card";
+    exportCharBtn.disabled = currentTask() !== null;
     exportCharBtn.title = `Download "${original}" as a .lumirealm.charx archive. Attached modules are not included.`;
     exportCharBtn.addEventListener("click", () => {
       log.info(`modules-panel: export_character id=${card.character_id}`);
@@ -37197,14 +37299,16 @@ filename: ${m.filename}`;
         detach.type = "button";
         detach.className = "lrm-btn-mini lrm-btn-danger";
         detach.textContent = "Detach";
+        const detachKey = `detach:${card.character_id}:${a.id}`;
+        setButtonBusy(detach, pendingAction?.key === detachKey ? "Removing…" : "Detach", pendingAction?.key === detachKey, currentTask() !== null);
         detach.title = `Detach "${displayAttached || a.name}" from this character.`;
         detach.addEventListener("click", () => {
           log.info(`modules-panel: detach_module char=${card.character_id} module=${a.id}`);
-          sendToBackend({
+          sendModuleAction({
             type: "detach_module",
             characterId: card.character_id,
             moduleId: a.id
-          });
+          }, "Removing module", detachKey);
         });
         li.appendChild(detach);
         ul.appendChild(li);
@@ -37232,6 +37336,7 @@ filename: ${m.filename}`;
       attachBtn.textContent = "Attach";
       attachBtn.title = "Attach the selected module.";
       attachBtn.disabled = true;
+      setButtonBusy(attachBtn, pendingAction?.key === `attach:${card.character_id}` ? "Attaching…" : "Attach", pendingAction?.key === `attach:${card.character_id}`, true);
       const ss = createSearchableSelect({
         id: selectId,
         className: "lrm-attach-trigger",
@@ -37253,23 +37358,22 @@ filename: ${m.filename}`;
           };
         }),
         onChange(selected) {
-          attachBtn.disabled = selected === null;
+          attachBtn.disabled = selected === null || currentTask() !== null;
         }
       });
       attachSelectHandles.push(ss);
+      ss.setDisabled(currentTask() !== null);
       attachWrap.appendChild(ss.root);
       attachBtn.addEventListener("click", () => {
         const moduleId = ss.getValue();
         if (!moduleId)
           return;
         log.info(`modules-panel: attach_module char=${card.character_id} module=${moduleId}`);
-        sendToBackend({
+        sendModuleAction({
           type: "attach_module",
           characterId: card.character_id,
           moduleId
-        });
-        ss.setValue(null);
-        attachBtn.disabled = true;
+        }, "Attaching module", `attach:${card.character_id}`);
       });
       attachWrap.appendChild(attachBtn);
       body.appendChild(attachWrap);
@@ -37341,7 +37445,7 @@ filename: ${m.filename}`;
   }
   renderPresetLabelControls();
   async function onPresetUploadClicked() {
-    if (presetImportInFlight)
+    if (presetImportInFlight || currentTask())
       return;
     let file = null;
     try {
@@ -37358,7 +37462,7 @@ filename: ${m.filename}`;
     const totalBytes = file.size;
     setPresetStatus(`Uploading "${fileName}" (${(totalBytes / 1024).toFixed(1)} KB)…`, false);
     let cancelled = false;
-    opts.onImportStart?.(fileName, () => {
+    const accepted = opts.onImportStart?.(fileName, () => {
       cancelled = true;
       if (activeTus) {
         activeTus.abort(true).catch(() => {});
@@ -37368,6 +37472,11 @@ filename: ${m.filename}`;
       presetUploadBtn.disabled = false;
       setPresetStatus("Import cancelled", false);
     }, totalBytes);
+    if (accepted === false) {
+      presetImportInFlight = false;
+      updateBusyControls();
+      return;
+    }
     const upload = new Upload(file, {
       endpoint: UPLOAD_ENDPOINT3,
       chunkSize: UPLOAD_CHUNK_BYTES3,
@@ -37384,6 +37493,7 @@ filename: ${m.filename}`;
         presetImportInFlight = false;
         presetUploadBtn.disabled = false;
         setPresetStatus(`Upload failed: ${errMsg(err)}`, true);
+        opts.onImportError?.(`Upload failed: ${errMsg(err)}`);
       },
       onProgress: (bytesSent, bytesTotal) => {
         opts.onUploadProgress?.(bytesSent, bytesTotal);
@@ -37397,6 +37507,7 @@ filename: ${m.filename}`;
           presetImportInFlight = false;
           presetUploadBtn.disabled = false;
           setPresetStatus("Could not read upload ID from endpoint", true);
+          opts.onImportError?.("Could not read upload ID from endpoint");
           return;
         }
         const labelTranslation = presetTranslateCheck.checked && presetConnectionId !== null ? { connectionId: presetConnectionId } : null;
@@ -37421,7 +37532,7 @@ filename: ${m.filename}`;
     onLorebookUploadClicked();
   });
   async function onLorebookUploadClicked() {
-    if (lorebookImportInFlight)
+    if (lorebookImportInFlight || currentTask())
       return;
     let file;
     try {
@@ -37439,6 +37550,8 @@ filename: ${m.filename}`;
       setLorebookStatus(`Read failed: ${errMsg(err)}`, true);
       return;
     }
+    if (currentTask())
+      return;
     lorebookImportInFlight = true;
     lbUploadBtn.disabled = true;
     setLorebookStatus(`Importing "${file.name}" (${(text.length / 1024).toFixed(1)} KB)…`, false);
@@ -37454,6 +37567,7 @@ filename: ${m.filename}`;
   function setLorebookStatus(msg, isError) {
     lbStatus.textContent = msg;
     lbStatus.classList.toggle("lrm-lorebook-status-error", isError);
+    updateBusyControls();
   }
   let regexImportInFlight = false;
   rxUploadBtn.addEventListener("click", () => {
@@ -37468,7 +37582,7 @@ filename: ${m.filename}`;
       regexTargetSelect.setValue("");
   }
   async function onRegexUploadClicked() {
-    if (regexImportInFlight)
+    if (regexImportInFlight || currentTask())
       return;
     let file;
     try {
@@ -37486,6 +37600,8 @@ filename: ${m.filename}`;
       setRegexStatus(`Read failed: ${errMsg(err)}`, true);
       return;
     }
+    if (currentTask())
+      return;
     const targetId = regexTargetSelect.getValue() || null;
     regexImportInFlight = true;
     rxUploadBtn.disabled = true;
@@ -37502,6 +37618,7 @@ filename: ${m.filename}`;
   function setRegexStatus(msg, isError) {
     rxStatus.textContent = msg;
     rxStatus.classList.toggle("lrm-lorebook-status-error", isError);
+    updateBusyControls();
   }
   async function onStandaloneRegexInstall(msg) {
     if (!msg.ok || msg.scripts.length === 0) {
@@ -37521,11 +37638,11 @@ filename: ${m.filename}`;
       setRegexStatus(`Install failed: ${errMsg(err)}`, true);
     } finally {
       regexImportInFlight = false;
-      rxUploadBtn.disabled = false;
+      updateBusyControls();
     }
   }
   async function onUploadClicked() {
-    if (uploadBtn.disabled)
+    if (uploadBtn.disabled || currentTask())
       return;
     log.info("modules-panel: upload clicked");
     let file = null;
@@ -37542,14 +37659,16 @@ filename: ${m.filename}`;
       return;
     }
     lastError = null;
+    moduleImportInFlight = true;
     const fileName = file.name;
     const totalBytes = file.size;
     setStatus(`Uploading ${fileName}…`);
     uploadBtn.disabled = true;
     log.info(`modules-panel: upload file=${fileName} bytes=${totalBytes}`);
     let cancelled = false;
-    opts.onImportStart?.(fileName, () => {
+    const accepted = opts.onImportStart?.(fileName, () => {
       cancelled = true;
+      moduleImportInFlight = false;
       if (activeTus) {
         activeTus.abort(true).catch(() => {});
         activeTus = null;
@@ -37558,6 +37677,11 @@ filename: ${m.filename}`;
       uploadBtn.disabled = false;
       log.info("modules-panel: upload cancel requested");
     }, totalBytes);
+    if (accepted === false) {
+      moduleImportInFlight = false;
+      updateBusyControls();
+      return;
+    }
     const upload = new Upload(file, {
       endpoint: UPLOAD_ENDPOINT3,
       chunkSize: UPLOAD_CHUNK_BYTES3,
@@ -37574,7 +37698,9 @@ filename: ${m.filename}`;
           return;
         log.error("modules-panel: tus upload failed", err);
         lastError = `Upload failed: ${errMsg(err)}`;
+        moduleImportInFlight = false;
         setStatus(lastError, true);
+        opts.onImportError?.(lastError);
         uploadBtn.disabled = false;
       },
       onProgress: (sent, total) => {
@@ -37584,10 +37710,14 @@ filename: ${m.filename}`;
       },
       onSuccess: () => {
         activeTus = null;
+        if (cancelled)
+          return;
         const uploadId = (upload.url ?? "").split("/").filter(Boolean).pop() ?? "";
         if (!uploadId) {
           lastError = "Upload finished but no id was returned";
+          moduleImportInFlight = false;
           setStatus(lastError, true);
+          opts.onImportError?.(lastError);
           uploadBtn.disabled = false;
           return;
         }
@@ -37620,12 +37750,12 @@ filename: ${m.filename}`;
       processingTimer = null;
       lastError = "Server did not respond after upload. The module may still be processing.";
       setStatus(lastError, true);
-      uploadBtn.disabled = false;
     });
   }
   function finishModuleUpload() {
-    if (!processingTimer)
+    if (!moduleImportInFlight)
       return;
+    moduleImportInFlight = false;
     clearProcessingTimer();
     uploadBtn.disabled = false;
     setStatus(null);
@@ -37665,7 +37795,6 @@ filename: ${m.filename}`;
             attachedByCharacter.set(charId, list);
           }
         }
-        finishModuleUpload();
         render();
         break;
       case "attached_modules_pushed":
@@ -37702,10 +37831,11 @@ filename: ${m.filename}`;
             setPresetStatus(msg.message, false);
           }
         }
-        if (processingTimer) {
+        if (moduleImportInFlight) {
           if (msg.phase === "done") {
             finishModuleUpload();
           } else if (msg.phase === "error") {
+            moduleImportInFlight = false;
             clearProcessingTimer();
             uploadBtn.disabled = false;
             lastError = msg.error ?? msg.message;
@@ -37716,19 +37846,37 @@ filename: ${m.filename}`;
         }
         break;
       case "error":
-        if (processingTimer) {
-          clearProcessingTimer();
-          uploadBtn.disabled = false;
-        }
         if (lastError === null) {
           lastError = msg.message;
           setStatus(lastError, true);
         }
         break;
+      case "operation_progress":
+        if (pendingAction?.id === msg.operationId && (msg.phase === "done" || msg.phase === "error")) {
+          const id = pendingAction.id;
+          pendingAction = null;
+          finishTask(id);
+          if (msg.phase === "error")
+            setStatus(msg.error ?? msg.message, true);
+          render();
+        }
+        break;
     }
+    updateBusyControls();
   }
   function destroy() {
     log.info("modules-panel: destroy");
+    unsubBusy();
+    if (pendingAction) {
+      const id = pendingAction.id;
+      pendingAction = null;
+      finishTask(id);
+    }
+    clearProcessingTimer();
+    if (charSearchTimer !== undefined)
+      window.clearTimeout(charSearchTimer);
+    if (moduleSearchTimer !== undefined)
+      window.clearTimeout(moduleSearchTimer);
     destroyAttachSelects();
     try {
       globalPickerHandle?.destroy();
@@ -37751,6 +37899,18 @@ filename: ${m.filename}`;
   }
   sendToBackend({ type: "get_cards" });
   sendToBackend({ type: "request_modules" });
+  function updateBusyControls() {
+    const busy = currentTask() !== null;
+    setButtonBusy(uploadBtn, moduleImportInFlight ? "Importing module…" : "Upload .risum / .charx", moduleImportInFlight, busy || moduleImportInFlight);
+    setButtonBusy(presetUploadBtn, presetImportInFlight ? "Importing preset…" : "Upload preset (.risup)…", presetImportInFlight, busy || presetImportInFlight);
+    setButtonBusy(lbUploadBtn, lorebookImportInFlight ? "Importing lorebook…" : "Upload lorebook…", lorebookImportInFlight, busy || lorebookImportInFlight);
+    setButtonBusy(rxUploadBtn, regexImportInFlight ? "Importing regex…" : "Upload regex…", regexImportInFlight, busy || regexImportInFlight);
+  }
+  const unsubBusy = subscribeTask(() => {
+    updateBusyControls();
+    render();
+  });
+  updateBusyControls();
   render();
   log.info("modules-panel: ready");
   return { handleBackendMessage, destroy };
@@ -40451,9 +40611,11 @@ function createSidebar(opts) {
             sendToBackend,
             log,
             ...opts.onImportStart ? { onImportStart: opts.onImportStart } : {},
+            ...opts.onImportError ? { onImportError: opts.onImportError } : {},
             ...opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}
           }),
           ...opts.onModuleImportStart ? { onImportStart: opts.onModuleImportStart } : {},
+          ...opts.onImportError ? { onImportError: opts.onImportError } : {},
           ...opts.onUploadProgress ? { onUploadProgress: opts.onUploadProgress } : {}
         });
         handle = {
@@ -41276,13 +41438,24 @@ function setupImportOverlay(log, sendToBackend) {
   const overlay = document.createElement("div");
   overlay.className = "lr-import-overlay";
   overlay.hidden = true;
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-live", "polite");
   document.body.appendChild(overlay);
   const card = document.createElement("div");
   card.className = "lr-import-card";
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", "Operation progress");
+  card.setAttribute("aria-live", "polite");
   overlay.appendChild(card);
+  const minimizeBtn = document.createElement("button");
+  minimizeBtn.type = "button";
+  minimizeBtn.className = "lrm-btn lr-import-minimize";
+  minimizeBtn.textContent = "Minimize";
+  minimizeBtn.setAttribute("aria-expanded", "true");
+  minimizeBtn.addEventListener("click", () => {
+    const minimized = overlay.classList.toggle("lr-import-minimized");
+    minimizeBtn.textContent = minimized ? "Expand" : "Minimize";
+    minimizeBtn.setAttribute("aria-expanded", String(!minimized));
+  });
+  card.appendChild(minimizeBtn);
   const titleEl = document.createElement("div");
   titleEl.className = "lr-import-title";
   card.appendChild(titleEl);
@@ -41339,6 +41512,8 @@ function setupImportOverlay(log, sendToBackend) {
   let pendingConsentRequestId = null;
   let pendingCancel = null;
   let uploadTotalBytes = 0;
+  let importing = false;
+  const queuedOperations = new Map;
   function setIndeterminate() {
     progressOuter.classList.add("lr-import-progress-indeterminate");
     progressInner.style.width = "40%";
@@ -41384,6 +41559,8 @@ function setupImportOverlay(log, sendToBackend) {
         log.warn("import-overlay: cancel callback threw", err);
       }
     }
+    importing = false;
+    finishTask("import");
     hideNow();
   });
   function hideNow() {
@@ -41391,6 +41568,12 @@ function setupImportOverlay(log, sendToBackend) {
     visible = false;
     overlay.hidden = true;
     log.info("import-overlay: hidden");
+    activeOperationId = null;
+    const next = queuedOperations.values().next().value;
+    if (next) {
+      queuedOperations.delete(next.operationId);
+      applyOperationProgress(next);
+    }
   }
   function scheduleHide() {
     cancelHide();
@@ -41406,6 +41589,9 @@ function setupImportOverlay(log, sendToBackend) {
     lastPhase = phase;
     lockCancel();
     if (phase === "done") {
+      importing = false;
+      finishTask("import");
+      titleEl.classList.remove("lr-busy");
       progressOuter.classList.remove("lr-import-progress-error");
       setFraction(1);
       dismissBtn.hidden = true;
@@ -41414,6 +41600,10 @@ function setupImportOverlay(log, sendToBackend) {
       return;
     }
     if (phase === "error") {
+      expand();
+      importing = false;
+      finishTask("import");
+      titleEl.classList.remove("lr-busy");
       progressOuter.classList.add("lr-import-progress-error");
       setFraction(1);
       dismissBtn.hidden = false;
@@ -41429,6 +41619,7 @@ function setupImportOverlay(log, sendToBackend) {
   let activeOperationId = null;
   function applyOperationProgress(msg) {
     activeOperationId = msg.operationId;
+    titleEl.classList.toggle("lr-busy", msg.phase === "started" || msg.phase === "progress");
     cancelHide();
     if (msg.phase === "started" || !visible) {
       visible = true;
@@ -41442,6 +41633,8 @@ function setupImportOverlay(log, sendToBackend) {
     }
     titleEl.textContent = msg.title;
     if (msg.phase === "error") {
+      expand();
+      finishTask(msg.operationId);
       progressOuter.classList.add("lr-import-progress-error");
       phaseEl.textContent = "Error";
       messageEl.textContent = msg.error || msg.message || "Operation failed";
@@ -41450,6 +41643,7 @@ function setupImportOverlay(log, sendToBackend) {
       return;
     }
     if (msg.phase === "done") {
+      finishTask(msg.operationId);
       progressOuter.classList.remove("lr-import-progress-error");
       phaseEl.textContent = "Done";
       messageEl.textContent = msg.message || "";
@@ -41465,11 +41659,17 @@ function setupImportOverlay(log, sendToBackend) {
       setIndeterminate();
     }
   }
+  function expand() {
+    overlay.classList.remove("lr-import-minimized");
+    minimizeBtn.textContent = "Minimize";
+    minimizeBtn.setAttribute("aria-expanded", "true");
+  }
   function showConsent(prompt) {
     cancelHide();
     if (!visible)
       showOverlay(label || "character");
     pendingConsentRequestId = prompt.requestId;
+    expand();
     titleEl.textContent = prompt.title;
     phaseEl.textContent = "Awaiting consent";
     messageEl.textContent = "";
@@ -41496,13 +41696,21 @@ function setupImportOverlay(log, sendToBackend) {
   grantBtn.addEventListener("click", () => resolveConsent(true));
   declineBtn.addEventListener("click", () => resolveConsent(false));
   function notifyImportStart(newLabel, source, onCancel, totalBytes) {
+    if (!startTask({ id: "import", kind: "import", label: newLabel }))
+      return false;
+    importing = true;
+    activeOperationId = null;
     log.info(`import-overlay: notifyImportStart label=${newLabel} source=${source} cancellable=${!!onCancel} totalBytes=${totalBytes ?? "?"}`);
     uploadTotalBytes = typeof totalBytes === "number" && totalBytes > 0 ? totalBytes : 0;
     showOverlay(newLabel);
     pendingCancel = onCancel ?? null;
     cancelBtn.hidden = !pendingCancel;
+    titleEl.classList.add("lr-busy");
+    return true;
   }
   function setUploadProgress(sent, total) {
+    if (!importing)
+      return;
     if (!visible)
       showOverlay(label || "character");
     if (lastPhase !== "")
@@ -41511,6 +41719,8 @@ function setupImportOverlay(log, sendToBackend) {
     if (total > 0) {
       messageEl.textContent = `Sent ${formatBytes(Math.min(sent, total))} of ${formatBytes(total)}…`;
       setFraction(sent / total);
+      if (sent >= total)
+        lockCancel();
     } else {
       messageEl.textContent = `Sent ${formatBytes(sent)}…`;
     }
@@ -41543,6 +41753,12 @@ function setupImportOverlay(log, sendToBackend) {
         break;
       }
       case "operation_progress": {
+        if (importing || pendingConsentRequestId || activeOperationId && activeOperationId !== msg.operationId && visible) {
+          queuedOperations.set(msg.operationId, msg);
+          if (msg.phase === "done" || msg.phase === "error")
+            finishTask(msg.operationId);
+          break;
+        }
         applyOperationProgress(msg);
         break;
       }
@@ -41554,18 +41770,25 @@ function setupImportOverlay(log, sendToBackend) {
         }
         break;
       }
-      case "error": {
-        if (visible && lastPhase !== "done")
-          applyProgress("error", msg.message, null);
-        break;
-      }
     }
   }
   function destroy() {
     cancelHide();
+    if (importing) {
+      pendingCancel?.();
+      finishTask("import");
+    }
+    if (activeOperationId)
+      finishTask(activeOperationId);
+    const task = currentTask();
+    if (task)
+      finishTask(task.id);
     overlay.remove();
   }
-  return { handleBackendMessage, notifyImportStart, setUploadProgress, destroy };
+  return { handleBackendMessage, notifyImportStart, setUploadProgress, notifyImportError: (message) => {
+    if (importing)
+      applyProgress("error", message, null);
+  }, destroy };
 }
 function formatBytes(n) {
   if (n < 1024)
@@ -42996,7 +43219,7 @@ function setupRealmModal(deps) {
     const importBtn = document.createElement("button");
     importBtn.type = "button";
     importBtn.className = "lr-realm-primary";
-    importBtn.disabled = state.downloading;
+    importBtn.disabled = state.downloading || currentTask() !== null;
     if (state.downloading) {
       const spin = document.createElement("span");
       spin.className = "lr-realm-spinner";
@@ -43146,14 +43369,19 @@ function setupRealmModal(deps) {
     render();
   }
   function doDownload(id) {
-    if (state.downloading)
+    if (state.downloading || currentTask())
       return;
     state.downloading = true;
     const requestId = nextRequestId("download");
     state.pendingDownloadReq = requestId;
     log.info(`realm modal: download req=${requestId} id=${id}`);
     const label = state.selected?.name || `RisuRealm character ${id}`;
-    deps.onImportStart?.(label);
+    if (deps.onImportStart?.(label) === false) {
+      state.downloading = false;
+      state.pendingDownloadReq = null;
+      render();
+      return;
+    }
     sendToBackend({ type: "realm_download", requestId, id });
   }
   function handleBackendMessage(msg) {
@@ -43226,6 +43454,7 @@ function setupRealmModal(deps) {
     }
   };
   document.addEventListener("keydown", onKeyDownCapture, true);
+  cleanups.push(subscribeTask(() => render()));
   cleanups.push(() => document.removeEventListener("keydown", onKeyDownCapture, true));
   function destroy() {
     if (searchDebounceTimer)
@@ -45270,6 +45499,7 @@ function setup(ctx) {
       log: flog2,
       onImportStart: (fileName, onCancel, totalBytes) => importOverlay.notifyImportStart(fileName, "drawer", onCancel, totalBytes),
       onUploadProgress: (sent, total) => importOverlay.setUploadProgress(sent, total),
+      onImportError: (message) => importOverlay.notifyImportError(message),
       onModuleImportStart: (fileName, onCancel, totalBytes) => importOverlay.notifyImportStart(fileName, "module", onCancel, totalBytes)
     });
     cleanups.push(() => sidebar?.destroy());
