@@ -151,7 +151,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(display.registerResolver(displayResolver));
   // Ownership is per-character: the host reads character.extensions.lumirealm.display_owner
   // (stamped by writeLumirealm + the boot backfill). display_authority is a separate signal
-  // telling the backend to short-circuit ('on') or keep resolving ('shadow'/'off').
+  // telling the backend to short-circuit ('on') or keep resolving ('off').
   const sendDisplayAuthority = (chatId: string | null): void => {
     if (!chatId) return;
     ctx.sendToBackend({
@@ -160,8 +160,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       authoritative: getDisplayResolutionMode() === 'on',
     });
   };
-  (window as unknown as { __lumirealmDisplayMode?: (m: string) => void }).__lumirealmDisplayMode = (m: string) => {
-    const mode: DisplayResolutionMode = m === 'shadow' || m === 'on' ? m : 'off';
+  (window as unknown as { __lumirealmDisplayMode?: (m: DisplayResolutionMode) => void }).__lumirealmDisplayMode = (m: DisplayResolutionMode) => {
+    const mode = m;
     setDisplayResolutionMode(mode);
     sendDisplayAuthority(activeRisuChatId);
     flog.info(`display resolution mode='${mode}'`);
@@ -169,97 +169,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(() => {
     try { delete (window as unknown as Record<string, unknown>).__lumirealmDisplayMode; } catch { /* */ }
   });
-  const originalFetch = window.fetch.bind(window);
-  const taggedFetch = async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const urlStr = typeof url === 'string' ? url : '';
-    const isResolveBatch = urlStr.includes('/api/v1/macros/resolve-batch');
-    const isRegexApply = urlStr.includes('/api/v1/regex-scripts/apply');
-    const isDisplayPreprocess = urlStr.includes('/display-preprocess');
-    if (!isResolveBatch && !isRegexApply && !isDisplayPreprocess) return originalFetch(input, init);
-    const t0 = performance.now();
-    if (isRegexApply) {
-      let preview = '';
-      try {
-        const body = init?.body;
-        if (typeof body === 'string') {
-          const parsed = JSON.parse(body) as { content?: string; scripts?: unknown[]; resolved_find_patterns?: Record<string, string>; resolved_replacements?: Record<string, string>; dynamic_macros?: Record<string, string> };
-          const findKeys = Object.keys(parsed.resolved_find_patterns ?? {});
-          const replaceKeys = Object.keys(parsed.resolved_replacements ?? {});
-          const dynKeys = Object.keys(parsed.dynamic_macros ?? {});
-          preview = `scripts=${parsed.scripts?.length ?? 0} content_len=${parsed.content?.length ?? 0} preFind=${findKeys.length} preReplace=${replaceKeys.length} dyn=[${dynKeys.join(',')}]`;
-        }
-      } catch { /* */ }
-      flog.trace(`[macro-tap] → POST regex-scripts/apply ${preview}`);
-      const resp = await originalFetch(input, init);
-      try {
-        const clone = resp.clone();
-        const text = await clone.text();
-        const parsed = (() => { try { return JSON.parse(text) as { result?: string; touched_vars?: string[]; cacheable?: boolean }; } catch { return null; } })();
-        if (parsed && typeof parsed.result === 'string') {
-          const stillRaw = /\{\{(?!\s*(?:user|char|bot|notChar|not_char|charName)\s*\}\})/i.test(parsed.result);
-          flog.trace(`[macro-tap] ← regex-scripts/apply 200 in ${Math.round(performance.now() - t0)}ms result_len=${parsed.result.length} touched=${parsed.touched_vars?.length ?? 0} cacheable=${parsed.cacheable} still_has_raw_cbs=${stillRaw} result[0..200]=${JSON.stringify(parsed.result.slice(0, 200))}`);
-        } else {
-          flog.warn(`[macro-tap] ← regex-scripts/apply HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
-        }
-      } catch (err) {
-        flog.warn('[macro-tap] regex-scripts/apply clone/parse failed:', err);
-      }
-      return resp;
-    }
-    if (isDisplayPreprocess) {
-      flog.trace(`[macro-tap] → POST display-preprocess`);
-      const resp = await originalFetch(input, init);
-      flog.trace(`[macro-tap] ← display-preprocess HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms`);
-      return resp;
-    }
-    let reqPreview: string = '';
-    try {
-      const body = init?.body;
-      if (typeof body === 'string') {
-        const parsed = JSON.parse(body) as { templates?: Record<string, string>; chat_id?: string; character_id?: string };
-        const keys = Object.keys(parsed.templates ?? {});
-        const firstKey = keys[0];
-        const firstTmpl = firstKey ? parsed.templates?.[firstKey] : undefined;
-        reqPreview = `templates=${keys.length} chat_id=${parsed.chat_id ?? '?'} character_id=${parsed.character_id ?? '?'} first_template[0..200]=${JSON.stringify((firstTmpl ?? '').slice(0, 200))}`;
-      }
-    } catch { /* */ }
-    flog.trace(`[macro-tap] → POST resolve-batch ${reqPreview}`);
-    const resp = await originalFetch(input, init);
-    try {
-      const clone = resp.clone();
-      const text = await clone.text();
-      const parsed = (() => { try { return JSON.parse(text) as { resolved?: Record<string, string> }; } catch { return null; } })();
-      if (parsed?.resolved) {
-        const entries = Object.entries(parsed.resolved);
-        const leaksRaw = entries.filter(([, v]) => /\{\{/.test(v));
-        const emptyKeys = entries.filter(([, v]) => v.length === 0).length;
-        flog.trace(`[macro-tap] ← resolve-batch 200 in ${Math.round(performance.now() - t0)}ms keys=${entries.length} leaks_with_raw_macros=${leaksRaw.length} empty_keys=${emptyKeys}`);
-        if (leaksRaw.length > 0) {
-          for (const [k, v] of leaksRaw.slice(0, 3)) {
-            flog.warn(`[macro-tap]   leak id=${k} resolved[0..300]=${JSON.stringify(v.slice(0, 300))}`);
-          }
-        }
-        for (const [k, v] of entries) {
-          flog.trace(`[macro-tap]   id=${k} len=${v.length} resolved[0..200]=${JSON.stringify(v.slice(0, 200))}`);
-        }
-      } else {
-        flog.warn(`[macro-tap] ← resolve-batch HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
-      }
-    } catch (err) {
-      flog.warn('[macro-tap] clone/parse failed:', err);
-    }
-    return resp;
-  };
-  Object.assign(taggedFetch, originalFetch);
-  (window as unknown as { fetch: typeof fetch }).fetch = taggedFetch as typeof fetch;
-  cleanups.push(() => {
-    (window as unknown as { fetch: typeof fetch }).fetch = originalFetch as typeof fetch;
-  });
-
   const dumpBubble = (): unknown => {
     const out: unknown[] = [];
     const bubbles = document.querySelectorAll('[data-message-id]');

@@ -15920,6 +15920,8 @@ function getDisplayResolutionMode() {
   return mode;
 }
 function setDisplayResolutionMode(next) {
+  if (next !== "on" && next !== "off")
+    throw new TypeError(`Unsupported display resolution mode: ${next}`);
   mode = next;
 }
 
@@ -23693,77 +23695,6 @@ function evalTemplate(snap, text, context, recorder) {
     reparseMacroResults: false
   }, { recorder, resolveLeaf: deferDisplayAssets });
 }
-async function fetchBackendBody(chatId, messageId, role, content) {
-  try {
-    const res = await fetch(`/api/v1/chats/${encodeURIComponent(chatId)}/display-preprocess`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ items: [{ messageId, role, rawContent: content }] })
-    });
-    if (!res.ok)
-      return content;
-    const json = await res.json();
-    const c = json.items?.[0]?.content;
-    return typeof c === "string" ? c : content;
-  } catch {
-    return content;
-  }
-}
-async function fetchBackendTemplates(templates, context) {
-  try {
-    const res = await fetch("/api/v1/macros/resolve-batch", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        templates,
-        chat_id: context.chatId,
-        character_id: context.characterId,
-        persona_id: context.personaId
-      })
-    });
-    if (!res.ok)
-      return {};
-    const json = await res.json();
-    return json.resolved ?? {};
-  } catch {
-    return {};
-  }
-}
-async function fetchBackendApply(args) {
-  const ctx = args.context;
-  try {
-    const res = await fetch("/api/v1/regex-scripts/apply", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        content: args.content,
-        scripts: args.scripts,
-        resolved_find_patterns: args.resolvedFindPatterns,
-        resolved_replacements: args.resolvedReplacements,
-        dynamic_macros: ctx.dynamicMacros,
-        context: {
-          chat_id: ctx.chatId,
-          character_id: ctx.characterId,
-          persona_id: ctx.personaId,
-          is_user: ctx.isUser,
-          depth: ctx.depth,
-          ...ctx.messageId ? { message_id: ctx.messageId } : {},
-          ...typeof ctx.messageIndex === "number" ? { message_index: ctx.messageIndex } : {},
-          ...ctx.role ? { role: ctx.role } : {}
-        }
-      })
-    });
-    if (!res.ok)
-      return null;
-    const json = await res.json();
-    return typeof json.result === "string" ? json.result : null;
-  } catch {
-    return null;
-  }
-}
 var warnedActionBindings = new Set;
 function warnActionBinding(scriptId, reason) {
   const key = `${scriptId}\x00${reason}`;
@@ -24026,16 +23957,6 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
         return null;
       }
       log6.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
-      const mode = getDisplayResolutionMode();
-      if (mode === "shadow") {
-        const beContent = await fetchBackendBody(chatId, args.context.messageId, args.context.role, args.content);
-        if (beContent !== feContent) {
-          log6.warn(`[shadow] body mismatch chat=${chatId} msg=${args.context.messageId ?? "?"} ` + `feLen=${feContent.length} beLen=${beContent.length} ` + `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` + `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`);
-        } else {
-          log6.trace(`[shadow] body match chat=${chatId} msg=${args.context.messageId ?? "?"} len=${feContent.length}`);
-        }
-        return { content: beContent };
-      }
       return {
         content: feContent,
         ...processingState !== undefined ? { processingState } : {},
@@ -24064,17 +23985,6 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
         log6.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
-      const mode = getDisplayResolutionMode();
-      if (mode === "shadow") {
-        const be = await fetchBackendTemplates(args.templates, args.context);
-        for (const key of Object.keys(args.templates)) {
-          const beVal = be[key];
-          if (typeof beVal === "string" && beVal !== resolved[key]) {
-            log6.warn(`[shadow] template mismatch chat=${chatId} key=${key} ` + `fe=${JSON.stringify((resolved[key] ?? "").slice(0, 120))} ` + `be=${JSON.stringify(beVal.slice(0, 120))}`);
-          }
-        }
-        return { resolved: { ...resolved, ...be } };
-      }
       return { resolved, touchedVars, cacheable };
     },
     async applyScripts(args) {
@@ -24096,19 +24006,6 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
         return null;
       }
       log6.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} placement=${args.context.isUser ? "user" : "ai"} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
-      const mode = getDisplayResolutionMode();
-      if (mode === "shadow") {
-        const beContent = await fetchBackendApply(args);
-        if (beContent === null) {
-          return { content: stripDisplayStyleImports(feContent), touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
-        }
-        if (beContent !== feContent) {
-          log6.warn(`[shadow] apply mismatch chat=${chatId} msg=${args.context.messageId ?? "?"} ` + `feLen=${feContent.length} beLen=${beContent.length} ` + `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` + `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`);
-        } else {
-          log6.trace(`[shadow] apply match chat=${chatId} msg=${args.context.messageId ?? "?"} len=${feContent.length}`);
-        }
-        return { content: stripDisplayStyleImports(beContent) };
-      }
       return {
         content: stripDisplayStyleImports(feContent),
         touchedVars: [...recorder.touched],
@@ -45266,7 +45163,7 @@ function setup(ctx) {
     });
   };
   window.__lumirealmDisplayMode = (m) => {
-    const mode = m === "shadow" || m === "on" ? m : "off";
+    const mode = m;
     setDisplayResolutionMode(mode);
     sendDisplayAuthority(activeRisuChatId);
     flog2.info(`display resolution mode='${mode}'`);
@@ -45275,106 +45172,6 @@ function setup(ctx) {
     try {
       delete window.__lumirealmDisplayMode;
     } catch {}
-  });
-  const originalFetch = window.fetch.bind(window);
-  const taggedFetch = async (input, init) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const urlStr = typeof url === "string" ? url : "";
-    const isResolveBatch = urlStr.includes("/api/v1/macros/resolve-batch");
-    const isRegexApply = urlStr.includes("/api/v1/regex-scripts/apply");
-    const isDisplayPreprocess = urlStr.includes("/display-preprocess");
-    if (!isResolveBatch && !isRegexApply && !isDisplayPreprocess)
-      return originalFetch(input, init);
-    const t0 = performance.now();
-    if (isRegexApply) {
-      let preview = "";
-      try {
-        const body = init?.body;
-        if (typeof body === "string") {
-          const parsed = JSON.parse(body);
-          const findKeys = Object.keys(parsed.resolved_find_patterns ?? {});
-          const replaceKeys = Object.keys(parsed.resolved_replacements ?? {});
-          const dynKeys = Object.keys(parsed.dynamic_macros ?? {});
-          preview = `scripts=${parsed.scripts?.length ?? 0} content_len=${parsed.content?.length ?? 0} preFind=${findKeys.length} preReplace=${replaceKeys.length} dyn=[${dynKeys.join(",")}]`;
-        }
-      } catch {}
-      flog2.trace(`[macro-tap] → POST regex-scripts/apply ${preview}`);
-      const resp = await originalFetch(input, init);
-      try {
-        const clone = resp.clone();
-        const text = await clone.text();
-        const parsed = (() => {
-          try {
-            return JSON.parse(text);
-          } catch {
-            return null;
-          }
-        })();
-        if (parsed && typeof parsed.result === "string") {
-          const stillRaw = /\{\{(?!\s*(?:user|char|bot|notChar|not_char|charName)\s*\}\})/i.test(parsed.result);
-          flog2.trace(`[macro-tap] ← regex-scripts/apply 200 in ${Math.round(performance.now() - t0)}ms result_len=${parsed.result.length} touched=${parsed.touched_vars?.length ?? 0} cacheable=${parsed.cacheable} still_has_raw_cbs=${stillRaw} result[0..200]=${JSON.stringify(parsed.result.slice(0, 200))}`);
-        } else {
-          flog2.warn(`[macro-tap] ← regex-scripts/apply HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
-        }
-      } catch (err) {
-        flog2.warn("[macro-tap] regex-scripts/apply clone/parse failed:", err);
-      }
-      return resp;
-    }
-    if (isDisplayPreprocess) {
-      flog2.trace(`[macro-tap] → POST display-preprocess`);
-      const resp = await originalFetch(input, init);
-      flog2.trace(`[macro-tap] ← display-preprocess HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms`);
-      return resp;
-    }
-    let reqPreview = "";
-    try {
-      const body = init?.body;
-      if (typeof body === "string") {
-        const parsed = JSON.parse(body);
-        const keys = Object.keys(parsed.templates ?? {});
-        const firstKey = keys[0];
-        const firstTmpl = firstKey ? parsed.templates?.[firstKey] : undefined;
-        reqPreview = `templates=${keys.length} chat_id=${parsed.chat_id ?? "?"} character_id=${parsed.character_id ?? "?"} first_template[0..200]=${JSON.stringify((firstTmpl ?? "").slice(0, 200))}`;
-      }
-    } catch {}
-    flog2.trace(`[macro-tap] → POST resolve-batch ${reqPreview}`);
-    const resp = await originalFetch(input, init);
-    try {
-      const clone = resp.clone();
-      const text = await clone.text();
-      const parsed = (() => {
-        try {
-          return JSON.parse(text);
-        } catch {
-          return null;
-        }
-      })();
-      if (parsed?.resolved) {
-        const entries = Object.entries(parsed.resolved);
-        const leaksRaw = entries.filter(([, v]) => /\{\{/.test(v));
-        const emptyKeys = entries.filter(([, v]) => v.length === 0).length;
-        flog2.trace(`[macro-tap] ← resolve-batch 200 in ${Math.round(performance.now() - t0)}ms keys=${entries.length} leaks_with_raw_macros=${leaksRaw.length} empty_keys=${emptyKeys}`);
-        if (leaksRaw.length > 0) {
-          for (const [k, v] of leaksRaw.slice(0, 3)) {
-            flog2.warn(`[macro-tap]   leak id=${k} resolved[0..300]=${JSON.stringify(v.slice(0, 300))}`);
-          }
-        }
-        for (const [k, v] of entries) {
-          flog2.trace(`[macro-tap]   id=${k} len=${v.length} resolved[0..200]=${JSON.stringify(v.slice(0, 200))}`);
-        }
-      } else {
-        flog2.warn(`[macro-tap] ← resolve-batch HTTP ${resp.status} in ${Math.round(performance.now() - t0)}ms (body not JSON)`);
-      }
-    } catch (err) {
-      flog2.warn("[macro-tap] clone/parse failed:", err);
-    }
-    return resp;
-  };
-  Object.assign(taggedFetch, originalFetch);
-  window.fetch = taggedFetch;
-  cleanups.push(() => {
-    window.fetch = originalFetch;
   });
   const dumpBubble = () => {
     const out = [];

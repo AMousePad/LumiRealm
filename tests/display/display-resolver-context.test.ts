@@ -2,6 +2,8 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createDisplayResolver } from '../../src/display/resolver.js';
 import {
   clearDisplaySnapshot,
+  getDisplayResolutionMode,
+  setDisplayResolutionMode,
   setDisplaySnapshot,
   type DisplaySnapshot,
 } from '../../src/display/snapshot.js';
@@ -118,6 +120,21 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
+  test('rejects retired comparison mode and keeps frontend results authoritative', async () => {
+    setDisplayResolutionMode('on');
+    expect(() => setDisplayResolutionMode('shadow' as 'on')).toThrow(TypeError);
+    expect(getDisplayResolutionMode()).toBe('on');
+    setDisplaySnapshot(snapshot());
+    const fetch = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected backend comparison'));
+    try {
+      const resolver = createDisplayResolver();
+      const context = { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0 };
+      expect(await resolver.resolveBody({ content: 'Hello {{char}}', context })).toMatchObject({ content: 'Hello Character' });
+      expect(await resolver.resolveTemplates({ templates: { name: '{{char}}' }, context })).toMatchObject({ resolved: { name: 'Character' } });
+      expect(await resolver.applyScripts({ content: 'TOKEN', scripts: [displayRule({ replace_string: 'result' })], context })).toMatchObject({ content: 'result' });
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { fetch.mockRestore(); }
+  });
   test('Lua display hooks cannot emit saved-message edits but retain variable writeback', async () => {
     setWasmoonEnabled(false);
     setDisplaySnapshot(paginatedSnapshot(`
