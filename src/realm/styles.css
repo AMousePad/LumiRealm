@@ -64,7 +64,7 @@ div:has(> .lr-realm-modal-root) {
 .lr-realm-root {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
   position: relative;
   width: 100%;
   flex: 1;
@@ -74,11 +74,23 @@ div:has(> .lr-realm-modal-root) {
 }
 
 .lr-realm-toolbar {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   flex-shrink: 0;
+}
+.lr-realm-toolbar::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 14px;
+  background: linear-gradient(to bottom, var(--lumiverse-bg, #1c1f24), transparent);
+  pointer-events: none;
 }
 
 .lr-realm-search {
@@ -257,6 +269,8 @@ div:has(> .lr-realm-modal-root) {
   text-overflow: ellipsis;
 }
 .lr-realm-feedback {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -265,6 +279,7 @@ div:has(> .lr-realm-modal-root) {
   font-size: 13px;
   color: var(--lumiverse-text-muted, #8b8b8b);
 }
+.lr-realm-feedback:empty { display: none; }
 .lr-realm-feedback.error { color: #ff8a8a; }
 @media (prefers-reduced-motion: reduce) {
   .lr-realm-grid { transition: none; }
