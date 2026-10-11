@@ -42298,6 +42298,8 @@ div:has(> .lr-realm-modal-root) {\r
   flex: 1;\r
   overflow-y: auto;\r
   min-height: 0;\r
+  padding-bottom: 52px;\r
+  scroll-padding-bottom: 52px;\r
   overscroll-behavior: contain;\r
 }\r
 \r
@@ -42526,19 +42528,27 @@ div:has(> .lr-realm-modal-root) {\r
 \r
 .lr-realm-pager {\r
   display: flex;\r
-  flex-shrink: 0;\r
+  position: absolute;\r
+  bottom: 6px;\r
+  left: 50%;\r
+  transform: translateX(-50%);\r
+  z-index: 2;\r
   justify-content: center;\r
   align-items: center;\r
-  gap: 8px;\r
-  padding: 0 0 6px;\r
+  gap: 2px;\r
+  padding: 4px;\r
+  border: 1px solid var(--lumiverse-border, #2a2a2a);\r
+  border-radius: 999px;\r
+  background: var(--lumiverse-bg, #1c1f24);\r
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);\r
 }\r
 \r
 .lr-realm-pager button {\r
-  width: 36px;\r
-  height: 36px;\r
-  border-radius: var(--lumiverse-radius, 8px);\r
-  border: 1px solid var(--lumiverse-border, #2a2a2a);\r
-  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04));\r
+  width: 30px;\r
+  height: 30px;\r
+  border-radius: 50%;\r
+  border: 0;\r
+  background: transparent;\r
   color: inherit;\r
   font-family: inherit;\r
   cursor: pointer;\r
@@ -42548,7 +42558,7 @@ div:has(> .lr-realm-modal-root) {\r
 }\r
 \r
 .lr-realm-pager button:hover:not(:disabled) {\r
-  border-color: var(--lumiverse-primary, #5b8cff);\r
+  background: var(--lumiverse-fill-hover, rgba(255, 255, 255, 0.08));\r
 }\r
 \r
 .lr-realm-pager button:disabled {\r
@@ -42557,17 +42567,22 @@ div:has(> .lr-realm-modal-root) {\r
 }\r
 \r
 .lr-realm-pager-page {\r
-  width: 72px;\r
+  appearance: textfield;\r
+  width: 48px;\r
+  height: 28px;\r
   box-sizing: border-box;\r
-  padding: 8px 4px;\r
-  border: 1px solid var(--lumiverse-border, #2a2a2a);\r
-  border-radius: var(--lumiverse-radius, 8px);\r
-  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04));\r
+  padding: 0 4px;\r
+  border: 0;\r
+  border-radius: 6px;\r
+  background: transparent;\r
   color: inherit;\r
   font: inherit;\r
   text-align: center;\r
   font-weight: 600;\r
 }\r
+.lr-realm-pager-page::-webkit-inner-spin-button,\r
+.lr-realm-pager-page::-webkit-outer-spin-button { appearance: none; margin: 0; }\r
+.lr-realm-pager :focus-visible { outline: 2px solid var(--lumiverse-primary, #5b8cff); outline-offset: 1px; }\r
 \r
 .lr-realm-status {\r
   display: flex;\r
