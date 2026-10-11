@@ -73,7 +73,9 @@ for (const engine of [chromium, firefox]) {
       await page.emulateMedia({ reducedMotion: 'reduce' });
       assert.equal(await page.locator('.lr-realm-grid').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
       const count = await page.evaluate(() => (window as any).sent.length);
-      await page.getByLabel('View mode').selectOption('grid');
+      await page.getByRole('button', { name: 'Switch to grid view', exact: true }).focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('button', { name: 'Switch to default view', exact: true }).waitFor();
       assert.equal(await page.evaluate(() => (window as any).sent.length), count);
       await page.locator('.lr-realm-card').first().scrollIntoViewIfNeeded();
       const layout = await page.locator('.lr-realm-card').first().evaluate(el => {

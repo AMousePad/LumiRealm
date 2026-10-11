@@ -71,6 +71,12 @@ const ICON_LEFT =
 const ICON_RIGHT =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="9 18 15 12 9 6"/></svg>';
 
+const ICON_GRID =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>';
+
+const ICON_LIST =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>';
+
 const SEARCH_DEBOUNCE_MS = 350;
 const TOAST_DURATION_MS = 4000;
 
@@ -99,7 +105,7 @@ interface ModalSurface {
   readonly resultsEl: HTMLDivElement;
   readonly statusEl: HTMLDivElement;
   readonly pagerEl: HTMLElement;
-  readonly viewSelectEl: HTMLSelectElement;
+  readonly viewButtonEl: HTMLButtonElement;
   renderedCards: readonly RealmCard[] | null;
 }
 
@@ -262,17 +268,11 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     });
     toolbar.appendChild(nsfwBtn);
 
-    const viewSelect = document.createElement('select');
-    viewSelect.className = 'lr-realm-view';
-    viewSelect.setAttribute('aria-label', 'View mode');
-    for (const [value, label] of [['default', 'Default view'], ['grid', 'Grid view']] as const) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      viewSelect.appendChild(option);
-    }
-    viewSelect.addEventListener('change', () => {
-      state.viewMode = viewSelect.value === 'grid' ? 'grid' : 'default';
+    const viewButton = document.createElement('button');
+    viewButton.type = 'button';
+    viewButton.className = 'lr-realm-view';
+    viewButton.addEventListener('click', () => {
+      state.viewMode = state.viewMode === 'default' ? 'grid' : 'default';
       viewChanged = true;
       savingView = true;
       viewError = '';
@@ -282,7 +282,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
         viewError = 'Could not save the view preference.';
       }).finally(() => { savingView = false; if (!destroyed) render(); });
     });
-    toolbar.appendChild(viewSelect);
+    toolbar.appendChild(viewButton);
 
     const importBtn = document.createElement('button');
     importBtn.type = 'button';
@@ -325,7 +325,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
       statusEl: status,
       pagerEl: pager,
       renderedCards: null,
-      viewSelectEl: viewSelect,
+      viewButtonEl: viewButton,
     };
 
     modalHandle.onDismiss(() => {
@@ -371,8 +371,11 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
 
     resultsEl.classList.toggle('lr-realm-loading', state.loading);
     resultsEl.dataset.view = state.viewMode;
-    surface.viewSelectEl.value = state.viewMode;
-    surface.viewSelectEl.disabled = savingView;
+    const viewLabel = state.viewMode === 'default' ? 'Switch to grid view' : 'Switch to default view';
+    surface.viewButtonEl.title = viewLabel;
+    surface.viewButtonEl.setAttribute('aria-label', viewLabel);
+    surface.viewButtonEl.innerHTML = state.viewMode === 'default' ? ICON_GRID : ICON_LIST;
+    surface.viewButtonEl.disabled = savingView;
     resultsEl.setAttribute('aria-busy', String(state.loading));
     resultsEl.inert = state.loading;
     if (surface.renderedCards !== state.cards) {

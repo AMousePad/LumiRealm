@@ -42233,14 +42233,24 @@ div:has(> .lr-realm-modal-root) {\r
 \r
 .lr-realm-grid.lr-realm-loading { filter: blur(4px); }\r
 .lr-realm-view {\r
+  display: flex;\r
+  align-items: center;\r
+  justify-content: center;\r
+  flex-shrink: 0;\r
+  width: var(--lumiverse-btn-icon, 32px);\r
+  height: var(--lumiverse-btn-icon, 32px);\r
   border: 1px solid var(--lumiverse-border, #2a2a2a);\r
-  border-radius: var(--lumiverse-radius, 8px);\r
-  padding: 6px 10px;\r
-  background: var(--lumiverse-bg, #1c1f24);\r
-  color: inherit;\r
-  font: inherit;\r
-  font-size: 12px;\r
+  border-radius: 6px;\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04));\r
+  color: var(--lumiverse-text-dim, #8b8b8b);\r
+  cursor: pointer;\r
+  transition: background var(--lumiverse-transition-fast, 120ms), color var(--lumiverse-transition-fast, 120ms);\r
 }\r
+.lr-realm-view:hover:not(:disabled) {\r
+  background: var(--lumiverse-fill-hover, rgba(255, 255, 255, 0.08));\r
+  color: var(--lumiverse-text, #e6e6e6);\r
+}\r
+.lr-realm-view:disabled { opacity: 0.4; cursor: not-allowed; }\r
 .lr-realm-grid[data-view="grid"] {\r
   grid-template-columns: repeat(auto-fill, minmax(min(100%, max(200px, calc((100% - 48px) / 5))), 1fr));\r
 }\r
@@ -42801,6 +42811,8 @@ var ICON_HUB = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill
 var ICON_SEARCH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
 var ICON_LEFT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="15 18 9 12 15 6"/></svg>';
 var ICON_RIGHT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="9 18 15 12 9 6"/></svg>';
+var ICON_GRID = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>';
+var ICON_LIST = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>';
 var SEARCH_DEBOUNCE_MS = 350;
 var TOAST_DURATION_MS = 4000;
 var MODAL_MAX_WIDTH = 1696;
@@ -42968,17 +42980,11 @@ function setupRealmModal(deps) {
       doSearch();
     });
     toolbar.appendChild(nsfwBtn);
-    const viewSelect = document.createElement("select");
-    viewSelect.className = "lr-realm-view";
-    viewSelect.setAttribute("aria-label", "View mode");
-    for (const [value, label] of [["default", "Default view"], ["grid", "Grid view"]]) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      viewSelect.appendChild(option);
-    }
-    viewSelect.addEventListener("change", () => {
-      state.viewMode = viewSelect.value === "grid" ? "grid" : "default";
+    const viewButton = document.createElement("button");
+    viewButton.type = "button";
+    viewButton.className = "lr-realm-view";
+    viewButton.addEventListener("click", () => {
+      state.viewMode = state.viewMode === "default" ? "grid" : "default";
       viewChanged = true;
       savingView = true;
       viewError = "";
@@ -42992,7 +42998,7 @@ function setupRealmModal(deps) {
           render();
       });
     });
-    toolbar.appendChild(viewSelect);
+    toolbar.appendChild(viewButton);
     const importBtn = document.createElement("button");
     importBtn.type = "button";
     importBtn.className = "lr-realm-secondary";
@@ -43030,7 +43036,7 @@ function setupRealmModal(deps) {
       statusEl: status,
       pagerEl: pager,
       renderedCards: null,
-      viewSelectEl: viewSelect
+      viewButtonEl: viewButton
     };
     modalHandle.onDismiss(() => {
       log.info("realm: modal dismissed");
@@ -43070,8 +43076,11 @@ function setupRealmModal(deps) {
     additionalEl.textContent = "";
     resultsEl.classList.toggle("lr-realm-loading", state.loading);
     resultsEl.dataset.view = state.viewMode;
-    surface.viewSelectEl.value = state.viewMode;
-    surface.viewSelectEl.disabled = savingView;
+    const viewLabel = state.viewMode === "default" ? "Switch to grid view" : "Switch to default view";
+    surface.viewButtonEl.title = viewLabel;
+    surface.viewButtonEl.setAttribute("aria-label", viewLabel);
+    surface.viewButtonEl.innerHTML = state.viewMode === "default" ? ICON_GRID : ICON_LIST;
+    surface.viewButtonEl.disabled = savingView;
     resultsEl.setAttribute("aria-busy", String(state.loading));
     resultsEl.inert = state.loading;
     if (surface.renderedCards !== state.cards) {
