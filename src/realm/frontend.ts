@@ -476,25 +476,9 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     desc.textContent = pickDescription(card.desc);
     bodyEl.appendChild(desc);
 
-    if (card.tags && card.tags.length > 0) {
-      const tags = document.createElement('div');
-      tags.className = 'lr-realm-tags';
-      const visible = card.tags.slice(0, 5);
-      for (const t of visible) {
-        const tag = document.createElement('span');
-        tag.className = 'lr-realm-tag';
-        tag.textContent = t;
-        tags.appendChild(tag);
-      }
-      if (card.tags.length > visible.length) {
-        const more = document.createElement('span');
-        more.className = 'lr-realm-tag';
-        more.textContent = `+${card.tags.length - visible.length}`;
-        tags.appendChild(more);
-      }
-      bodyEl.appendChild(tags);
-    }
-
+    const footer = document.createElement('div');
+    footer.className = 'lr-realm-card-footer';
+    bodyEl.appendChild(footer);
     const stats = document.createElement('div');
     stats.className = 'lr-realm-card-stats';
     const featureLabels: string[] = [];
@@ -503,7 +487,28 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     if (card.hasAsset) featureLabels.push('Assets');
     const featurePart = featureLabels.length > 0 ? ` · ${featureLabels.join(' · ')}` : '';
     stats.textContent = `↓ ${card.download ?? 0}${featurePart}`;
-    bodyEl.appendChild(stats);
+    stats.title = stats.textContent;
+    footer.appendChild(stats);
+
+    if (card.tags && card.tags.length > 0) {
+      const tags = document.createElement('div');
+      tags.className = 'lr-realm-tags';
+      const track = document.createElement('div');
+      track.className = 'lr-realm-tags-track';
+      for (const t of card.tags) {
+        const tag = document.createElement('span');
+        tag.className = 'lr-realm-tag';
+        tag.textContent = t;
+        track.appendChild(tag);
+      }
+      tags.appendChild(track);
+      tags.addEventListener('pointerenter', () => {
+        const overflow = Math.max(0, track.scrollWidth - tags.clientWidth);
+        tags.style.setProperty('--lr-tag-offset', `${-overflow}px`);
+        tags.style.setProperty('--lr-tag-duration', `${Math.max(2, overflow / 30)}s`);
+      });
+      footer.appendChild(tags);
+    }
 
     return btn;
   }

@@ -42365,12 +42365,7 @@ div:has(> .lr-realm-modal-root) {\r
 }\r
 .lr-realm-grid[data-view="grid"] .lr-realm-card-name { flex-shrink: 0; }\r
 .lr-realm-grid[data-view="grid"] .lr-realm-card-desc { color: #e6e6e6; min-height: 0; }\r
-.lr-realm-grid[data-view="grid"] .lr-realm-tags {\r
-  margin-top: 0;\r
-  flex-wrap: nowrap;\r
-  overflow: hidden;\r
-  flex-shrink: 0;\r
-}\r
+.lr-realm-grid[data-view="grid"] .lr-realm-card-footer { margin-top: 0; }\r
 .lr-realm-grid[data-view="grid"] .lr-realm-tag {\r
   flex: 0 0 auto;\r
   max-width: 100%;\r
@@ -42486,10 +42481,47 @@ div:has(> .lr-realm-modal-root) {\r
   background: color-mix(in srgb, var(--lumiverse-primary, #5b8cff) 8%, transparent);\r
 }\r
 \r
+.lr-realm-card-footer {\r
+  display: flex;\r
+  align-items: center;\r
+  gap: 6px;\r
+  height: 18px;\r
+  min-width: 0;\r
+  flex-shrink: 0;\r
+  margin-top: auto;\r
+}\r
+\r
 .lr-realm-card-stats {\r
+  flex: 0 1 auto;\r
+  min-width: 0;\r
+  max-width: 50%;\r
+  overflow: hidden;\r
+  white-space: nowrap;\r
+  text-overflow: ellipsis;\r
   font-size: 10px;\r
   color: var(--lumiverse-text-dim, #6f6f6f);\r
-  margin-top: 2px;\r
+}\r
+\r
+.lr-realm-card-footer .lr-realm-tags {\r
+  display: block;\r
+  flex: 1;\r
+  min-width: 0;\r
+  margin-top: 0;\r
+  overflow-x: auto;\r
+  overflow-y: hidden;\r
+  scrollbar-width: none;\r
+}\r
+.lr-realm-card-footer .lr-realm-tags::-webkit-scrollbar { display: none; }\r
+.lr-realm-tags-track { display: flex; gap: 4px; width: max-content; }\r
+.lr-realm-tags-track .lr-realm-tag { flex-shrink: 0; white-space: nowrap; }\r
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {\r
+  .lr-realm-card-footer .lr-realm-tags:hover .lr-realm-tags-track {\r
+    animation: lr-realm-tags-scroll var(--lr-tag-duration, 2s) linear alternate infinite;\r
+  }\r
+}\r
+@keyframes lr-realm-tags-scroll {\r
+  0%, 15% { transform: translateX(0); }\r
+  85%, 100% { transform: translateX(var(--lr-tag-offset, 0px)); }\r
 }\r
 \r
 .lr-realm-pager {\r
@@ -43249,24 +43281,9 @@ function setupRealmModal(deps) {
     desc.className = "lr-realm-card-desc";
     desc.textContent = pickDescription(card.desc);
     bodyEl.appendChild(desc);
-    if (card.tags && card.tags.length > 0) {
-      const tags = document.createElement("div");
-      tags.className = "lr-realm-tags";
-      const visible = card.tags.slice(0, 5);
-      for (const t of visible) {
-        const tag = document.createElement("span");
-        tag.className = "lr-realm-tag";
-        tag.textContent = t;
-        tags.appendChild(tag);
-      }
-      if (card.tags.length > visible.length) {
-        const more = document.createElement("span");
-        more.className = "lr-realm-tag";
-        more.textContent = `+${card.tags.length - visible.length}`;
-        tags.appendChild(more);
-      }
-      bodyEl.appendChild(tags);
-    }
+    const footer = document.createElement("div");
+    footer.className = "lr-realm-card-footer";
+    bodyEl.appendChild(footer);
     const stats = document.createElement("div");
     stats.className = "lr-realm-card-stats";
     const featureLabels = [];
@@ -43278,7 +43295,27 @@ function setupRealmModal(deps) {
       featureLabels.push("Assets");
     const featurePart = featureLabels.length > 0 ? ` · ${featureLabels.join(" · ")}` : "";
     stats.textContent = `↓ ${card.download ?? 0}${featurePart}`;
-    bodyEl.appendChild(stats);
+    stats.title = stats.textContent;
+    footer.appendChild(stats);
+    if (card.tags && card.tags.length > 0) {
+      const tags = document.createElement("div");
+      tags.className = "lr-realm-tags";
+      const track = document.createElement("div");
+      track.className = "lr-realm-tags-track";
+      for (const t of card.tags) {
+        const tag = document.createElement("span");
+        tag.className = "lr-realm-tag";
+        tag.textContent = t;
+        track.appendChild(tag);
+      }
+      tags.appendChild(track);
+      tags.addEventListener("pointerenter", () => {
+        const overflow = Math.max(0, track.scrollWidth - tags.clientWidth);
+        tags.style.setProperty("--lr-tag-offset", `${-overflow}px`);
+        tags.style.setProperty("--lr-tag-duration", `${Math.max(2, overflow / 30)}s`);
+      });
+      footer.appendChild(tags);
+    }
     return btn;
   }
   function renderPager() {

@@ -254,3 +254,15 @@ test('view button cycles both ways with matching icons and accessible labels', a
   expect(savedView).toBe('default');
   expect(root.querySelector('.lr-realm-grid')!.getAttribute('data-view')).toBe('default');
 });
+
+
+test('card footer puts every tag after the download count without changing popup tags', () => {
+  button('Recent').click();
+  const tags = Array.from({ length: 8 }, (_, i) => `Tag ${i}`);
+  reply([{ ...card, tags }]);
+  const footer = root.querySelector('.lr-realm-card-footer')!;
+  expect(footer.firstElementChild!.className).toBe('lr-realm-card-stats');
+  expect(Array.from(footer.querySelectorAll('.lr-realm-tag')).map(el => el.textContent)).toEqual(tags);
+  (root.querySelector('.lr-realm-card') as HTMLButtonElement).click();
+  expect(document.querySelector('.lr-realm-popup .lr-realm-tags-track')).toBeNull();
+});
