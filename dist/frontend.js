@@ -42288,6 +42288,24 @@ var styles_default2 = `.lr-realm-launcher {\r
   display: grid;\r
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));\r
   gap: 12px;\r
+  transition: filter 0.3s ease;\r
+}\r
+\r
+.lr-realm-grid.lr-realm-loading { filter: blur(4px); }\r
+.lr-realm-feedback {\r
+  display: flex;\r
+  align-items: center;\r
+  gap: 8px;\r
+  min-height: 20px;\r
+  flex-shrink: 0;\r
+  font-size: 13px;\r
+  color: var(--lumiverse-text-muted, #8b8b8b);\r
+}\r
+.lr-realm-feedback.error { color: #ff8a8a; }\r
+.lr-realm-pager[hidden] { display: none; }\r
+@media (prefers-reduced-motion: reduce) {\r
+  .lr-realm-grid { transition: none; }\r
+  .lr-realm-spinner { animation: none; }\r
 }\r
 \r
 .lr-realm-card {\r
@@ -42855,6 +42873,7 @@ function setupRealmModal(deps) {
         }
         doSearch();
       }, SEARCH_DEBOUNCE_MS);
+      render();
     });
     searchInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
@@ -42934,9 +42953,17 @@ function setupRealmModal(deps) {
     additionalEl.className = "lr-realm-additional";
     additionalEl.hidden = true;
     root.appendChild(additionalEl);
+    const status = document.createElement("div");
+    status.className = "lr-realm-feedback";
+    status.setAttribute("role", "status");
+    root.appendChild(status);
     const body = document.createElement("div");
     body.className = "lr-realm-body";
     root.appendChild(body);
+    const results = document.createElement("div");
+    results.className = "lr-realm-grid";
+    const pager = renderPager();
+    body.append(results, pager);
     surface = {
       handle: modalHandle,
       bodyEl: body,
@@ -42944,7 +42971,11 @@ function setupRealmModal(deps) {
       searchInputEl: searchInput,
       sortBtns,
       nsfwBtn,
-      additionalEl
+      additionalEl,
+      resultsEl: results,
+      statusEl: status,
+      pagerEl: pager,
+      renderedCards: null
     };
     modalHandle.onDismiss(() => {
       log.info("realm: modal dismissed");
@@ -42974,46 +43005,45 @@ function setupRealmModal(deps) {
   function render() {
     if (!surface)
       return;
-    const { sortBtns, nsfwBtn, additionalEl, bodyEl } = surface;
+    const { sortBtns, nsfwBtn, additionalEl, bodyEl, resultsEl, statusEl, pagerEl } = surface;
+    const scrollPositions = [];
+    for (let el = bodyEl;el; el = el.parentElement) {
+      if (el.scrollTop > 0)
+        scrollPositions.push([el, el.scrollTop]);
+    }
     nsfwBtn.classList.toggle("active", state.nsfw);
     for (const [id, btn] of sortBtns) {
       btn.classList.toggle("active", id === state.sort);
     }
     additionalEl.hidden = true;
     additionalEl.textContent = "";
-    bodyEl.replaceChildren();
+    resultsEl.classList.toggle("lr-realm-loading", state.loading);
+    resultsEl.setAttribute("aria-busy", String(state.loading));
+    resultsEl.inert = state.loading;
+    if (surface.renderedCards !== state.cards) {
+      resultsEl.replaceChildren(...state.cards.map(renderCard));
+      surface.renderedCards = state.cards;
+    }
+    statusEl.replaceChildren();
+    statusEl.classList.toggle("error", state.errorText.length > 0);
     if (state.loading) {
-      const status = document.createElement("div");
-      status.className = "lr-realm-status";
       const spinner = document.createElement("span");
       spinner.className = "lr-realm-spinner";
       const label = document.createElement("span");
       label.textContent = "Loading…";
-      status.append(spinner, label);
-      bodyEl.appendChild(status);
+      statusEl.append(spinner, label);
     } else if (state.errorText.length > 0) {
-      const status = document.createElement("div");
-      status.className = "lr-realm-status error";
-      status.textContent = state.errorText;
-      bodyEl.appendChild(status);
+      statusEl.textContent = state.errorText + (state.cards.length > 0 ? " Previous results are still shown." : "");
     } else if (state.cards.length === 0) {
-      const status = document.createElement("div");
-      status.className = "lr-realm-status";
-      status.textContent = "No characters found.";
-      bodyEl.appendChild(status);
-    } else {
-      const grid = document.createElement("div");
-      grid.className = "lr-realm-grid";
-      for (const card of state.cards) {
-        grid.appendChild(renderCard(card));
-      }
-      bodyEl.appendChild(grid);
-      if (state.sort !== "random" && state.sort !== "recommended") {
-        bodyEl.appendChild(renderPager());
-      }
+      statusEl.textContent = "No characters found.";
     }
-    if (toastEl)
-      bodyEl.appendChild(toastEl);
+    pagerEl.hidden = state.sort === "random" || state.sort === "recommended";
+    const pagingBusy = state.loading || searchDebounceTimer !== undefined;
+    pagerEl.querySelector('[title="Previous page"]').disabled = pagingBusy || state.page === 0;
+    pagerEl.querySelector('[title="Next page"]').disabled = pagingBusy || state.cards.length === 0;
+    pagerEl.querySelector(".lr-realm-pager-page").textContent = String(state.page + 1);
+    for (const [el, top] of scrollPositions)
+      el.scrollTop = top;
     syncOverlays();
   }
   function syncOverlays() {
@@ -43353,6 +43383,10 @@ function setupRealmModal(deps) {
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
   function doSearch() {
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = undefined;
+    }
     state.loading = true;
     state.errorText = "";
     const requestId = nextRequestId("search");
@@ -43387,7 +43421,7 @@ function setupRealmModal(deps) {
   function handleBackendMessage(msg) {
     switch (msg.type) {
       case "realm_search_result": {
-        if (state.pendingSearchReq && msg.requestId !== state.pendingSearchReq)
+        if (msg.requestId !== state.pendingSearchReq)
           return;
         state.pendingSearchReq = null;
         state.loading = false;
@@ -43396,7 +43430,6 @@ function setupRealmModal(deps) {
           state.errorText = "";
           state.additionalHTML = msg.additionalHTML ?? "";
         } else {
-          state.cards = [];
           state.errorText = msg.error ?? "Search failed";
           state.additionalHTML = "";
         }

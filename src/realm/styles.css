@@ -152,6 +152,24 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 12px;
+  transition: filter 0.3s ease;
+}
+
+.lr-realm-grid.lr-realm-loading { filter: blur(4px); }
+.lr-realm-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--lumiverse-text-muted, #8b8b8b);
+}
+.lr-realm-feedback.error { color: #ff8a8a; }
+.lr-realm-pager[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .lr-realm-grid { transition: none; }
+  .lr-realm-spinner { animation: none; }
 }
 
 .lr-realm-card {
