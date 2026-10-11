@@ -43,6 +43,7 @@ export interface ConsentRequest {
 export type UploadProgressFrame = {
   readonly type: 'import_progress';
   readonly phase: 'uploading_assets';
+  readonly cancellable?: boolean;
   readonly message: string;
   readonly fraction: number;
 };
@@ -63,7 +64,7 @@ export interface ModuleUploaderDeps {
   readonly decodeCharx: (bytes: Uint8Array) => DecodedRisum;
   readonly parseSchema: (data: unknown) => SchemaParseResult;
   readonly newUuid: () => string;
-  readonly requestConsent: (opts: ConsentRequest, userId: string) => Promise<{ confirmed: boolean }>;
+  readonly requestConsent: (opts: ConsentRequest, userId: string, signal?: AbortSignal) => Promise<{ confirmed: boolean }>;
   readonly pairAssets: typeof pairModuleAssetsForUpload;
   readonly guessMimeType: (path: string) => string;
   readonly sniffImageMime: (bytes: Uint8Array) => { ext: string; mime: string } | null;
@@ -74,6 +75,7 @@ export interface ModuleUploaderDeps {
     opts: { userId: string },
   ) => Promise<readonly ImageUploadResult[]>;
   readonly appendToJournal: (userId: string, moduleId: string, ids: readonly string[]) => Promise<void>;
+  readonly discardCancelled: (userId: string, moduleId: string, imageIds: readonly string[]) => Promise<void>;
   readonly syncWorldBook: (env: ModuleEnvelope, userId: string) => Promise<string | null>;
   readonly writeEnvelope: (userId: string, env: ModuleEnvelope) => Promise<void>;
   readonly emitProgress: (frame: UploadProgressFrame, userId: string) => void;
@@ -82,9 +84,14 @@ export interface ModuleUploaderDeps {
   readonly errMsg: (e: unknown) => string;
 }
 
+export interface ModuleUploadControl {
+  readonly signal: AbortSignal;
+  readonly beginSave: () => void;
+}
+
 export interface ModuleUploader {
-  upload(bytes: Uint8Array, fileName: string, userId: string): Promise<{ envelope: ModuleEnvelope }>;
-  uploadSource(source: ModuleUploadSource, fileName: string, userId: string): Promise<{ envelope: ModuleEnvelope }>;
+  upload(bytes: Uint8Array, fileName: string, userId: string, control?: ModuleUploadControl): Promise<{ envelope: ModuleEnvelope }>;
+  uploadSource(source: ModuleUploadSource, fileName: string, userId: string, control?: ModuleUploadControl): Promise<{ envelope: ModuleEnvelope }>;
 }
 
 const PROGRESS_BASE = 0.35;
@@ -97,7 +104,9 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
     bytesIn: Uint8Array,
     fileName: string,
     userId: string,
+    control?: ModuleUploadControl,
   ): Promise<{ envelope: ModuleEnvelope }> {
+    control?.signal.throwIfAborted();
     const t0 = Date.now();
     const inputBytes = bytesIn.byteLength;
     deps.log.info(
@@ -122,15 +131,17 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
       assets: decoded.assets,
       ...(decoded.icon ? { icon: decoded.icon } : {}),
       readAsset: async (index) => decoded.assets[index],
-    }, fileName, userId, t0);
+    }, fileName, userId, control, t0);
   }
 
   async function uploadSource(
     source: ModuleUploadSource,
     fileName: string,
     userId: string,
+    control?: ModuleUploadControl,
     t0 = Date.now(),
   ): Promise<{ envelope: ModuleEnvelope }> {
+    control?.signal.throwIfAborted();
     const parsed = deps.parseSchema(source.module);
     if (!parsed.success) {
       throw new Error(
@@ -153,6 +164,8 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         `(source id was ${sourceModuleId})`,
     );
 
+    const uploadedIds: string[] = [];
+    try {
     if (moduleBody.lowLevelAccess === true) {
       deps.log.info(
         `processModuleUpload: lowLevelAccess=true for module=${moduleBody.id} ` +
@@ -170,7 +183,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
             `Decline to refuse the upload, the module will not be added to your library.`,
           confirmLabel: 'Grant access',
           cancelLabel: 'Decline',
-        }, userId);
+        }, userId, control?.signal);
         confirmed = !!res?.confirmed;
       } catch (err) {
         deps.log.warn(
@@ -178,6 +191,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         );
         confirmed = false;
       }
+      control?.signal.throwIfAborted();
       if (!confirmed) {
         deps.log.info(`processModuleUpload: consent declined for module=${moduleBody.id},aborting upload`);
         throw new Error(
@@ -237,6 +251,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
           ? { imageId, ext }
           : { imageId };
         journalBuffer.push(imageId);
+        uploadedIds.push(imageId);
       };
       const emitProgress = (): void => {
         const frac = totalCount === 0
@@ -245,6 +260,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         deps.emitProgress({
           type: 'import_progress',
           phase: 'uploading_assets',
+          cancellable: !!control,
           message: `Uploading module assets for ${moduleNameForProgress} (${processed}/${totalCount})…`,
           fraction: frac,
         }, userId);
@@ -259,6 +275,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         let i = 0;
         let deferred: { sourceIndex: number; bytes: Uint8Array } | undefined;
         while (i < pending.length) {
+          control?.signal.throwIfAborted();
           const batchItems: ImageUploadInput[] = [];
           const batchAssetNames: string[] = [];
           const batchSniffedExts: Array<string | undefined> = [];
@@ -270,6 +287,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
                 ? deferred.bytes
                 : await source.readAsset(meta.sourceIndex)
               : undefined;
+            control?.signal.throwIfAborted();
             if (!meta || !bytes) { i += 1; continue; }
             if (batchItems.length > 0 && batchBytes + bytes.byteLength > BATCH_MAX_BYTES) {
               deferred = { sourceIndex: meta.sourceIndex, bytes };
@@ -310,6 +328,8 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
           }
           processed += batchItems.length;
           flushJournal();
+          await journalChain;
+          control?.signal.throwIfAborted();
           emitProgress();
         }
       }
@@ -321,8 +341,10 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
       );
     }
 
+    control?.signal.throwIfAborted();
     const actualAssetCount = await source.finish?.() ?? source.assetCount;
 
+    control?.signal.throwIfAborted();
     if (source.icon) {
       const declaredExt = /^[a-z0-9]{1,10}$/i.test(source.icon.ext)
         ? source.icon.ext.toLowerCase()
@@ -343,6 +365,7 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
           throw new Error('upload returned without an image id');
         }
         moduleBody.icon = result.id;
+        uploadedIds.push(result.id);
         try {
           await deps.appendToJournal(userId, moduleBody.id, [result.id]);
         } catch (err) {
@@ -358,6 +381,8 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
       }
     }
 
+    control?.signal.throwIfAborted();
+    control?.beginSave();
     const baseEnvelope: ModuleEnvelope = {
       schema_version: MODULE_SCHEMA_VERSION,
       id: moduleBody.id,
@@ -396,6 +421,10 @@ export function createModuleUploader(deps: ModuleUploaderDeps): ModuleUploader {
         `elapsed=${Date.now() - t0}ms`,
     );
     return { envelope };
+    } catch (error) {
+      if (control?.signal.aborted) await deps.discardCancelled(userId, moduleBody.id, uploadedIds);
+      throw error;
+    }
   }
 
   return { upload, uploadSource };

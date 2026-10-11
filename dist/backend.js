@@ -24731,7 +24731,8 @@ var PROGRESS_END = 0.92;
 var BATCH_MAX_ITEMS = 64;
 var BATCH_MAX_BYTES = 16 * 1024 * 1024;
 function createModuleUploader(deps) {
-  async function upload(bytesIn, fileName, userId) {
+  async function upload(bytesIn, fileName, userId, control) {
+    control?.signal.throwIfAborted();
     const t0 = Date.now();
     const inputBytes = bytesIn.byteLength;
     deps.log.info(`processModuleUpload: file=${fileName} bytes=${inputBytes} userId=${userId}`);
@@ -24746,9 +24747,10 @@ function createModuleUploader(deps) {
       assets: decoded.assets,
       ...decoded.icon ? { icon: decoded.icon } : {},
       readAsset: async (index) => decoded.assets[index]
-    }, fileName, userId, t0);
+    }, fileName, userId, control, t0);
   }
-  async function uploadSource(source, fileName, userId, t0 = Date.now()) {
+  async function uploadSource(source, fileName, userId, control, t0 = Date.now()) {
+    control?.signal.throwIfAborted();
     const parsed = deps.parseSchema(source.module);
     if (!parsed.success) {
       throw new Error(`decoded module failed schema validation,${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
@@ -24760,195 +24762,214 @@ function createModuleUploader(deps) {
     const sourceModuleId = moduleBody.id;
     moduleBody.id = deps.newUuid();
     deps.log.info(`processModuleUpload: assigned fresh id=${moduleBody.id} ` + `(source id was ${sourceModuleId})`);
-    if (moduleBody.lowLevelAccess === true) {
-      deps.log.info(`processModuleUpload: lowLevelAccess=true for module=${moduleBody.id} ` + `name="${moduleBody.name ?? "<unnamed>"}",prompting consent`);
-      let confirmed = false;
-      try {
-        const res = await deps.requestConsent({
-          title: `Module "${moduleBody.name ?? moduleBody.id}" requests low-level access`,
-          message: `This module declares low-level access: its triggers can call runLLM, ` + `runImgGen, request, and other privileged APIs that consume tokens, ` + `hit external services, and read your chat state.
+    const uploadedIds = [];
+    try {
+      if (moduleBody.lowLevelAccess === true) {
+        deps.log.info(`processModuleUpload: lowLevelAccess=true for module=${moduleBody.id} ` + `name="${moduleBody.name ?? "<unnamed>"}",prompting consent`);
+        let confirmed = false;
+        try {
+          const res = await deps.requestConsent({
+            title: `Module "${moduleBody.name ?? moduleBody.id}" requests low-level access`,
+            message: `This module declares low-level access: its triggers can call runLLM, ` + `runImgGen, request, and other privileged APIs that consume tokens, ` + `hit external services, and read your chat state.
 
 ` + `Only accept if you trust the source of this module.
 
 ` + `Decline to refuse the upload, the module will not be added to your library.`,
-          confirmLabel: "Grant access",
-          cancelLabel: "Decline"
-        }, userId);
-        confirmed = !!res?.confirmed;
-      } catch (err) {
-        deps.log.warn(`processModuleUpload: consent prompt threw: ${deps.errMsg(err)},treating as decline`);
-        confirmed = false;
-      }
-      if (!confirmed) {
-        deps.log.info(`processModuleUpload: consent declined for module=${moduleBody.id},aborting upload`);
-        throw new Error(`Module "${moduleBody.name ?? moduleBody.id}" requires low-level access; consent declined.`);
-      }
-      deps.log.info(`processModuleUpload: low-level access consent granted for module=${moduleBody.id}`);
-    }
-    const moduleAssetIndex = {};
-    let assetUploadFailures = 0;
-    if (source.assetCount > 0) {
-      const moduleAssets = moduleBody.assets ?? [];
-      const pending = source.assets ? deps.pairAssets(moduleAssets, source.assets, () => "", deps.guessMimeType) : moduleAssets.slice(0, source.assetCount).flatMap((triple, sourceIndex) => {
-        const path = Array.isArray(triple) && typeof triple[0] === "string" ? triple[0] : "";
-        return path.length > 0 ? [{ path, base64: "", mimeType: deps.guessMimeType(path), sourceIndex }] : [];
-      });
-      if (pending.length < source.assetCount) {
-        deps.log.warn(`processModuleUpload: ${source.assetCount - pending.length} asset(s) ` + `couldn't be paired with a module.assets[] name, dropped. ` + `(decoded.assets index out of bounds vs module.assets list.)`);
-      }
-      const tUpload = Date.now();
-      const totalCount = pending.length;
-      let processed = 0;
-      const moduleNameForProgress = typeof moduleBody.name === "string" && moduleBody.name.length > 0 ? moduleBody.name : moduleBody.id;
-      const journalBuffer = [];
-      let journalChain = Promise.resolve();
-      const flushJournal = () => {
-        if (journalBuffer.length === 0)
-          return;
-        const ids = journalBuffer.splice(0);
-        journalChain = journalChain.then(async () => {
-          try {
-            await deps.appendToJournal(userId, moduleBody.id, ids);
-          } catch (err) {
-            journalBuffer.unshift(...ids);
-            deps.log.warn(`processModuleUpload: journal flush failed module=${moduleBody.id}: ${deps.errMsg(err)}`);
-          }
-        });
-      };
-      const recordUploaded = (assetName, imageId, sniffedExt) => {
-        let ext = sniffedExt;
-        if (ext === undefined) {
-          const lastDot = assetName.lastIndexOf(".");
-          if (lastDot > 0)
-            ext = assetName.slice(lastDot + 1).toLowerCase();
-        }
-        moduleAssetIndex[assetName] = ext !== undefined ? { imageId, ext } : { imageId };
-        journalBuffer.push(imageId);
-      };
-      const emitProgress = () => {
-        const frac = totalCount === 0 ? PROGRESS_END : PROGRESS_BASE + (PROGRESS_END - PROGRESS_BASE) * (processed / totalCount);
-        deps.emitProgress({
-          type: "import_progress",
-          phase: "uploading_assets",
-          message: `Uploading module assets for ${moduleNameForProgress} (${processed}/${totalCount})\u2026`,
-          fraction: frac
-        }, userId);
-      };
-      if (totalCount > 0) {
-        const skipThumbnails = await deps.getSkipAssetThumbnails(userId);
-        deps.log.info(`processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` + `(module=${moduleBody.id}, batched, skipThumbnails=${skipThumbnails})`);
-        let i = 0;
-        let deferred;
-        while (i < pending.length) {
-          const batchItems = [];
-          const batchAssetNames = [];
-          const batchSniffedExts = [];
-          let batchBytes = 0;
-          while (i < pending.length && batchItems.length < BATCH_MAX_ITEMS) {
-            const meta = pending[i];
-            const bytes = meta ? deferred?.sourceIndex === meta.sourceIndex ? deferred.bytes : await source.readAsset(meta.sourceIndex) : undefined;
-            if (!meta || !bytes) {
-              i += 1;
-              continue;
-            }
-            if (batchItems.length > 0 && batchBytes + bytes.byteLength > BATCH_MAX_BYTES) {
-              deferred = { sourceIndex: meta.sourceIndex, bytes };
-              break;
-            }
-            deferred = undefined;
-            const sniff = deps.sniffImageMime(bytes);
-            const uploadFilename = sniff ? `${meta.path}.${sniff.ext}` : meta.path;
-            const uploadMime = sniff?.mime ?? meta.mimeType;
-            batchItems.push({
-              data: bytes,
-              mime_type: uploadMime,
-              filename: uploadFilename,
-              ...skipThumbnails ? { skip_thumbnail_processing: true } : {}
-            });
-            batchAssetNames.push(meta.path);
-            batchSniffedExts.push(sniff?.ext);
-            batchBytes += bytes.byteLength;
-            i += 1;
-          }
-          let results = [];
-          try {
-            results = await deps.uploadImageMany(batchItems, { userId });
-          } catch (err) {
-            const msg = deps.errMsg(err);
-            deps.log.warn(`processModuleUpload: uploadMany batch failed (${batchItems.length} items): ${msg}`);
-            results = batchItems.map(() => ({ error: msg }));
-          }
-          for (let k = 0;k < results.length; k++) {
-            const r = results[k];
-            const name = batchAssetNames[k];
-            if (typeof r.id === "string" && r.id.length > 0) {
-              recordUploaded(name, r.id, batchSniffedExts[k]);
-            } else {
-              assetUploadFailures += 1;
-              deps.log.warn(`processModuleUpload: upload failed name=${name}: ${r.error ?? "unknown error"}`);
-            }
-          }
-          processed += batchItems.length;
-          flushJournal();
-          emitProgress();
-        }
-      }
-      flushJournal();
-      await journalChain;
-      deps.log.info(`processModuleUpload: uploaded ${Object.keys(moduleAssetIndex).length}/${pending.length} ` + `failed=${assetUploadFailures} elapsed=${Date.now() - tUpload}ms`);
-    }
-    const actualAssetCount = await source.finish?.() ?? source.assetCount;
-    if (source.icon) {
-      const declaredExt = /^[a-z0-9]{1,10}$/i.test(source.icon.ext) ? source.icon.ext.toLowerCase() : "";
-      const sniff = deps.sniffImageMime(source.icon.data);
-      const ext = sniff?.ext ?? declaredExt;
-      const filename = ext ? `module-icon.${ext}` : "module-icon";
-      try {
-        const result = await deps.uploadImageOne({
-          data: source.icon.data,
-          mime_type: sniff?.mime ?? deps.guessMimeType(filename),
-          filename
-        }, userId);
-        if (typeof result?.id !== "string" || result.id.length === 0) {
-          throw new Error("upload returned without an image id");
-        }
-        moduleBody.icon = result.id;
-        try {
-          await deps.appendToJournal(userId, moduleBody.id, [result.id]);
+            confirmLabel: "Grant access",
+            cancelLabel: "Decline"
+          }, userId, control?.signal);
+          confirmed = !!res?.confirmed;
         } catch (err) {
-          deps.log.warn(`processModuleUpload: icon journal append failed module=${moduleBody.id}: ${deps.errMsg(err)}`);
+          deps.log.warn(`processModuleUpload: consent prompt threw: ${deps.errMsg(err)},treating as decline`);
+          confirmed = false;
         }
-      } catch (err) {
-        moduleBody.icon = "";
-        deps.log.warn(`processModuleUpload: module icon upload failed module=${moduleBody.id}: ${deps.errMsg(err)}`);
+        control?.signal.throwIfAborted();
+        if (!confirmed) {
+          deps.log.info(`processModuleUpload: consent declined for module=${moduleBody.id},aborting upload`);
+          throw new Error(`Module "${moduleBody.name ?? moduleBody.id}" requires low-level access; consent declined.`);
+        }
+        deps.log.info(`processModuleUpload: low-level access consent granted for module=${moduleBody.id}`);
       }
+      const moduleAssetIndex = {};
+      let assetUploadFailures = 0;
+      if (source.assetCount > 0) {
+        const moduleAssets = moduleBody.assets ?? [];
+        const pending = source.assets ? deps.pairAssets(moduleAssets, source.assets, () => "", deps.guessMimeType) : moduleAssets.slice(0, source.assetCount).flatMap((triple, sourceIndex) => {
+          const path = Array.isArray(triple) && typeof triple[0] === "string" ? triple[0] : "";
+          return path.length > 0 ? [{ path, base64: "", mimeType: deps.guessMimeType(path), sourceIndex }] : [];
+        });
+        if (pending.length < source.assetCount) {
+          deps.log.warn(`processModuleUpload: ${source.assetCount - pending.length} asset(s) ` + `couldn't be paired with a module.assets[] name, dropped. ` + `(decoded.assets index out of bounds vs module.assets list.)`);
+        }
+        const tUpload = Date.now();
+        const totalCount = pending.length;
+        let processed = 0;
+        const moduleNameForProgress = typeof moduleBody.name === "string" && moduleBody.name.length > 0 ? moduleBody.name : moduleBody.id;
+        const journalBuffer = [];
+        let journalChain = Promise.resolve();
+        const flushJournal = () => {
+          if (journalBuffer.length === 0)
+            return;
+          const ids = journalBuffer.splice(0);
+          journalChain = journalChain.then(async () => {
+            try {
+              await deps.appendToJournal(userId, moduleBody.id, ids);
+            } catch (err) {
+              journalBuffer.unshift(...ids);
+              deps.log.warn(`processModuleUpload: journal flush failed module=${moduleBody.id}: ${deps.errMsg(err)}`);
+            }
+          });
+        };
+        const recordUploaded = (assetName, imageId, sniffedExt) => {
+          let ext = sniffedExt;
+          if (ext === undefined) {
+            const lastDot = assetName.lastIndexOf(".");
+            if (lastDot > 0)
+              ext = assetName.slice(lastDot + 1).toLowerCase();
+          }
+          moduleAssetIndex[assetName] = ext !== undefined ? { imageId, ext } : { imageId };
+          journalBuffer.push(imageId);
+          uploadedIds.push(imageId);
+        };
+        const emitProgress = () => {
+          const frac = totalCount === 0 ? PROGRESS_END : PROGRESS_BASE + (PROGRESS_END - PROGRESS_BASE) * (processed / totalCount);
+          deps.emitProgress({
+            type: "import_progress",
+            phase: "uploading_assets",
+            cancellable: !!control,
+            message: `Uploading module assets for ${moduleNameForProgress} (${processed}/${totalCount})\u2026`,
+            fraction: frac
+          }, userId);
+        };
+        if (totalCount > 0) {
+          const skipThumbnails = await deps.getSkipAssetThumbnails(userId);
+          deps.log.info(`processModuleUpload: uploading ${totalCount} asset(s) via spindle.images.uploadMany ` + `(module=${moduleBody.id}, batched, skipThumbnails=${skipThumbnails})`);
+          let i = 0;
+          let deferred;
+          while (i < pending.length) {
+            control?.signal.throwIfAborted();
+            const batchItems = [];
+            const batchAssetNames = [];
+            const batchSniffedExts = [];
+            let batchBytes = 0;
+            while (i < pending.length && batchItems.length < BATCH_MAX_ITEMS) {
+              const meta = pending[i];
+              const bytes = meta ? deferred?.sourceIndex === meta.sourceIndex ? deferred.bytes : await source.readAsset(meta.sourceIndex) : undefined;
+              control?.signal.throwIfAborted();
+              if (!meta || !bytes) {
+                i += 1;
+                continue;
+              }
+              if (batchItems.length > 0 && batchBytes + bytes.byteLength > BATCH_MAX_BYTES) {
+                deferred = { sourceIndex: meta.sourceIndex, bytes };
+                break;
+              }
+              deferred = undefined;
+              const sniff = deps.sniffImageMime(bytes);
+              const uploadFilename = sniff ? `${meta.path}.${sniff.ext}` : meta.path;
+              const uploadMime = sniff?.mime ?? meta.mimeType;
+              batchItems.push({
+                data: bytes,
+                mime_type: uploadMime,
+                filename: uploadFilename,
+                ...skipThumbnails ? { skip_thumbnail_processing: true } : {}
+              });
+              batchAssetNames.push(meta.path);
+              batchSniffedExts.push(sniff?.ext);
+              batchBytes += bytes.byteLength;
+              i += 1;
+            }
+            let results = [];
+            try {
+              results = await deps.uploadImageMany(batchItems, { userId });
+            } catch (err) {
+              const msg = deps.errMsg(err);
+              deps.log.warn(`processModuleUpload: uploadMany batch failed (${batchItems.length} items): ${msg}`);
+              results = batchItems.map(() => ({ error: msg }));
+            }
+            for (let k = 0;k < results.length; k++) {
+              const r = results[k];
+              const name = batchAssetNames[k];
+              if (typeof r.id === "string" && r.id.length > 0) {
+                recordUploaded(name, r.id, batchSniffedExts[k]);
+              } else {
+                assetUploadFailures += 1;
+                deps.log.warn(`processModuleUpload: upload failed name=${name}: ${r.error ?? "unknown error"}`);
+              }
+            }
+            processed += batchItems.length;
+            flushJournal();
+            await journalChain;
+            control?.signal.throwIfAborted();
+            emitProgress();
+          }
+        }
+        flushJournal();
+        await journalChain;
+        deps.log.info(`processModuleUpload: uploaded ${Object.keys(moduleAssetIndex).length}/${pending.length} ` + `failed=${assetUploadFailures} elapsed=${Date.now() - tUpload}ms`);
+      }
+      control?.signal.throwIfAborted();
+      const actualAssetCount = await source.finish?.() ?? source.assetCount;
+      control?.signal.throwIfAborted();
+      if (source.icon) {
+        const declaredExt = /^[a-z0-9]{1,10}$/i.test(source.icon.ext) ? source.icon.ext.toLowerCase() : "";
+        const sniff = deps.sniffImageMime(source.icon.data);
+        const ext = sniff?.ext ?? declaredExt;
+        const filename = ext ? `module-icon.${ext}` : "module-icon";
+        try {
+          const result = await deps.uploadImageOne({
+            data: source.icon.data,
+            mime_type: sniff?.mime ?? deps.guessMimeType(filename),
+            filename
+          }, userId);
+          if (typeof result?.id !== "string" || result.id.length === 0) {
+            throw new Error("upload returned without an image id");
+          }
+          moduleBody.icon = result.id;
+          uploadedIds.push(result.id);
+          try {
+            await deps.appendToJournal(userId, moduleBody.id, [result.id]);
+          } catch (err) {
+            deps.log.warn(`processModuleUpload: icon journal append failed module=${moduleBody.id}: ${deps.errMsg(err)}`);
+          }
+        } catch (err) {
+          moduleBody.icon = "";
+          deps.log.warn(`processModuleUpload: module icon upload failed module=${moduleBody.id}: ${deps.errMsg(err)}`);
+        }
+      }
+      control?.signal.throwIfAborted();
+      control?.beginSave();
+      const baseEnvelope = {
+        schema_version: MODULE_SCHEMA_VERSION,
+        id: moduleBody.id,
+        filename: fileName,
+        uploaded_at: Date.now(),
+        module: moduleBody,
+        asset_index: moduleAssetIndex,
+        translator_schema_version: deps.currentTranslatorSchemaVersion
+      };
+      const wbId = await deps.syncWorldBook(baseEnvelope, userId).catch((err) => {
+        deps.log.warn(`processModuleUpload: syncModuleWorldBook failed module=${moduleBody.id}: ${deps.errMsg(err)}`);
+        return null;
+      });
+      const envelope = {
+        schema_version: baseEnvelope.schema_version,
+        id: baseEnvelope.id,
+        filename: baseEnvelope.filename,
+        uploaded_at: baseEnvelope.uploaded_at,
+        module: baseEnvelope.module,
+        asset_index: baseEnvelope.asset_index,
+        ...baseEnvelope.translator_schema_version !== undefined ? { translator_schema_version: baseEnvelope.translator_schema_version } : {},
+        ...wbId ? { installed_world_book_id: wbId } : {}
+      };
+      await deps.writeEnvelope(userId, envelope);
+      deps.log.info(`processModuleUpload: ok id=${envelope.id} name=${moduleBody.name} ` + `lore=${(moduleBody.lorebook ?? []).length} ` + `regex=${(moduleBody.regex ?? []).length} ` + `triggers=${(moduleBody.trigger ?? []).length} ` + `assets=${actualAssetCount} ` + `icon=${moduleBody.icon ? "yes" : "no"} ` + `assetUploadFailures=${assetUploadFailures} ` + `wb=${envelope.installed_world_book_id ?? "-"} ` + `elapsed=${Date.now() - t0}ms`);
+      return { envelope };
+    } catch (error) {
+      if (control?.signal.aborted)
+        await deps.discardCancelled(userId, moduleBody.id, uploadedIds);
+      throw error;
     }
-    const baseEnvelope = {
-      schema_version: MODULE_SCHEMA_VERSION,
-      id: moduleBody.id,
-      filename: fileName,
-      uploaded_at: Date.now(),
-      module: moduleBody,
-      asset_index: moduleAssetIndex,
-      translator_schema_version: deps.currentTranslatorSchemaVersion
-    };
-    const wbId = await deps.syncWorldBook(baseEnvelope, userId).catch((err) => {
-      deps.log.warn(`processModuleUpload: syncModuleWorldBook failed module=${moduleBody.id}: ${deps.errMsg(err)}`);
-      return null;
-    });
-    const envelope = {
-      schema_version: baseEnvelope.schema_version,
-      id: baseEnvelope.id,
-      filename: baseEnvelope.filename,
-      uploaded_at: baseEnvelope.uploaded_at,
-      module: baseEnvelope.module,
-      asset_index: baseEnvelope.asset_index,
-      ...baseEnvelope.translator_schema_version !== undefined ? { translator_schema_version: baseEnvelope.translator_schema_version } : {},
-      ...wbId ? { installed_world_book_id: wbId } : {}
-    };
-    await deps.writeEnvelope(userId, envelope);
-    deps.log.info(`processModuleUpload: ok id=${envelope.id} name=${moduleBody.name} ` + `lore=${(moduleBody.lorebook ?? []).length} ` + `regex=${(moduleBody.regex ?? []).length} ` + `triggers=${(moduleBody.trigger ?? []).length} ` + `assets=${actualAssetCount} ` + `icon=${moduleBody.icon ? "yes" : "no"} ` + `assetUploadFailures=${assetUploadFailures} ` + `wb=${envelope.installed_world_book_id ?? "-"} ` + `elapsed=${Date.now() - t0}ms`);
-    return { envelope };
   }
   return { upload, uploadSource };
 }
@@ -25893,7 +25914,8 @@ function createViewerHandlers(deps) {
 
 // src/handlers/module.ts
 function createModuleHandlers(deps) {
-  async function finalizeModuleUpload(process2, ctx) {
+  const activeImports = new Map;
+  async function finalizeModuleUpload(process2, signal, ctx) {
     try {
       const { envelope: env } = await process2();
       deps.nudgeGc("module-upload");
@@ -25909,43 +25931,65 @@ function createModuleHandlers(deps) {
       }
       ctx.send({ type: "import_progress", phase: "done", message: `Imported ${moduleName}`, fraction: 1 }, ctx.userId);
     } catch (err) {
+      if (signal.aborted && err === signal.reason) {
+        ctx.send({ type: "import_progress", phase: "done", message: "Module import cancelled", fraction: null, cancelled: true }, ctx.userId);
+        return;
+      }
       ctx.send({ type: "import_progress", phase: "error", message: "Module upload failed", fraction: null, error: deps.errMsg(err) }, ctx.userId);
       ctx.send({ type: "error", message: `Module decode/save failed: ${deps.errMsg(err)}` }, ctx.userId);
     }
   }
   return {
     process_module_from_upload: async (msg, ctx) => {
-      deps.log.info(`process_module_from_upload: uploadId=${msg.uploadId} file=${msg.fileName} userId=${ctx.userId}`);
-      if (msg.fileName.toLowerCase().endsWith(".risum")) {
-        ctx.send({ type: "import_progress", phase: "translating", message: `Translating ${msg.fileName}\u2026`, fraction: 0.3 }, ctx.userId);
-        try {
-          await finalizeModuleUpload(() => deps.processRisumUpload(msg.uploadId, msg.fileName, ctx.userId), ctx);
-        } finally {
-          await deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => false);
+      if (activeImports.has(ctx.userId)) {
+        if (activeImports.get(ctx.userId).uploadId === msg.uploadId)
+          return;
+        ctx.send({ type: "error", message: "A module import is already running." }, ctx.userId);
+        return;
+      }
+      const entry = { uploadId: msg.uploadId, controller: new AbortController, saving: false };
+      activeImports.set(ctx.userId, entry);
+      const control = {
+        signal: entry.controller.signal,
+        beginSave() {
+          entry.controller.signal.throwIfAborted();
+          entry.saving = true;
+          ctx.send({ type: "import_progress", phase: "saving_payload", message: "Saving module\u2026", fraction: 0.94, cancellable: false }, ctx.userId);
         }
-        return;
-      }
-      let upload;
+      };
       try {
-        upload = await deps.getUpload(msg.uploadId, ctx.userId);
-      } catch (err) {
-        deps.log.warn(`process_module_from_upload: getUpload threw: ${deps.errMsg(err)}`);
-        ctx.send({ type: "import_progress", phase: "error", message: "Upload retrieval failed", fraction: null, error: deps.errMsg(err) }, ctx.userId);
-        ctx.send({ type: "error", message: `Module upload retrieval failed: ${deps.errMsg(err)}` }, ctx.userId);
-        return;
-      }
-      if (!upload) {
-        deps.log.warn(`process_module_from_upload: uploadId=${msg.uploadId} not found or expired`);
-        ctx.send({ type: "import_progress", phase: "error", message: "Upload not found or expired. Re-import the module.", fraction: null, error: "upload_missing" }, ctx.userId);
-        ctx.send({ type: "error", message: "Module upload not found or expired. Re-import the module." }, ctx.userId);
-        return;
-      }
-      deps.log.info(`process_module_from_upload: got ${upload.data.byteLength} bytes, processing`);
-      ctx.send({ type: "import_progress", phase: "translating", message: `Translating ${msg.fileName || upload.fileName}\u2026`, fraction: 0.3 }, ctx.userId);
-      try {
-        await finalizeModuleUpload(() => deps.processModuleUpload(upload.data, msg.fileName || upload.fileName, ctx.userId), ctx);
+        await finalizeModuleUpload(async () => {
+          try {
+            ctx.send({ type: "import_progress", phase: "translating", message: `Translating ${msg.fileName}\u2026`, fraction: 0.3, cancellable: true }, ctx.userId);
+            if (msg.fileName.toLowerCase().endsWith(".risum")) {
+              return await deps.processRisumUpload(msg.uploadId, msg.fileName, ctx.userId, control);
+            }
+            const upload = await deps.getUpload(msg.uploadId, ctx.userId);
+            control.signal.throwIfAborted();
+            if (!upload)
+              throw new Error("Module upload not found or expired. Re-import the module.");
+            return await deps.processModuleUpload(upload.data, msg.fileName || upload.fileName, ctx.userId, control);
+          } finally {
+            await deps.deleteUpload(msg.uploadId, ctx.userId).catch((err) => {
+              deps.log.warn(`Module staged upload cleanup failed: ${deps.errMsg(err)}`);
+            });
+          }
+        }, control.signal, ctx);
       } finally {
-        deps.deleteUpload(msg.uploadId, ctx.userId).catch(() => {});
+        activeImports.delete(ctx.userId);
+      }
+    },
+    cancel_module_import: async (msg, ctx) => {
+      const entry = activeImports.get(ctx.userId);
+      if (entry?.uploadId === msg.uploadId && !entry.saving)
+        entry.controller.abort();
+      else if (!entry && msg.stagedUpload === true) {
+        try {
+          await deps.deleteUpload(msg.uploadId, ctx.userId);
+          ctx.send({ type: "import_progress", phase: "done", message: "Module import cancelled", fraction: null, cancelled: true }, ctx.userId);
+        } catch (error) {
+          ctx.send({ type: "import_progress", phase: "error", message: "Cancelled upload cleanup failed", fraction: null, error: deps.errMsg(error) }, ctx.userId);
+        }
       }
     },
     request_modules: async (_msg, ctx) => {
@@ -35956,13 +36000,24 @@ function createConsentApi(deps) {
   const { send, log } = deps;
   const pendingConsents = new Map;
   const consentChainByUser = new Map;
-  function requestConsent(opts, userId) {
+  function requestConsent(opts, userId, signal) {
     const run = () => new Promise((resolve) => {
+      if (signal?.aborted) {
+        resolve({ confirmed: false });
+        return;
+      }
       const requestId = crypto.randomUUID();
+      const abort = () => {
+        pendingConsents.delete(requestId);
+        clearTimeout(timeoutHandle);
+        resolve({ confirmed: false });
+      };
+      signal?.addEventListener("abort", abort, { once: true });
       const timeoutHandle = setTimeout(() => {
         if (!pendingConsents.has(requestId))
           return;
         pendingConsents.delete(requestId);
+        signal?.removeEventListener("abort", abort);
         log.warn(`requestConsent: timed out requestId=${requestId} userId=${userId} (auto-decline)`);
         resolve({ confirmed: false });
       }, CONSENT_TIMEOUT_MS);
@@ -35973,6 +36028,7 @@ function createConsentApi(deps) {
         ownerUserId: userId,
         resolver: (confirmed) => {
           clearTimeout(timeoutHandle);
+          signal?.removeEventListener("abort", abort);
           resolve({ confirmed });
         }
       });
@@ -37924,7 +37980,7 @@ var moduleUploader = createModuleUploader({
   decodeCharx: decodeModuleCharx,
   parseSchema: (data) => risuModuleSchema.safeParse(data),
   newUuid: () => crypto.randomUUID(),
-  requestConsent: (opts, userId) => requestConsent(opts, userId),
+  requestConsent: (opts, userId, signal) => requestConsent(opts, userId, signal),
   pairAssets: pairModuleAssetsForUpload,
   guessMimeType,
   sniffImageMime,
@@ -37932,6 +37988,12 @@ var moduleUploader = createModuleUploader({
   uploadImageOne: (input, userId) => spindle.images.upload(input, userId),
   uploadImageMany: (items, opts) => spindle.images.uploadMany(items, opts),
   appendToJournal: (uid, moduleId, ids) => appendModuleImageIdsToJournal(journalStorage(), uid, moduleId, ids),
+  discardCancelled: async (uid, moduleId, ids) => {
+    const result = await deleteImageIds(ids, uid, "cancelled module import");
+    if (result.failed > 0)
+      throw new Error(`Import cancelled, but ${result.failed} temporary image(s) could not be removed. Retry orphan cleanup.`);
+    await clearModuleImageJournal(journalStorage(), uid, moduleId);
+  },
   syncWorldBook: (env, uid) => syncModuleWorldBook(env, uid),
   writeEnvelope: async (uid, env) => {
     await writeEnvelope(moduleStorage(), uid, env);
@@ -37941,20 +38003,23 @@ var moduleUploader = createModuleUploader({
   log: log8,
   errMsg
 });
-async function processModuleUpload(bytesIn, fileName, userId) {
+async function processModuleUpload(bytesIn, fileName, userId, control) {
   assetUploadsInFlight++;
   try {
-    return await moduleUploader.upload(bytesIn, fileName, userId);
+    return await moduleUploader.upload(bytesIn, fileName, userId, control);
   } finally {
     assetUploadsInFlight--;
   }
 }
-async function processRisumUpload(uploadId, fileName, userId) {
+async function processRisumUpload(uploadId, fileName, userId, control) {
   assetUploadsInFlight++;
   try {
-    const source = await openRisumUpload((offset) => readUploadChunk(uploadId, offset, userId));
+    const source = await openRisumUpload(async (offset) => {
+      control.signal.throwIfAborted();
+      return readUploadChunk(uploadId, offset, userId);
+    });
     log8.info(`processModuleUpload: file=${fileName} bytes=${source.size} userId=${userId} mode=chunked`);
-    return await moduleUploader.uploadSource(source, fileName, userId);
+    return await moduleUploader.uploadSource(source, fileName, userId, control);
   } finally {
     assetUploadsInFlight--;
   }

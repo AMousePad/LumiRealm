@@ -51,7 +51,7 @@ export interface MountCardsPanelOptions {
   readonly ctx: SpindleFrontendContext;
   readonly sendToBackend: (msg: FrontendToBackend) => void;
   readonly log: FrontendLog;
-  readonly onImportStart?: (fileName: string, onCancel?: () => void, totalBytes?: number) => boolean | void;
+  readonly onImportStart?: (fileName: string, onCancel?: () => boolean | void, totalBytes?: number) => boolean | void;
   readonly onImportError?: (message: string) => void;
   readonly onUploadProgress?: (sent: number, total: number) => void;
 }

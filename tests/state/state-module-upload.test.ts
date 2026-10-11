@@ -118,6 +118,7 @@ function makeMockDeps(overrides: {
     appendToJournal: overrides.appendToJournal ?? (async (_uid, moduleId, ids) => {
       state.journalAppends.push({ moduleId, ids });
     }),
+    discardCancelled: async () => {},
     syncWorldBook: overrides.syncWorldBook ?? (async (env, userId) => {
       state.syncWorldBookCalls.push({ envId: env.id, userId });
       return null;
@@ -499,5 +500,61 @@ describe('createModuleUploader: progress emission', () => {
     const last = state.progressFrames[state.progressFrames.length - 1]!;
     expect(last.frame.phase).toBe('uploading_assets');
     expect(last.userId).toBe('u-1');
+  });
+});
+
+
+describe('module import cancellation', () => {
+  test('stops between asset batches, waits for journaling, and removes every uploaded image', async () => {
+    const abort = new AbortController();
+    const body = defaultModuleBody();
+    const names = Array.from({ length: 65 }, (_, i) => `asset-${i}`);
+    body.assets = names.map(name => [name, '', '']);
+    const { deps, state } = makeMockDeps({ parse: { success: true, data: body } });
+    let batches = 0;
+    let cleanup: readonly string[] = [];
+    let saved = false;
+    const uploader = createModuleUploader({ ...deps,
+      uploadImageMany: async items => { batches++; abort.abort(); return items.map((_, i) => ({ id: `image-${i}` })); },
+      discardCancelled: async (uid, moduleId, ids) => {
+        expect(uid).toBe('user'); expect(moduleId).toBe('uuid-1');
+        expect(state.journalAppends.flatMap(item => item.ids)).toEqual([...ids]);
+        cleanup = ids;
+      },
+    });
+    await expect(uploader.uploadSource({ module: body, assetCount: 65,
+      readAsset: async () => Uint8Array.of(1),
+    }, 'module.risum', 'user', { signal: abort.signal, beginSave: () => { saved = true; } })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(batches).toBe(1); expect(cleanup).toHaveLength(64); expect(saved).toBe(false);
+    expect(state.syncWorldBookCalls).toHaveLength(0); expect(state.writeEnvelopeCalls).toHaveLength(0);
+  });
+
+  test('stops a sequential source before sending a partially read batch', async () => {
+    const abort = new AbortController();
+    const body = defaultModuleBody(); body.assets = [['asset', '', '']];
+    const { deps, state } = makeMockDeps({ parse: { success: true, data: body } });
+    await expect(createModuleUploader(deps).uploadSource({ module: body, assetCount: 1,
+      readAsset: async () => { abort.abort(); return Uint8Array.of(1); },
+    }, 'module.risum', 'user', { signal: abort.signal, beginSave: () => {} })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(state.uploadManyCalls).toHaveLength(0); expect(state.writeEnvelopeCalls).toHaveLength(0);
+  });
+
+  test('removes an icon returned by an in-flight upload before cancellation', async () => {
+    const abort = new AbortController(); let cleaned: readonly string[] = [];
+    const { deps, state } = makeMockDeps({ decoded: { module: {}, assets: [], icon: { data: Uint8Array.of(1), ext: 'png' } },
+      uploadOne: async () => { abort.abort(); return { id: 'icon' }; },
+    });
+    const uploader = createModuleUploader({ ...deps, discardCancelled: async (_uid, _id, ids) => { cleaned = ids; } });
+    await expect(uploader.upload(Uint8Array.of(1), 'module.risum', 'user', { signal: abort.signal, beginSave: () => {} })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cleaned).toEqual(['icon']); expect(state.writeEnvelopeCalls).toHaveLength(0);
+  });
+
+  test('reports cancellation cleanup failures instead of claiming success', async () => {
+    const abort = new AbortController();
+    const { deps } = makeMockDeps();
+    const uploader = createModuleUploader({ ...deps, discardCancelled: async () => { throw new Error('cleanup failed'); } });
+    await expect(uploader.uploadSource({ module: {}, assetCount: 0, readAsset: async () => undefined,
+      finish: async () => { abort.abort(); return 0; },
+    }, 'module.risum', 'user', { signal: abort.signal, beginSave: () => {} })).rejects.toThrow('cleanup failed');
   });
 });

@@ -100,7 +100,7 @@ import {
 import { pushViewerData, type ViewerPushDeps } from './state/viewer-push.js';
 import { createViewerAssembly } from './state/viewer-assembly.js';
 import { createLorebookImporter } from './state/lorebook-import.js';
-import { createModuleUploader } from './state/module-upload.js';
+import { createModuleUploader, type ModuleUploadControl } from './state/module-upload.js';
 import { createOrphanOrchestrator } from './state/orphan-orchestrator.js';
 import type { Handler, HandlerCallCtx, HandlerRegistry } from './handlers/types.js';
 import { createDisplayWritebackHandlers } from './handlers/display-writeback.js';
@@ -1253,7 +1253,7 @@ const moduleUploader = createModuleUploader({
   decodeCharx: decodeModuleCharx,
   parseSchema: (data) => risuModuleSchema.safeParse(data) as never,
   newUuid: () => crypto.randomUUID(),
-  requestConsent: (opts, userId) => requestConsent(opts, userId),
+  requestConsent: (opts, userId, signal) => requestConsent(opts, userId, signal),
   pairAssets: pairModuleAssetsForUpload,
   guessMimeType,
   sniffImageMime,
@@ -1262,6 +1262,11 @@ const moduleUploader = createModuleUploader({
   uploadImageMany: (items, opts) => spindle.images.uploadMany(items as never, opts),
   appendToJournal: (uid, moduleId, ids) =>
     appendModuleImageIdsToJournal(journalStorage(), uid, moduleId, ids),
+  discardCancelled: async (uid, moduleId, ids) => {
+    const result = await deleteImageIds(ids, uid, 'cancelled module import');
+    if (result.failed > 0) throw new Error(`Import cancelled, but ${result.failed} temporary image(s) could not be removed. Retry orphan cleanup.`);
+    await clearModuleImageJournal(journalStorage(), uid, moduleId);
+  },
   syncWorldBook: (env, uid) => syncModuleWorldBook(env, uid),
   writeEnvelope: async (uid, env) => { await writeModuleEnvelope(moduleStorage(), uid, env); },
   emitProgress: (frame, userId) => send(frame, userId),
@@ -1274,10 +1279,11 @@ async function processModuleUpload(
   bytesIn: Uint8Array,
   fileName: string,
   userId: string,
+  control: ModuleUploadControl,
 ): Promise<{ envelope: ModuleEnvelope }> {
   assetUploadsInFlight++;
   try {
-    return await moduleUploader.upload(bytesIn, fileName, userId);
+    return await moduleUploader.upload(bytesIn, fileName, userId, control);
   } finally {
     assetUploadsInFlight--;
   }
@@ -1287,12 +1293,13 @@ async function processRisumUpload(
   uploadId: string,
   fileName: string,
   userId: string,
+  control: ModuleUploadControl,
 ): Promise<{ envelope: ModuleEnvelope }> {
   assetUploadsInFlight++;
   try {
-    const source = await openRisumUpload((offset) => readUploadChunk(uploadId, offset, userId));
+    const source = await openRisumUpload(async (offset) => { control.signal.throwIfAborted(); return readUploadChunk(uploadId, offset, userId); });
     log.info(`processModuleUpload: file=${fileName} bytes=${source.size} userId=${userId} mode=chunked`);
-    return await moduleUploader.uploadSource(source, fileName, userId);
+    return await moduleUploader.uploadSource(source, fileName, userId, control);
   } finally {
     assetUploadsInFlight--;
   }
