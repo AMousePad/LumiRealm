@@ -77,7 +77,7 @@ export interface DisplaySnapshot {
   readonly compiledLibraries: readonly CompiledTriggerEntry[];
 }
 
-export type DisplayResolutionMode = 'off' | 'shadow' | 'on';
+export type DisplayResolutionMode = 'off' | 'on';
 
 const snapshots = new Map<string, DisplaySnapshot>();
 let mode: DisplayResolutionMode = 'on';
@@ -160,5 +160,6 @@ export function getDisplayResolutionMode(): DisplayResolutionMode {
 }
 
 export function setDisplayResolutionMode(next: DisplayResolutionMode): void {
+  if (next !== 'on' && next !== 'off') throw new TypeError(`Unsupported display resolution mode: ${next}`);
   mode = next;
 }

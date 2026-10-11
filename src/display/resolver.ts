@@ -20,7 +20,6 @@ import {
 import { makeSafeLogger } from '../util/safe-log.js';
 import {
   getDisplaySnapshot,
-  getDisplayResolutionMode,
   isDisplayResolutionReady,
   waitForSnapshot,
   type DisplaySnapshot,
@@ -105,85 +104,6 @@ function evalTemplate(
   return runPipeline({
     ...buildInput(snap, text, context), visualize: false, rmVar: false, reparseMacroResults: false,
   }, { recorder, resolveLeaf: deferDisplayAssets });
-}
-
-async function fetchBackendBody(
-  chatId: string,
-  messageId: string | undefined,
-  role: string | undefined,
-  content: string,
-): Promise<string> {
-  try {
-    const res = await fetch(`/api/v1/chats/${encodeURIComponent(chatId)}/display-preprocess`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ items: [{ messageId, role, rawContent: content }] }),
-    });
-    if (!res.ok) return content;
-    const json = (await res.json()) as { items?: Array<{ content?: unknown }> };
-    const c = json.items?.[0]?.content;
-    return typeof c === 'string' ? c : content;
-  } catch {
-    return content;
-  }
-}
-
-async function fetchBackendTemplates(
-  templates: Record<string, string>,
-  context: SpindleDisplayContext,
-): Promise<Record<string, string>> {
-  try {
-    const res = await fetch('/api/v1/macros/resolve-batch', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        templates,
-        chat_id: context.chatId,
-        character_id: context.characterId,
-        persona_id: context.personaId,
-      }),
-    });
-    if (!res.ok) return {};
-    const json = (await res.json()) as { resolved?: Record<string, string> };
-    return json.resolved ?? {};
-  } catch {
-    return {};
-  }
-}
-
-async function fetchBackendApply(args: SpindleDisplayScriptsArgs): Promise<string | null> {
-  const ctx = args.context;
-  try {
-    const res = await fetch('/api/v1/regex-scripts/apply', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        content: args.content,
-        scripts: args.scripts,
-        resolved_find_patterns: args.resolvedFindPatterns,
-        resolved_replacements: args.resolvedReplacements,
-        dynamic_macros: ctx.dynamicMacros,
-        context: {
-          chat_id: ctx.chatId,
-          character_id: ctx.characterId,
-          persona_id: ctx.personaId,
-          is_user: ctx.isUser,
-          depth: ctx.depth,
-          ...(ctx.messageId ? { message_id: ctx.messageId } : {}),
-          ...(typeof ctx.messageIndex === 'number' ? { message_index: ctx.messageIndex } : {}),
-          ...(ctx.role ? { role: ctx.role } : {}),
-        },
-      }),
-    });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { result?: unknown };
-    return typeof json.result === 'string' ? json.result : null;
-  } catch {
-    return null;
-  }
 }
 
 const warnedActionBindings = new Set<string>();
@@ -492,27 +412,6 @@ export function createDisplayResolver(
 
       log.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? '?'} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
 
-      const mode = getDisplayResolutionMode();
-      if (mode === 'shadow') {
-        const beContent = await fetchBackendBody(
-          chatId,
-          args.context.messageId,
-          args.context.role,
-          args.content,
-        );
-        if (beContent !== feContent) {
-          log.warn(
-            `[shadow] body mismatch chat=${chatId} msg=${args.context.messageId ?? '?'} ` +
-              `feLen=${feContent.length} beLen=${beContent.length} ` +
-              `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` +
-              `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`,
-          );
-        } else {
-          log.trace(`[shadow] body match chat=${chatId} msg=${args.context.messageId ?? '?'} len=${feContent.length}`);
-        }
-        return { content: beContent };
-      }
-
       return {
         content: feContent,
         ...(processingState !== undefined ? { processingState } : {}),
@@ -541,22 +440,6 @@ export function createDisplayResolver(
         return null;
       }
 
-      const mode = getDisplayResolutionMode();
-      if (mode === 'shadow') {
-        const be = await fetchBackendTemplates(args.templates, args.context);
-        for (const key of Object.keys(args.templates)) {
-          const beVal = be[key];
-          if (typeof beVal === 'string' && beVal !== resolved[key]) {
-            log.warn(
-              `[shadow] template mismatch chat=${chatId} key=${key} ` +
-                `fe=${JSON.stringify((resolved[key] ?? '').slice(0, 120))} ` +
-                `be=${JSON.stringify(beVal.slice(0, 120))}`,
-            );
-          }
-        }
-        return { resolved: { ...resolved, ...be } };
-      }
-
       return { resolved, touchedVars, cacheable };
     },
     async applyScripts(args: SpindleDisplayScriptsArgs): Promise<SpindleDisplayResolveResult | null> {
@@ -579,25 +462,6 @@ export function createDisplayResolver(
       }
 
       log.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? '?'} placement=${args.context.isUser ? 'user' : 'ai'} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
-
-      const mode = getDisplayResolutionMode();
-      if (mode === 'shadow') {
-        const beContent = await fetchBackendApply(args);
-        if (beContent === null) {
-          return { content: stripDisplayStyleImports(feContent), touchedVars: [...recorder.touched], cacheable: !recorder.volatile };
-        }
-        if (beContent !== feContent) {
-          log.warn(
-            `[shadow] apply mismatch chat=${chatId} msg=${args.context.messageId ?? '?'} ` +
-              `feLen=${feContent.length} beLen=${beContent.length} ` +
-              `fe[0..160]=${JSON.stringify(feContent.slice(0, 160))} ` +
-              `be[0..160]=${JSON.stringify(beContent.slice(0, 160))}`,
-          );
-        } else {
-          log.trace(`[shadow] apply match chat=${chatId} msg=${args.context.messageId ?? '?'} len=${feContent.length}`);
-        }
-        return { content: stripDisplayStyleImports(beContent) };
-      }
 
       return {
         content: stripDisplayStyleImports(feContent),
