@@ -42214,6 +42214,68 @@ var styles_default2 = `.lr-realm-launcher {\r
 }\r
 \r
 .lr-realm-grid.lr-realm-loading { filter: blur(4px); }\r
+.lr-realm-view {\r
+  border: 1px solid var(--lumiverse-border, #2a2a2a);\r
+  border-radius: var(--lumiverse-radius, 8px);\r
+  padding: 6px 10px;\r
+  background: var(--lumiverse-bg, #1c1f24);\r
+  color: inherit;\r
+  font: inherit;\r
+  font-size: 12px;\r
+}\r
+.lr-realm-grid[data-view="grid"] {\r
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));\r
+}\r
+.lr-realm-grid[data-view="grid"] .lr-realm-card {\r
+  position: relative;\r
+  display: block;\r
+  padding: 0;\r
+  min-width: 0;\r
+  aspect-ratio: 2 / 3;\r
+  overflow: hidden;\r
+}\r
+.lr-realm-grid[data-view="grid"] :is(.lr-realm-thumb, .lr-realm-thumb-fallback) {\r
+  position: absolute;\r
+  inset: 0;\r
+  width: 100%;\r
+  height: 100%;\r
+  border-radius: 0;\r
+}\r
+.lr-realm-grid[data-view="grid"] .lr-realm-card-body {\r
+  position: absolute;\r
+  inset: auto 0 0;\r
+  height: 33.333%;\r
+  box-sizing: border-box;\r
+  padding: 8px 10px;\r
+  gap: 3px;\r
+  overflow: hidden;\r
+  color: #fff;\r
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.92));\r
+}\r
+.lr-realm-grid[data-view="grid"] .lr-realm-card-name { flex-shrink: 0; }\r
+.lr-realm-grid[data-view="grid"] .lr-realm-card-desc { color: #e6e6e6; min-height: 0; }\r
+.lr-realm-grid[data-view="grid"] .lr-realm-tags {\r
+  flex-wrap: nowrap;\r
+  overflow: hidden;\r
+  flex-shrink: 0;\r
+}\r
+.lr-realm-grid[data-view="grid"] .lr-realm-tag {\r
+  flex: 0 0 auto;\r
+  max-width: 100%;\r
+  box-sizing: border-box;\r
+  white-space: nowrap;\r
+  overflow: hidden;\r
+  text-overflow: ellipsis;\r
+  color: #c9ddff;\r
+  background: rgba(112, 157, 255, 0.18);\r
+}\r
+.lr-realm-grid[data-view="grid"] .lr-realm-card-stats {\r
+  flex-shrink: 0;\r
+  color: #ccc;\r
+  white-space: nowrap;\r
+  overflow: hidden;\r
+  text-overflow: ellipsis;\r
+}\r
 .lr-realm-feedback {\r
   display: flex;\r
   align-items: center;\r
@@ -42719,9 +42781,13 @@ function computeModalMaxHeight() {
 }
 function setupRealmModal(deps) {
   const { ctx, sendToBackend, log } = deps;
+  if (!ctx.settings)
+    throw new Error("RisuRealm requires the Lumiverse settings API");
+  const settings = ctx.settings;
   const cleanups = [];
   cleanups.push(ctx.dom.addStyle(REALM_STYLES));
   const state = {
+    viewMode: "default",
     search: "",
     page: 0,
     sort: "recommended",
@@ -42743,6 +42809,10 @@ function setupRealmModal(deps) {
   let toastEl = null;
   let popupOverlay = null;
   let promptOverlay = null;
+  let viewChanged = false;
+  let savingView = false;
+  let viewError = "";
+  let destroyed = false;
   const launchBtn = document.createElement("button");
   launchBtn.type = "button";
   launchBtn.className = "lr-realm-launcher";
@@ -42862,6 +42932,31 @@ function setupRealmModal(deps) {
       doSearch();
     });
     toolbar.appendChild(nsfwBtn);
+    const viewSelect = document.createElement("select");
+    viewSelect.className = "lr-realm-view";
+    viewSelect.setAttribute("aria-label", "View mode");
+    for (const [value, label] of [["default", "Default view"], ["grid", "Grid view"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      viewSelect.appendChild(option);
+    }
+    viewSelect.addEventListener("change", () => {
+      state.viewMode = viewSelect.value === "grid" ? "grid" : "default";
+      viewChanged = true;
+      savingView = true;
+      viewError = "";
+      render();
+      settings.set("realm:view", state.viewMode).catch((error) => {
+        log.error("realm: could not save view preference", error);
+        viewError = "Could not save the view preference.";
+      }).finally(() => {
+        savingView = false;
+        if (!destroyed)
+          render();
+      });
+    });
+    toolbar.appendChild(viewSelect);
     const importBtn = document.createElement("button");
     importBtn.type = "button";
     importBtn.className = "lr-realm-secondary";
@@ -42897,7 +42992,8 @@ function setupRealmModal(deps) {
       resultsEl: results,
       statusEl: status,
       pagerEl: pager,
-      renderedCards: null
+      renderedCards: null,
+      viewSelectEl: viewSelect
     };
     modalHandle.onDismiss(() => {
       log.info("realm: modal dismissed");
@@ -42940,6 +43036,9 @@ function setupRealmModal(deps) {
     additionalEl.hidden = true;
     additionalEl.textContent = "";
     resultsEl.classList.toggle("lr-realm-loading", state.loading);
+    resultsEl.dataset.view = state.viewMode;
+    surface.viewSelectEl.value = state.viewMode;
+    surface.viewSelectEl.disabled = savingView;
     resultsEl.setAttribute("aria-busy", String(state.loading));
     resultsEl.inert = state.loading;
     if (surface.renderedCards !== state.cards) {
@@ -42947,7 +43046,7 @@ function setupRealmModal(deps) {
       surface.renderedCards = state.cards;
     }
     statusEl.replaceChildren();
-    statusEl.classList.toggle("error", state.errorText.length > 0);
+    statusEl.classList.toggle("error", state.errorText.length > 0 || viewError.length > 0);
     if (state.loading) {
       const spinner = document.createElement("span");
       spinner.className = "lr-realm-spinner";
@@ -42958,6 +43057,8 @@ function setupRealmModal(deps) {
       statusEl.textContent = state.errorText + (state.cards.length > 0 ? " Previous results are still shown." : "");
     } else if (state.cards.length === 0) {
       statusEl.textContent = "No characters found.";
+    } else if (viewError) {
+      statusEl.textContent = viewError;
     }
     pagerEl.hidden = state.sort === "random" || state.sort === "recommended";
     const pagingBusy = state.loading || searchDebounceTimer !== undefined;
@@ -43412,6 +43513,7 @@ function setupRealmModal(deps) {
   cleanups.push(subscribeTask(() => render()));
   cleanups.push(() => document.removeEventListener("keydown", onKeyDownCapture, true));
   function destroy() {
+    destroyed = true;
     if (searchDebounceTimer)
       clearTimeout(searchDebounceTimer);
     if (toastTimer)
@@ -43423,6 +43525,19 @@ function setupRealmModal(deps) {
       } catch {}
     }
   }
+  settings.get("realm:view").then((view) => {
+    if (destroyed || viewChanged)
+      return;
+    if (view === "default" || view === "grid") {
+      state.viewMode = view;
+      render();
+    }
+  }).catch((error) => {
+    log.error("realm: could not load view preference", error);
+    viewError = "Could not load the saved view preference.";
+    if (!destroyed)
+      render();
+  });
   return {
     open,
     close,

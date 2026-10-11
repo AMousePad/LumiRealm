@@ -14,13 +14,15 @@ for (const engine of [chromium, firefox]) {
       page.on('pageerror', error => errors.push(error.message));
       await page.route('http://realm-browser.test/**', route => route.fulfill({
         contentType: route.request().url().endsWith('.js') ? 'text/javascript' : 'text/html',
-        body: route.request().url().endsWith('.js') ? script : '<!doctype html><html><body style="margin:0;background:#171717"></body></html>',
+        body: route.request().url().endsWith('.js') ? script : '<!doctype html><html><body style="margin:0;background:#171717;color:#eee;font-family:system-ui,sans-serif"></body></html>',
       }));
       await page.goto('http://realm-browser.test/');
+      await page.route('https://sv.risuai.xyz/resource/**', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#557bc5"/><stop offset="1" stop-color="#c89d65"/></linearGradient></defs><rect width="400" height="600" fill="url(#g)"/><circle cx="200" cy="220" r="110" fill="#d9dfed"/></svg>' }));
       await page.addScriptTag({ type: 'module', content: `
         import { setupRealmModal } from '/realm.js';
         const sent = window.sent = [];
         const ctx = {
+          settings: { get: async () => localStorage.getItem('realm:view'), set: async (_key, value) => { localStorage.setItem('realm:view', value); } },
           dom: { addStyle(css) { const style = document.createElement('style'); style.textContent = css; document.head.append(style); return () => style.remove(); } },
           ui: { showModal() {
             const box = document.createElement('div');
@@ -33,7 +35,7 @@ for (const engine of [chromium, firefox]) {
         };
         const realm = window.realm = setupRealmModal({ ctx, mountTarget: document.body, sendToBackend: msg => sent.push(msg), log: { info() {}, warn() {}, error() {} } });
         window.reply = (prefix, count = 40) => realm.handleBackendMessage({ type:'realm_search_result', requestId: sent.at(-1).requestId, ok:true,
-          cards: Array.from({ length: count }, (_, i) => ({ id: prefix+i, name: prefix+i, desc:'A description for this example card.', img:'', tags:['First tag','Another tag','Longer tag name','Fourth tag','Last tag'], download:1, hot:0, hasLore:false, hasEmotion:false, hasAsset:false, type:'character', viewScreen:'none', license:'' })) });
+          cards: Array.from({ length: count }, (_, i) => ({ id: prefix+i, name: prefix+i, desc:'A description for this example card.', img:i === 1 ? '' : 'example.svg', tags:['First tag','Another tag','Longer tag name','Fourth tag','Last tag'], download:1, hot:0, hasLore:false, hasEmotion:false, hasAsset:false, type:'character', viewScreen:'none', license:'' })) });
         realm.open(); window.reply('Initial');
       ` });
       await page.getByRole('button', { name: 'Recent', exact: true }).click();
@@ -57,8 +59,33 @@ for (const engine of [chromium, firefox]) {
       assert.equal(await page.locator('#host-scroll').evaluate(el => el.scrollTop), before);
       await page.emulateMedia({ reducedMotion: 'reduce' });
       assert.equal(await page.locator('.lr-realm-grid').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
+      const count = await page.evaluate(() => (window as any).sent.length);
+      await page.getByLabel('View mode').selectOption('grid');
+      assert.equal(await page.evaluate(() => (window as any).sent.length), count);
+      await page.locator('.lr-realm-card').first().scrollIntoViewIfNeeded();
+      const layout = await page.locator('.lr-realm-card').first().evaluate(el => {
+        const rect = el.getBoundingClientRect();
+        const image = el.querySelector('img')!.getBoundingClientRect();
+        const text = el.querySelector('.lr-realm-card-body')!.getBoundingClientRect();
+        const tags = el.querySelector('.lr-realm-tags')!;
+        return { ratio: text.height / rect.height, imageRatio: image.height / rect.height, bottom: Math.abs(text.bottom - rect.bottom), tagRows: new Set(Array.from(tags.children).map(tag => tag.getBoundingClientRect().top)).size, overflow: getComputedStyle(tags).overflow };
+      });
+      assert(Math.abs(layout.ratio - 1 / 3) < 0.01 && layout.bottom < 2);
+      assert(layout.imageRatio > 0.98);
+      assert.equal(layout.tagRows, 1);
+      assert.equal(layout.overflow, 'hidden');
+      assert.equal(await page.locator('.lr-realm-card').nth(1).locator('.lr-realm-thumb-fallback').count(), 1);
+      await page.locator('#host-scroll').evaluate(el => { el.scrollTop = 0; });
+      await page.waitForFunction(() => (document.querySelector('.lr-realm-card img') as HTMLImageElement)?.complete);
+      await page.screenshot({ path: `${process.env.TEMP}/lumirealm-grid-${engine.name()}-${width}.png` });
+      await page.reload();
+      await page.addScriptTag({ type: 'module', content: `
+        import { setupRealmModal } from '/realm.js';
+        document.body.dataset.savedView = localStorage.getItem('realm:view');
+      ` });
+      assert.equal(await page.locator('body').getAttribute('data-saved-view'), 'grid');
       assert.deepEqual(errors, []);
-      console.log(`${engine.name()} ${width}px: retained results, next/previous scroll, 0.3s blur, and reduced motion pass`);
+      console.log(`${engine.name()} ${width}px: scroll retention, blur, reduced motion, grid layout, single tag row, and saved preference pass`);
       await page.close();
     }
   } finally { await browser.close(); }
