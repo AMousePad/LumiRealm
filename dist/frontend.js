@@ -29035,6 +29035,10 @@ var styles_default = `.risu-compat-drawer {\r
 }\r
 .lr-import-minimize { align-self: flex-end; }\r
 .lr-import-minimized { align-items: flex-end; justify-content: flex-end; }\r
+.lr-import-minimized .lr-import-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }\r
+.lr-import-minimized .lr-import-card .lr-import-minimize { grid-column: 2; grid-row: 1; margin-top: 0; align-self: center; }\r
+.lr-import-minimized .lr-import-title { grid-column: 1; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\r
+.lr-import-minimized .lr-import-progress { grid-column: 1 / -1; }\r
 .lr-import-minimized .lr-import-card > :not(.lr-import-title):not(.lr-import-progress):not(.lr-import-minimize) { display: none; }\r
 .lr-busy::before {\r
   content: '';\r
