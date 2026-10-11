@@ -43192,6 +43192,8 @@ function setupRealmModal(deps) {
       viewError = "";
       render();
       settings.set("realm:view", state.viewMode).catch((error) => {
+        if (destroyed)
+          return;
         log.error("realm: could not save view preference", error);
         viewError = "Could not save the view preference.";
       }).finally(() => {
@@ -43811,6 +43813,8 @@ function setupRealmModal(deps) {
       render();
     }
   }).catch((error) => {
+    if (destroyed)
+      return;
     log.error("realm: could not load view preference", error);
     viewError = "Could not load the saved view preference.";
     if (!destroyed)

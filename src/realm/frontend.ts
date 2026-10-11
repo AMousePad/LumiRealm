@@ -278,6 +278,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
       viewError = '';
       render();
       void settings.set('realm:view', state.viewMode).catch(error => {
+        if (destroyed) return;
         log.error('realm: could not save view preference', error);
         viewError = 'Could not save the view preference.';
       }).finally(() => { savingView = false; if (!destroyed) render(); });
@@ -921,6 +922,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
     if (destroyed || viewChanged) return;
     if (view === 'default' || view === 'grid') { state.viewMode = view; render(); }
   }).catch(error => {
+    if (destroyed) return;
     log.error('realm: could not load view preference', error);
     viewError = 'Could not load the saved view preference.';
     if (!destroyed) render();
