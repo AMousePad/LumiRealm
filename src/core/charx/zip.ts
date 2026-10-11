@@ -1,5 +1,6 @@
 import { inflateRawSync } from "node:zlib";
 import { TranslationError } from "../errors.js";
+import { findJpegZipBoundary } from './polyglot.js';
 
 
 export interface ZipEntry {
@@ -43,15 +44,21 @@ function resolveCentralDirectory(
   let cdCount = readU16(bytes, eocdOff + 10);
   // ZIP64 locator sits at eocdOff - 20.
   const locOff = eocdOff - 20;
+  let cdEnd = eocdOff;
   if (locOff >= 0 && readU32(bytes, locOff) === SIG_EOCD64_LOCATOR) {
-    const eocd64Off = Number(readU64(bytes, locOff + 8));
+    let eocd64Off = Number(readU64(bytes, locOff + 8));
+    if (readU32(bytes, eocd64Off) !== SIG_EOCD64) {
+      const prefix = findJpegZipBoundary(bytes);
+      if (prefix > 0) eocd64Off += prefix;
+    }
     if (eocd64Off >= 0 && eocd64Off + 56 <= bytes.length && readU32(bytes, eocd64Off) === SIG_EOCD64) {
+      cdEnd = eocd64Off;
       cdCount = Number(readU64(bytes, eocd64Off + 32));
       cdSize = Number(readU64(bytes, eocd64Off + 40));
       storedCdOffset = Number(readU64(bytes, eocd64Off + 48));
     }
   }
-  const realCdOffset = eocdOff - cdSize;
+  const realCdOffset = cdEnd - cdSize;
   const prefixDelta = realCdOffset - storedCdOffset;
   return { cdOffset: realCdOffset, cdSize, cdCount, prefixDelta };
 }
