@@ -42122,7 +42122,7 @@ div:has(> .lr-realm-modal-root) {\r
 .lr-realm-root {\r
   display: flex;\r
   flex-direction: column;\r
-  gap: 12px;\r
+  gap: 6px;\r
   position: relative;\r
   width: 100%;\r
   flex: 1;\r
@@ -42132,11 +42132,23 @@ div:has(> .lr-realm-modal-root) {\r
 }\r
 \r
 .lr-realm-toolbar {\r
+  position: relative;\r
+  z-index: 2;\r
   display: flex;\r
   align-items: center;\r
   gap: 10px;\r
   flex-wrap: wrap;\r
   flex-shrink: 0;\r
+}\r
+.lr-realm-toolbar::after {\r
+  content: '';\r
+  position: absolute;\r
+  top: 100%;\r
+  left: 0;\r
+  right: 0;\r
+  height: 14px;\r
+  background: linear-gradient(to bottom, var(--lumiverse-bg, #1c1f24), transparent);\r
+  pointer-events: none;\r
 }\r
 \r
 .lr-realm-search {\r
@@ -42315,6 +42327,8 @@ div:has(> .lr-realm-modal-root) {\r
   text-overflow: ellipsis;\r
 }\r
 .lr-realm-feedback {\r
+  position: relative;\r
+  z-index: 2;\r
   display: flex;\r
   align-items: center;\r
   gap: 8px;\r
@@ -42323,6 +42337,7 @@ div:has(> .lr-realm-modal-root) {\r
   font-size: 13px;\r
   color: var(--lumiverse-text-muted, #8b8b8b);\r
 }\r
+.lr-realm-feedback:empty { display: none; }\r
 .lr-realm-feedback.error { color: #ff8a8a; }\r
 @media (prefers-reduced-motion: reduce) {\r
   .lr-realm-grid { transition: none; }\r

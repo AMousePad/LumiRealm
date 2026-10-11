@@ -91,6 +91,10 @@ for (const engine of [chromium, firefox]) {
       assert.equal(scrollbar.gutter, 'stable');
       assert.equal(scrollbar.gap, '6px');
       const resultsBefore = await page.locator('.lr-realm-body').boundingBox();
+      assert(toolbarBefore && resultsBefore && resultsBefore.y - toolbarBefore.y - toolbarBefore.height <= 8, 'empty status must not reserve space below the toolbar');
+      assert.equal(await page.locator('.lr-realm-feedback').evaluate(el => getComputedStyle(el).display), 'none');
+      const fade = await page.locator('.lr-realm-toolbar').evaluate(el => getComputedStyle(el, '::after').backgroundImage);
+      assert(fade.includes('linear-gradient') && fade.includes('rgba(0, 0, 0, 0)'), 'toolbar edge must fade to transparent');
       assert(pagerBefore && pagerBefore.width < 150 && pagerBefore.height <= 42, 'pagination must be a compact pill');
       assert(resultsBefore && pagerBefore.y < resultsBefore.y + resultsBefore.height, 'pagination must float over the results');
       assert.equal(await page.getByRole('spinbutton', { name: 'Page number', exact: true }).evaluate(el => getComputedStyle(el).appearance), 'textfield');
@@ -103,6 +107,7 @@ for (const engine of [chromium, firefox]) {
       assert(before > 100, 'fixture must exercise a genuinely scrolled modal');
       await page.getByTitle('Next page', { exact: true }).click();
       await page.waitForTimeout(150);
+      assert(await page.locator('.lr-realm-feedback').isVisible(), 'loading status must remain visible');
       const blur = await page.locator('.lr-realm-grid').evaluate(el => parseFloat(getComputedStyle(el).filter.slice(5)));
       assert(blur > 0 && blur < 4, `blur should transition over 0.3 seconds: ${blur}`);
       assert.equal(await page.locator('.lr-realm-body').evaluate(el => el.scrollTop), before);
