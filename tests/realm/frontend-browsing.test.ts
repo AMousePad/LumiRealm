@@ -163,3 +163,32 @@ test('preference save failure is visible and leaves the view selector usable', a
   expect(select.disabled).toBe(false);
   expect(root.querySelector('.lr-realm-feedback')!.textContent).toContain('Could not save');
 });
+
+test('manual page entry uses one-based numbering and preserves scroll', () => {
+  button('Recent').click();
+  reply([card]);
+  const input = root.querySelector('.lr-realm-pager-page') as HTMLInputElement;
+  const body = root.querySelector('.lr-realm-body')!;
+  body.scrollTop = 200;
+  input.value = '7';
+  input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }) as unknown as Event);
+  expect(sent.at(-1)).toMatchObject({ page: 6 });
+  expect(input.disabled).toBe(true);
+  reply([card]);
+  expect(input.value).toBe('7');
+  expect(body.scrollTop).toBe(200);
+  const count = sent.length;
+  input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }) as unknown as Event);
+  expect(sent).toHaveLength(count);
+});
+
+test.each(['', '0', '-1', '1.5', '9007199254740992'])('rejects invalid page input %s', value => {
+  button('Recent').click();
+  reply([card]);
+  const input = root.querySelector('.lr-realm-pager-page') as HTMLInputElement;
+  input.value = value;
+  const count = sent.length;
+  input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }) as unknown as Event);
+  expect(sent).toHaveLength(count);
+  expect(input.validationMessage).not.toBe('');
+});

@@ -355,7 +355,14 @@
 }
 
 .lr-realm-pager-page {
-  min-width: 36px;
+  width: 72px;
+  box-sizing: border-box;
+  padding: 8px 4px;
+  border: 1px solid var(--lumiverse-border, #2a2a2a);
+  border-radius: var(--lumiverse-radius, 8px);
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04));
+  color: inherit;
+  font: inherit;
   text-align: center;
   font-weight: 600;
 }

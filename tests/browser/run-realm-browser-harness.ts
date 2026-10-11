@@ -53,9 +53,14 @@ for (const engine of [chromium, firefox]) {
       await page.evaluate(() => (window as any).reply('Next'));
       assert.equal(await page.locator('#host-scroll').evaluate(el => el.scrollTop), before);
       assert.equal(await page.locator('.lr-realm-grid').evaluate(el => el === (window as any).previousGrid), true);
-      assert.equal(await page.locator('.lr-realm-pager-page').textContent(), '2');
+      assert.equal(await page.getByRole('spinbutton', { name: 'Page number', exact: true }).inputValue(), '2');
       await page.getByTitle('Previous page', { exact: true }).click();
       await page.evaluate(() => (window as any).reply('Previous'));
+      assert.equal(await page.locator('#host-scroll').evaluate(el => el.scrollTop), before);
+      await page.getByRole('spinbutton', { name: 'Page number', exact: true }).fill('7');
+      await page.getByRole('spinbutton', { name: 'Page number', exact: true }).press('Enter');
+      assert.equal(await page.evaluate(() => (window as any).sent.at(-1).page), 6);
+      await page.evaluate(() => (window as any).reply('Page7'));
       assert.equal(await page.locator('#host-scroll').evaluate(el => el.scrollTop), before);
       await page.emulateMedia({ reducedMotion: 'reduce' });
       assert.equal(await page.locator('.lr-realm-grid').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
@@ -85,7 +90,7 @@ for (const engine of [chromium, firefox]) {
       ` });
       assert.equal(await page.locator('body').getAttribute('data-saved-view'), 'grid');
       assert.deepEqual(errors, []);
-      console.log(`${engine.name()} ${width}px: scroll retention, blur, reduced motion, grid layout, single tag row, and saved preference pass`);
+      console.log(`${engine.name()} ${width}px: scroll retention, manual paging, blur, reduced motion, grid layout, single tag row, and saved preference pass`);
       await page.close();
     }
   } finally { await browser.close(); }

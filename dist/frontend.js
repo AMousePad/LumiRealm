@@ -42491,7 +42491,14 @@ var styles_default2 = `.lr-realm-launcher {\r
 }\r
 \r
 .lr-realm-pager-page {\r
-  min-width: 36px;\r
+  width: 72px;\r
+  box-sizing: border-box;\r
+  padding: 8px 4px;\r
+  border: 1px solid var(--lumiverse-border, #2a2a2a);\r
+  border-radius: var(--lumiverse-radius, 8px);\r
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04));\r
+  color: inherit;\r
+  font: inherit;\r
   text-align: center;\r
   font-weight: 600;\r
 }\r
@@ -43142,7 +43149,12 @@ function setupRealmModal(deps) {
     const pagingBusy = state.loading || searchDebounceTimer !== undefined;
     pagerEl.querySelector('[title="Previous page"]').disabled = pagingBusy || state.page === 0;
     pagerEl.querySelector('[title="Next page"]').disabled = pagingBusy || state.cards.length === 0;
-    pagerEl.querySelector(".lr-realm-pager-page").textContent = String(state.page + 1);
+    const pageInput = pagerEl.querySelector(".lr-realm-pager-page");
+    pageInput.disabled = pagingBusy;
+    if (document.activeElement !== pageInput || state.loading) {
+      pageInput.value = String(state.page + 1);
+      pageInput.setCustomValidity("");
+    }
     for (const [el, top] of scrollPositions)
       el.scrollTop = top;
     syncOverlays();
@@ -43255,10 +43267,34 @@ function setupRealmModal(deps) {
       }
     });
     pager.appendChild(prev);
-    const label = document.createElement("div");
-    label.className = "lr-realm-pager-page";
-    label.textContent = String(state.page + 1);
-    pager.appendChild(label);
+    const pageInput = document.createElement("input");
+    pageInput.type = "number";
+    pageInput.min = "1";
+    pageInput.max = String(Number.MAX_SAFE_INTEGER);
+    pageInput.step = "1";
+    pageInput.inputMode = "numeric";
+    pageInput.enterKeyHint = "go";
+    pageInput.className = "lr-realm-pager-page";
+    pageInput.setAttribute("aria-label", "Page number");
+    pageInput.title = "Page number (press Enter to go)";
+    pageInput.value = String(state.page + 1);
+    pageInput.addEventListener("input", () => pageInput.setCustomValidity(""));
+    pageInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter")
+        return;
+      event.preventDefault();
+      const page = pageInput.valueAsNumber;
+      if (!Number.isSafeInteger(page) || page < 1) {
+        pageInput.setCustomValidity("Enter a whole page number of 1 or greater.");
+        pageInput.reportValidity();
+        return;
+      }
+      if (state.loading || searchDebounceTimer !== undefined || page - 1 === state.page)
+        return;
+      state.page = page - 1;
+      doSearch();
+    });
+    pager.appendChild(pageInput);
     const next = document.createElement("button");
     next.type = "button";
     next.title = "Next page";
