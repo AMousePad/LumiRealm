@@ -25507,7 +25507,7 @@ var styles_default = `.risu-compat-drawer {\r
 \r
 .lr-ss-panel {\r
   position: fixed;\r
-  z-index: 9000;\r
+  z-index: 10005;\r
   display: none;\r
   flex-direction: column;\r
   min-width: 200px;\r

@@ -273,13 +273,21 @@ export function createModuleHandlers(deps: ModuleHandlerDeps): {
     },
     attach_module: async (msg, ctx) => {
       if (deps.blockedByRepair(ctx.userId, 'attach_module')) return;
-      const result = await deps.attachModuleToCharacter(msg.characterId, msg.moduleId, ctx.userId);
-      if (!result.ok) {
-        ctx.send({ type: 'error', message: `attach_module: ${result.reason ?? 'failed'}` }, ctx.userId);
-        return;
+      const operationId = crypto.randomUUID();
+      const title = 'Attach module';
+      deps.emitOperationProgress(ctx.userId, operationId, 'started', title, 'Installing module…', null);
+      try {
+        const result = await deps.attachModuleToCharacter(msg.characterId, msg.moduleId, ctx.userId);
+        if (!result.ok) throw new Error(result.reason ?? 'Attachment failed');
+        deps.emitOperationProgress(ctx.userId, operationId, 'progress', title, 'Refreshing module list…', null);
+        await deps.pushAttachedForCharacter(msg.characterId, ctx.userId);
+        await deps.pushModules(ctx.userId);
+        deps.emitOperationProgress(ctx.userId, operationId, 'done', title, 'Module attached', 1);
+      } catch (error) {
+        const message = deps.errMsg(error);
+        deps.emitOperationProgress(ctx.userId, operationId, 'error', title, '', null, message);
+        ctx.send({ type: 'error', message: `attach_module: ${message}` }, ctx.userId);
       }
-      await deps.pushAttachedForCharacter(msg.characterId, ctx.userId);
-      await deps.pushModules(ctx.userId);
     },
     detach_module: async (msg, ctx) => {
       if (deps.blockedByRepair(ctx.userId, 'detach_module')) return;
