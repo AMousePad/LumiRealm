@@ -3744,7 +3744,7 @@
   pointer-events: auto;
   max-height: calc(100dvh - 48px);
   overflow-y: auto;
-  background: var(--lumiverse-fill, #1c1f24);
+  background: var(--lumiverse-card-bg, #1c1f24);
   border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.1));
   border-radius: 10px;
   padding: 22px 24px;
