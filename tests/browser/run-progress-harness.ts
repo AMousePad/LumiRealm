@@ -63,6 +63,16 @@ for (const engine of [chromium, firefox]) {
       assert.equal(await progressCard.evaluate(el => getComputedStyle(el).backgroundImage), 'linear-gradient(165deg, rgb(28, 24, 38), rgb(20, 17, 30))');
       assert.equal(await page.locator('.lr-import-progress').isVisible(), true);
       assert.equal(await page.locator('.lr-import-message').isVisible(), false);
+      await page.locator('.lr-import-title').evaluate(el => { el.textContent = 'Importing ' + 'long module name '.repeat(12); });
+      const titleBox = await page.locator('.lr-import-title').boundingBox();
+      const expandBox = await page.getByRole('button', { name: 'Expand', exact: true }).boundingBox();
+      assert(titleBox && expandBox && titleBox.x + titleBox.width <= expandBox.x);
+      assert(titleBox && expandBox && Math.abs(titleBox.y + titleBox.height / 2 - expandBox.y - expandBox.height / 2) < 2, 'Expand must align with the title');
+      assert.deepEqual(await page.locator('.lr-import-title').evaluate(el => ({
+        overflow: getComputedStyle(el).textOverflow,
+        wrap: getComputedStyle(el).whiteSpace,
+        clipped: el.scrollWidth > el.clientWidth,
+      })), { overflow: 'ellipsis', wrap: 'nowrap', clipped: true });
       await page.getByRole('button', { name: 'Expand', exact: true }).click();
       assert.equal(await page.locator('.lr-import-message').isVisible(), true);
       const bounds = await page.locator('.lr-import-card').boundingBox();
