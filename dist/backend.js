@@ -5719,13 +5719,13 @@ var init_assets = __esm(() => {
     return `<div risu-ctrl="bgm___auto___${hit.src}" style="display:none;"></div>
 `;
   }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
-  register12("inlay", (ctx, args) => {
+  register12("inlay", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
     return `<img src="/api/v1/images/${id}"/>`;
   }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
-  register12("inlayed", (ctx, args) => {
+  register12("inlayed", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -5733,7 +5733,7 @@ var init_assets = __esm(() => {
 
 `;
   }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
-  register12("inlayeddata", (ctx, args) => {
+  register12("inlayeddata", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -5767,7 +5767,8 @@ var init_handlers = __esm(() => {
   init_metadata();
   init_assets();
 });
-// src/core/cbs/parser.ts
+
+// src/core/cbs/normalize.ts
 function normalizeMacroName(raw) {
   let out = "";
   for (let i = 0;i < raw.length; i++) {
@@ -5781,18 +5782,7 @@ function normalizeMacroName(raw) {
   }
   return out;
 }
-var OPAQUE_KINDS;
-var init_parser = __esm(() => {
-  OPAQUE_KINDS = new Set([
-    "pure",
-    "pure_display",
-    "ignore",
-    "escape",
-    "each",
-    "func",
-    "code"
-  ]);
-});
+
 // src/core/cbs/catalog/schema.ts
 function isComplete(entry) {
   if (entry.argShape === "UNCERTAIN")
@@ -5931,7 +5921,6 @@ function parseCatalog(raw) {
 }
 var init_loader = __esm(() => {
   init_schema();
-  init_parser();
 });
 
 // src/core/cbs/catalog/index.ts
@@ -5939,17 +5928,11 @@ var init_catalog = __esm(() => {
   init_schema();
   init_loader();
 });
-// src/core/cbs/runtime/mock.ts
-var init_mock = () => {};
-
 // src/core/cbs/runtime/index.ts
-var init_runtime = __esm(() => {
-  init_mock();
-});
+var init_runtime = () => {};
 
 // src/core/cbs/index.ts
 var init_cbs = __esm(() => {
-  init_parser();
   init_catalog();
   init_runtime();
 });
@@ -9422,81 +9405,23 @@ content#} form. Returns trimmed content if cond is not the empty string, 0, or -
 });
 
 // src/interpreter/evaluator/builtins.ts
-function parseUTCOffset(s) {
-  const m = /^UTC\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?$/i.exec(s.trim());
-  if (!m)
-    return null;
-  const sign = m[1] === "-" ? -1 : 1;
-  const h = parseInt(m[2], 10);
-  const mm = m[3] ? parseInt(m[3], 10) : 0;
-  return sign * (h + mm / 60);
-}
 function registerBuiltins(register) {
   register("bot", (ctx) => ctx.identity.charName, false);
   register("user", (ctx) => ctx.identity.userName, false);
   register("char", (ctx) => ctx.identity.charName, false);
   register("charname", (ctx) => ctx.identity.charName, false);
   register("notchar", (ctx) => ctx.identity.userName, false);
-  register("not_char", (ctx) => ctx.identity.userName, false);
-  register("newline", () => `
-`, false);
   register("nl", () => `
 `, false);
   register("n", () => `
 `, false);
   register("space", () => " ", false);
   register("noop", () => "", false);
-  register("//", () => "", false);
-  register("comment", () => "", false);
   register("note", () => "", false);
-  register("upper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
   register("uppercase", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
   register("toupper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
-  register("lower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
   register("lowercase", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
   register("tolower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
-  register("random", (ctx, a) => {
-    if (a.length === 0)
-      return String(Math.round(ctx.rng.random()));
-    const allNumeric = a.length <= 2 && a.every((x) => x.trim() !== "" && !isNaN(Number(x)));
-    if (allNumeric) {
-      const min = parseInt(a[0] ?? "", 10) || 0;
-      const max = parseInt(a[1] ?? "", 10) || 1;
-      if (max < min)
-        return String(min);
-      return String(Math.floor(ctx.rng.random() * (max - min + 1)) + min);
-    }
-    const idx = Math.floor(ctx.rng.random() * a.length);
-    return a[idx] ?? "";
-  }, false);
-  register("roll", (ctx, a) => {
-    const notation = a[0] ?? "1d6";
-    const match = /^(\d+)d(\d+)$/i.exec(notation);
-    if (!match)
-      return "0";
-    const count = Math.min(parseInt(match[1], 10), 100);
-    const sides = parseInt(match[2], 10);
-    if (sides < 1 || count < 1)
-      return "0";
-    let total = 0;
-    for (let i = 0;i < count; i++)
-      total += Math.floor(ctx.rng.random() * sides) + 1;
-    return String(total);
-  }, false);
-  register("time", (ctx, a) => {
-    const offset = a[0];
-    const now = new Date(ctx.clock.now());
-    if (offset) {
-      const parsed = parseUTCOffset(offset);
-      if (parsed !== null) {
-        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-        const shifted = new Date(utc + parsed * 3600000);
-        return shifted.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-      }
-    }
-    return now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  }, false);
-  register("jailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
   register("charjailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
 }
 
@@ -13570,7 +13495,7 @@ function isRisuPresetBytes(bytes, fileName = "") {
   }
   return false;
 }
-async function decodeRisuPreset(bytes, fileName = "") {
+async function decodeRisuPreset(bytes, _fileName = "") {
   if (bytes.length > 0 && bytes[0] === 123) {
     try {
       const text = new TextDecoder().decode(bytes);
@@ -16413,159 +16338,494 @@ function mapLoreBookWithStats(entries, opts) {
   };
 }
 
-// src/core/mappers/at-actions.ts
-var PHASE_EVENT_MAP = {
-  editinput: ["MESSAGE_SENT"],
-  editprocess: ["GENERATION_STARTED"],
-  editoutput: ["GENERATION_ENDED"],
-  editdisplay: ["CHARACTER_MESSAGE_RENDERED"],
-  edittrans: ["GENERATION_ENDED"],
-  disabled: []
+// src/interpreter/trigger-interpreter.ts
+var NOOP = () => {};
+var LEAVES = {
+  v2Header: NOOP,
+  v2If: NOOP,
+  v2IfVar: NOOP,
+  v2IfAdvanced: NOOP,
+  v2Else: NOOP,
+  v2EndIndent: NOOP,
+  v2Loop: NOOP,
+  v2LoopNTimes: NOOP,
+  v2BreakLoop: NOOP,
+  v2Comment: NOOP,
+  setvar: async (op, { rt }) => {
+    const e = op;
+    await rt.setvarV1(e.var, e.operator, e.value);
+  },
+  impersonate: async (op, { rt }) => {
+    const e = op;
+    await rt.impersonate(e.role, rt.resolve(e.value, "value"));
+  },
+  systemprompt: async (op, { rt }) => {
+    const e = op;
+    await rt.systemPrompt(e.location, rt.resolve(e.value, "value"));
+  },
+  command: async (op, { rt }) => {
+    const e = op;
+    await rt.command(rt.resolve(e.value, "value"));
+  },
+  stop: (_op, { rt }) => {
+    rt.stopSending = true;
+  },
+  runtrigger: async (op, { rt }) => {
+    const e = op;
+    await rt.runTrigger(e.value);
+  },
+  cutchat: async (op, { rt }) => {
+    const e = op;
+    await rt.cutChat(Number(rt.resolve(e.start, "value")), Number(rt.resolve(e.end, "value")));
+  },
+  modifychat: async (op, { rt }) => {
+    const e = op;
+    await rt.modifyChat(Number(rt.resolve(e.index, "value")), rt.resolve(e.value, "value"));
+  },
+  showAlert: async (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    if (ctx.displayMode)
+      return "return";
+    const e = op;
+    await ctx.rt.showAlert(e.alertType, ctx.rt.resolve(e.value, "value"), ctx.rt.resolve(e.inputVar, "value"));
+  },
+  sendAIprompt: (_op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    ctx.rt.sendAIprompt = true;
+  },
+  runLLM: async (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    const e = op;
+    ctx.rt.setVar(e.inputVar, await ctx.rt.runLLM(ctx.rt.resolve(e.value, "value"), "model"));
+  },
+  runAxLLM: async (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    const e = op;
+    ctx.rt.setVar(e.inputVar, await ctx.rt.runLLM(ctx.rt.resolve(e.value, "value"), "submodel"));
+  },
+  checkSimilarity: async (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    const e = op;
+    ctx.rt.setVar(e.inputVar, (await ctx.rt.checkSimilarity(ctx.rt.resolve(e.value, "value"), ctx.rt.resolve(e.source, "value"))).join("\xA7"));
+  },
+  extractRegex: (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    const e = op;
+    ctx.rt.setVar(e.inputVar, ctx.rt.extractRegex(ctx.rt.resolve(e.value, "value"), e.regex, e.flags, e.result, true));
+  },
+  runImgGen: async (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    const e = op;
+    ctx.rt.setVar(e.inputVar, await ctx.rt.runImgGen(ctx.rt.resolve(e.value, "value"), ctx.rt.resolve(e.negValue, "value")));
+  },
+  triggercode: (op, { rt }) => {
+    const e = op;
+    if (rt.warnDroppedTriggerCode)
+      rt.warnDroppedTriggerCode(String(e.code ?? "").slice(0, 60));
+  },
+  triggerlua: async (op, { rt }) => {
+    const e = op;
+    await rt.runLua(e.code);
+  },
+  v2StopTrigger: () => "stop",
+  v2ConsoleLog: (op, ctx) => {
+    const e = op;
+    ctx.console.log(ctx.rt.resolve(e.source, e.sourceType));
+  },
+  v2SetVar: async (op, { rt }) => {
+    const e = op;
+    const value = rt.resolve(e.value, e.valueType === "value" ? "value" : "var");
+    await rt.setvarV2(rt.resolve(e.var, "value"), e.operator, value);
+  },
+  v2DeclareLocalVar: (op, { rt }) => {
+    const e = op;
+    const value = rt.resolve(e.value, e.valueType === "value" ? "value" : "var");
+    rt.declareLocalVar(rt.resolve(e.var, "value"), value, e.indent);
+  },
+  v2CutChat: async (op, { rt }) => {
+    const e = op;
+    await rt.cutChat(Number(rt.resolve(e.start, e.startType === "value" ? "value" : "var")), Number(rt.resolve(e.end, e.endType === "value" ? "value" : "var")), true);
+  },
+  v2ModifyChat: async (op, { rt }) => {
+    const e = op;
+    await rt.modifyChat(Number(rt.resolve(e.index, e.indexType)), rt.resolve(e.value, e.valueType));
+  },
+  v2SystemPrompt: async (op, { rt }) => {
+    const e = op;
+    await rt.systemPrompt(e.location, rt.resolve(e.value, e.valueType));
+  },
+  v2Impersonate: async (op, { rt }) => {
+    const e = op;
+    await rt.impersonate(e.role, rt.resolve(e.value, e.valueType));
+  },
+  v2Command: async (op, { rt }) => {
+    const e = op;
+    await rt.command(rt.resolve(e.value, e.valueType));
+  },
+  v2SendAIprompt: (_op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    ctx.rt.sendAIprompt = true;
+  },
+  v2StopPromptSending: (_op, { rt }) => {
+    rt.stopSending = true;
+  },
+  v2UpdateGUI: async (_op, { rt }) => {
+    await rt.updateGUI();
+  },
+  v2UpdateChatAt: async (op, { rt }) => {
+    const e = op;
+    await rt.updateChatAt(Number(e.index));
+  },
+  v2Wait: async (op, { rt }) => {
+    const e = op;
+    await rt.sleep(Number(rt.resolve(e.value, e.valueType)) * 1000);
+  },
+  v2Tokenize: async (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, String(await rt.tokenize(rt.resolve(e.value, e.valueType))));
+  },
+  v2QuickSearchChat: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.quickSearchChat(rt.resolve(e.value, e.valueType), e.condition, Number(rt.resolve(e.depth, e.depthType))) ? "1" : "0");
+  },
+  v2GetLastMessage: (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), rt.getLastMessage());
+  },
+  v2GetMessageAtIndex: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.getMessageAtIndex(Number(rt.resolve(e.index, e.indexType))));
+  },
+  v2GetMessageCount: (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), String(rt.getMessageCount()));
+  },
+  v2GetLastUserMessage: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.getLastUserMessage());
+  },
+  v2GetLastCharMessage: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.getLastCharMessage());
+  },
+  v2GetFirstMessage: (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), rt.getFirstMessage());
+  },
+  v2ShowAlert: async (op, ctx) => {
+    if (ctx.displayMode)
+      return "return";
+    const e = op;
+    await ctx.rt.showAlert("normal", ctx.rt.resolve(e.value, e.valueType), "");
+  },
+  v2RunLLM: async (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    const e = op;
+    ctx.rt.setResult(e.outputVar, await ctx.rt.runLLM(ctx.rt.resolve(e.value, e.valueType), e.model, Boolean(e.streaming)));
+  },
+  v2GetAlertInput: async (op, ctx) => {
+    if (ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setResult(e.outputVar, await ctx.rt.alertInput(ctx.rt.resolve(e.display, e.displayType)));
+  },
+  v2GetAlertSelect: async (op, ctx) => {
+    if (ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setResult(e.outputVar, await ctx.rt.alertSelect(ctx.rt.resolve(e.display, e.displayType), String(ctx.rt.resolve(e.value, e.valueType)).split("|")));
+  },
+  v2CheckSimilarity: async (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    const e = op;
+    ctx.rt.setResult(e.outputVar, (await ctx.rt.checkSimilarity(ctx.rt.resolve(e.value, e.valueType), ctx.rt.resolve(e.source, e.sourceType))).join("\xA7"));
+  },
+  v2ImgGen: async (op, ctx) => {
+    if (!ctx.lowLevelAccess)
+      return;
+    const e = op;
+    ctx.rt.setResult(e.outputVar, await ctx.rt.runImgGen(ctx.rt.resolve(e.value, e.valueType), ctx.rt.resolve(e.negValue, e.negValueType)));
+  },
+  v2ExtractRegex: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.extractRegex(rt.resolve(e.value, e.valueType), rt.resolve(e.regex, e.regexType), rt.resolve(e.flags, e.flagsType), () => rt.resolve(e.result, e.resultType)));
+  },
+  v2RegexTest: (op, { rt }) => rt.regexEffect(op),
+  v2ReplaceString: (op, { rt }) => rt.regexEffect(op),
+  v2Random: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, String(rt.random(Number(rt.resolve(e.min, e.minType)), Number(rt.resolve(e.max, e.maxType)))));
+  },
+  v2GetCharAt: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, String(rt.resolve(e.source, e.sourceType))[Number(rt.resolve(e.index, e.indexType))] ?? "null");
+  },
+  v2GetCharCount: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, String(String(rt.resolve(e.source, e.sourceType)).length));
+  },
+  v2ToLowerCase: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, String(rt.resolve(e.source, e.sourceType)).toLowerCase());
+  },
+  v2ToUpperCase: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, String(rt.resolve(e.source, e.sourceType)).toUpperCase());
+  },
+  v2SetCharAt: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.setCharAt(rt.resolve(e.source, e.sourceType), Number(rt.resolve(e.index, e.indexType)), rt.resolve(e.value, e.valueType)));
+  },
+  v2SplitString: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, JSON.stringify(rt.splitString(rt.resolve(e.source, e.sourceType), rt.resolve(e.delimiter, e.delimiterType), e.delimiterType)));
+  },
+  v2ConcatString: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, String(rt.resolve(e.source1, e.source1Type)) + String(rt.resolve(e.source2, e.source2Type)));
+  },
+  v2Calculate: (op, { rt }) => {
+    const e = op;
+    rt.calculate(e.expression, e.expressionType, e.outputVar);
+  },
+  v2MakeArrayVar: (op, { rt }) => {
+    const e = op;
+    const name = rt.resolve(e.var, "value");
+    if (name.startsWith("[") && name.endsWith("]"))
+      return "return";
+    rt.setVar(name, "[]");
+  },
+  v2GetArrayVarLength: (op, { rt }) => rt.collectionEffect(op),
+  v2GetArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2SetArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2PushArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2PopArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2ShiftArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2UnshiftArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2SpliceArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2SliceArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2JoinArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2GetIndexOfValueInArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2RemoveIndexFromArrayVar: (op, { rt }) => rt.collectionEffect(op),
+  v2MakeDictVar: (op, { rt }) => {
+    const e = op;
+    if (e.var.startsWith("{") && e.var.endsWith("}"))
+      return "return";
+    rt.setVar(rt.resolve(e.var, "value"), "{}");
+  },
+  v2GetDictVar: (op, { rt }) => rt.collectionEffect(op),
+  v2SetDictVar: (op, { rt }) => rt.collectionEffect(op),
+  v2DeleteDictKey: (op, { rt }) => rt.collectionEffect(op),
+  v2HasDictKey: (op, { rt }) => rt.collectionEffect(op),
+  v2ClearDict: (op, { rt }) => {
+    const e = op;
+    if (e.var.startsWith("{") && e.var.endsWith("}"))
+      return "return";
+    rt.setVar(rt.resolve(e.var, "value"), "{}");
+  },
+  v2GetDictSize: (op, { rt }) => rt.collectionEffect(op),
+  v2GetDictKeys: (op, { rt }) => rt.collectionEffect(op),
+  v2GetDictValues: (op, { rt }) => rt.collectionEffect(op),
+  v2GetCharacterDesc: async (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), await rt.getCharacterDesc());
+  },
+  v2SetCharacterDesc: async (op, { rt }) => {
+    const e = op;
+    await rt.setCharacterDesc(rt.resolve(e.value, e.valueType));
+  },
+  v2GetPersonaDesc: async (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), await rt.getPersonaDesc());
+  },
+  v2SetPersonaDesc: async (op, { rt }) => {
+    const e = op;
+    await rt.setPersonaDesc(rt.resolve(e.value, e.valueType));
+  },
+  v2GetReplaceGlobalNote: async (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), await rt.getReplaceGlobalNote());
+  },
+  v2SetReplaceGlobalNote: async (op, { rt }) => {
+    const e = op;
+    await rt.setReplaceGlobalNote(rt.resolve(e.value, e.valueType));
+  },
+  v2GetAuthorNote: async (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), await rt.getAuthorNote());
+  },
+  v2SetAuthorNote: async (op, { rt }) => {
+    const e = op;
+    await rt.setAuthorNote(rt.resolve(e.value, e.valueType));
+  },
+  v2ModifyLorebook: async (op, { rt }) => {
+    const e = op;
+    await rt.modifyLorebook(rt.resolve(e.target, e.targetType), rt.resolve(e.value, e.valueType));
+  },
+  v2GetLorebook: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.getLorebookByKey(rt.resolve(e.target, e.targetType)));
+  },
+  v2GetLorebookCount: (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), String(rt.getLorebookCount()));
+  },
+  v2GetLorebookEntry: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.getLorebookEntry(Number(rt.resolve(e.index, e.indexType))));
+  },
+  v2SetLorebookActivation: async (op, { rt }) => {
+    const e = op;
+    await rt.setLorebookActivation(Number(rt.resolve(e.index, e.indexType)), Boolean(e.value));
+  },
+  v2GetLorebookIndexViaName: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, String(rt.getLorebookIndexViaName(rt.resolve(e.name, e.nameType))));
+  },
+  v2GetAllLorebooks: (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), JSON.stringify(rt.getAllLorebooks()));
+  },
+  v2GetLorebookByName: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, JSON.stringify(rt.getLorebookByName(rt.resolve(e.name, e.nameType))));
+  },
+  v2GetLorebookByIndex: (op, { rt }) => {
+    const e = op;
+    rt.setResult(e.outputVar, rt.getLorebookByIndex(Number(rt.resolve(e.index, e.indexType))));
+  },
+  v2CreateLorebook: async (op, { rt }) => {
+    const e = op;
+    await rt.createLorebook(rt.resolve(e.name, e.nameType), rt.resolve(e.key, e.keyType), rt.resolve(e.content, e.contentType), Number(rt.resolve(e.insertOrder, e.insertOrderType)));
+  },
+  v2ModifyLorebookByIndex: async (op, { rt }) => {
+    const e = op;
+    await rt.modifyLorebookByIndex(Number(rt.resolve(e.index, e.indexType)), rt.resolve(e.name, e.nameType), rt.resolve(e.key, e.keyType), rt.resolve(e.content, e.contentType), rt.resolve(e.insertOrder, e.insertOrderType));
+  },
+  v2DeleteLorebookByIndex: async (op, { rt }) => {
+    const e = op;
+    await rt.deleteLorebookByIndex(Number(rt.resolve(e.index, e.indexType)));
+  },
+  v2GetLorebookCountNew: (op, { rt }) => {
+    const e = op;
+    rt.setVar(rt.resolve(e.outputVar, "value"), String(rt.getLorebookCount()));
+  },
+  v2SetLorebookAlwaysActive: async (op, { rt }) => {
+    const e = op;
+    await rt.setLorebookAlwaysActive(Number(rt.resolve(e.index, e.indexType)), Boolean(e.value));
+  },
+  v2GetDisplayState: (op, ctx) => {
+    if (!ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setVar(ctx.rt.resolve(e.outputVar, "value"), ctx.rt.getDisplayState());
+  },
+  v2SetDisplayState: (op, ctx) => {
+    if (!ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setDisplayState(ctx.rt.resolve(e.value, e.valueType));
+  },
+  v2GetRequestState: (op, ctx) => {
+    if (!ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setResult(e.outputVar, ctx.rt.getRequestState(Number(ctx.rt.resolve(e.index, e.indexType))));
+  },
+  v2SetRequestState: (op, ctx) => {
+    if (!ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setRequestState(Number(ctx.rt.resolve(e.index, e.indexType)), ctx.rt.resolve(e.value, e.valueType));
+  },
+  v2GetRequestStateRole: (op, ctx) => {
+    if (!ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setResult(e.outputVar, ctx.rt.getRequestStateRole(Number(ctx.rt.resolve(e.index, e.indexType))));
+  },
+  v2SetRequestStateRole: (op, ctx) => {
+    if (!ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setRequestStateRole(Number(ctx.rt.resolve(e.index, e.indexType)), ctx.rt.resolve(e.value, e.valueType));
+  },
+  v2GetRequestStateLength: (op, ctx) => {
+    if (!ctx.displayMode)
+      return "return";
+    const e = op;
+    ctx.rt.setVar(ctx.rt.resolve(e.outputVar, "value"), String(ctx.rt.getRequestStateLength()));
+  },
+  v2RunTrigger: async (op, { rt }) => {
+    const e = op;
+    await rt.runTrigger(e.target);
+  }
 };
-function compileAtActions(actions, opts) {
-  const files = [];
+function isImplementedTriggerEffect(type) {
+  return Object.hasOwn(LEAVES, type);
+}
+
+// src/core/mappers/triggers.ts
+var BINDING_EVENT_MAP = {
+  input: ["MESSAGE_SENT"],
+  output: ["GENERATION_ENDED"],
+  display: ["CHARACTER_MESSAGE_RENDERED"],
+  start: ["ls:startup", "CHAT_CHANGED"],
+  manual: [],
+  request: ["GENERATION_STARTED"]
+};
+function prepareTriggerEntries(triggers) {
+  const seen = new Set;
+  return triggers.flatMap((source, index) => {
+    if (!Object.hasOwn(BINDING_EVENT_MAP, source.type))
+      return [];
+    const slug = uniqueSlug(source.comment ?? "", source.type, index, seen);
+    return [{
+      name: source.type === "manual" ? `risu-manual-${slug}` : `risu-trigger-${source.type}-${slug}`,
+      type: source.type === "manual" ? "library" : "trigger",
+      triggers: BINDING_EVENT_MAP[source.type],
+      source
+    }];
+  });
+}
+function analyzeTriggers(triggers) {
   const issues = [];
-  const seenSlugs = new Set;
-  const runtimeLib = opts.runtimeLibrary ?? "risu-compat";
-  for (const a of actions) {
-    const events = PHASE_EVENT_MAP[a.phase] ?? ["MESSAGE_SENT"];
-    const slug = uniqueSlug(a.script.comment || a.action, a.index, seenSlugs);
-    const scriptName = `risu-at-${a.action}-${slug}`;
-    try {
-      const code = renderAtActionCode({
-        slug,
-        name: nonEmpty2(a.script.comment, scriptName),
-        characterId: opts.characterId,
-        events,
-        action: a,
-        runtimeLib
-      });
-      const bindings = [
-        {
-          type: "character",
-          characterId: opts.characterId,
-          displayName: opts.characterName ?? opts.characterId
-        }
-      ];
-      const entry = {
-        name: scriptName,
-        code,
-        type: "trigger",
-        folder: `risu/at-actions`,
-        path: `scripts/at-actions/${scriptName}.js`,
-        bindings,
-        ...events.length > 0 ? { triggers: events } : {}
-      };
-      files.push(entry);
-    } catch (e) {
-      issues.push({
-        path: `at-action[${a.index}]`,
-        message: `emit failed: ${e instanceof Error ? e.message : String(e)}`
-      });
+  const opcodeUnimplemented = {};
+  let count = 0;
+  let luaCount = 0;
+  triggers.forEach((trigger, index) => {
+    if (!Object.hasOwn(BINDING_EVENT_MAP, trigger.type)) {
+      issues.push({ path: `trigger[${index}]`, message: `unknown binding type "${trigger.type}" \u2014 skipped` });
+      return;
     }
-  }
-  return { files, issues };
+    count++;
+    if (trigger.effect?.some((effect) => effect.type === "triggerlua"))
+      luaCount++;
+    for (const effect of trigger.effect ?? []) {
+      if (!isImplementedTriggerEffect(effect.type)) {
+        opcodeUnimplemented[effect.type] = (opcodeUnimplemented[effect.type] ?? 0) + 1;
+      }
+    }
+  });
+  return { count, issues, opcodeUnimplemented, luaCount };
 }
-function renderAtActionCode(a) {
-  const s = a.action.script;
-  const body = renderActionBody(a.action);
-  const frontmatter = [
-    `// @name       ${oneLine(a.name)}`,
-    `// @type       trigger`,
-    ...a.events.length > 0 ? [`// @triggers   ${a.events.join(", ")}`] : [],
-    `// @folder     risu/at-actions`,
-    `// @description LumiRealm @@${a.action.action} (character ${a.characterId}, phase ${a.action.phase})`
-  ].join(`
-`);
-  const comment = [
-    `//`,
-    `// regex:     ${oneLine(s.in)}`,
-    `// out:       ${oneLine(s.out)}`,
-    `//`
-  ].join(`
-`);
-  return [
-    frontmatter,
-    comment,
-    ``,
-    `const PATTERN = ${JSON.stringify(s.in)};`,
-    `const FLAGS = ${JSON.stringify(a.action.flag)};`,
-    `const OUT = ${JSON.stringify(s.out)};`,
-    ``,
-    `const __rc = await script.require(${JSON.stringify(a.runtimeLib)});`,
-    `const __risu = await __rc.makeRisuRegexRuntime(api, data, script, { characterId: ${JSON.stringify(a.characterId)}, phase: ${JSON.stringify(a.action.phase)} });`,
-    `const text = __risu.text();`,
-    `const regex = new RegExp(PATTERN, FLAGS);`,
-    `if (regex.test(text)) {`,
-    body,
-    `} else {`,
-    a.action.action === "repeat_back" ? `  // Risu's repeat_back branch fires only on NO MATCH (scripts.ts).
-  const mode = OUT.split(" ", 2)[1];
-  await __risu.repeatBack(regex, mode);` : `  return;`,
-    `}`,
-    `await __risu.flush();`,
-    ``
-  ].join(`
-`);
-}
-function renderActionBody(a) {
-  switch (a.action) {
-    case "emo": {
-      return [
-        `  const name = OUT.substring(6).trim();`,
-        `  await __risu.setExpression(name);`
-      ].join(`
-`);
-    }
-    case "inject": {
-      return [
-        `  const cleaned = text.replace(regex, "");`,
-        `  await __risu.setCurrentText(cleaned);`,
-        `  const stripped = OUT.replace(/^@@inject\\s*/, "");`,
-        `  await __risu.inject(stripped);`
-      ].join(`
-`);
-    }
-    case "move_top":
-    case "move_bottom": {
-      const direction = JSON.stringify(a.action === "move_top" ? "top" : "bottom");
-      return [
-        `  let out = OUT.replace("@@move_top ", "").replace("@@move_bottom ", "");`,
-        `  const isGlobal = FLAGS.includes("g");`,
-        `  const matches = isGlobal ? Array.from(text.matchAll(regex)) : (text.match(regex) ? [text.match(regex)] : []);`,
-        `  let cleaned = text.replace(regex, "");`,
-        `  for (const m of matches) {`,
-        `    if (!m) continue;`,
-        `    const mapped = __risu.applyMatchTemplate(out, m);`,
-        `    cleaned = ${direction} === "top" ? (mapped + "\\n" + cleaned) : (cleaned + "\\n" + mapped);`,
-        `  }`,
-        `  await __risu.setCurrentText(cleaned);`
-      ].join(`
-`);
-    }
-    case "repeat_back": {
-      return `  return;`;
-    }
-    default: {
-      return `  /* unknown @@action */`;
-    }
-  }
-}
-function oneLine(s) {
-  return s.replace(/\r?\n/g, " ").slice(0, 200);
-}
-function nonEmpty2(s, fallback) {
-  if (typeof s === "string" && s.trim().length > 0)
-    return s.trim();
-  return fallback;
-}
-function uniqueSlug(base, index, seen) {
-  const slug = slugify(base) || `action_${index}`;
-  let candidate = slug;
+function uniqueSlug(comment, type, index, seen) {
+  const base = slugify(comment) || `${type}_${index}`;
+  let candidate = base;
   let n = 1;
   while (seen.has(candidate)) {
     n++;
-    candidate = `${slug}_${n}`;
+    candidate = `${base}_${n}`;
   }
   seen.add(candidate);
   return candidate;
@@ -16583,1056 +16843,174 @@ function slugify(s) {
   return out.join("").slice(0, 64);
 }
 
-// src/core/triggers/types.ts
-function resolveCall(value, kind) {
-  return `__risu.resolve(${JSON.stringify(value)}, ${JSON.stringify(kind)})`;
-}
-function setVarCall(name, value) {
-  return `__risu.setVar(${JSON.stringify(name)}, ${value})`;
-}
-function indent(ctx) {
-  return "  ".repeat(Math.max(0, ctx.indent));
-}
-function line(ctx, body) {
-  return indent(ctx) + body;
-}
-
-// src/core/triggers/opcodes/v1.ts
-function emitSetvar(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.setvarV1(${JSON.stringify(effect.var)}, ${JSON.stringify(effect.operator)}, ${JSON.stringify(effect.value)});`);
-  return { code, needsAwait: true };
-}
-function emitImpersonate(op, ctx) {
-  const effect = op;
-  const value = resolveCall(effect.value, "value");
-  const code = line(ctx, `await __risu.impersonate(${JSON.stringify(effect.role)}, ${value});`);
-  return { code, needsAwait: true };
-}
-function emitSystemPrompt(op, ctx) {
-  const effect = op;
-  const value = resolveCall(effect.value, "value");
-  const code = line(ctx, `await __risu.systemPrompt(${JSON.stringify(effect.location)}, ${value});`);
-  return { code, needsAwait: true };
-}
-function emitCommand(op, ctx) {
-  const effect = op;
-  const value = resolveCall(effect.value, "value");
-  const code = line(ctx, `await __risu.command(${value});`);
-  return { code, needsAwait: true };
-}
-function emitStop(_op, ctx) {
-  return { code: line(ctx, `__risu.stopSending = true;`), needsAwait: false };
-}
-function emitRuntrigger(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.runTrigger(${JSON.stringify(effect.value)});`);
-  return { code, needsAwait: true };
-}
-function emitCutChat(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.cutChat(Number(${resolveCall(effect.start, "value")}), Number(${resolveCall(effect.end, "value")}));`);
-  return { code, needsAwait: true };
-}
-function emitModifyChat(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.modifyChat(Number(${resolveCall(effect.index, "value")}), ${resolveCall(effect.value, "value")});`);
-  return { code, needsAwait: true };
-}
-function emitShowAlert(op, ctx) {
-  const effect = op;
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* showAlert skipped \u2014 requires lowLevelAccess */`), needsAwait: false };
-  }
-  if (ctx.displayMode) {
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  }
-  const value = resolveCall(effect.value, "value");
-  const inputVar = resolveCall(effect.inputVar, "value");
-  const code = line(ctx, `await __risu.showAlert(${JSON.stringify(effect.alertType)}, ${value}, ${inputVar});`);
-  return { code, needsAwait: true };
-}
-function emitSendAIprompt(_op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* sendAIprompt skipped \u2014 requires lowLevelAccess */`), needsAwait: false };
-  }
-  return { code: line(ctx, `__risu.sendAIprompt = true;`), needsAwait: false };
-}
-function emitRunLLM(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* runLLM skipped \u2014 requires lowLevelAccess */`), needsAwait: false };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `await __risu.runLLM(${resolveCall(effect.value, "value")}, "model")`)};`);
-  return { code, needsAwait: true };
-}
-function emitRunAxLLM(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* runAxLLM skipped \u2014 requires lowLevelAccess */`), needsAwait: false };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `await __risu.runLLM(${resolveCall(effect.value, "value")}, "submodel")`)};`);
-  return { code, needsAwait: true };
-}
-function emitCheckSimilarity(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return {
-      code: line(ctx, `/* checkSimilarity skipped \u2014 requires lowLevelAccess */`),
-      needsAwait: false
-    };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `(await __risu.checkSimilarity(${resolveCall(effect.value, "value")}, ${resolveCall(effect.source, "value")})).join("\xA7")`)};`);
-  return { code, needsAwait: true };
-}
-function emitExtractRegex(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* extractRegex skipped \u2014 requires lowLevelAccess */`), needsAwait: false };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `__risu.extractRegex(${resolveCall(effect.value, "value")}, ${JSON.stringify(effect.regex)}, ${JSON.stringify(effect.flags)}, ${JSON.stringify(effect.result)}, true)`)};`);
-  return { code, needsAwait: false };
-}
-function emitImgGen(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* runImgGen skipped \u2014 requires lowLevelAccess */`), needsAwait: false };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `await __risu.runImgGen(${resolveCall(effect.value, "value")}, ${resolveCall(effect.negValue, "value")})`)};`);
-  return { code, needsAwait: true };
-}
-function emitTriggerCode(op, ctx) {
-  const effect = op;
-  const label = JSON.stringify(String(effect.code ?? "").slice(0, 60));
-  const code = line(ctx, `__risu.warnDroppedTriggerCode && __risu.warnDroppedTriggerCode(${label});`);
-  return { code, needsAwait: false };
-}
-function emitTriggerLua(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.runLua(${JSON.stringify(effect.code)});`);
-  return { code, needsAwait: true };
-}
-var V1_EMITTERS = {
-  setvar: emitSetvar,
-  impersonate: emitImpersonate,
-  systemprompt: emitSystemPrompt,
-  command: emitCommand,
-  stop: emitStop,
-  runtrigger: emitRuntrigger,
-  cutchat: emitCutChat,
-  modifychat: emitModifyChat,
-  showAlert: emitShowAlert,
-  sendAIprompt: emitSendAIprompt,
-  runLLM: emitRunLLM,
-  runAxLLM: emitRunAxLLM,
-  checkSimilarity: emitCheckSimilarity,
-  extractRegex: emitExtractRegex,
-  runImgGen: emitImgGen,
-  triggercode: emitTriggerCode,
-  triggerlua: emitTriggerLua
-};
-
-// src/core/triggers/opcodes/v2.ts
-function setResultCall(name, value, direct = false) {
-  return direct ? `__risu.setVar(${resolveCall(name, "value")}, ${value})` : `__risu.setResult(${JSON.stringify(name)}, ${value})`;
-}
-function emitRegexEffect(op, ctx) {
-  return { code: line(ctx, `__risu.regexEffect(${JSON.stringify(op)});`), needsAwait: false };
-}
-function emitCollectionEffect(op, ctx) {
-  return { code: line(ctx, `__risu.collectionEffect(${JSON.stringify(op)});`), needsAwait: false };
-}
-function emitV2SetVar(op, ctx) {
-  const e = op;
-  const code = line(ctx, `const __value = ${resolveCall(e.value, e.valueType === "value" ? "value" : "var")};
-` + line(ctx, `await __risu.setvarV2(${resolveCall(e.var, "value")}, ${JSON.stringify(e.operator)}, __value);`));
-  return { code, needsAwait: true };
-}
-function emitV2DeclareLocalVar(op, ctx) {
-  const e = op;
-  const code = line(ctx, `const __value = ${resolveCall(e.value, e.valueType === "value" ? "value" : "var")};
-` + line(ctx, `__risu.declareLocalVar(${resolveCall(e.var, "value")}, __value, ${JSON.stringify(e.indent)});`));
-  return { code, needsAwait: false };
-}
-function emitStructuralNoop(_op, _ctx) {
-  return { code: "", needsAwait: false };
-}
-function emitV2Header(_op, _ctx) {
-  return { code: "", needsAwait: false };
-}
-function emitV2Comment(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `// ${(e.value ?? "").replace(/\r?\n/g, " ").slice(0, 120)}`),
-    needsAwait: false
-  };
-}
-function emitV2StopTrigger(_op, ctx) {
-  return { code: line(ctx, `return;`), needsAwait: false };
-}
-function emitV2ConsoleLog(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `console.log(${resolveCall(e.source, e.sourceType)});`),
-    needsAwait: false
-  };
-}
-function emitV2CutChat(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.cutChat(Number(${resolveCall(e.start, e.startType === "value" ? "value" : "var")}), Number(${resolveCall(e.end, e.endType === "value" ? "value" : "var")}), true);`),
-    needsAwait: true
-  };
-}
-function emitV2ModifyChat(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.modifyChat(Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2SystemPrompt(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.systemPrompt(${JSON.stringify(e.location)}, ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2Impersonate(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.impersonate(${JSON.stringify(e.role)}, ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2Command(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.command(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2SendAIprompt(_op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* v2SendAIprompt skipped \u2014 lowLevelAccess only */`), needsAwait: false };
-  }
-  return { code: line(ctx, `__risu.sendAIprompt = true;`), needsAwait: false };
-}
-function emitV2StopPromptSending(_op, ctx) {
-  return { code: line(ctx, `__risu.stopSending = true;`), needsAwait: false };
-}
-function emitV2UpdateGUI(_op, ctx) {
-  return { code: line(ctx, `await __risu.updateGUI();`), needsAwait: true };
-}
-function emitV2UpdateChatAt(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.updateChatAt(Number(${JSON.stringify(e.index)}));`),
-    needsAwait: true
-  };
-}
-function emitV2Wait(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.sleep(Number(${resolveCall(e.value, e.valueType)}) * 1000);`),
-    needsAwait: true
-  };
-}
-function emitV2Tokenize(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(await __risu.tokenize(${resolveCall(e.value, e.valueType)}))`)};`),
-    needsAwait: true
-  };
-}
-function emitV2QuickSearchChat(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.quickSearchChat(${resolveCall(e.value, e.valueType)}, ${JSON.stringify(e.condition)}, Number(${resolveCall(e.depth, e.depthType)})) ? "1" : "0"`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLastMessage(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastMessage()`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetMessageAtIndex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getMessageAtIndex(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetMessageCount(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getMessageCount())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLastUserMessage(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastUserMessage()`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLastCharMessage(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastCharMessage()`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetFirstMessage(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getFirstMessage()`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2ShowAlert(op, ctx) {
-  if (ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.showAlert("normal", ${resolveCall(e.value, e.valueType)}, "");`),
-    needsAwait: true
-  };
-}
-function emitV2RunLLM(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* v2RunLLM skipped \u2014 lowLevelAccess only */`), needsAwait: false };
-  }
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.runLLM(${resolveCall(e.value, e.valueType)}, ${JSON.stringify(e.model)}, ${Boolean(e.streaming)})`)};`),
-    needsAwait: true
-  };
-}
-function emitV2GetAlertInput(op, ctx) {
-  if (ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.alertInput(${resolveCall(e.display, e.displayType)})`)};`),
-    needsAwait: true
-  };
-}
-function emitV2GetAlertSelect(op, ctx) {
-  if (ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.alertSelect(${resolveCall(e.display, e.displayType)}, String(${resolveCall(e.value, e.valueType)}).split("|"))`)};`),
-    needsAwait: true
-  };
-}
-function emitV2CheckSimilarity(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* v2CheckSimilarity skipped \u2014 lowLevelAccess only */`), needsAwait: false };
-  }
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `(await __risu.checkSimilarity(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.source, e.sourceType)})).join("\xA7")`)};`),
-    needsAwait: true
-  };
-}
-function emitV2ImgGen(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* v2ImgGen skipped \u2014 lowLevelAccess only */`), needsAwait: false };
-  }
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.runImgGen(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.negValue, e.negValueType)})`)};`),
-    needsAwait: true
-  };
-}
-function emitV2ExtractRegex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.extractRegex(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.regex, e.regexType)}, ${resolveCall(e.flags, e.flagsType)}, () => ${resolveCall(e.result, e.resultType)})`)};`),
-    needsAwait: false
-  };
-}
-function emitV2Random(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.random(Number(${resolveCall(e.min, e.minType)}), Number(${resolveCall(e.max, e.maxType)})))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetCharAt(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `(String(${resolveCall(e.source, e.sourceType)})[Number(${resolveCall(e.index, e.indexType)})] ?? "null")`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetCharCount(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(String(${resolveCall(e.source, e.sourceType)}).length)`)};`),
-    needsAwait: false
-  };
-}
-function emitV2ToLowerCase(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(${resolveCall(e.source, e.sourceType)}).toLowerCase()`)};`),
-    needsAwait: false
-  };
-}
-function emitV2ToUpperCase(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(${resolveCall(e.source, e.sourceType)}).toUpperCase()`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetCharAt(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.setCharAt(${resolveCall(e.source, e.sourceType)}, Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)})`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SplitString(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `JSON.stringify(__risu.splitString(${resolveCall(e.source, e.sourceType)}, ${resolveCall(e.delimiter, e.delimiterType)}, ${JSON.stringify(e.delimiterType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2ConcatString(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(${resolveCall(e.source1, e.source1Type)}) + String(${resolveCall(e.source2, e.source2Type)})`)};`),
-    needsAwait: false
-  };
-}
-function emitV2Calculate(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `__risu.calculate(${JSON.stringify(e.expression)}, ${JSON.stringify(e.expressionType)}, ${JSON.stringify(e.outputVar)});`),
-    needsAwait: false
-  };
-}
-function emitV2MakeArrayVar(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `{ const name = ${resolveCall(e.var, "value")}; if (name.startsWith('[') && name.endsWith(']')) return 'abort'; __risu.setVar(name, "[]"); }`),
-    needsAwait: false
-  };
-}
-function emitV2MakeDictVar(op, ctx) {
-  const e = op;
-  if (e.var.startsWith("{") && e.var.endsWith("}"))
-    return { code: line(ctx, "return 'abort';"), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setVar(${resolveCall(e.var, "value")}, "{}");`),
-    needsAwait: false
-  };
-}
-function emitV2ClearDict(op, ctx) {
-  const e = op;
-  if (e.var.startsWith("{") && e.var.endsWith("}"))
-    return { code: line(ctx, "return 'abort';"), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setVar(${resolveCall(e.var, "value")}, "{}");`),
-    needsAwait: false
-  };
-}
-function emitV2GetCharacterDesc(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getCharacterDesc()`, true)};`),
-    needsAwait: true
-  };
-}
-function emitV2SetCharacterDesc(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setCharacterDesc(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetPersonaDesc(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getPersonaDesc()`, true)};`),
-    needsAwait: true
-  };
-}
-function emitV2SetPersonaDesc(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setPersonaDesc(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetReplaceGlobalNote(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getReplaceGlobalNote()`, true)};`),
-    needsAwait: true
-  };
-}
-function emitV2SetReplaceGlobalNote(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setReplaceGlobalNote(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetAuthorNote(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getAuthorNote()`, true)};`),
-    needsAwait: true
-  };
-}
-function emitV2SetAuthorNote(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setAuthorNote(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2ModifyLorebook(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.modifyLorebook(${resolveCall(e.target, e.targetType)}, ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetLorebook(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLorebookByKey(${resolveCall(e.target, e.targetType)})`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLorebookCount(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getLorebookCount())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLorebookEntry(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLorebookEntry(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetLorebookActivation(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setLorebookActivation(Number(${resolveCall(e.index, e.indexType)}), ${Boolean(e.value)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetLorebookIndexViaName(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getLorebookIndexViaName(${resolveCall(e.name, e.nameType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetAllLorebooks(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `JSON.stringify(__risu.getAllLorebooks())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLorebookByName(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `JSON.stringify(__risu.getLorebookByName(${resolveCall(e.name, e.nameType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLorebookByIndex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLorebookByIndex(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2CreateLorebook(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.createLorebook(${resolveCall(e.name, e.nameType)}, ${resolveCall(e.key, e.keyType)}, ${resolveCall(e.content, e.contentType)}, Number(${resolveCall(e.insertOrder, e.insertOrderType)}));`),
-    needsAwait: true
-  };
-}
-function emitV2ModifyLorebookByIndex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.modifyLorebookByIndex(Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.name, e.nameType)}, ${resolveCall(e.key, e.keyType)}, ${resolveCall(e.content, e.contentType)}, ${resolveCall(e.insertOrder, e.insertOrderType)});`),
-    needsAwait: true
-  };
-}
-function emitV2DeleteLorebookByIndex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.deleteLorebookByIndex(Number(${resolveCall(e.index, e.indexType)}));`),
-    needsAwait: true
-  };
-}
-function emitV2GetLorebookCountNew(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getLorebookCount())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetLorebookAlwaysActive(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setLorebookAlwaysActive(Number(${resolveCall(e.index, e.indexType)}), ${Boolean(e.value)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetDisplayState(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getDisplayState()`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetDisplayState(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setDisplayState(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: false
-  };
-}
-function emitV2GetRequestState(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getRequestState(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetRequestState(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setRequestState(Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: false
-  };
-}
-function emitV2GetRequestStateRole(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getRequestStateRole(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetRequestStateRole(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setRequestStateRole(Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: false
-  };
-}
-function emitV2GetRequestStateLength(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getRequestStateLength())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2RunTrigger(op, ctx) {
-  const e = op;
-  return { code: line(ctx, `await __risu.runTrigger(${JSON.stringify(e.target)});`), needsAwait: true };
-}
-var V2_EMITTERS = {
-  v2Header: emitV2Header,
-  v2If: emitStructuralNoop,
-  v2IfVar: emitStructuralNoop,
-  v2IfAdvanced: emitStructuralNoop,
-  v2Else: emitStructuralNoop,
-  v2EndIndent: emitStructuralNoop,
-  v2Loop: emitStructuralNoop,
-  v2LoopNTimes: emitStructuralNoop,
-  v2BreakLoop: emitStructuralNoop,
-  v2Comment: emitV2Comment,
-  v2StopTrigger: emitV2StopTrigger,
-  v2ConsoleLog: emitV2ConsoleLog,
-  v2SetVar: emitV2SetVar,
-  v2DeclareLocalVar: emitV2DeclareLocalVar,
-  v2CutChat: emitV2CutChat,
-  v2ModifyChat: emitV2ModifyChat,
-  v2SystemPrompt: emitV2SystemPrompt,
-  v2Impersonate: emitV2Impersonate,
-  v2Command: emitV2Command,
-  v2SendAIprompt: emitV2SendAIprompt,
-  v2StopPromptSending: emitV2StopPromptSending,
-  v2UpdateGUI: emitV2UpdateGUI,
-  v2UpdateChatAt: emitV2UpdateChatAt,
-  v2Wait: emitV2Wait,
-  v2Tokenize: emitV2Tokenize,
-  v2QuickSearchChat: emitV2QuickSearchChat,
-  v2GetLastMessage: emitV2GetLastMessage,
-  v2GetMessageAtIndex: emitV2GetMessageAtIndex,
-  v2GetMessageCount: emitV2GetMessageCount,
-  v2GetLastUserMessage: emitV2GetLastUserMessage,
-  v2GetLastCharMessage: emitV2GetLastCharMessage,
-  v2GetFirstMessage: emitV2GetFirstMessage,
-  v2ShowAlert: emitV2ShowAlert,
-  v2RunLLM: emitV2RunLLM,
-  v2GetAlertInput: emitV2GetAlertInput,
-  v2GetAlertSelect: emitV2GetAlertSelect,
-  v2CheckSimilarity: emitV2CheckSimilarity,
-  v2ImgGen: emitV2ImgGen,
-  v2ExtractRegex: emitV2ExtractRegex,
-  v2RegexTest: emitRegexEffect,
-  v2ReplaceString: emitRegexEffect,
-  v2Random: emitV2Random,
-  v2GetCharAt: emitV2GetCharAt,
-  v2GetCharCount: emitV2GetCharCount,
-  v2ToLowerCase: emitV2ToLowerCase,
-  v2ToUpperCase: emitV2ToUpperCase,
-  v2SetCharAt: emitV2SetCharAt,
-  v2SplitString: emitV2SplitString,
-  v2ConcatString: emitV2ConcatString,
-  v2Calculate: emitV2Calculate,
-  v2MakeArrayVar: emitV2MakeArrayVar,
-  v2GetArrayVarLength: emitCollectionEffect,
-  v2GetArrayVar: emitCollectionEffect,
-  v2SetArrayVar: emitCollectionEffect,
-  v2PushArrayVar: emitCollectionEffect,
-  v2PopArrayVar: emitCollectionEffect,
-  v2ShiftArrayVar: emitCollectionEffect,
-  v2UnshiftArrayVar: emitCollectionEffect,
-  v2SpliceArrayVar: emitCollectionEffect,
-  v2SliceArrayVar: emitCollectionEffect,
-  v2JoinArrayVar: emitCollectionEffect,
-  v2GetIndexOfValueInArrayVar: emitCollectionEffect,
-  v2RemoveIndexFromArrayVar: emitCollectionEffect,
-  v2MakeDictVar: emitV2MakeDictVar,
-  v2GetDictVar: emitCollectionEffect,
-  v2SetDictVar: emitCollectionEffect,
-  v2DeleteDictKey: emitCollectionEffect,
-  v2HasDictKey: emitCollectionEffect,
-  v2ClearDict: emitV2ClearDict,
-  v2GetDictSize: emitCollectionEffect,
-  v2GetDictKeys: emitCollectionEffect,
-  v2GetDictValues: emitCollectionEffect,
-  v2GetCharacterDesc: emitV2GetCharacterDesc,
-  v2SetCharacterDesc: emitV2SetCharacterDesc,
-  v2GetPersonaDesc: emitV2GetPersonaDesc,
-  v2SetPersonaDesc: emitV2SetPersonaDesc,
-  v2GetReplaceGlobalNote: emitV2GetReplaceGlobalNote,
-  v2SetReplaceGlobalNote: emitV2SetReplaceGlobalNote,
-  v2GetAuthorNote: emitV2GetAuthorNote,
-  v2SetAuthorNote: emitV2SetAuthorNote,
-  v2ModifyLorebook: emitV2ModifyLorebook,
-  v2GetLorebook: emitV2GetLorebook,
-  v2GetLorebookCount: emitV2GetLorebookCount,
-  v2GetLorebookEntry: emitV2GetLorebookEntry,
-  v2SetLorebookActivation: emitV2SetLorebookActivation,
-  v2GetLorebookIndexViaName: emitV2GetLorebookIndexViaName,
-  v2GetAllLorebooks: emitV2GetAllLorebooks,
-  v2GetLorebookByName: emitV2GetLorebookByName,
-  v2GetLorebookByIndex: emitV2GetLorebookByIndex,
-  v2CreateLorebook: emitV2CreateLorebook,
-  v2ModifyLorebookByIndex: emitV2ModifyLorebookByIndex,
-  v2DeleteLorebookByIndex: emitV2DeleteLorebookByIndex,
-  v2GetLorebookCountNew: emitV2GetLorebookCountNew,
-  v2SetLorebookAlwaysActive: emitV2SetLorebookAlwaysActive,
-  v2GetDisplayState: emitV2GetDisplayState,
-  v2SetDisplayState: emitV2SetDisplayState,
-  v2GetRequestState: emitV2GetRequestState,
-  v2SetRequestState: emitV2SetRequestState,
-  v2GetRequestStateRole: emitV2GetRequestStateRole,
-  v2SetRequestStateRole: emitV2SetRequestStateRole,
-  v2GetRequestStateLength: emitV2GetRequestStateLength,
-  v2RunTrigger: emitV2RunTrigger
-};
-
-// src/core/triggers/opcodes/index.ts
-var EMITTERS = {
-  ...V1_EMITTERS,
-  ...V2_EMITTERS
-};
-
-// src/core/triggers/control-flow.ts
-var CONTROL_OPS = new Set([
-  "v2If",
-  "v2IfAdvanced",
-  "v2Else",
-  "v2EndIndent",
-  "v2Loop",
-  "v2LoopNTimes",
-  "v2BreakLoop"
+// src/core/pipeline/risu-payload.ts
+var KNOWN_RISUAI_FIELDS = new Set([
+  "backgroundHTML",
+  "customScripts",
+  "triggerscript",
+  "virtualscript",
+  "defaultVariables",
+  "utilityBot",
+  "emotions"
 ]);
-
-// src/core/triggers/templates.ts
-function hasTriggerTemplate(value) {
-  return /\{[{#]|<(?:user|char|bot)>/i.test(value);
+var EMBEDED_PREFIX = "embeded://";
+var ASSET_PREFIX = "__asset:";
+function stripAssetUriPrefix(uri) {
+  if (uri.startsWith(EMBEDED_PREFIX))
+    return uri.slice(EMBEDED_PREFIX.length);
+  if (uri.startsWith(ASSET_PREFIX))
+    return uri.slice(ASSET_PREFIX.length);
+  return uri;
 }
-function triggerNeedsTemplates(trigger) {
-  const first = trigger.effect[0]?.type;
-  if (first === "triggerlua" || first === "triggercode")
-    return false;
-  if (trigger.conditions.some((condition) => condition.type === "var"))
-    return true;
-  return [...trigger.conditions, ...trigger.effect].some((entry) => Object.values(entry).some((value) => typeof value === "string" && hasTriggerTemplate(value)));
+function extFromPath(path) {
+  const dot = path.lastIndexOf(".");
+  if (dot < 0 || dot === path.length - 1)
+    return;
+  const ext = path.slice(dot + 1).toLowerCase();
+  if (!/^[a-z0-9]{1,6}$/.test(ext))
+    return;
+  return ext;
 }
-
-// src/core/triggers/compile.ts
-function compileTrigger(trigger, opts = {}) {
-  const issues = [];
-  const baseIndent = opts.baseIndent ?? 1;
-  const ctx = {
-    indent: baseIndent,
-    issues,
-    lowLevelAccess: Boolean(opts.lowLevelAccess ?? trigger.lowLevelAccess ?? false),
-    displayMode: Boolean(opts.displayMode ?? false),
-    loopDepth: 0
-  };
+function extractAdditionalAssets(assets) {
   const out = [];
-  if (triggerNeedsTemplates(trigger)) {
-    out.push(line2(ctx, "await __risu.prepareTemplates();"));
-  }
-  const hasConditions = Array.isArray(trigger.conditions) && trigger.conditions.length > 0;
-  if (hasConditions) {
-    out.push(line2(ctx, `if (!__risu.checkConditions(${JSON.stringify(trigger.conditions)})) return;`));
-  }
-  const effects = trigger.effect ?? [];
-  if (effects.length > 0) {
-    const controlEffects = effects.map((effect) => CONTROL_OPS.has(effect.type) ? effect : { type: effect.type, ..."indent" in effect ? { indent: effect.indent } : {} });
-    out.push(line2(ctx, `const __effects = ${JSON.stringify(controlEffects)};`));
-    out.push(line2(ctx, `const __control = { loops: {}, ticks: 0 };`));
-    out.push(line2(ctx, `for (let __index = 0; __index < __effects.length; __index++) {`));
-    const inner = { ...ctx, indent: ctx.indent + 1 };
-    out.push(line2(inner, `const __next = await __risu.advanceControl(__effects, __index, __control);`));
-    out.push(line2(inner, `if (__next !== undefined) { __index = __next; continue; }`));
-    out.push(line2(inner, `switch (__index) {`));
-    const leafCtx = { ...inner, indent: inner.indent + 2 };
-    for (const [index, op] of effects.entries()) {
-      if (CONTROL_OPS.has(op.type))
-        continue;
-      const emitter = EMITTERS[op.type];
-      if (!emitter) {
-        issues.push({ opcode: op.type, message: "unknown opcode: likely a newer RisuAI version. Card may not work properly. Contact `amousepad` on Discord if you see this message.", severity: "warn" });
-        out.push(line2(inner, "/* unknown opcode skipped */"));
-        continue;
-      }
-      out.push(line2(inner, `case ${index}: {`));
-      out.push(emitter(op, leafCtx).code);
-      out.push(line2(leafCtx, `break;`));
-      out.push(line2(inner, `}`));
-    }
-    out.push(line2(inner, `}`));
-    out.push(line2(ctx, `}`));
-  }
-  const unimplementedCounts = {};
-  for (const issue of issues) {
-    if (!issue.message.startsWith("unknown opcode"))
+  for (const raw of assets) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
       continue;
-    unimplementedCounts[issue.opcode] = (unimplementedCounts[issue.opcode] ?? 0) + 1;
+    const a = raw;
+    if (a["type"] !== "x-risu-asset")
+      continue;
+    const name = typeof a["name"] === "string" ? a["name"] : "";
+    const uri = typeof a["uri"] === "string" ? a["uri"] : "";
+    if (!name || !uri)
+      continue;
+    const path = stripAssetUriPrefix(uri);
+    const explicitExt = typeof a["ext"] === "string" ? a["ext"].toLowerCase() : undefined;
+    const ext = explicitExt ?? extFromPath(path);
+    out.push({ name, path, ...ext ? { ext } : {} });
   }
-  return {
-    body: out.filter((s) => s.length > 0).join(`
-`),
-    issues,
-    unimplementedCounts,
-    hasConditions
-  };
+  return out;
 }
-function line2(ctx, body) {
-  return indent(ctx) + body;
-}
-
-// src/core/mappers/triggers.ts
-var BINDING_EVENT_MAP = {
-  input: ["MESSAGE_SENT"],
-  output: ["GENERATION_ENDED"],
-  display: ["CHARACTER_MESSAGE_RENDERED"],
-  start: ["ls:startup", "CHAT_CHANGED"],
-  manual: [],
-  request: ["GENERATION_STARTED"]
-};
-function compileTriggers(triggers, opts) {
-  const files = [];
-  const issues = [];
-  const opcodeUnimplemented = {};
-  let luaCount = 0;
-  const seenSlugs = new Set;
-  triggers.forEach((t, i) => {
-    if (!t.type || !Object.prototype.hasOwnProperty.call(BINDING_EVENT_MAP, t.type)) {
-      issues.push({
-        path: `trigger[${i}]`,
-        message: `unknown binding type "${t.type}" \u2014 skipped`
-      });
-      return;
-    }
-    const displayMode = t.type === "display";
-    const lowLevelAccess = Boolean(t.lowLevelAccess);
-    const compiled = compileTrigger(t, { displayMode, lowLevelAccess });
-    for (const [opcode, count] of Object.entries(compiled.unimplementedCounts)) {
-      opcodeUnimplemented[opcode] = (opcodeUnimplemented[opcode] ?? 0) + count;
-    }
-    for (const issue of compiled.issues) {
-      if (issue.severity === "error") {
-        issues.push({
-          path: `trigger[${i}]`,
-          message: `${issue.opcode}: ${issue.message}`
-        });
-      }
-    }
-    const hasLua = Array.isArray(t.effect) && t.effect.some((e) => e.type === "triggerlua");
-    if (hasLua)
-      luaCount++;
-    const slug = uniqueSlug2(t.comment ?? "", t.type, i, seenSlugs);
-    const events = BINDING_EVENT_MAP[t.type] ?? [];
-    const runtimeLib = opts.runtimeLibrary ?? "risu-compat";
-    const isManual = t.type === "manual";
-    const code = renderTriggerCode({
-      slug,
-      name: nameFor(t, i, isManual ? "manual" : t.type),
-      characterId: opts.characterId,
-      binding: t.type,
-      events,
-      displayMode,
-      lowLevelAccess,
-      comment: t.comment ?? "",
-      body: compiled.body,
-      hasConditions: compiled.hasConditions,
-      index: i,
-      isManual,
-      runtimeLib
-    });
-    const bindings = isManual ? undefined : [
-      {
-        type: "character",
-        characterId: opts.characterId,
-        displayName: opts.characterName ?? opts.characterId
-      }
-    ];
-    const scriptName = isManual ? `risu-manual-${slug}` : `risu-trigger-${t.type}-${slug}`;
-    const entry = {
-      name: scriptName,
-      code,
-      type: isManual ? "library" : "trigger",
-      folder: isManual ? "risu/manual" : `risu/${t.type}`,
-      path: isManual ? `scripts/libraries/${scriptName}.js` : `scripts/triggers/${scriptName}.js`,
-      ...events.length > 0 ? { triggers: events } : {},
-      ...bindings ? { bindings } : {}
-    };
-    files.push(entry);
-  });
-  return { files, issues, opcodeUnimplemented, luaCount };
-}
-function nameFor(t, i, fallback) {
-  const c = (t.comment ?? "").trim();
-  return c.length > 0 ? c : `risu_${fallback}_${i}`;
-}
-function renderTriggerCode(a) {
-  const frontmatter = [
-    `// @name       ${a.name}`,
-    `// @type       ${a.isManual ? "library" : "trigger"}`,
-    ...a.events.length > 0 ? [`// @triggers   ${a.events.join(", ")}`] : [],
-    `// @folder     ${a.isManual ? "risu/manual" : `risu/${a.binding}`}`,
-    `// @description LumiRealm translated trigger (character ${a.characterId}, binding ${a.binding}, source index ${a.index})`
-  ].join(`
-`);
-  const comment = [
-    `//`,
-    `// source comment: ${sanitizeComment(a.comment)}`,
-    `//`
-  ].join(`
-`);
-  const rtOpts = JSON.stringify({
-    displayMode: a.displayMode,
-    lowLevelAccess: a.lowLevelAccess,
-    binding: a.binding,
-    characterId: a.characterId
-  });
-  const bodyText = a.body.length > 0 ? a.body : "    // (empty trigger body)";
-  const inner = [
-    `const __rc = await script.require(${JSON.stringify(a.runtimeLib)});`,
-    `const __risu = await __rc.makeRisuTriggerRuntime(api, data, script, ${a.isManual ? `{ ...${rtOpts}, invocationState: invokeCtx.invocationState }` : rtOpts});`,
-    `try {`,
-    bodyText,
-    `} finally {`,
-    `  await __risu.flush();`,
-    `}`
-  ].join(`
-`);
-  if (a.isManual) {
-    return [
-      frontmatter,
-      comment,
-      ``,
-      `module.exports = {`,
-      `  async run(invokeCtx) {`,
-      `    const api = invokeCtx.api;`,
-      `    const data = invokeCtx.data || {};`,
-      `    const script = invokeCtx.script;`,
-      indent2(inner, "    "),
-      `  },`,
-      `};`,
-      ``
-    ].join(`
-`);
-  }
-  return [frontmatter, comment, ``, inner, ``].join(`
-`);
-}
-function indent2(text, prefix) {
-  return text.split(`
-`).map((line) => line.length > 0 ? prefix + line : line).join(`
-`);
-}
-function sanitizeComment(s) {
-  return s.replace(/\r?\n/g, " ").replace(/\*\//g, "*\\/").slice(0, 200);
-}
-function uniqueSlug2(comment, type, index, seen) {
-  const base = slugify2(comment) || `${type}_${index}`;
-  let candidate = base;
-  let n = 1;
-  while (seen.has(candidate)) {
-    n++;
-    candidate = `${base}_${n}`;
-  }
-  seen.add(candidate);
-  return candidate;
-}
-function slugify2(s) {
+function extractV3EmotionAssets(assets) {
   const out = [];
-  for (let i = 0;i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95 || c === 45) {
-      out.push(s[i]);
-    } else if (c === 32 || c === 9) {
-      out.push("_");
+  for (const raw of assets) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      continue;
+    const a = raw;
+    if (a["type"] !== "emotion")
+      continue;
+    const name = typeof a["name"] === "string" ? a["name"] : "";
+    const uri = typeof a["uri"] === "string" ? a["uri"] : "";
+    if (!name || !uri)
+      continue;
+    const path = stripAssetUriPrefix(uri);
+    const explicitExt = typeof a["ext"] === "string" ? a["ext"].toLowerCase() : undefined;
+    const ext = explicitExt ?? extFromPath(path);
+    out.push({ name, path, ...ext ? { ext } : {} });
+  }
+  return out;
+}
+function extractEmotionImages(extensions) {
+  const risuai = extensions["risuai"];
+  if (!risuai || typeof risuai !== "object" || Array.isArray(risuai))
+    return [];
+  const emotions = risuai["emotions"];
+  if (!Array.isArray(emotions))
+    return [];
+  const out = [];
+  for (const raw of emotions) {
+    if (Array.isArray(raw)) {
+      const [n, s, e] = raw;
+      const name = typeof n === "string" ? n : "";
+      const rawSrc = typeof s === "string" ? s : "";
+      const path = stripAssetUriPrefix(rawSrc);
+      const ext = typeof e === "string" ? e.toLowerCase() : undefined;
+      if (!name || !path)
+        continue;
+      out.push({ name, path, ...ext ?? extFromPath(path) ? { ext: ext ?? extFromPath(path) } : {} });
+    } else if (raw && typeof raw === "object") {
+      const o = raw;
+      const name = typeof o["name"] === "string" ? o["name"] : "";
+      const rawPath = typeof o["path"] === "string" ? o["path"] : typeof o["src"] === "string" ? o["src"] : "";
+      const path = stripAssetUriPrefix(rawPath);
+      const explicitExt = typeof o["ext"] === "string" ? o["ext"].toLowerCase() : undefined;
+      if (!name || !path)
+        continue;
+      const ext = explicitExt ?? extFromPath(path);
+      out.push({ name, path, ...ext ? { ext } : {} });
     }
   }
-  return out.join("").slice(0, 64);
+  return out;
+}
+function parseScriptstateDefaults(text) {
+  if (!text || typeof text !== "string")
+    return {};
+  const out = {};
+  for (const rawLine of text.split(`
+`)) {
+    const line = rawLine.trimStart();
+    if (!line || line.startsWith("#") || line.startsWith("//"))
+      continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0)
+      continue;
+    const key = line.slice(0, eq).trim();
+    if (!key)
+      continue;
+    let value = line.slice(eq + 1);
+    if (value.endsWith("\r"))
+      value = value.slice(0, -1);
+    out[key] = value;
+  }
+  return out;
+}
+function extractLuaScripts(triggers) {
+  return triggers.map((t) => {
+    const parts = [];
+    for (const e of t.effect ?? []) {
+      const eo = e;
+      if (eo.type === "triggerlua" && typeof eo.code === "string") {
+        parts.push(eo.code);
+      }
+    }
+    return parts.join(`
+`);
+  });
+}
+function extractRisuaiExtra(extensions) {
+  const risuai = extensions["risuai"];
+  if (!risuai || typeof risuai !== "object" || Array.isArray(risuai))
+    return {};
+  const out = {};
+  for (const [k, v] of Object.entries(risuai)) {
+    if (KNOWN_RISUAI_FIELDS.has(k))
+      continue;
+    out[k] = v;
+  }
+  return out;
+}
+function buildRisuPayload(input) {
+  const bgHtml = input.extracted.backgroundHTML;
+  const payload = {
+    triggers: input.triggers,
+    lua_scripts: extractLuaScripts(input.triggers),
+    at_actions: input.atActions,
+    background_html: bgHtml,
+    ...typeof bgHtml === "string" && bgHtml.length > 0 ? { background_html_source: bgHtml } : {},
+    virtualscript: input.extracted.virtualScript,
+    utility_bot: input.extracted.utilityBot,
+    scriptstate_defaults: parseScriptstateDefaults(input.extracted.defaultVariables),
+    additional_assets: extractAdditionalAssets(input.extracted.assets),
+    emotion_images: [
+      ...extractEmotionImages(input.characterExtensions),
+      ...extractV3EmotionAssets(input.extracted.assets)
+    ],
+    extra: extractRisuaiExtra(input.characterExtensions),
+    translator_version: input.translatorVersion,
+    risu_spec_version: input.risuSpecVersion,
+    requires: input.requires,
+    ...input.untranslated ? { untranslated: input.untranslated } : {}
+  };
+  return payload;
 }
 
 // src/core/mappers/font-hoist.ts
@@ -17875,282 +17253,6 @@ function prepareBackgroundHtmlForRuntime(raw, opts) {
     svgDangerousSkipped
   };
 }
-function buildBackgroundHtmlScript(html, opts) {
-  if (typeof html !== "string" || html.length === 0)
-    return { file: null, issues: [] };
-  const issues = [];
-  const expanded = expandShorthand(html);
-  const rewritten = applyIframePolicy(expanded).html;
-  const bindings = [
-    {
-      type: "character",
-      characterId: opts.characterId,
-      displayName: opts.characterName ?? opts.characterId
-    }
-  ];
-  const code = renderCode({
-    html: rewritten,
-    characterId: opts.characterId,
-    runtimeLib: opts.runtimeLibrary ?? "risu-compat"
-  });
-  const entry = {
-    name: "risu-bg-html",
-    code,
-    type: "trigger",
-    triggers: ["CHAT_CHANGED", "ls:startup"],
-    bindings,
-    folder: "risu/background-html",
-    path: "scripts/background-html/risu-bg-html.js"
-  };
-  return { file: entry, issues };
-}
-function expandShorthand(src) {
-  const n = src.length;
-  const out = [];
-  let i = 0;
-  let runStart = 0;
-  while (i < n) {
-    const c = src.charCodeAt(i);
-    if (c === 123) {
-      if (i + 1 < n && src.charCodeAt(i + 1) === 123) {
-        i += 2;
-        continue;
-      }
-      let j = i + 1;
-      if (j >= n)
-        break;
-      const first = src.charCodeAt(j);
-      if (!isIdentStart(first)) {
-        i++;
-        continue;
-      }
-      j++;
-      while (j < n && isIdentCont(src.charCodeAt(j)))
-        j++;
-      if (j < n && src.charCodeAt(j) === 125 && j - i > 1) {
-        out.push(src.slice(runStart, i));
-        out.push("{{getvar::", src.slice(i + 1, j), "}}");
-        i = j + 1;
-        runStart = i;
-        continue;
-      }
-      i = j;
-      continue;
-    }
-    i++;
-  }
-  out.push(src.slice(runStart, n));
-  return out.join("");
-}
-function isIdentStart(c) {
-  return c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95;
-}
-function isIdentCont(c) {
-  return isIdentStart(c) || c >= 48 && c <= 57;
-}
-function renderCode(a) {
-  a.runtimeLib;
-  const frontmatter = [
-    `// @name       risu-bg-html`,
-    `// @type       trigger`,
-    `// @triggers   CHAT_CHANGED, ls:startup`,
-    `// @folder     risu/background-html`,
-    `// @description LumiRealm translated backgroundHTML (character ${a.characterId})`
-  ].join(`
-`);
-  return [
-    frontmatter,
-    ``,
-    `const HTML = ${JSON.stringify(a.html)};`,
-    ``,
-    `let resolved = HTML;`,
-    `try {`,
-    `  if (api && api.utils && api.utils.template && typeof api.utils.template.render === "function") {`,
-    `    resolved = await api.utils.template.render(HTML, {}, { macrosOnly: true });`,
-    `  }`,
-    `} catch (e) { /* keep raw HTML on failure */ }`,
-    ``,
-    `try {`,
-    `  if (api && api.ui && api.ui.dom && typeof api.ui.dom.setBackgroundHtml === "function") {`,
-    `    await api.ui.dom.setBackgroundHtml(resolved);`,
-    `  } else if (api && api.broadcast && typeof api.broadcast.emit === "function") {`,
-    `    api.broadcast.emit("risu:bg-html", { html: resolved, characterId: ${JSON.stringify(a.characterId)} });`,
-    `  }`,
-    `} catch (e) { /* swallow \u2014 best-effort paint */ }`,
-    ``
-  ].join(`
-`);
-}
-
-// src/core/pipeline/risu-payload.ts
-var KNOWN_RISUAI_FIELDS = new Set([
-  "backgroundHTML",
-  "customScripts",
-  "triggerscript",
-  "virtualscript",
-  "defaultVariables",
-  "utilityBot",
-  "emotions"
-]);
-var EMBEDED_PREFIX = "embeded://";
-var ASSET_PREFIX = "__asset:";
-function stripAssetUriPrefix(uri) {
-  if (uri.startsWith(EMBEDED_PREFIX))
-    return uri.slice(EMBEDED_PREFIX.length);
-  if (uri.startsWith(ASSET_PREFIX))
-    return uri.slice(ASSET_PREFIX.length);
-  return uri;
-}
-function extFromPath(path) {
-  const dot = path.lastIndexOf(".");
-  if (dot < 0 || dot === path.length - 1)
-    return;
-  const ext = path.slice(dot + 1).toLowerCase();
-  if (!/^[a-z0-9]{1,6}$/.test(ext))
-    return;
-  return ext;
-}
-function extractAdditionalAssets(assets) {
-  const out = [];
-  for (const raw of assets) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw))
-      continue;
-    const a = raw;
-    if (a["type"] !== "x-risu-asset")
-      continue;
-    const name = typeof a["name"] === "string" ? a["name"] : "";
-    const uri = typeof a["uri"] === "string" ? a["uri"] : "";
-    if (!name || !uri)
-      continue;
-    const path = stripAssetUriPrefix(uri);
-    const explicitExt = typeof a["ext"] === "string" ? a["ext"].toLowerCase() : undefined;
-    const ext = explicitExt ?? extFromPath(path);
-    out.push({ name, path, ...ext ? { ext } : {} });
-  }
-  return out;
-}
-function extractV3EmotionAssets(assets) {
-  const out = [];
-  for (const raw of assets) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw))
-      continue;
-    const a = raw;
-    if (a["type"] !== "emotion")
-      continue;
-    const name = typeof a["name"] === "string" ? a["name"] : "";
-    const uri = typeof a["uri"] === "string" ? a["uri"] : "";
-    if (!name || !uri)
-      continue;
-    const path = stripAssetUriPrefix(uri);
-    const explicitExt = typeof a["ext"] === "string" ? a["ext"].toLowerCase() : undefined;
-    const ext = explicitExt ?? extFromPath(path);
-    out.push({ name, path, ...ext ? { ext } : {} });
-  }
-  return out;
-}
-function extractEmotionImages(extensions) {
-  const risuai = extensions["risuai"];
-  if (!risuai || typeof risuai !== "object" || Array.isArray(risuai))
-    return [];
-  const emotions = risuai["emotions"];
-  if (!Array.isArray(emotions))
-    return [];
-  const out = [];
-  for (const raw of emotions) {
-    if (Array.isArray(raw)) {
-      const [n, s, e] = raw;
-      const name = typeof n === "string" ? n : "";
-      const rawSrc = typeof s === "string" ? s : "";
-      const path = stripAssetUriPrefix(rawSrc);
-      const ext = typeof e === "string" ? e.toLowerCase() : undefined;
-      if (!name || !path)
-        continue;
-      out.push({ name, path, ...ext ?? extFromPath(path) ? { ext: ext ?? extFromPath(path) } : {} });
-    } else if (raw && typeof raw === "object") {
-      const o = raw;
-      const name = typeof o["name"] === "string" ? o["name"] : "";
-      const rawPath = typeof o["path"] === "string" ? o["path"] : typeof o["src"] === "string" ? o["src"] : "";
-      const path = stripAssetUriPrefix(rawPath);
-      const explicitExt = typeof o["ext"] === "string" ? o["ext"].toLowerCase() : undefined;
-      if (!name || !path)
-        continue;
-      const ext = explicitExt ?? extFromPath(path);
-      out.push({ name, path, ...ext ? { ext } : {} });
-    }
-  }
-  return out;
-}
-function parseScriptstateDefaults(text) {
-  if (!text || typeof text !== "string")
-    return {};
-  const out = {};
-  for (const rawLine of text.split(`
-`)) {
-    const line = rawLine.trimStart();
-    if (!line || line.startsWith("#") || line.startsWith("//"))
-      continue;
-    const eq = line.indexOf("=");
-    if (eq <= 0)
-      continue;
-    const key = line.slice(0, eq).trim();
-    if (!key)
-      continue;
-    let value = line.slice(eq + 1);
-    if (value.endsWith("\r"))
-      value = value.slice(0, -1);
-    out[key] = value;
-  }
-  return out;
-}
-function extractLuaScripts(triggers) {
-  return triggers.map((t) => {
-    const parts = [];
-    for (const e of t.effect ?? []) {
-      const eo = e;
-      if (eo.type === "triggerlua" && typeof eo.code === "string") {
-        parts.push(eo.code);
-      }
-    }
-    return parts.join(`
-`);
-  });
-}
-function extractRisuaiExtra(extensions) {
-  const risuai = extensions["risuai"];
-  if (!risuai || typeof risuai !== "object" || Array.isArray(risuai))
-    return {};
-  const out = {};
-  for (const [k, v] of Object.entries(risuai)) {
-    if (KNOWN_RISUAI_FIELDS.has(k))
-      continue;
-    out[k] = v;
-  }
-  return out;
-}
-function buildRisuPayload(input) {
-  const bgHtml = input.extracted.backgroundHTML;
-  const payload = {
-    triggers: input.triggers,
-    lua_scripts: extractLuaScripts(input.triggers),
-    at_actions: input.atActions,
-    background_html: bgHtml,
-    ...typeof bgHtml === "string" && bgHtml.length > 0 ? { background_html_source: bgHtml } : {},
-    virtualscript: input.extracted.virtualScript,
-    utility_bot: input.extracted.utilityBot,
-    scriptstate_defaults: parseScriptstateDefaults(input.extracted.defaultVariables),
-    additional_assets: extractAdditionalAssets(input.extracted.assets),
-    emotion_images: [
-      ...extractEmotionImages(input.characterExtensions),
-      ...extractV3EmotionAssets(input.extracted.assets)
-    ],
-    extra: extractRisuaiExtra(input.characterExtensions),
-    translator_version: input.translatorVersion,
-    risu_spec_version: input.risuSpecVersion,
-    requires: input.requires,
-    ...input.untranslated ? { untranslated: input.untranslated } : {}
-  };
-  return payload;
-}
 
 // src/core/pipeline/translate.ts
 init_svg_rasterize();
@@ -18248,7 +17350,6 @@ function translateFromCharxBundle(bundle, opts = {}) {
   let moduleCjs = false;
   let backgroundEmbedding = false;
   let mcp = false;
-  let moduleName = null;
   if (bundle.moduleEnvelope) {
     try {
       const parsed = parseRisuModule(bundle.moduleEnvelope.module);
@@ -18258,7 +17359,6 @@ function translateFromCharxBundle(bundle, opts = {}) {
       moduleLorebook = parsed.module.lorebook ?? [];
       moduleRegexScripts = parsed.module.regex ?? [];
       moduleTriggerScripts = parsed.module.trigger ?? [];
-      moduleName = parsed.module.name;
       moduleRegexCount = parsed.module.regex?.length ?? 0;
       moduleTriggerCount = parsed.module.trigger?.length ?? 0;
       moduleCjs = typeof parsed.module.cjs === "string" && parsed.module.cjs.length > 0;
@@ -18357,41 +17457,15 @@ function translateFromCharxBundle(bundle, opts = {}) {
   const regexUnknownTypes = charRegexOut.issues.filter((i) => i.message.startsWith("unknown Risu regex phase")).length + moduleRegexOut.issues.filter((i) => i.message.startsWith("unknown Risu regex phase")).length;
   const charTriggerScripts = filterValidTriggerScripts(bundle.moduleEnvelope ? [] : charMap.extracted.triggerScripts, issues, "character_level_triggers");
   const allTriggers = [...charTriggerScripts, ...moduleTriggerScripts].map((trigger) => ({ ...trigger, lowLevelAccess }));
-  const atActionsOut = wantTriggers ? compileAtActions(allAtActions, {
-    characterId: charMap.character.id,
-    characterName: charMap.character.name
-  }) : { files: [], issues: [] };
-  const triggersOut = wantTriggers ? compileTriggers(allTriggers, {
-    characterId: charMap.character.id,
-    characterName: charMap.character.name
-  }) : {
-    files: [],
-    issues: [],
-    opcodeUnimplemented: {},
-    luaCount: 0
-  };
-  const bgHtml = wantBgHtml ? buildBackgroundHtmlScript(charMap.extracted.backgroundHTML ?? null, {
-    characterId: charMap.character.id,
-    characterName: charMap.character.name
-  }) : { file: null, issues: [] };
-  for (const iss of bgHtml.issues)
-    issues.push(iss);
-  const emitPackScripts = opts.emitPackScripts !== false;
-  const scripts = emitPackScripts ? [
-    ...atActionsOut.files,
-    ...triggersOut.files,
-    ...bgHtml.file ? [bgHtml.file] : []
-  ] : [];
-  for (const iss of atActionsOut.issues)
-    issues.push(iss);
-  for (const iss of triggersOut.issues)
-    issues.push(iss);
+  const triggersOut = analyzeTriggers(wantTriggers ? allTriggers : []);
+  for (const issue of triggersOut.issues)
+    issues.push(issue);
   const assetsMap = opts.includeAssets === false ? new Map : bundle.assets;
   const extSpec = charMap.character.extensions["_lumirealm"];
   const hasMacrosInText = detectMacrosInText(charMap.character);
   const translatedCharRegex = charRegexOut.rows.length + charRegexOut.skipped.length;
   const translatedModuleRegex = moduleRegexOut.rows.length + moduleRegexOut.skipped.length;
-  const translatedTriggers = triggersOut.files.length;
+  const translatedTriggers = triggersOut.count;
   const untranslated = {
     module_regex: Math.max(0, moduleRegexCount - translatedModuleRegex),
     module_triggers: Math.max(0, moduleTriggerCount - translatedTriggers),
@@ -18400,7 +17474,7 @@ function translateFromCharxBundle(bundle, opts = {}) {
     virtualscript: isNonEmpty(charMap.extracted.virtualScript),
     default_variables: isNonEmpty(charMap.extracted.defaultVariables),
     ...isNonEmpty(charMap.extracted.additionalText) ? { additional_text: true } : {},
-    background_html: isNonEmpty(charMap.extracted.backgroundHTML) && bgHtml.file === null,
+    background_html: isNonEmpty(charMap.extracted.backgroundHTML) && !wantBgHtml,
     background_embedding: backgroundEmbedding,
     ...mcp ? { mcp: true } : {},
     module_cjs: moduleCjs,
@@ -18525,7 +17599,6 @@ function translateFromCharxBundle(bundle, opts = {}) {
     worldBook,
     worldBookEntries,
     regexScripts,
-    scripts,
     risuPayload,
     assets: assetsMap,
     preferredAvatar,
@@ -18978,68 +18051,55 @@ function mergeSidecarOverrides(base, overlay) {
 
 // src/core/payload/types.ts
 var LUMIREALM_EXT_KEY = "lumirealm";
+// src/state/image-journal-store.ts
+function createImageJournal(directory, idKey) {
+  const path = (id) => `${directory}/${id}.json`;
+  const scope = (userId) => userId !== undefined ? { userId } : {};
+  async function read(storage, userId, id) {
+    const value = await storage.getJson(path(id), { fallback: null, ...scope(userId) });
+    if (!value || typeof value !== "object")
+      return null;
+    const file = value;
+    return file.schema_version === 1 && typeof file[idKey] === "string" && Array.isArray(file.imageIds) && (file.status === "active" || file.status === "pending_delete") ? file : null;
+  }
+  return {
+    read,
+    async append(storage, userId, id, newIds) {
+      const cleanIds = newIds.filter((id) => typeof id === "string" && id.length > 0);
+      if (cleanIds.length === 0)
+        return;
+      const existing = await read(storage, userId, id);
+      if (existing?.status === "pending_delete")
+        return;
+      const current = existing?.imageIds ?? [];
+      const imageIds = Array.from(new Set([...current, ...cleanIds]));
+      if (existing && imageIds.length === current.length)
+        return;
+      await storage.setJson(path(id), { schema_version: 1, [idKey]: id, imageIds, status: "active", updated_at: Date.now() }, scope(userId));
+    },
+    async clear(storage, userId, id) {
+      try {
+        await storage.delete(path(id), userId);
+      } catch {}
+    },
+    async list(storage, userId) {
+      let names;
+      try {
+        names = await storage.list(directory, userId);
+      } catch {
+        return [];
+      }
+      return names.filter((name) => name.endsWith(".json")).map((name) => name.replace(/\.json$/i, ""));
+    }
+  };
+}
+
 // src/state/image-journal.ts
-var JOURNAL_DIR = "lumirealm/image_journal";
-var SCHEMA_VERSION = 1;
-function journalPath(characterId) {
-  return `${JOURNAL_DIR}/${characterId}.json`;
-}
-function isJournalFile(v) {
-  if (!v || typeof v !== "object")
-    return false;
-  const f = v;
-  return f.schema_version === SCHEMA_VERSION && typeof f.characterId === "string" && Array.isArray(f.imageIds) && (f.status === "active" || f.status === "pending_delete");
-}
-function userIdOpts(userId) {
-  return userId !== undefined ? { userId } : {};
-}
-async function writeJournalFile(storage, userId, file) {
-  await storage.setJson(journalPath(file.characterId), file, userIdOpts(userId));
-}
-async function readImageJournalFile(storage, userId, characterId) {
-  const file = await storage.getJson(journalPath(characterId), { fallback: null, ...userIdOpts(userId) });
-  return isJournalFile(file) ? file : null;
-}
-async function appendImageIdsToJournal(storage, userId, characterId, newIds) {
-  const cleanIds = newIds.filter((id) => typeof id === "string" && id.length > 0);
-  if (cleanIds.length === 0)
-    return;
-  const existing = await readImageJournalFile(storage, userId, characterId);
-  if (existing && existing.status === "pending_delete") {
-    return;
-  }
-  const curIds = existing ? existing.imageIds : [];
-  const merged = Array.from(new Set([...curIds, ...cleanIds]));
-  if (existing && merged.length === curIds.length)
-    return;
-  await writeJournalFile(storage, userId, {
-    schema_version: SCHEMA_VERSION,
-    characterId,
-    imageIds: merged,
-    status: "active",
-    updated_at: Date.now()
-  });
-}
-async function clearImageJournal(storage, userId, characterId) {
-  try {
-    await storage.delete(journalPath(characterId), userId);
-  } catch {}
-}
-async function listImageJournalCharacterIds(storage, userId) {
-  let names;
-  try {
-    names = await storage.list(JOURNAL_DIR, userId);
-  } catch {
-    return [];
-  }
-  const out = [];
-  for (const name of names) {
-    if (!name.endsWith(".json"))
-      continue;
-    out.push(name.replace(/\.json$/i, ""));
-  }
-  return out;
-}
+var journal = createImageJournal("lumirealm/image_journal", "characterId");
+var readImageJournalFile = journal.read;
+var appendImageIdsToJournal = journal.append;
+var clearImageJournal = journal.clear;
+var listImageJournalCharacterIds = journal.list;
 
 // src/log/store.ts
 var LEVEL_RANK = {
@@ -19513,8 +18573,7 @@ async function importCard(args) {
   const charxBundle = args.prepared?.bundle ?? readCharx(args.bytes);
   const bundle = translateFromCharxBundle(charxBundle, {
     sourceId: args.sourceId ?? `file:${args.fileName}`,
-    mode: "full",
-    emitPackScripts: false
+    mode: "full"
   });
   const assets = new Map(args.prepared?.assets);
   for (const [path, bytes] of bundle.assets)
@@ -20662,8 +19721,7 @@ async function migrateCharacterIfNeeded(args, deps) {
       module: args.envelope.source.module
     }), {
       sourceId: `migrate:${args.characterId}`,
-      mode: "full",
-      emitPackScripts: false
+      mode: "full"
     });
   } catch (err) {
     return {
@@ -21191,32 +20249,30 @@ function createWorldBookOps(deps) {
     expectCharacterEdit(characterId);
     await spindle.characters.update(characterId, { world_book_ids: ids.filter((id) => id !== worldBookId) }, userId);
   }
-  async function dispatchModuleArtifactInstall(characterId, env, userId, options) {
+  function moduleRegex(env, characterId, options) {
     const m = env.module;
     const moduleName = typeof m.name === "string" && m.name.length > 0 ? m.name : env.id;
     let stableIndex = 0;
-    const regexScripts = projectModuleRegexEntries(env.id, moduleName, characterId, m.regex, () => options?.stableIdPrefix ? `${options.stableIdPrefix}_${stableIndex++}` : cryptoUuidLocal()).map((script) => {
+    return projectModuleRegexEntries(env.id, moduleName, characterId, m.regex, () => options?.stableIdPrefix ? `${options.stableIdPrefix}_${stableIndex++}` : cryptoUuidLocal()).map((script) => {
       const sourceRow = script.metadata?._risu?.source_row_index;
       const legacyId = typeof sourceRow === "number" ? options?.legacyScriptIdsBySourceRow?.get(sourceRow) : undefined;
       return legacyId ? { ...script, metadata: { ...script.metadata, imported_script_id: normalizeScriptId2(legacyId) } } : script;
     });
-    const lorebookEntries = [];
+  }
+  async function dispatchModuleArtifactInstall(characterId, env, userId, options) {
+    const regexScripts = moduleRegex(env, characterId, options);
     const ownership = userId === undefined ? { allOwned: false, scripts: regexScripts } : await ensureRegexOwnership(spindle.regex_scripts, regexScripts, userId);
-    log.info(`dispatchModuleArtifactInstall: module=${env.id} char=${characterId} ` + `lorebookEntries=${lorebookEntries.length} regexScripts=${regexScripts.length}`);
+    log.info(`dispatchModuleArtifactInstall: module=${env.id} char=${characterId} ` + `regexScripts=${regexScripts.length}`);
     send({
       type: "install_module_artifacts",
       characterId,
       moduleId: env.id,
-      worldBookName: `Module: ${moduleName}`,
-      lorebookEntries,
       regexScripts: ownership.scripts,
       cleanupStale: ownership.allOwned,
       ...options?.requestId ? { requestId: options.requestId } : {}
     }, userId);
   }
   async function dispatchGlobalModuleArtifactInstall(env, userId, options) {
-    const m = env.module;
-    const moduleName = typeof m.name === "string" && m.name.length > 0 ? m.name : env.id;
     let addedWorldBookId = null;
     const wbId = env.installed_world_book_id ?? null;
     if (wbId) {
@@ -21231,20 +20287,13 @@ function createWorldBookOps(deps) {
         log.warn(`dispatchGlobalModuleArtifactInstall: setGlobal failed module=${env.id}: ${errMsg(err)}`);
       }
     }
-    let stableIndex = 0;
-    const regexScripts = projectModuleRegexEntries(env.id, moduleName, null, m.regex, () => options?.stableIdPrefix ? `${options.stableIdPrefix}_${stableIndex++}` : cryptoUuidLocal()).map((script) => {
-      const sourceRow = script.metadata?._risu?.source_row_index;
-      const legacyId = typeof sourceRow === "number" ? options?.legacyScriptIdsBySourceRow?.get(sourceRow) : undefined;
-      return legacyId ? { ...script, metadata: { ...script.metadata, imported_script_id: normalizeScriptId2(legacyId) } } : script;
-    });
+    const regexScripts = moduleRegex(env, null, options);
     const ownership = userId === undefined ? { allOwned: false, scripts: regexScripts } : await ensureRegexOwnership(spindle.regex_scripts, regexScripts, userId);
     log.info(`dispatchGlobalModuleArtifactInstall: module=${env.id} regexScripts=${regexScripts.length} (global scope)`);
     send({
       type: "install_module_artifacts",
       characterId: null,
       moduleId: env.id,
-      worldBookName: `Module: ${moduleName}`,
-      lorebookEntries: [],
       regexScripts: ownership.scripts,
       cleanupStale: ownership.allOwned,
       ...options?.requestId ? { requestId: options.requestId } : {}
@@ -21997,66 +21046,11 @@ function buildDetachModulesPatch(current, moduleIds) {
 }
 
 // src/state/module-image-journal.ts
-var JOURNAL_DIR2 = "lumirealm/module_image_journal";
-var SCHEMA_VERSION2 = 1;
-function journalPath2(moduleId) {
-  return `${JOURNAL_DIR2}/${moduleId}.json`;
-}
-function isJournalFile2(v) {
-  if (!v || typeof v !== "object")
-    return false;
-  const f = v;
-  return f.schema_version === SCHEMA_VERSION2 && typeof f.moduleId === "string" && Array.isArray(f.imageIds) && (f.status === "active" || f.status === "pending_delete");
-}
-function userIdOpts2(userId) {
-  return userId !== undefined ? { userId } : {};
-}
-async function writeJournalFile2(storage, userId, file) {
-  await storage.setJson(journalPath2(file.moduleId), file, userIdOpts2(userId));
-}
-async function readModuleImageJournalFile(storage, userId, moduleId) {
-  const file = await storage.getJson(journalPath2(moduleId), { fallback: null, ...userIdOpts2(userId) });
-  return isJournalFile2(file) ? file : null;
-}
-async function appendModuleImageIdsToJournal(storage, userId, moduleId, newIds) {
-  const cleanIds = newIds.filter((id) => typeof id === "string" && id.length > 0);
-  if (cleanIds.length === 0)
-    return;
-  const existing = await readModuleImageJournalFile(storage, userId, moduleId);
-  if (existing && existing.status === "pending_delete")
-    return;
-  const curIds = existing ? existing.imageIds : [];
-  const merged = Array.from(new Set([...curIds, ...cleanIds]));
-  if (existing && merged.length === curIds.length)
-    return;
-  await writeJournalFile2(storage, userId, {
-    schema_version: SCHEMA_VERSION2,
-    moduleId,
-    imageIds: merged,
-    status: "active",
-    updated_at: Date.now()
-  });
-}
-async function clearModuleImageJournal(storage, userId, moduleId) {
-  try {
-    await storage.delete(journalPath2(moduleId), userId);
-  } catch {}
-}
-async function listModuleImageJournalIds(storage, userId) {
-  let names;
-  try {
-    names = await storage.list(JOURNAL_DIR2, userId);
-  } catch {
-    return [];
-  }
-  const out = [];
-  for (const name of names) {
-    if (!name.endsWith(".json"))
-      continue;
-    out.push(name.replace(/\.json$/i, ""));
-  }
-  return out;
-}
+var journal2 = createImageJournal("lumirealm/module_image_journal", "moduleId");
+var readModuleImageJournalFile = journal2.read;
+var appendModuleImageIdsToJournal = journal2.append;
+var clearModuleImageJournal = journal2.clear;
+var listModuleImageJournalIds = journal2.list;
 
 // src/state/orphan-detect.ts
 var IMAGE_URL_RE = /\/api\/v1\/images\/([A-Za-z0-9_\-]+)/g;
@@ -22711,6 +21705,17 @@ function currentUserId() {
   return userIdAls.getStore() ?? null;
 }
 var triggerDepthAls = createAls();
+
+// src/core/triggers/control-flow.ts
+var CONTROL_OPS = new Set([
+  "v2If",
+  "v2IfAdvanced",
+  "v2Else",
+  "v2EndIndent",
+  "v2Loop",
+  "v2LoopNTimes",
+  "v2BreakLoop"
+]);
 // src/state/authors-note-cache.ts
 var AUTHORS_NOTE_CACHE_TTL_MS = 2000;
 var notesByChat = new Map;
@@ -22724,30 +21729,6 @@ async function readChatAuthorsNote(chatId, userId) {
   const value = typeof raw === "string" ? raw : "";
   notesByChat.set(chatId, { at: Date.now(), value });
   return value;
-}
-
-// src/interpreter/runtime/lorebook.ts
-function withModuleLorebooks(entries, modules, bookIds = []) {
-  const loadedBooks = new Set([...bookIds, ...entries.map((entry) => entry.worldBookId)]);
-  const out = [...entries];
-  for (const raw of modules) {
-    if (!raw || typeof raw !== "object")
-      continue;
-    const row = raw;
-    if (typeof row.worldBookId === "string" && loadedBooks.has(row.worldBookId))
-      continue;
-    out.push({
-      ...row,
-      id: typeof row.id === "string" ? row.id : `module-lore-${out.length}`,
-      key: Array.isArray(row.key) ? row.key : typeof row.key === "string" ? row.key : [],
-      content: typeof row.content === "string" ? row.content : "",
-      comment: typeof row.comment === "string" ? row.comment : "",
-      orderValue: typeof row.orderValue === "number" ? row.orderValue : typeof row.insertorder === "number" ? row.insertorder : 100,
-      disabled: row.disabled === true,
-      constant: typeof row.constant === "boolean" ? row.constant : row.alwaysActive === true
-    });
-  }
-  return out;
 }
 
 // src/interpreter/evaluator/index.ts
@@ -23221,30 +22202,16 @@ function prepareTriggers(payload, characterId) {
   return prepareTriggerSources(rawTriggers, characterId);
 }
 function prepareTriggerSources(rawTriggers, characterId) {
-  const compiled = compileTriggers(rawTriggers, { characterId });
-  const out = [];
-  for (let i = 0;i < compiled.files.length; i++) {
-    const f = compiled.files[i];
-    const sourceTrigger = rawTriggers[i];
-    if (!sourceTrigger)
-      continue;
-    const binding = sourceTrigger.type;
-    out.push({
-      name: f.name,
-      code: f.code,
-      type: f.type,
-      triggers: f.triggers ?? [],
-      binding,
-      source: sourceTrigger,
-      rtOpts: {
-        displayMode: binding === "display",
-        lowLevelAccess: Boolean(sourceTrigger.lowLevelAccess),
-        binding,
-        characterId
-      }
-    });
-  }
-  return out;
+  return prepareTriggerEntries(rawTriggers).map((entry) => ({
+    ...entry,
+    binding: entry.source.type,
+    rtOpts: {
+      displayMode: entry.source.type === "display",
+      lowLevelAccess: Boolean(entry.source.lowLevelAccess),
+      binding: entry.source.type,
+      characterId
+    }
+  }));
 }
 
 // src/payload/lorebook-direct-import.ts
@@ -23601,17 +22568,6 @@ async function fetchLorebookForCharacter(worldBookIds, userId) {
   return out;
 }
 
-// src/interpreter/modules-by-namespace-cache.ts
-var byCharacter3 = new Map;
-var chatToCharacter3 = new Map;
-function setActiveModulesByNamespace(chatId, characterId, modulesByNamespace) {
-  byCharacter3.set(characterId, modulesByNamespace);
-  chatToCharacter3.set(chatId, characterId);
-}
-function clearActiveModulesByNamespace(chatId) {
-  chatToCharacter3.delete(chatId);
-}
-
 // src/interpreter/listenedit-preload.ts
 var log = makeSafeLogger("listenEdit.preload");
 var cache2 = new Map;
@@ -23654,9 +22610,9 @@ function setGlobalModuleIdsCache(userId, ids) {
 
 // src/state/character-recency.ts
 var PATH = "lumirealm/character-recency.json";
-var SCHEMA_VERSION3 = 1;
+var SCHEMA_VERSION = 1;
 var MAX_ENTRIES = 500;
-var EMPTY = { schema_version: SCHEMA_VERSION3, seen: {} };
+var EMPTY = { schema_version: SCHEMA_VERSION, seen: {} };
 async function readCharacterRecency(storage, userId) {
   try {
     const raw = await storage.getJson(PATH, {
@@ -23665,7 +22621,7 @@ async function readCharacterRecency(storage, userId) {
     });
     if (!raw || typeof raw !== "object")
       return EMPTY;
-    if (raw.schema_version !== SCHEMA_VERSION3)
+    if (raw.schema_version !== SCHEMA_VERSION)
       return EMPTY;
     if (!raw.seen || typeof raw.seen !== "object")
       return EMPTY;
@@ -23682,9 +22638,9 @@ function touchRecency(current, characterId, now) {
     const next = {};
     for (const k of trimmed)
       next[k] = seen[k];
-    return { schema_version: SCHEMA_VERSION3, seen: next };
+    return { schema_version: SCHEMA_VERSION, seen: next };
   }
-  return { schema_version: SCHEMA_VERSION3, seen };
+  return { schema_version: SCHEMA_VERSION, seen };
 }
 async function writeCharacterRecency(storage, userId, value) {
   await storage.setJson(PATH, value, {
@@ -27540,7 +26496,6 @@ function createImportHandlers(deps) {
             deps.sendSetActiveChat(active ? lastChat : null, active ? active.card.character_id : null, ctx.userId);
             if (active) {
               deps.setChatStyleMode(lastChat, "extension-relaxed", ctx.userId);
-              deps.invalidateRenderMcpForChat(lastChat);
               deps.invalidateMacroInterceptorForChat(lastChat);
               await deps.refreshBgHtml(active, lastChat, ctx.userId);
               await deps.refreshVariables(active, lastChat, ctx.userId, { force: true });
@@ -27919,7 +26874,6 @@ function createLifecycleEventHandlers(deps) {
       if (active.ownerUserId !== userId)
         continue;
       affected.add(active.card.character_id);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       deps.invalidateListenEditPreload(chatId);
     }
@@ -27949,7 +26903,6 @@ function createLifecycleEventHandlers(deps) {
     const active = await deps.ensureActiveCardForChat(chatId, null, userId);
     if (!active)
       return;
-    deps.invalidateRenderMcpForChat(chatId);
     deps.invalidateMacroInterceptorForChat(chatId);
     await deps.refreshVariables(active, chatId, userId, { force: true });
     await deps.refreshBgHtml(active, chatId, userId);
@@ -28036,7 +26989,6 @@ function createLifecycleEventHandlers(deps) {
       }
       deps.setChatStyleMode(chatId, "extension-relaxed", userId);
       deps.lastSentBgHtmlByChat.delete(chatId);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       deps.refreshMessagesCache(chatId, userId);
       await deps.refreshVariables(active, chatId, userId, { force: true });
@@ -28064,7 +27016,6 @@ function createLifecycleEventHandlers(deps) {
       const wasOwn = deps.consumeOwnChatChange(chatId);
       if (requiresRefresh) {
         deps.invalidateListenEditPreload(chatId);
-        deps.invalidateRenderMcpForChat(chatId);
         deps.invalidateMacroInterceptorForChat(chatId);
         if (!wasOwn)
           invalidateRecentFlush(chatId);
@@ -28105,7 +27056,6 @@ function createLifecycleEventHandlers(deps) {
         return;
       if (userId !== undefined)
         await deps.runMessageVarPass(chatId, active.card.character_id, userId);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       await deps.refreshBgHtml(active, chatId, userId);
       await deps.refreshVariables(active, chatId, userId);
@@ -28127,7 +27077,6 @@ function createLifecycleEventHandlers(deps) {
           await deps.runBinding(active, chatId, binding, userId, payload.frontendSessionId);
         }
       }
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       deps.refreshMessagesCache(chatId, userId);
       await deps.refreshBgHtml(active, chatId, userId);
@@ -28142,7 +27091,6 @@ function createLifecycleEventHandlers(deps) {
       const active = await deps.ensureActiveCardForChat(chatId, characterId, userId);
       if (!active)
         return;
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       await deps.refreshBgHtml(active, chatId, userId);
       await deps.refreshVariables(active, chatId, userId);
@@ -28156,7 +27104,6 @@ function createLifecycleEventHandlers(deps) {
       if (!chatId || !msgId)
         return;
       deps.invalidateListenEditPreload(chatId);
-      deps.invalidateRenderMcpForMessage(chatId, msgId);
       deps.refreshMessagesCache(chatId, userId);
       const active = await deps.ensureActiveCardForChat(chatId, null, userId);
       if (!active)
@@ -28175,7 +27122,6 @@ function createLifecycleEventHandlers(deps) {
         deps.log.warn(`event MESSAGE_EDITED: missing chatId/msgId payload=${JSON.stringify(raw).slice(0, 200)}`);
         return;
       }
-      deps.invalidateRenderMcpForMessage(chatId, msgId);
       deps.refreshMessagesCache(chatId, userId);
       const newContent = String(p.message?.content ?? "");
       if (deps.consumeIfOurWrite(chatId, msgId, newContent))
@@ -28192,8 +27138,6 @@ function createLifecycleEventHandlers(deps) {
       if (!chatId)
         return;
       deps.invalidateListenEditPreload(chatId);
-      if (msgId)
-        deps.invalidateRenderMcpForMessage(chatId, msgId);
       await deps.refreshMessagesCache(chatId, userId);
       const active = await deps.ensureActiveCardForChat(chatId, null, userId);
       if (!active)
@@ -28210,7 +27154,6 @@ function createLifecycleEventHandlers(deps) {
       if (!chatId)
         return;
       deps.invalidateListenEditPreload(chatId);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       deps.invalidateMessagesCache(chatId);
       invalidateRecentFlush(chatId);
@@ -28784,36 +27727,6 @@ function isDirectAction(value) {
   return value === "emo" || value === "inject" || value === "move_top" || value === "move_bottom" || value === "repeat_back";
 }
 
-// src/util/pua-roundtrip.ts
-var ENCODE_OPEN = String.fromCharCode(63728);
-var ENCODE_CLOSE = String.fromCharCode(63729);
-var FE_MACRO_RE = /\{\{\s*(user|char|charName|notChar|not_char)\s*\}\}/g;
-var DECODE_RE = new RegExp(`${ENCODE_OPEN}(\\d+)${ENCODE_CLOSE}`, "g");
-function puaEncodeFeMacros(text) {
-  if (!text || text.indexOf("{{") < 0)
-    return { text, tokens: [] };
-  const tokens = [];
-  const out = text.replace(FE_MACRO_RE, (_match, name) => {
-    const idx = tokens.length;
-    tokens.push(name);
-    return `${ENCODE_OPEN}${idx}${ENCODE_CLOSE}`;
-  });
-  return { text: out, tokens };
-}
-function puaDecodeFeMacros(text, tokens) {
-  if (tokens.length === 0)
-    return text;
-  if (text.indexOf(ENCODE_OPEN) < 0)
-    return text;
-  return text.replace(DECODE_RE, (_match, idxStr) => {
-    const idx = Number(idxStr);
-    const name = tokens[idx];
-    if (name === undefined)
-      return _match;
-    return `{{${name}}}`;
-  });
-}
-
 // src/util/perf.ts
 var ENABLED = (() => {
   try {
@@ -28882,23 +27795,6 @@ var PANEL_TRACE = (() => {
     return false;
   }
 })();
-var PANEL_MARKERS = ["\u2605\u25A0", "\uD83E\uDDB6", "\u2605OMEGA\u2605", "data-lr-style-wrap", "data-risu-island", "sys-panel", "status-panel"];
-function panelTrace(stage, content) {
-  if (!PANEL_TRACE)
-    return;
-  const found = [];
-  let firstIdx = -1;
-  for (const m of PANEL_MARKERS) {
-    const i = content.indexOf(m);
-    if (i >= 0) {
-      found.push(m);
-      if (firstIdx < 0 || i < firstIdx)
-        firstIdx = i;
-    }
-  }
-  const slice = firstIdx >= 0 ? content.slice(Math.max(0, firstIdx - 50), firstIdx + 140) : content.slice(0, 140);
-  emitLine(`[panel-trace] ${stage} len=${content.length} markers=[${found.join(",")}] slice=${JSON.stringify(slice)}`);
-}
 function flushNow() {
   if (!ENABLED || buckets.size === 0)
     return;
@@ -28915,20 +27811,13 @@ ${lines.join(`
 `)}`);
 }
 
-// src/state/render-mcp-cache.ts
-var log3 = makeSafeLogger("render-mcp-cache");
+// src/state/macro-interceptor-cache.ts
+var log3 = makeSafeLogger("macro-interceptor-cache");
 var TTL_MS = 5000;
 var MAX_ENTRIES2 = 500;
 var cache5 = new Map;
-var inFlight = new Map;
-var knownOutputs = new Map;
-var KNOWN_OUTPUTS_MAX = 800;
 var hitCount = 0;
 var missCount = 0;
-var inFlightHitCount = 0;
-function key(chatId, msgId) {
-  return `${chatId}::${msgId}`;
-}
 function fnv1a(s) {
   let h = 2166136261;
   for (let i = 0;i < s.length; i++) {
@@ -28936,6 +27825,9 @@ function fnv1a(s) {
     h = h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
   }
   return h >>> 0;
+}
+function key(chatId, template, commit, ctxKey) {
+  return `${chatId}::${commit ? "c" : "d"}::${ctxKey}::${template.length}::${fnv1a(template)}`;
 }
 function evictIfNeeded(now) {
   if (cache5.size < MAX_ENTRIES2)
@@ -28957,14 +27849,8 @@ function evictIfNeeded(now) {
   if (oldestKey)
     cache5.delete(oldestKey);
 }
-function lookupRenderMcp(chatId, msgId, content) {
-  const k = key(chatId, msgId);
-  const liveHash = fnv1a(content);
-  const ko = knownOutputs.get(k);
-  if (ko && ko.hashes.has(liveHash)) {
-    hitCount += 1;
-    return { kind: "noop" };
-  }
+function lookupMacroInterceptor(chatId, template, commit, ctxKey) {
+  const k = key(chatId, template, commit, ctxKey);
   const entry = cache5.get(k);
   if (!entry) {
     missCount += 1;
@@ -28976,79 +27862,15 @@ function lookupRenderMcp(chatId, msgId, content) {
     missCount += 1;
     return null;
   }
-  if (entry.contentLen === content.length && entry.contentHash === liveHash) {
-    hitCount += 1;
-    return entry.result;
-  }
-  if (entry.result.kind === "transformed" && entry.outLen === content.length && entry.outHash === liveHash) {
-    hitCount += 1;
-    return { kind: "noop" };
-  }
-  missCount += 1;
-  return null;
+  hitCount += 1;
+  return { result: entry.result, touchedVars: entry.touchedVars, volatile: entry.volatile };
 }
-function cacheRenderMcp(chatId, msgId, content, result) {
+function cacheMacroInterceptor(chatId, template, commit, ctxKey, result, touchedVars, volatile) {
   const now = Date.now();
   evictIfNeeded(now);
-  const outContent = result.kind === "transformed" ? result.content : content;
-  const k = key(chatId, msgId);
-  cache5.set(k, {
-    contentHash: fnv1a(content),
-    contentLen: content.length,
-    result,
-    outHash: fnv1a(outContent),
-    outLen: outContent.length,
-    ts: now
-  });
-  if (result.kind === "transformed") {
-    if (knownOutputs.size >= KNOWN_OUTPUTS_MAX) {
-      let oldestKey = null;
-      let oldestTs = Infinity;
-      for (const [kk, v] of knownOutputs) {
-        if (v.ts < oldestTs) {
-          oldestTs = v.ts;
-          oldestKey = kk;
-        }
-      }
-      if (oldestKey)
-        knownOutputs.delete(oldestKey);
-    }
-    const ko = knownOutputs.get(k);
-    const h = fnv1a(result.content);
-    if (ko) {
-      ko.hashes.add(h);
-      ko.ts = now;
-      if (ko.hashes.size > 16) {
-        const first = ko.hashes.values().next().value;
-        if (first !== undefined)
-          ko.hashes.delete(first);
-      }
-    } else {
-      knownOutputs.set(k, { hashes: new Set([h]), ts: now });
-    }
-  }
+  cache5.set(key(chatId, template, commit, ctxKey), { result, touchedVars, volatile, ts: now });
 }
-function lookupInFlightRenderMcp(chatId, msgId, content) {
-  const entry = inFlight.get(key(chatId, msgId));
-  if (!entry)
-    return null;
-  if (entry.contentLen !== content.length)
-    return null;
-  if (entry.contentHash !== fnv1a(content))
-    return null;
-  inFlightHitCount += 1;
-  return entry.promise;
-}
-function markRenderMcpInFlight(chatId, msgId, content, promise) {
-  const k = key(chatId, msgId);
-  inFlight.set(k, { contentHash: fnv1a(content), contentLen: content.length, promise });
-  promise.finally(() => {
-    const cur = inFlight.get(k);
-    if (cur && cur.promise === promise)
-      inFlight.delete(k);
-  });
-}
-function invalidateRenderMcpForChat(chatId) {
+function invalidateMacroInterceptorForChat(chatId) {
   const prefix = `${chatId}::`;
   let removed = 0;
   for (const k of cache5.keys()) {
@@ -29057,97 +27879,11 @@ function invalidateRenderMcpForChat(chatId) {
       removed += 1;
     }
   }
-  for (const k of inFlight.keys()) {
-    if (k.startsWith(prefix))
-      inFlight.delete(k);
-  }
   if (removed > 0)
     log3.debug(`invalidate chat=${chatId} entries=${removed}`);
 }
-function invalidateRenderMcpForMessage(chatId, msgId) {
-  const k = key(chatId, msgId);
-  if (cache5.delete(k))
-    log3.debug(`invalidate chat=${chatId} msg=${msgId}`);
-  inFlight.delete(k);
-  knownOutputs.delete(k);
-}
-function renderMcpCacheStats() {
-  return { size: cache5.size, hits: hitCount, misses: missCount, inFlightHits: inFlightHitCount, inFlightSize: inFlight.size };
-}
-
-// src/state/macro-interceptor-cache.ts
-var log4 = makeSafeLogger("macro-interceptor-cache");
-var TTL_MS2 = 5000;
-var MAX_ENTRIES3 = 500;
-var cache6 = new Map;
-var hitCount2 = 0;
-var missCount2 = 0;
-function fnv1a2(s) {
-  let h = 2166136261;
-  for (let i = 0;i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
-  }
-  return h >>> 0;
-}
-function key2(chatId, template, commit, ctxKey) {
-  return `${chatId}::${commit ? "c" : "d"}::${ctxKey}::${template.length}::${fnv1a2(template)}`;
-}
-function evictIfNeeded2(now) {
-  if (cache6.size < MAX_ENTRIES3)
-    return;
-  for (const [k, v] of cache6) {
-    if (now - v.ts > TTL_MS2)
-      cache6.delete(k);
-  }
-  if (cache6.size < MAX_ENTRIES3)
-    return;
-  let oldestKey = null;
-  let oldestTs = Infinity;
-  for (const [k, v] of cache6) {
-    if (v.ts < oldestTs) {
-      oldestTs = v.ts;
-      oldestKey = k;
-    }
-  }
-  if (oldestKey)
-    cache6.delete(oldestKey);
-}
-function lookupMacroInterceptor(chatId, template, commit, ctxKey) {
-  const k = key2(chatId, template, commit, ctxKey);
-  const entry = cache6.get(k);
-  if (!entry) {
-    missCount2 += 1;
-    return null;
-  }
-  const now = Date.now();
-  if (now - entry.ts > TTL_MS2) {
-    cache6.delete(k);
-    missCount2 += 1;
-    return null;
-  }
-  hitCount2 += 1;
-  return { result: entry.result, touchedVars: entry.touchedVars, volatile: entry.volatile };
-}
-function cacheMacroInterceptor(chatId, template, commit, ctxKey, result, touchedVars, volatile) {
-  const now = Date.now();
-  evictIfNeeded2(now);
-  cache6.set(key2(chatId, template, commit, ctxKey), { result, touchedVars, volatile, ts: now });
-}
-function invalidateMacroInterceptorForChat(chatId) {
-  const prefix = `${chatId}::`;
-  let removed = 0;
-  for (const k of cache6.keys()) {
-    if (k.startsWith(prefix)) {
-      cache6.delete(k);
-      removed += 1;
-    }
-  }
-  if (removed > 0)
-    log4.debug(`invalidate chat=${chatId} entries=${removed}`);
-}
 function macroInterceptorCacheStats() {
-  return { size: cache6.size, hits: hitCount2, misses: missCount2 };
+  return { size: cache5.size, hits: hitCount, misses: missCount };
 }
 
 // src/state/toggle-preferences.ts
@@ -29287,57 +28023,57 @@ function presetToggleValues(chatId, userId) {
 }
 
 // src/state/recent-writes.ts
-var log5 = makeSafeLogger("recent-writes");
-var TTL_MS3 = 60000;
-var MAX_ENTRIES4 = 100;
+var log4 = makeSafeLogger("recent-writes");
+var TTL_MS2 = 60000;
+var MAX_ENTRIES3 = 100;
 var RAPID_CONSUME_MS = 100;
-var cache7 = new Map;
-function key3(chatId, msgId) {
+var cache6 = new Map;
+function key2(chatId, msgId) {
   return `${chatId}::${msgId}`;
 }
 function rememberOurWrite(chatId, msgId, content) {
   const now = Date.now();
-  if (cache7.size >= MAX_ENTRIES4) {
-    for (const [k, v] of cache7) {
-      if (now - v.ts > TTL_MS3)
-        cache7.delete(k);
+  if (cache6.size >= MAX_ENTRIES3) {
+    for (const [k, v] of cache6) {
+      if (now - v.ts > TTL_MS2)
+        cache6.delete(k);
     }
-    if (cache7.size >= MAX_ENTRIES4) {
+    if (cache6.size >= MAX_ENTRIES3) {
       let oldestKey = null;
       let oldestTs = Infinity;
-      for (const [k, v] of cache7) {
+      for (const [k, v] of cache6) {
         if (v.ts < oldestTs) {
           oldestTs = v.ts;
           oldestKey = k;
         }
       }
       if (oldestKey)
-        cache7.delete(oldestKey);
+        cache6.delete(oldestKey);
     }
   }
-  cache7.set(key3(chatId, msgId), { content, ts: now });
+  cache6.set(key2(chatId, msgId), { content, ts: now });
 }
 function consumeIfOurWrite(chatId, msgId, content) {
-  const k = key3(chatId, msgId);
-  const entry = cache7.get(k);
+  const k = key2(chatId, msgId);
+  const entry = cache6.get(k);
   if (!entry)
     return false;
   const elapsed = Date.now() - entry.ts;
-  if (elapsed > TTL_MS3) {
-    cache7.delete(k);
+  if (elapsed > TTL_MS2) {
+    cache6.delete(k);
     return false;
   }
   if (entry.content !== content)
     return false;
-  cache7.delete(k);
+  cache6.delete(k);
   if (elapsed >= RAPID_CONSUME_MS) {
-    log5.info(`consumeIfOurWrite: late match chat=${chatId} msg=${msgId} elapsed=${elapsed}ms content_len=${content.length} ` + `\u2014 normal echoes are <${RAPID_CONSUME_MS}ms; if user reports a "my edit reverted" symptom soon after, suspect false-positive`);
+    log4.info(`consumeIfOurWrite: late match chat=${chatId} msg=${msgId} elapsed=${elapsed}ms content_len=${content.length} ` + `\u2014 normal echoes are <${RAPID_CONSUME_MS}ms; if user reports a "my edit reverted" symptom soon after, suspect false-positive`);
   }
   return true;
 }
 
 // src/interpreter/decorator-buffers.ts
-var TTL_MS4 = 60000;
+var TTL_MS3 = 60000;
 var buffersByChat = new Map;
 function setDecoratorBuffers(chatId, buffers) {
   buffersByChat.set(chatId, { ...buffers, ts: Date.now() });
@@ -29346,7 +28082,7 @@ function getDecoratorBuffers(chatId) {
   const buf = buffersByChat.get(chatId);
   if (!buf)
     return null;
-  if (Date.now() - buf.ts > TTL_MS4) {
+  if (Date.now() - buf.ts > TTL_MS3) {
     buffersByChat.delete(chatId);
     return null;
   }
@@ -29414,7 +28150,7 @@ function resolvePickResolution(requestId, responderUserId, value) {
 }
 
 // src/interpreter/spindle-host.ts
-var log6 = makeSafeLogger("spindle-host.llm.generate");
+var log5 = makeSafeLogger("spindle-host.llm.generate");
 function makeSpindleHost(ctx) {
   const { chatId, characterId, userId } = ctx;
   const uid = userId ?? undefined;
@@ -29542,9 +28278,7 @@ function makeSpindleHost(ctx) {
   const host = {
     luaStateScope: backendLuaStateScope(userId),
     ...uid !== undefined ? { userId: uid } : {},
-    ...typeof spindle.cors === "function" ? {
-      corsFetch: async (url, init) => await spindle.cors(url, { method: init?.method ?? "GET" })
-    } : {},
+    corsFetch: async (url, init) => await spindle.cors(url, { method: init?.method ?? "GET" }),
     getGlobalVariables: async () => {
       if (!uid)
         throw new TypeError("Global variables require a user ID");
@@ -29572,7 +28306,7 @@ function makeSpindleHost(ctx) {
     ui: {
       toast: (msg, kind) => {
         if (userId === undefined) {
-          log6.warn(`toast: no userId in dispatch ctx, skipping (would broadcast)`);
+          log5.warn(`toast: no userId in dispatch ctx, skipping (would broadcast)`);
           return;
         }
         const t = spindle.toast;
@@ -29614,7 +28348,7 @@ function makeSpindleHost(ctx) {
       },
       alert: async (message, kind) => {
         if (userId === undefined) {
-          log6.warn(`alert: no userId in dispatch ctx, skipping (would broadcast)`);
+          log5.warn(`alert: no userId in dispatch ctx, skipping (would broadcast)`);
           return;
         }
         const requestId = globalThis.crypto?.randomUUID?.() ?? `alert-${Date.now()}-${Math.random()}`;
@@ -29626,18 +28360,18 @@ function makeSpindleHost(ctx) {
       },
       pick: async (title, options) => {
         if (options.length === 0 || userId === undefined) {
-          log6.warn(`pick: empty options (n=${options.length}) or no userId, returning null`);
+          log5.warn(`pick: empty options (n=${options.length}) or no userId, returning null`);
           return null;
         }
         const requestId = globalThis.crypto?.randomUUID?.() ?? `pick-${Date.now()}-${Math.random()}`;
-        log6.info(`pick: requestId=${requestId} title=${JSON.stringify(title.slice(0, 80))} options=${options.length}`);
+        log5.info(`pick: requestId=${requestId} title=${JSON.stringify(title.slice(0, 80))} options=${options.length}`);
         try {
           spindle.sendToFrontend({ type: "request_pick", requestId, title, options }, userId);
           const v = await awaitPickResolution(requestId, userId);
-          log6.info(`pick: requestId=${requestId} resolved value=${JSON.stringify(v)}`);
+          log5.info(`pick: requestId=${requestId} resolved value=${JSON.stringify(v)}`);
           return v;
         } catch (err) {
-          log6.error(`pick: requestId=${requestId} threw ${err instanceof Error ? err.message : String(err)}`);
+          log5.error(`pick: requestId=${requestId} threw ${err instanceof Error ? err.message : String(err)}`);
           return null;
         }
       }
@@ -29693,7 +28427,7 @@ function makeSpindleHost(ctx) {
     async generate(req) {
       const resolution = await resolveConnection(req.connectionId);
       if (!resolution.ok) {
-        log6.warn(resolution.error);
+        log5.warn(resolution.error);
         throw new Error(resolution.error);
       }
       const resolved = resolution.value;
@@ -29731,7 +28465,7 @@ ${instruction}` }
         ...Object.keys(parameters).length > 0 ? { parameters } : {},
         ...uid !== undefined ? { userId: uid } : {}
       });
-      log6.info(`dispatching connection_id=${resolved.id.slice(0, 8)}\u2026 ` + `model="${effectiveModel || "<connection-default>"}" ` + `provider="${provider || "<connection-default>"}" ` + `msgs=${messages.length} params=[${Object.keys(parameters).join(",")}]`);
+      log5.info(`dispatching connection_id=${resolved.id.slice(0, 8)}\u2026 ` + `model="${effectiveModel || "<connection-default>"}" ` + `provider="${provider || "<connection-default>"}" ` + `msgs=${messages.length} params=[${Object.keys(parameters).join(",")}]`);
       const finalMessages = req.prefillCompat ? toUserInstruction(messages) : messages;
       const result = await rawGenerate(buildInput(finalMessages));
       const r = result;
@@ -29759,7 +28493,7 @@ ${instruction}` }
       }
     }
   };
-  if (typeof spindle !== "undefined" && spindle.imageGen) {
+  {
     host.imageGen = {
       async generate(prompt, opts) {
         const input = {
@@ -29777,7 +28511,7 @@ ${instruction}` }
       }
     };
   }
-  if (typeof spindle !== "undefined" && spindle.images) {
+  {
     host.images = {
       async uploadFromDataUrl(dataUrl, name) {
         const res = await spindle.images.uploadFromDataUrl(dataUrl, {
@@ -30547,10 +29281,6 @@ function applyRisuChatRanges(messages, presetMetadata) {
 }
 
 // src/interceptors/lumi-hooks.ts
-function collectRuntimeModuleLorebooks(active) {
-  const extra = active.card.risuPayload.extra;
-  return Object.values(extra?.runtime_module_lorebooks ?? {}).flat();
-}
 function cardDisablesRecursiveWorldInfo(active) {
   const source = active.lumirealm.source?.card;
   if (!source || typeof source !== "object" || Array.isArray(source))
@@ -30583,22 +29313,9 @@ function createLumiInterceptors(deps) {
   let diagInterceptorCall = 0;
   let mcpInFlight = 0;
   let mcpEnterSeq = 0;
-  let lastCacheStatsAt = 0;
   let lastMicCacheStatsAt = 0;
   function withMaybeUser(userId, fn) {
     return userId !== undefined ? userIdAls.run(userId, fn) : fn();
-  }
-  function maybeEmitCacheStats() {
-    const stats = renderMcpCacheStats();
-    const lookups = stats.hits + stats.misses;
-    if (lookups < 200)
-      return;
-    const now = Date.now();
-    if (now - lastCacheStatsAt < 5000)
-      return;
-    lastCacheStatsAt = now;
-    const ratio = lookups > 0 ? Math.round(stats.hits / lookups * 100) : 0;
-    log.info(`[render-mcp-cache] size=${stats.size} hits=${stats.hits} misses=${stats.misses} ratio=${ratio}%`);
   }
   function maybeEmitMicCacheStats() {
     const stats = macroInterceptorCacheStats();
@@ -30778,149 +29495,8 @@ function createLumiInterceptors(deps) {
           log.trace(`messageContentProcessor.exit #${seq} path=skip-not-lumirealm chat=${ctx.chatId} ensure=${tB - tA}ms total=${Date.now() - tStart}ms`);
           return;
         }
-        if (ctx.origin === "render") {
-          if (deps.isFeDisplayAuthoritative(ctx.chatId)) {
-            log.trace(`messageContentProcessor.exit #${seq} path=fe-owned-passthrough chat=${ctx.chatId} msg=${ctx.messageId ?? "<new>"} total=${Date.now() - tStart}ms (FE owns display; backend skips render-MCP)`);
-            return;
-          }
-          const triggers = active.card.risuPayload.triggers;
-          const luaScripts = active.card.risuPayload.lua_scripts;
-          const hasLuaTrigger = triggers.some((t) => t.effect?.[0]?.type === "triggerlua");
-          const renderAtActions = coerceAtActions(active.card.risuPayload.at_actions).filter(isRowlessAtAction);
-          const rawIdx = ctx.extra?.["messageIndex"];
-          const messageIndex = typeof rawIdx === "number" ? rawIdx : 0;
-          const risuChatIdx = Math.max(-1, messageIndex - 1);
-          if (ctx.messageId) {
-            const cached = lookupRenderMcp(ctx.chatId, ctx.messageId, ctx.content);
-            maybeEmitCacheStats();
-            if (cached) {
-              const totalMs = Date.now() - tStart;
-              if (cached.kind === "noop") {
-                log.trace(`messageContentProcessor.exit #${seq} path=render-cache-noop chat=${ctx.chatId} msg=${ctx.messageId} idx=${messageIndex} total=${totalMs}ms`);
-                return;
-              }
-              log.trace(`messageContentProcessor.exit #${seq} path=render-cache-hit chat=${ctx.chatId} msg=${ctx.messageId} idx=${messageIndex} before_len=${ctx.content.length} after_len=${cached.content.length} total=${totalMs}ms`);
-              return { content: cached.content };
-            }
-            const inFlight = lookupInFlightRenderMcp(ctx.chatId, ctx.messageId, ctx.content);
-            if (inFlight) {
-              const shared = await inFlight;
-              const totalMs = Date.now() - tStart;
-              if (shared.kind === "noop") {
-                log.info(`messageContentProcessor.exit #${seq} path=render-inflight-share-noop chat=${ctx.chatId} msg=${ctx.messageId} idx=${messageIndex} total=${totalMs}ms`);
-                return;
-              }
-              log.info(`messageContentProcessor.exit #${seq} path=render-inflight-share chat=${ctx.chatId} msg=${ctx.messageId} idx=${messageIndex} before_len=${ctx.content.length} after_len=${shared.content.length} total=${totalMs}ms`);
-              return { content: shared.content };
-            }
-          }
-          let workResolve = () => {};
-          let workReject = () => {};
-          const workPromise = new Promise((res, rej) => {
-            workResolve = res;
-            workReject = rej;
-          });
-          workPromise.catch(() => {});
-          if (ctx.messageId) {
-            markRenderMcpInFlight(ctx.chatId, ctx.messageId, ctx.content, workPromise);
-          }
-          const editChain = triggers.map((t, i) => ({
-            source: t,
-            luaCode: luaScripts[i] ?? ""
-          }));
-          const moduleLorebooks = collectRuntimeModuleLorebooks(active);
-          try {
-            const editApi = makeSpindleHost({
-              chatId: ctx.chatId,
-              characterId: active.card.character_id,
-              userId: ctx.userId
-            });
-            const puaResolve = async (text) => {
-              if (text.indexOf("{{") < 0)
-                return text;
-              const enc = puaEncodeFeMacros(text);
-              const resolved = await deps.resolveReadonly(enc.text, ctx.chatId, active.card.character_id, ctx.userId, { rmVar: true });
-              return puaDecodeFeMacros(resolved, enc.tokens);
-            };
-            let transformed = ctx.content;
-            panelTrace("mcp.render.in", transformed);
-            let preResolveMs = 0;
-            {
-              const tPre = Date.now();
-              try {
-                transformed = await puaResolve(transformed);
-              } catch (err) {
-                log.warn(`messageContentProcessor.render pre-resolve threw: ${errMsg(err)}. Continuing with raw content.`);
-              }
-              preResolveMs = Date.now() - tPre;
-            }
-            panelTrace("mcp.render.afterPreResolve", transformed);
-            let chainMs = 0;
-            if (hasLuaTrigger) {
-              const tChain = Date.now();
-              transformed = await deps.executeFrontend(ctx.chatId, active.card.character_id, { kind: "edit", mode: "editDisplay", value: transformed, meta: { index: risuChatIdx } }, ctx.userId, ctx.frontendSessionId);
-              chainMs = Date.now() - tChain;
-              log.trace(`messageContentProcessor.render chain.elapsed #${seq} chain=${chainMs}ms (mcp_total_so_far=${Date.now() - tStart}ms)`);
-            }
-            panelTrace("mcp.render.afterLua", transformed);
-            let atActionsMs = 0;
-            if (renderAtActions.length > 0) {
-              const tAt = Date.now();
-              try {
-                transformed = await runAtActionsForPhase(renderAtActions, "editdisplay", transformed, {
-                  api: editApi,
-                  chatIndex: risuChatIdx,
-                  role: "assistant"
-                });
-              } catch (err) {
-                log.warn(`messageContentProcessor.render at-actions threw: ${errMsg(err)}. Continuing with prior content.`);
-              }
-              atActionsMs = Date.now() - tAt;
-            }
-            panelTrace("mcp.render.afterAtActions", transformed);
-            let resolveMs = 0;
-            if (transformed.indexOf("{{") >= 0) {
-              const tResolve = Date.now();
-              try {
-                transformed = await puaResolve(transformed);
-              } catch (err) {
-                log.warn(`messageContentProcessor.render body-resolve threw: ${errMsg(err)}. Returning pre-resolve content.`);
-              }
-              resolveMs = Date.now() - tResolve;
-            }
-            panelTrace("mcp.render.afterBodyResolve", transformed);
-            const totalMs = Date.now() - tStart;
-            const otherOverhead = totalMs - preResolveMs - chainMs - atActionsMs - resolveMs - (tB - tA);
-            if (perfEnabled()) {
-              perfRecord("mcp.render.total", totalMs);
-              perfRecord("mcp.render.preResolve", preResolveMs);
-              if (hasLuaTrigger)
-                perfRecord("mcp.render.luaChain", chainMs);
-              if (renderAtActions.length > 0)
-                perfRecord("mcp.render.atActions", atActionsMs);
-              perfRecord("mcp.render.bodyResolve", resolveMs);
-              perfRecord("mcp.render.ensureCard", tB - tA);
-            }
-            if (transformed === ctx.content) {
-              if (ctx.messageId) {
-                cacheRenderMcp(ctx.chatId, ctx.messageId, ctx.content, { kind: "noop" });
-              }
-              workResolve({ kind: "noop" });
-              log.trace(`messageContentProcessor.exit #${seq} path=render-noop chat=${ctx.chatId} msg=${ctx.messageId ?? "<?>"} idx=${messageIndex} total=${totalMs}ms (pre=${preResolveMs}ms chain=${chainMs}ms at_actions=${atActionsMs}ms resolve=${resolveMs}ms ensure=${tB - tA}ms other=${otherOverhead}ms)`);
-              return;
-            }
-            if (ctx.messageId) {
-              cacheRenderMcp(ctx.chatId, ctx.messageId, ctx.content, { kind: "transformed", content: transformed });
-            }
-            workResolve({ kind: "transformed", content: transformed });
-            log.trace(`messageContentProcessor.exit #${seq} path=render-transformed chat=${ctx.chatId} msg=${ctx.messageId ?? "<?>"} idx=${messageIndex} before_len=${ctx.content.length} after_len=${transformed.length} total=${totalMs}ms (pre=${preResolveMs}ms chain=${chainMs}ms at_actions=${atActionsMs}ms resolve=${resolveMs}ms ensure=${tB - tA}ms other=${otherOverhead}ms)`);
-            return { content: transformed };
-          } catch (err) {
-            workReject(err);
-            log.warn(`messageContentProcessor.exit #${seq} path=render-threw chat=${ctx.chatId} msg=${ctx.messageId ?? "<?>"} err=${errMsg(err)} total=${Date.now() - tStart}ms`);
-            return;
-          }
-        }
+        if (ctx.origin === "render")
+          return;
         const isUserMessage = ctx.isUser;
         const isGreeting = ctx.extra?.["greeting"] === true;
         const atActions = coerceAtActions(active.card.risuPayload.at_actions).filter(isRowlessAtAction);
@@ -31425,7 +30001,7 @@ async function translatePresetLabels(preset, opts, deps) {
 init_logic();
 init_registry();
 init_risu_helpers();
-var log7 = makeSafeLogger("spindle-macros");
+var log6 = makeSafeLogger("spindle-macros");
 function getArg(ctx, index) {
   const args = ctx?.args;
   if (Array.isArray(args)) {
@@ -31526,7 +30102,7 @@ async function effectiveGlobals(ctx, caller) {
     const presetToggles = presetToggleLayer(ctx, promptVariables, userId);
     return mergeEffectiveGlobals(legacy, await readPreferencesCached(userId), presetToggles);
   } catch (err) {
-    log7.warn(`${caller}: toggle preference read failed, using chat globals: ` + `${err instanceof Error ? err.message : String(err)}`);
+    log6.warn(`${caller}: toggle preference read failed, using chat globals: ` + `${err instanceof Error ? err.message : String(err)}`);
     return legacy;
   }
 }
@@ -31545,7 +30121,7 @@ async function resolveAuthornoteMacro(ctx) {
   try {
     return await readChatAuthorsNote(chatId, userId);
   } catch (err) {
-    log7.warn(`authornote(${chatId}): chat metadata read failed: ` + `${err instanceof Error ? err.message : String(err)}`);
+    log6.warn(`authornote(${chatId}): chat metadata read failed: ` + `${err instanceof Error ? err.message : String(err)}`);
     return "";
   }
 }
@@ -31554,7 +30130,7 @@ function resolveChatLogMacro(ctx) {
   const messages = env?.extra?.["messages"];
   if (!Array.isArray(messages) || messages.length === 0) {
     const userId = typeof env?.extra?.["userId"] === "string" ? env.extra["userId"] : "";
-    log7.warn(`previous_chat_log(${readChatId(ctx) || "no-chat"}/${userId || "no-user"}): ` + "no chat history in this evaluation");
+    log6.warn(`previous_chat_log(${readChatId(ctx) || "no-chat"}/${userId || "no-user"}): ` + "no chat history in this evaluation");
     return "";
   }
   const args = ctx?.args;
@@ -31670,22 +30246,17 @@ function registerSpindleMacros() {
         }
       }
     } catch (err) {
-      log7.warn(`Failed to register macro ${m.name}: ${err instanceof Error ? err.message : String(err)}`);
+      log6.warn(`Failed to register macro ${m.name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  log7.info(`Registered ${macros.length} Spindle compatibility macros for Lumiverse prompt assembly`);
+  log6.info(`Registered ${macros.length} Spindle compatibility macros for Lumiverse prompt assembly`);
 }
 
 // src/interceptors/prompt-regex-runner-client.ts
 var RUNNER_ENTRY = "dist/regex-runner.js";
 var RUNNER_KIND = "lumirealm-prompt-regex";
 var RUNNER_KEY = "singleton";
-var PROMPT_REGEX_TIMEOUT_MS = (() => {
-  const env = globalThis.Bun?.env;
-  const raw = env?.LUMIREALM_PROMPT_REGEX_TIMEOUT_MS;
-  const parsed = raw !== undefined ? parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30000;
-})();
+var PROMPT_REGEX_TIMEOUT_MS = 30000;
 var STARTUP_TIMEOUT_MS = 1e4;
 var HEARTBEAT_TIMEOUT_MS = 45000;
 function createPromptRegexRunnerClient(deps) {
@@ -32059,7 +30630,6 @@ function createMessageVarPass(deps) {
     }
     if (wrote > 0) {
       await deps.refreshMessagesCache(chatId, userId);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
     }
     deps.log.info(`runVarStrip: chat=${chatId} strippedMsgs=${wrote} varWrites=${varWrites.length}`);
@@ -32122,7 +30692,6 @@ function createTriggerDispatcher(deps) {
     if (!active)
       throw new Error("The chat has no active Risu runtime");
     await deps.execute(chatId, active.card.character_id, operation, userId, sessionId);
-    invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await deps.refreshBgHtml(active, chatId, userId);
     await deps.refreshVariables(active, chatId, userId);
@@ -32547,7 +31116,6 @@ async function retranslateCharacterFromCurrentSource(args, deps) {
     const bundle = translateFromStoredSource(translationSource, {
       sourceId: `repair:${args.characterId}`,
       mode: "full",
-      emitPackScripts: false,
       ...backgroundHtmlOverride !== undefined ? { backgroundHtmlOverride } : {}
     });
     if (!bundle.risuPayload)
@@ -32838,7 +31406,6 @@ function createMigrationsRunner(deps) {
     invalidateActiveForCharacter,
     toastFor,
     charactersAttachedTo,
-    refreshAttachedModule,
     log,
     errMsg
   } = deps;
@@ -33207,7 +31774,7 @@ async function writeMigrationState(storage, userId, state) {
 // src/migrations/retired-macro.ts
 var RETIRED_PREFIX = "risu_";
 var STRUCTURAL_KINDS = new Set(["if", "if_pure", "when"]);
-var OPAQUE_KINDS2 = new Set([
+var OPAQUE_KINDS = new Set([
   "each",
   "func",
   "pure",
@@ -33431,7 +31998,7 @@ function migrateRetiredMacroNames(text) {
     if (inner.startsWith(RETIRED_PREFIX)) {
       const projected = inner.slice(RETIRED_PREFIX.length);
       const { name, rest } = splitMacroHead(projected);
-      if (OPAQUE_KINDS2.has(name) && rest.startsWith("::")) {
+      if (OPAQUE_KINDS.has(name) && rest.startsWith("::")) {
         out += reconstructOpaque(name, splitTopLevel(inner));
       } else {
         out += `{{${name}${migrateRetiredMacroNames(rest)}}}`;
@@ -33867,11 +32434,8 @@ function createActiveCardLoader(deps) {
     buildVersionError,
     loadAttachedModulesForRuntime,
     buildSyntheticStoredCard,
-    modulesByNamespaceFromCard,
     setActiveAssetIndexes,
     setActiveScriptstateDefaults,
-    setActiveModulesByNamespace,
-    clearActiveModulesByNamespace,
     setActiveLorebook,
     fetchLorebookForCharacter,
     hasActiveLorebookForCharacter,
@@ -34021,11 +32585,6 @@ function createActiveCardLoader(deps) {
       emotions: card.emotion_index
     });
     setActiveScriptstateDefaults(chatId, card.character_id, card.risuPayload.scriptstate_defaults ?? {});
-    const mbnForActive = modulesByNamespaceFromCard(card);
-    if (mbnForActive)
-      setActiveModulesByNamespace(chatId, card.character_id, mbnForActive);
-    else
-      clearActiveModulesByNamespace(chatId);
     setActiveCharacterImage(chatId, imageUrlFromId(fetched.character.image_id ?? null));
     refreshPersonaImage(userId);
     seedAuthorsNoteFromDepthPrompt(chatId, userId, fetched.character.extensions ?? {});
@@ -34044,7 +32603,6 @@ function createApplySvgRasterIndex(deps) {
     appendImageIdsToJournal,
     activeCardByChat,
     ensureActiveCardForChat,
-    invalidateRenderMcpForChat,
     invalidateMacroInterceptorForChat,
     onActiveChatEvicted,
     refreshBgHtml,
@@ -34147,7 +32705,6 @@ function createApplySvgRasterIndex(deps) {
         try {
           const reloaded = await ensureActiveCardForChat(chatId, null, userId);
           if (reloaded) {
-            invalidateRenderMcpForChat(chatId);
             invalidateMacroInterceptorForChat(chatId);
             await refreshBgHtml(reloaded, chatId, userId);
           }
@@ -34533,7 +33090,6 @@ function createVariablesTogglesService(deps) {
     } catch (err) {
       return { ok: false, reason: `chats.update failed: ${errMsg(err)}` };
     }
-    invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     invalidateRecentFlush(chatId);
     await refreshBgHtml(active, chatId, userId);
@@ -34626,7 +33182,6 @@ function createVariablesTogglesService(deps) {
       return { ok: false, reason: `toggle preferences write failed: ${errMsg(err)}` };
     }
     deps.invalidateUserToggleReaders?.(userId);
-    invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
     await refreshVariables(active, chatId, userId, { force: true });
@@ -34637,132 +33192,7 @@ function createVariablesTogglesService(deps) {
 }
 
 // src/state/display-snapshot-assembly.ts
-function dtoToHostEntry(r) {
-  const e = { ...r, id: typeof r.id === "string" ? r.id : "" };
-  if (typeof r.world_book_id === "string")
-    e.worldBookId = r.world_book_id;
-  if (Array.isArray(r.key))
-    e.key = r.key;
-  else if (typeof r.key === "string")
-    e.key = r.key;
-  if (typeof r.content === "string")
-    e.content = r.content;
-  if (typeof r.comment === "string")
-    e.comment = r.comment;
-  if (typeof r.order_value === "number")
-    e.orderValue = r.order_value;
-  if (typeof r.disabled === "boolean")
-    e.disabled = r.disabled;
-  if (typeof r.constant === "boolean")
-    e.constant = r.constant;
-  return e;
-}
-async function fetchHostMessages(chatId) {
-  try {
-    const msgs = await spindle.chat.getMessages(chatId);
-    return msgs.map((m) => {
-      const raw = m;
-      return {
-        id: m.id,
-        content: typeof m.content === "string" ? m.content : "",
-        role: m.role,
-        createdAt: hostMessageTime(raw),
-        ...typeof raw.name === "string" && raw.name.length > 0 ? { speaker: raw.name } : {},
-        ...typeof m.extra?.greeting_index === "number" ? { greetingIndex: m.extra.greeting_index } : {}
-      };
-    });
-  } catch {
-    return [];
-  }
-}
-function buildDisplayChatStateFromView(view) {
-  const messages = view.messages.map((m) => ({
-    role: m.role === "user" ? "user" : "assistant",
-    content: m.content,
-    createdAt: m.createdAt ?? 0,
-    ...m.speaker ? { speaker: m.speaker } : {}
-  }));
-  const risuLen = messages.length;
-  let lastUser = "";
-  let lastChar = "";
-  for (let i = risuLen - 1;i >= 0; i--) {
-    const m = messages[i];
-    if (!lastUser && m.role === "user")
-      lastUser = m.content;
-    if (!lastChar && m.role === "assistant")
-      lastChar = m.content;
-    if (lastUser && lastChar)
-      break;
-  }
-  return {
-    messageCount: risuLen + 1,
-    lastMessage: risuLen > 0 ? messages[risuLen - 1].content : "",
-    lastUserMessage: lastUser,
-    lastCharMessage: lastChar,
-    lastMessageId: risuLen,
-    messages
-  };
-}
-async function fetchHostLorebook(bookIds, userId) {
-  if (bookIds.length === 0)
-    return [];
-  const lists = await Promise.allSettled(bookIds.map((bid) => spindle.world_books.entries.list(bid, { limit: 1000, userId }).then((res) => ({ bid, res }))));
-  const out = [];
-  for (const r of lists) {
-    if (r.status !== "fulfilled" || !Array.isArray(r.value.res?.data))
-      continue;
-    for (const dto of r.value.res.data) {
-      const e = dtoToHostEntry(dto);
-      out.push({ ...e, worldBookId: e.worldBookId || r.value.bid });
-    }
-  }
-  out.sort((a, b) => Number(b.orderValue || 0) - Number(a.orderValue || 0));
-  return out;
-}
-async function fetchChatRuntimeState(chatId, userId) {
-  try {
-    const chat = await spindle.chats.get(chatId, userId);
-    const metadata = chat?.metadata;
-    const an = metadata?.authors_note;
-    const selectedAlternateGreetingIndex = typeof metadata?.activeGreetingIndex === "number" ? toRisuFirstMessageIndex(metadata.activeGreetingIndex) : undefined;
-    if (!an || typeof an !== "object") {
-      return {
-        authorsNote: null,
-        ...selectedAlternateGreetingIndex !== undefined ? { selectedAlternateGreetingIndex } : {}
-      };
-    }
-    const o = an;
-    return {
-      authorsNote: {
-        content: typeof o.content === "string" ? o.content : "",
-        ...typeof o.depth === "number" ? { depth: o.depth } : {},
-        ...typeof o.role === "string" ? { role: o.role } : {},
-        ...typeof o.position === "number" ? { position: o.position } : {}
-      },
-      ...selectedAlternateGreetingIndex !== undefined ? { selectedAlternateGreetingIndex } : {}
-    };
-  } catch {
-    return { authorsNote: null };
-  }
-}
-async function assembleDisplaySnapshot(deps, active, chatId, userId, vars) {
-  const characterId = active.card.character_id;
-  const [charRaw, personaRaw] = await Promise.all([
-    spindle.characters.get(characterId, userId).catch(() => null),
-    spindle.personas.getActive(userId).catch(() => null)
-  ]);
-  const ch = charRaw ?? {};
-  const persona = personaRaw ?? {};
-  const bookIds = Array.isArray(ch.world_book_ids) ? ch.world_book_ids : [];
-  const [messagesHost, lorebookHost, chatRuntimeState] = await Promise.all([
-    fetchHostMessages(chatId),
-    fetchHostLorebook(bookIds, userId),
-    fetchChatRuntimeState(chatId, userId)
-  ]);
-  const moduleLorebooks = Object.values(active.card.risuPayload.extra?.runtime_module_lorebooks ?? {}).flat();
-  const combinedLorebook = withModuleLorebooks(lorebookHost, moduleLorebooks, bookIds);
-  const chatView = buildRisuChatView({ messages: messagesHost });
-  const chatState = buildDisplayChatStateFromView(chatView);
+function assembleRuntimeConfig(deps, active, chatId, userId) {
   const triggers = active.card.risuPayload.triggers;
   const luaScripts = active.card.risuPayload.lua_scripts;
   const hasEditDisplayLua = triggers.some((t) => t.effect?.[0]?.type === "triggerlua");
@@ -34774,47 +33204,23 @@ async function assembleDisplaySnapshot(deps, active, chatId, userId, vars) {
   const dims = getScreenDims(userId);
   return {
     chatId,
-    characterId,
-    userName: persona.name ?? "",
-    charName: ch.name ?? "",
-    personaText: persona.description ?? "",
-    personaImage: getActivePersonaImage(userId) ?? "",
-    personaImageId: persona.image_id ?? null,
-    chatAuthorsNote: chatRuntimeState.authorsNote,
+    characterId: active.card.character_id,
     character: {
-      description: ch.description ?? "",
-      personality: ch.personality ?? "",
-      scenario: ch.scenario ?? "",
-      exampleDialogue: ch.mes_example ?? "",
-      mainPrompt: ch.system_prompt ?? "",
-      postHistoryInstructions: ch.post_history_instructions ?? "",
-      creatorNotes: ch.creator_notes ?? "",
       jailbreakPrompt: "",
       globalNote: "",
       authorsNote: "",
-      firstMessage: ch.first_mes ?? "",
-      alternateGreetings: ch.alternate_greetings ?? [],
-      selectedAlternateGreetingIndex: chatRuntimeState.selectedAlternateGreetingIndex ?? toRisuFirstMessageIndex(chatView.greetingIndex),
-      ...chatView.greeting !== undefined ? { selectedGreeting: chatView.greeting } : {},
       additionalAssets: active.card.asset_index,
-      emotionImages: active.card.emotion_index,
-      image: getActiveCharacterImage(chatId) ?? "",
-      imageId: ch.image_id ?? null
+      emotionImages: active.card.emotion_index
     },
-    chat: chatState,
-    vars: { local: { ...vars.local }, global: { ...vars.global }, chat: { ...vars.chat } },
     scriptstateDefaults: active.card.risuPayload.scriptstate_defaults,
     screenWidth: dims?.width ?? 0,
     screenHeight: dims?.height ?? 0,
     legacyMediaFindings: deps.legacyMediaFindings(userId),
     modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
     compiledLibraries: deps.getCompiledLibraries(active),
-    lorebook: getActiveLorebook(chatId),
     hasEditDisplayLua,
     hasEditAtActions,
     luaTriggers,
-    messagesHost,
-    lorebookHost: combinedLorebook,
     atActions: coerceAtActions(active.card.risuPayload.at_actions)
   };
 }
@@ -36403,9 +34809,6 @@ function recompileDerivedPayload(cur) {
   };
 }
 
-// src/state/state-changed-debouncer.ts
-var pendingTimers = new Map;
-
 // src/util/version-check.ts
 function compareVersions(a, b) {
   const parse = (v) => {
@@ -37441,7 +35844,7 @@ function logUid() {
 function userScoped(handler) {
   return (raw, userId, frontendSessionId) => userId ? userIdAls.run(userId, () => handler(raw, userId, frontendSessionId)) : handler(raw, userId, frontendSessionId);
 }
-var log8 = {
+var log7 = {
   error(msg) {
     spindle.log.error(`[lumirealm] ${msg}`);
     logStore.push("error", "backend", msg, logUid());
@@ -37467,13 +35870,13 @@ var log8 = {
     logStore.push("trace", "backend", msg, logUid());
   }
 };
-log8.info(`backend boot: version=${EXTENSION_VERSION} features=[lorebook-cache,worldbook-events]`);
+log7.info(`backend boot: version=${EXTENSION_VERSION} features=[lorebook-cache,worldbook-events]`);
 var hostVersionCheck = checkHostVersion(runtimeVersionInfo.hostVersion, MINIMUM_LUMIVERSE_VERSION);
 var hostVersionTag = hostVersionCheck.needsUpdate ? "WARN" : "ok";
-log8.info(`host-version: lumiverse=${runtimeVersionInfo.hostVersion} min=${MINIMUM_LUMIVERSE_VERSION} ${hostVersionTag}`);
+log7.info(`host-version: lumiverse=${runtimeVersionInfo.hostVersion} min=${MINIMUM_LUMIVERSE_VERSION} ${hostVersionTag}`);
 if (hostVersionCheck.needsUpdate)
-  log8.warn(hostVersionCheck.message);
-initPermissions(log8);
+  log7.warn(hostVersionCheck.message);
+initPermissions(log7);
 subscribeToMissingChanges((missing) => {
   const purposes = {};
   for (const p of missing)
@@ -37486,13 +35889,13 @@ subscribeToMissingChanges((missing) => {
         purposes
       }, userId);
     } catch (err) {
-      log8.warn(`permissions.changed: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
+      log7.warn(`permissions.changed: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
     }
   }
   if (missing.length > 0) {
-    log8.warn(`permissions.changed: broadcast notify_missing_permissions to ${capturedUserIds.size} user(s) missing=[${missing.join(",")}]`);
+    log7.warn(`permissions.changed: broadcast notify_missing_permissions to ${capturedUserIds.size} user(s) missing=[${missing.join(",")}]`);
   } else {
-    log8.info(`permissions.changed: all required perms granted, broadcast empty set to ${capturedUserIds.size} user(s) to auto-dismiss`);
+    log7.info(`permissions.changed: all required perms granted, broadcast empty set to ${capturedUserIds.size} user(s) to auto-dismiss`);
   }
 });
 function broadcastBridgeStatus(payload) {
@@ -37500,7 +35903,7 @@ function broadcastBridgeStatus(payload) {
     try {
       spindle.sendToFrontend({ type: "notify_bridge_status", ...payload }, userId);
     } catch (err) {
-      log8.warn(`bridge_status: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
+      log7.warn(`bridge_status: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
     }
   }
 }
@@ -37508,14 +35911,14 @@ subscribeToMissingChanges(() => {
   (async () => {
     const missing = await probeLumiagentBridge(spindle);
     if (missing && missing.length > 0) {
-      log8.warn(`permissions.changed: lumiagent bridge probe failed, LumiRealm missing=[${missing.join(",")}]`);
+      log7.warn(`permissions.changed: lumiagent bridge probe failed, LumiRealm missing=[${missing.join(",")}]`);
       broadcastBridgeStatus({
         offline: true,
         missingPermissions: missing,
         forCaller: "lumiagent"
       });
     } else {
-      log8.info(`permissions.changed: lumiagent bridge probe ok (or endpoint absent), clearing any banner`);
+      log7.info(`permissions.changed: lumiagent bridge probe ok (or endpoint absent), clearing any banner`);
       broadcastBridgeStatus({ offline: false, missingPermissions: [] });
     }
   })();
@@ -37555,14 +35958,13 @@ var settingsService = createSettingsService({
   userStorage,
   listConnections: (userId) => spindle.connections.list(userId),
   send,
-  log: log8,
+  log: log7,
   errMsg
 });
 var getSettingsForUser = settingsService.getSettingsForUser;
 var getSkipAssetThumbnails = async (uid) => (await getSettingsForUser(uid)).skipAssetThumbnails;
 var getCachedSettingsSync = settingsService.getCachedSettingsSync;
 var applySettingsPatch = settingsService.applySettingsPatch;
-var makeAuxDebugCapture = settingsService.makeAuxDebugCapture;
 var listConnectionsForUser = settingsService.listConnectionsForUser;
 var activeCardByChat = new Map;
 var lastActiveChatByUser = new Map;
@@ -37571,7 +35973,7 @@ var worldBookIdsByCharacter = new Map;
 function journalStorage() {
   return spindle.userStorage;
 }
-var consentApi = createConsentApi({ send, log: log8 });
+var consentApi = createConsentApi({ send, log: log7 });
 var requestConsent = consentApi.requestConsent;
 var pendingConsents = consentApi.pendingConsents;
 var deleteCardByChar = makeDeleteCardByChar({
@@ -37583,7 +35985,7 @@ var deleteCardByChar = makeDeleteCardByChar({
   listCards,
   pushCards,
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
-  log: log8
+  log: log7
 });
 var orphanDetectBuilders = createOrphanDetectBuilders({
   journalStorage,
@@ -37596,7 +35998,7 @@ var orphanDetectBuilders = createOrphanDetectBuilders({
   },
   listModuleStore: (userId) => listModules(moduleStorage(), userId),
   readModuleEnvelope: (userId, moduleId) => readEnvelope(moduleStorage(), userId, moduleId),
-  log: log8,
+  log: log7,
   errMsg
 });
 var buildOrphanDetectDeps = orphanDetectBuilders.buildOrphanDetectDeps;
@@ -37646,7 +36048,7 @@ var orphanOrchestrator = createOrphanOrchestrator({
     const modules = await listModules(moduleStorage(), userId);
     return buildRepairTargetSummary(entries, modules);
   },
-  log: log8,
+  log: log7,
   errMsg
 });
 var scanOrphanedImages = (userId) => orphanOrchestrator.scanOrphanedImages(userId);
@@ -37659,11 +36061,11 @@ var recompileDerivedPayloadForCharacter = async (characterId, userId) => {
       const result = recompileDerivedPayload(cur);
       if (result === null)
         return cur;
-      log8.info(`recompile-derived: char=${characterId} rebuilt [${result.changed.join(",")}]`);
+      log7.info(`recompile-derived: char=${characterId} rebuilt [${result.changed.join(",")}]`);
       return result.next;
     });
   } catch (err) {
-    log8.warn(`recompile-derived: char=${characterId} failed: ${errMsg(err)}`);
+    log7.warn(`recompile-derived: char=${characterId} failed: ${errMsg(err)}`);
   }
 };
 var deleteRepairRegexRows = async (userId, ids) => {
@@ -37695,10 +36097,10 @@ var { captureUserId, markFrontendReady } = makeCaptureUserId({
     try {
       spindle.sendToFrontend({ type: "notify_missing_permissions", missing, purposes }, userId);
     } catch (err) {
-      log8.warn(`captureUserId.notify: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
+      log7.warn(`captureUserId.notify: sendToFrontend failed userId=${userId}: ${errMsg(err)}`);
     }
   },
-  log: log8,
+  log: log7,
   errMsg
 });
 var scanRepairTargets = (userId) => orphanOrchestrator.scanRepairTargets(userId);
@@ -37723,7 +36125,7 @@ var importCardOrchestrator = createImportCardOrchestrator({
   listCards,
   pushCards,
   toastFor,
-  log: log8,
+  log: log7,
   errMsg
 });
 var importCardFromBytes = importCardOrchestrator.importCardFromBytes;
@@ -37734,7 +36136,7 @@ function blockedByRepair(userId, messageType) {
     return false;
   if (!repairInFlightByUser.has(userId))
     return false;
-  log8.info(`${messageType}: blocked by in-flight repair for user=${userId}`);
+  log7.info(`${messageType}: blocked by in-flight repair for user=${userId}`);
   toastFor(userId, "warning", "A repair is in progress. Try again once it finishes.", { title: "lumirealm" });
   return true;
 }
@@ -37754,14 +36156,14 @@ function userStorage() {
 }
 function send(msg, userId) {
   if (userId === undefined) {
-    log8.error(`send: refusing to broadcast type=${msg.type} (no userId)`);
+    log7.error(`send: refusing to broadcast type=${msg.type} (no userId)`);
     return;
   }
   spindle.sendToFrontend(msg, userId);
 }
 function toastFor(userId, kind, message, options) {
   if (userId === undefined) {
-    log8.warn(`toastFor(broadcast): no userId for kind=${kind}, fanning out to all users`);
+    log7.warn(`toastFor(broadcast): no userId for kind=${kind}, fanning out to all users`);
     spindle.toast[kind](message, options ?? {});
     return;
   }
@@ -37776,9 +36178,9 @@ async function ensureLogStateLoaded(userId) {
 }
 async function listCards(userId) {
   const t0 = Date.now();
-  log8.debug(`listCards: start userId=${userId ?? "<none>"}`);
+  log7.debug(`listCards: start userId=${userId ?? "<none>"}`);
   if (userId === undefined) {
-    log8.info(`listCards: userId not yet captured, returning empty`);
+    log7.info(`listCards: userId not yet captured, returning empty`);
     return [];
   }
   const entries = await listLumirealmCharacters(charactersApi(), userId, {
@@ -37800,7 +36202,7 @@ async function listCards(userId) {
     };
   });
   summaries.sort((a, b) => (b.last_opened_at ?? 0) - (a.last_opened_at ?? 0) || b.stored_at - a.stored_at);
-  log8.debug(`listCards: done count=${summaries.length} elapsed=${Date.now() - t0}ms`);
+  log7.debug(`listCards: done count=${summaries.length} elapsed=${Date.now() - t0}ms`);
   return summaries;
 }
 function pushCards(cards, userId) {
@@ -37823,25 +36225,10 @@ function dumpPayload(raw) {
     return "<unstringifiable>";
   }
 }
-var FE_DISPLAY_ENABLED = (() => {
-  const v = globalThis.Bun?.env?.LUMIREALM_FE_DISPLAY;
-  return v !== "0" && v !== "false";
-})();
-var PROMPT_REGEX_ENV = (() => {
-  const v = globalThis.Bun?.env?.LUMIREALM_PROMPT_REGEX;
-  return v !== "0" && v !== "false";
-})();
-var PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE = typeof spindle.promptRegex?.setOwnedChats === "function";
-var PROMPT_REGEX_ACTIVE = PROMPT_REGEX_ENV && PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE;
-if (PROMPT_REGEX_ENV && !PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE) {
-  log8.warn("Inline prompt regex is enabled (LUMIREALM_PROMPT_REGEX) and backendProcesses is available, but " + "spindle.promptRegex.setOwnedChats is missing on this host; declining prompt-regex ownership so the host " + "keeps its own pass (a host that cannot be told to skip would otherwise double-apply). Upgrade Lumiverse to " + "enable inline prompt regex.");
-}
-var promptRegexRunnerClient = PROMPT_REGEX_ACTIVE ? createPromptRegexRunnerClient({ log: log8, errMsg }) : null;
+var promptRegexRunnerClient = createPromptRegexRunnerClient({ log: log7, errMsg });
 var promptRegexOwnedByUser = new Map;
 var promptRegexOwnedSnapshot = "";
 function syncPromptRegexOwnedChats() {
-  if (!PROMPT_REGEX_ACTIVE)
-    return;
   const owned = new Set;
   for (const chatId of promptRegexOwnedByUser.values())
     owned.add(chatId);
@@ -37850,17 +36237,13 @@ function syncPromptRegexOwnedChats() {
     return;
   promptRegexOwnedSnapshot = next;
   const api = spindle.promptRegex;
-  if (typeof api?.setOwnedChats !== "function")
-    return;
   try {
     api.setOwnedChats([...owned]);
   } catch (err) {
-    log8.warn(`syncPromptRegexOwnedChats: ${err.message}`);
+    log7.warn(`syncPromptRegexOwnedChats: ${err.message}`);
   }
 }
 function dropPromptRegexOwnershipForChat(chatId) {
-  if (!PROMPT_REGEX_ACTIVE)
-    return;
   let dropped = false;
   for (const [uid, owned] of promptRegexOwnedByUser) {
     if (owned === chatId) {
@@ -37889,25 +36272,25 @@ async function touchCharacterRecency(characterId, userId) {
         return;
       await writeCharacterRecency(userStorage(), userId, touchRecency(cur, characterId, Date.now()));
     } catch (err) {
-      log8.debug(`touchCharacterRecency: ${errMsg(err)}`);
+      log7.debug(`touchCharacterRecency: ${errMsg(err)}`);
     }
   });
   return recencyWriteChain;
 }
 function setChatStyleMode(chatId, mode, userId) {
   spindle.chat.setStyleMode(chatId, mode, userId).catch((err) => {
-    log8.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
+    log7.warn(`setChatStyleMode chat=${chatId} mode=${mode}: ${errMsg(err)}`);
   });
 }
 function sendSetActiveChat(activeChatId, activeCharacterId, userId) {
   try {
     send({ type: "set_active_chat", chatId: activeChatId, characterId: activeCharacterId }, userId);
   } catch (err) {
-    log8.warn(`sendSetActiveChat: ${err.message}`);
+    log7.warn(`sendSetActiveChat: ${err.message}`);
   }
   if (activeCharacterId !== null)
     touchCharacterRecency(activeCharacterId, userId);
-  if (PROMPT_REGEX_ACTIVE && userId !== undefined) {
+  if (userId !== undefined) {
     const nowOwned = activeChatId !== null;
     const prevOwned = promptRegexOwnedByUser.get(userId);
     if (nowOwned) {
@@ -37915,12 +36298,12 @@ function sendSetActiveChat(activeChatId, activeCharacterId, userId) {
         promptRegexOwnedByUser.set(userId, activeChatId);
         const claimedChat = activeChatId;
         const claimingUser = userId;
-        promptRegexRunnerClient?.warmUp(claimingUser).then((ok) => {
+        promptRegexRunnerClient.warmUp(claimingUser).then((ok) => {
           if (ok)
             return;
           if (promptRegexOwnedByUser.get(claimingUser) !== claimedChat)
             return;
-          log8.error(`prompt-regex: runner warm-up failed for chat=${claimedChat}; dropping ownership so the host resumes its own prompt-regex pass.`);
+          log7.error(`prompt-regex: runner warm-up failed for chat=${claimedChat}; dropping ownership so the host resumes its own prompt-regex pass.`);
           promptRegexOwnedByUser.delete(claimingUser);
           syncPromptRegexOwnedChats();
         });
@@ -37931,15 +36314,15 @@ function sendSetActiveChat(activeChatId, activeCharacterId, userId) {
     syncPromptRegexOwnedChats();
   }
 }
-var nudgeGc = makeNudgeGc(log8, errMsg);
-var refreshPersonaImage = makeRefreshPersonaImage({ log: log8, errMsg });
-var seedAuthorsNoteFromDepthPrompt = makeSeedAuthorsNoteFromDepthPrompt({ log: log8, errMsg });
+var nudgeGc = makeNudgeGc(log7, errMsg);
+var refreshPersonaImage = makeRefreshPersonaImage({ log: log7, errMsg });
+var seedAuthorsNoteFromDepthPrompt = makeSeedAuthorsNoteFromDepthPrompt({ log: log7, errMsg });
 var maybeFinalizeImport = makeMaybeFinalizeImport({
   pendingImportCompletions,
   send,
   listCards,
   pushCards,
-  log: log8,
+  log: log7,
   errMsg
 });
 var activeCardLoader = createActiveCardLoader({
@@ -37955,11 +36338,8 @@ var activeCardLoader = createActiveCardLoader({
   buildVersionError: (missing) => new RisuCompatVersionError(missing, EXTENSION_VERSION),
   loadAttachedModulesForRuntime: (userId, ids) => loadAttachedModulesForRuntime(userId, ids),
   buildSyntheticStoredCard,
-  modulesByNamespaceFromCard,
   setActiveAssetIndexes,
   setActiveScriptstateDefaults,
-  setActiveModulesByNamespace,
-  clearActiveModulesByNamespace,
   setActiveLorebook,
   fetchLorebookForCharacter: (worldBookIds, userId) => fetchLorebookForCharacter(worldBookIds, userId),
   hasActiveLorebookForCharacter,
@@ -37971,7 +36351,7 @@ var activeCardLoader = createActiveCardLoader({
   seedAuthorsNoteFromDepthPrompt: (chatId, userId, ext) => seedAuthorsNoteFromDepthPrompt(chatId, userId, ext),
   runCharacterMigration: (charId, charName, userId, env, opts) => migrationsRunner.runCharacterMigration(charId, charName, userId, env, opts),
   toastFor,
-  log: log8,
+  log: log7,
   errMsg
 });
 var ensureActiveCardForChat = activeCardLoader.ensureActiveCardForChat;
@@ -37979,7 +36359,7 @@ var readonlyResolver = createReadonlyResolver({
   activeCardByChat,
   getCachedSettingsSync,
   modulesByNamespaceFromCard,
-  log: log8,
+  log: log7,
   errMsg
 });
 var resolveReadonly = readonlyResolver.resolve;
@@ -37988,7 +36368,7 @@ var bgHtmlRefresher = createBgHtmlRefresher({
   resolveReadonly,
   lastSentBgHtmlByChat,
   send,
-  log: log8
+  log: log7
 });
 var refreshBgHtml = bgHtmlRefresher.refresh;
 var applySvgRasterIndex = createApplySvgRasterIndex({
@@ -37997,18 +36377,17 @@ var applySvgRasterIndex = createApplySvgRasterIndex({
   appendImageIdsToJournal: (userId, charId, ids) => appendImageIdsToJournal(journalStorage(), userId, charId, ids),
   activeCardByChat,
   ensureActiveCardForChat,
-  invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
   refreshBgHtml,
-  log: log8,
+  log: log7,
   errMsg
 });
 var TRANSLATE_TARGET_LANG = "en";
 var runtimeConfigVersion = 0;
-async function assembleRuntimeSnapshot(active, chatId, userId, vars) {
+async function assembleRuntimeSnapshot(active, chatId, userId) {
   const configVersion = ++runtimeConfigVersion;
-  const snapshot = await assembleDisplaySnapshot({
+  const snapshot = await assembleRuntimeConfig({
     modulesByNamespaceFromCard,
     legacyMediaFindings: (uid) => getCachedSettingsSync(uid).legacyMediaFindings,
     getCompiledLibraries: (active) => {
@@ -38020,7 +36399,7 @@ async function assembleRuntimeSnapshot(active, chatId, userId, vars) {
       }
       return compiled.filter((entry) => entry.type === "library");
     }
-  }, active, chatId, userId, vars);
+  }, active, chatId, userId);
   return { ...snapshot, configVersion };
 }
 var variablesTogglesService = createVariablesTogglesService({
@@ -38030,7 +36409,6 @@ var variablesTogglesService = createVariablesTogglesService({
     for (const [chatId, active] of activeCardByChat) {
       if (active.ownerUserId !== userId)
         continue;
-      invalidateRenderMcpForChat(chatId);
       invalidateMacroInterceptorForChat(chatId);
       invalidateListenEditPreload(chatId);
     }
@@ -38043,20 +36421,18 @@ var variablesTogglesService = createVariablesTogglesService({
   ensureActiveCardForChat,
   refreshBgHtml,
   send,
-  pushDisplaySnapshot: (active, chatId, userId, vars, opts) => {
-    if (!FE_DISPLAY_ENABLED)
-      return;
-    assembleRuntimeSnapshot(active, chatId, userId, vars).then((snapshot) => {
+  pushDisplaySnapshot: (active, chatId, userId, _vars, opts) => {
+    assembleRuntimeSnapshot(active, chatId, userId).then((snapshot) => {
       send({
         type: "display_snapshot",
         snapshot,
         ...opts?.guiReload ? { reason: "gui-reload" } : {}
       }, userId);
     }).catch((err) => {
-      log8.warn(`pushDisplaySnapshot: assemble failed chat=${chatId}: ${errMsg(err)}`);
+      log7.warn(`pushDisplaySnapshot: assemble failed chat=${chatId}: ${errMsg(err)}`);
     });
   },
-  log: log8,
+  log: log7,
   errMsg
 });
 var refreshVariables = variablesTogglesService.refreshVariables;
@@ -38067,7 +36443,7 @@ var frontendLua = createFrontendLuaBackend(spindle, async (chatId, characterId, 
   const active = await ensureActiveCardForChat(chatId, characterId, userId);
   if (!active)
     throw new Error("The chat has no active Risu runtime");
-  const snapshot = await assembleRuntimeSnapshot(active, chatId, userId, { local: {}, global: {}, chat: {} });
+  const snapshot = await assembleRuntimeSnapshot(active, chatId, userId);
   return { snapshot, settings: getCachedSettingsSync(userId) };
 });
 spindle.on("FRONTEND_SESSION_CLOSED", userScoped(async (raw, userId) => {
@@ -38084,15 +36460,13 @@ var triggerDispatcher = createTriggerDispatcher({
 var runBinding = triggerDispatcher.runBinding;
 var dispatchManualTrigger = triggerDispatcher.dispatchManualTrigger;
 var dispatchButtonClick = triggerDispatcher.dispatchButtonClick;
-var feDisplayShadowOptOut = new Set;
 createLumiInterceptors({
   executeFrontend: frontendLua.call,
   prepareTriggerContext: readonlyResolver.prepareTriggerContext,
   activeCardByChat,
   captureUserId,
-  isFeDisplayAuthoritative: (chatId) => FE_DISPLAY_ENABLED && !feDisplayShadowOptOut.has(chatId),
-  isPromptRegexAuthoritative: (chatId) => PROMPT_REGEX_ACTIVE && isPromptRegexOwnedChat(chatId),
-  dispatchPromptRegex: (prebuilt, scripts, messages, userId) => promptRegexRunnerClient ? promptRegexRunnerClient.dispatch(prebuilt, scripts, messages, userId) : Promise.resolve({ ok: false, changed: false, messages }),
+  isPromptRegexAuthoritative: (chatId) => isPromptRegexOwnedChat(chatId),
+  dispatchPromptRegex: (prebuilt, scripts, messages, userId) => promptRegexRunnerClient.dispatch(prebuilt, scripts, messages, userId),
   ensureActiveCardForChat,
   getCachedSettingsSync,
   modulesByNamespaceFromCard,
@@ -38100,13 +36474,13 @@ createLumiInterceptors({
   resolveReadonlyMany,
   runMessageVarPass: (chatId, characterId, uid) => messageVarPass.run(chatId, characterId, uid),
   runBinding,
-  log: log8,
+  log: log7,
   errMsg
 }).registerAll();
 try {
   registerSpindleMacros();
 } catch (err) {
-  log8.warn(`registerSpindleMacros failed: ${errMsg(err)}`);
+  log7.warn(`registerSpindleMacros failed: ${errMsg(err)}`);
 }
 var messagesCacheInflight = new Map;
 async function refreshMessagesCache(chatId, _userId) {
@@ -38127,7 +36501,7 @@ async function refreshMessagesCache(chatId, _userId) {
       });
       setCachedMessages(chatId, msgs);
     } catch (err) {
-      log8.warn(`refreshMessagesCache: chat=${chatId} failed: ${errMsg(err)}`);
+      log7.warn(`refreshMessagesCache: chat=${chatId} failed: ${errMsg(err)}`);
     } finally {
       messagesCacheInflight.delete(chatId);
     }
@@ -38138,9 +36512,8 @@ async function refreshMessagesCache(chatId, _userId) {
 var messageVarPass = createMessageVarPass({
   stripMessageSetvars: readonlyResolver.stripMessageSetvars,
   refreshMessagesCache,
-  invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
-  log: log8,
+  log: log7,
   errMsg
 });
 var lifecycleHandlers = createLifecycleEventHandlers({
@@ -38157,8 +36530,6 @@ var lifecycleHandlers = createLifecycleEventHandlers({
   ensureActiveCardForChat,
   invalidateActiveForCharacter: (characterId, userId) => characterModuleAttach.invalidateActiveForCharacter(characterId, userId),
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
-  invalidateRenderMcpForChat,
-  invalidateRenderMcpForMessage,
   invalidateMacroInterceptorForChat,
   invalidateListenEditPreload,
   refreshMessagesCache,
@@ -38193,7 +36564,7 @@ var lifecycleHandlers = createLifecycleEventHandlers({
   deleteImageIds,
   emitOperationProgress,
   chatsGet: (chatId, userId) => spindle.chats.get(chatId, userId),
-  log: log8,
+  log: log7,
   errMsg
 });
 spindle.on("SETTINGS_UPDATED", userScoped(lifecycleHandlers.SETTINGS_UPDATED));
@@ -38273,7 +36644,7 @@ var moduleUploader = createModuleUploader({
   },
   emitProgress: (frame, userId) => send(frame, userId),
   currentTranslatorSchemaVersion: CURRENT_MODULE_SCHEMA_VERSION,
-  log: log8,
+  log: log7,
   errMsg
 });
 async function processModuleUpload(bytesIn, fileName, userId, control) {
@@ -38291,7 +36662,7 @@ async function processRisumUpload(uploadId, fileName, userId, control) {
       control.signal.throwIfAborted();
       return readUploadChunk(uploadId, offset, userId);
     });
-    log8.info(`processModuleUpload: file=${fileName} bytes=${source.size} userId=${userId} mode=chunked`);
+    log7.info(`processModuleUpload: file=${fileName} bytes=${source.size} userId=${userId} mode=chunked`);
     return await moduleUploader.uploadSource(source, fileName, userId, control);
   } finally {
     assetUploadsInFlight--;
@@ -38315,7 +36686,7 @@ var modulePushes = createModulePushes({
   listCards,
   pushCards,
   send,
-  log: log8,
+  log: log7,
   errMsg
 });
 var pushModules = modulePushes.pushModules;
@@ -38331,13 +36702,13 @@ var viewerAssembly = createViewerAssembly({
   fetchWorldBookMeta: async (wbId, userId) => spindle.world_books.get(wbId, userId),
   listWorldBookEntries: (wbId, opts) => spindle.world_books.entries.list(wbId, opts),
   translateLang: TRANSLATE_TARGET_LANG,
-  log: log8,
+  log: log7,
   errMsg
 });
 var worldBookOps = createWorldBookOps({
   charactersAttachedTo: (moduleId, userId) => characterModuleAttach.charactersAttachedTo(moduleId, userId),
   send,
-  log: log8,
+  log: log7,
   errMsg
 });
 worldBookOps.deleteModuleWorldBookEverywhere;
@@ -38358,7 +36729,7 @@ var assetTriggerMutate = createAssetTriggerMutate({
     const stats = await deleteImageIds(safe, userId, context);
     return { deleted: stats.deleted, shielded };
   },
-  log: log8,
+  log: log7,
   errMsg
 });
 var refreshRisuAssetMap = assetTriggerMutate.refreshRisuAssetMap;
@@ -38387,7 +36758,7 @@ var characterModuleAttach = createCharacterModuleAttach({
   send,
   visibleChatForUser: (uid) => lastActiveChatByUser.get(uid),
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
-  log: log8,
+  log: log7,
   errMsg
 });
 var attachModuleToCharacter = characterModuleAttach.attachModuleToCharacter;
@@ -38399,7 +36770,6 @@ var charactersAttachedTo = characterModuleAttach.charactersAttachedTo;
 var syncModuleWorldBook = worldBookOps.syncModuleWorldBook;
 worldBookOps.addWorldBookToCharacter;
 worldBookOps.removeWorldBookFromCharacter;
-var dispatchModuleArtifactInstall = worldBookOps.dispatchModuleArtifactInstall;
 var lorebookImporter = createLorebookImporter({
   readLumirealm: (characterId, userId) => readLumirealm(charactersApi(), characterId, userId),
   createWorldBook: (input, userId) => spindle.world_books.create(input, userId),
@@ -38409,14 +36779,14 @@ var lorebookImporter = createLorebookImporter({
   },
   createWorldBookEntry: (bookId, input, userId) => spindle.world_books.entries.create(bookId, input, userId),
   send,
-  log: log8,
+  log: log7,
   errMsg,
   parseDirectLorebook,
   mapLoreBook
 });
 var regexImporter = createRegexImporter({
   send,
-  log: log8,
+  log: log7,
   errMsg,
   parseDirectRegex,
   mapRegex,
@@ -38449,7 +36819,7 @@ var migrationsRunner = createMigrationsRunner({
   toastFor,
   charactersAttachedTo: (moduleId, userId) => charactersAttachedTo(moduleId, userId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
-  log: log8,
+  log: log7,
   errMsg
 });
 var runCharacterMigration = migrationsRunner.runCharacterMigration;
@@ -38474,7 +36844,7 @@ var massMigrations = createMassMigrationsRunner({
   runCharacterMigration,
   emitOperationProgress,
   toastFor,
-  log: log8,
+  log: log7,
   errMsg
 });
 subscribeToMissingChanges((missing) => {
@@ -38482,28 +36852,28 @@ subscribeToMissingChanges((missing) => {
     return;
   if (capturedUserIds.size === 0)
     return;
-  log8.info(`permissions.changed: re-running mass migrations for ${capturedUserIds.size} captured user(s)`);
+  log7.info(`permissions.changed: re-running mass migrations for ${capturedUserIds.size} captured user(s)`);
   for (const userId of capturedUserIds) {
     (async () => {
       try {
         await massMigrations.runMassModuleMigrationIfNeeded(userId);
       } catch (err) {
-        log8.warn(`permissions.changed: mass module migration retry failed userId=${userId}: ${errMsg(err)}`);
+        log7.warn(`permissions.changed: mass module migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
         await massMigrations.runMassCharacterMigrationIfNeeded(userId);
       } catch (err) {
-        log8.warn(`permissions.changed: mass character migration retry failed userId=${userId}: ${errMsg(err)}`);
+        log7.warn(`permissions.changed: mass character migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
         await massMigrations.runRetiredMacroMigrationIfNeeded(userId);
       } catch (err) {
-        log8.warn(`permissions.changed: retired macro migration retry failed userId=${userId}: ${errMsg(err)}`);
+        log7.warn(`permissions.changed: retired macro migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
       try {
         await massMigrations.runVarScopeMigrationIfNeeded(userId);
       } catch (err) {
-        log8.warn(`permissions.changed: var-scope migration retry failed userId=${userId}: ${errMsg(err)}`);
+        log7.warn(`permissions.changed: var-scope migration retry failed userId=${userId}: ${errMsg(err)}`);
       }
     })();
   }
@@ -38526,7 +36896,7 @@ var repairOrchestrator = createRepairOrchestrator({
       const character = await spindle.characters.get(charId, uid);
       return typeof character?.image_id === "string" && character.image_id.length > 0 ? character.image_id : null;
     },
-    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send, deleteRegexRows: deleteRepairRegexRows, log: log8 }),
+    installCharacterRegexScripts: (charId, charName, scripts, uid) => installCurrentCharacterRegexScripts({ characterId: charId, characterName: charName, scripts, userId: uid }, { regexApi: spindle.regex_scripts, send, deleteRegexRows: deleteRepairRegexRows, log: log7 }),
     writeEnvelope: (charId, data, uid) => writeLumirealm(charactersApi(), charId, data, uid).then(() => {
       return;
     }),
@@ -38545,7 +36915,7 @@ var repairOrchestrator = createRepairOrchestrator({
       }, uid);
     },
     invalidateActiveForCharacter: (charId, uid) => invalidateActiveForCharacter(charId, uid),
-    log: log8
+    log: log7
   }),
   readModuleEnvelope: (userId, moduleId) => readEnvelope(moduleStorage(), userId, moduleId),
   refreshAttachedModule: (charId, env, userId) => refreshAttachedModule(charId, env, userId),
@@ -38555,7 +36925,7 @@ var repairOrchestrator = createRepairOrchestrator({
   clearDeadJournals,
   send,
   emitOperationProgress,
-  log: log8,
+  log: log7,
   errMsg
 });
 repairOrchestrator.forceRetranslateAll;
@@ -38565,7 +36935,7 @@ var viewerPushDeps = {
   assembleCharacter: (characterId, userId) => viewerAssembly.assembleCharacter(characterId, userId),
   assembleModule: (moduleId, userId) => viewerAssembly.assembleModule(moduleId, userId),
   send,
-  warn: (m) => log8.warn(m),
+  warn: (m) => log7.warn(m),
   errMsg
 };
 var rawGenerate = spindle.generate.raw;
@@ -38594,9 +36964,9 @@ var realmHandle = setupRealmBackend({
   importPreparedCard: importCardOrchestrator.importPreparedCard,
   send: (msg, userId) => send(msg, userId),
   log: {
-    info: (m) => log8.info(m),
-    warn: (m) => log8.warn(m),
-    error: (m) => log8.error(m)
+    info: (m) => log7.info(m),
+    warn: (m) => log7.warn(m),
+    error: (m) => log7.error(m)
   },
   importCardFromBytes: (bytes, fileName, userId) => importCardFromBytes(bytes, fileName, userId),
   createPreset: (input, uid) => spindle.presets.create(input, uid),
@@ -38613,12 +36983,12 @@ var realmHandle = setupRealmBackend({
       spindle.toast?.success(msg);
   }
 });
-var screenHandlers = createScreenHandlers({ setScreenDims, log: log8 });
+var screenHandlers = createScreenHandlers({ setScreenDims, log: log7 });
 var consentHandlers = createConsentHandlers({
   pendingConsents,
   resolveAlertDismissal,
   resolvePickResolution,
-  log: log8
+  log: log7
 });
 var connectionsHandlers = createConnectionsHandlers({
   listConnectionsForUser,
@@ -38635,11 +37005,11 @@ var connectionsHandlers = createConnectionsHandlers({
         is_default: c.is_default
       }));
     } catch (err) {
-      log8.warn(`listImageConnectionsForUser failed: ${err}`);
+      log7.warn(`listImageConnectionsForUser failed: ${err}`);
       return [];
     }
   },
-  log: log8
+  log: log7
 });
 var logHandlers = createLogHandlers({
   extensionVersion: EXTENSION_VERSION,
@@ -38668,12 +37038,12 @@ var togglesHandlers = createTogglesHandlers({
   writeToggleValue,
   ensureActiveCardForChat,
   refreshToggleDefinitions,
-  log: log8
+  log: log7
 });
 var dispatchHandlers = createDispatchHandlers({
   dispatchManualTrigger,
   dispatchButtonClick,
-  log: log8
+  log: log7
 });
 var lorebookHandlers = createLorebookHandlers({ lorebookImporter });
 var regexHandlers = createRegexHandlers({ regexImporter });
@@ -38703,7 +37073,7 @@ var assetsHandlers = createAssetsHandlers({
   charactersAttachedTo,
   invalidateActiveForCharacter,
   refreshRisuAssetMap,
-  log: log8,
+  log: log7,
   errMsg
 });
 var viewerHandlers = createViewerHandlers({
@@ -38722,7 +37092,7 @@ var viewerHandlers = createViewerHandlers({
     await writeEnvelope(moduleStorage(), userId, env);
   },
   send,
-  log: log8,
+  log: log7,
   errMsg
 });
 var importHandlers = createImportHandlers({
@@ -38738,7 +37108,6 @@ var importHandlers = createImportHandlers({
   ensureActiveCardForChat,
   sendSetActiveChat,
   setChatStyleMode,
-  invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
   refreshVariables,
@@ -38758,7 +37127,7 @@ var importHandlers = createImportHandlers({
   emitOperationProgress,
   notifyHostVersionOutdated: (msg, uid) => spindle.sendToFrontend(msg, uid),
   notifyMissingPermissions: (msg, uid) => spindle.sendToFrontend(msg, uid),
-  log: log8,
+  log: log7,
   errMsg
 });
 var orphanHandlers = createOrphanHandlers({
@@ -38770,7 +37139,7 @@ var orphanHandlers = createOrphanHandlers({
   buildOrphanDetectDeps,
   deleteImageIds,
   emitOperationProgress,
-  log: log8,
+  log: log7,
   errMsg
 });
 var repairHandlers = createRepairHandlers({
@@ -38780,7 +37149,7 @@ var repairHandlers = createRepairHandlers({
   repairInFlightByUser,
   scanRepairTargets,
   applyRepair,
-  log: log8,
+  log: log7,
   errMsg
 });
 var moduleHandlers = createModuleHandlers({
@@ -38799,7 +37168,7 @@ var moduleHandlers = createModuleHandlers({
     for (const moduleId of added) {
       const env = await readEnvelope(moduleStorage(), userId, moduleId);
       if (!env) {
-        log8.warn(`set_global_modules: module ${moduleId} has no envelope, artifacts not installed`);
+        log7.warn(`set_global_modules: module ${moduleId} has no envelope, artifacts not installed`);
         continue;
       }
       const { worldBookId } = await worldBookOps.dispatchGlobalModuleArtifactInstall(env, userId);
@@ -38808,7 +37177,7 @@ var moduleHandlers = createModuleHandlers({
     const chars = await listLumirealmCharacters(charactersApi(), userId, { paginate: true });
     for (const c of chars)
       invalidateActiveForCharacter(c.character.id, userId);
-    log8.info(`set_global_modules: user=${userId} count=${applied.length} ` + `added=${added.length} removed=${removed.length} invalidated=${chars.length}`);
+    log7.info(`set_global_modules: user=${userId} count=${applied.length} ` + `added=${added.length} removed=${removed.length} invalidated=${chars.length}`);
   },
   recordGlobalModuleArtifacts: async (moduleId, artifacts, userId) => {
     await writeGlobalModuleArtifacts(moduleStorage(), userId, moduleId, artifacts);
@@ -38853,7 +37222,7 @@ var moduleHandlers = createModuleHandlers({
   invalidateActiveForCharacter,
   emitOperationProgress,
   blockedByRepair,
-  log: log8,
+  log: log7,
   errMsg
 });
 var exportHandlers = createExportHandlers({
@@ -38915,7 +37284,7 @@ var exportHandlers = createExportHandlers({
     return out;
   },
   extensionVersion: EXTENSION_VERSION,
-  log: log8,
+  log: log7,
   errMsg
 });
 var handlerRegistry = {
@@ -38951,12 +37320,6 @@ var handlerRegistry = {
       deleted: msg.deleted
     });
   },
-  display_authority: async (msg) => {
-    if (msg.authoritative)
-      feDisplayShadowOptOut.delete(msg.chatId);
-    else
-      feDisplayShadowOptOut.add(msg.chatId);
-  },
   active_preset: async (msg, ctx) => {
     await applyActivePreset(spindle.regex_scripts, ctx.userId, msg.presetId);
   }
@@ -38967,17 +37330,17 @@ spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {
   markFrontendReady(userId);
   const msg = raw;
   if (!isLogTransportNoise(msg.type)) {
-    log8.trace(`frontend msg type=${msg.type} userId=${userId ?? "<none>"}`);
+    log7.trace(`frontend msg type=${msg.type} userId=${userId ?? "<none>"}`);
   }
   if (!userId) {
-    log8.warn(`frontend msg type=${msg.type} dropped: no userId`);
+    log7.warn(`frontend msg type=${msg.type} dropped: no userId`);
     return;
   }
   if (await receiveHostService(raw, userId, frontendSessionId))
     return;
   if (await frontendLua.receive(raw, userId, frontendSessionId))
     return;
-  const ctx = { userId, send, log: log8, errMsg, ...frontendSessionId ? { frontendSessionId } : {} };
+  const ctx = { userId, send, log: log7, errMsg, ...frontendSessionId ? { frontendSessionId } : {} };
   try {
     if (isRealmFrontendMessage(msg)) {
       await realmHandle.handle(msg, userId);
@@ -38987,7 +37350,7 @@ spindle.onFrontendMessage(userScoped(async (raw, userId, frontendSessionId) => {
     await handler(msg, ctx);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log8.error(`Frontend message handler error (type=${msg.type ?? "?"}): ${message}`);
+    log7.error(`Frontend message handler error (type=${msg.type ?? "?"}): ${message}`);
     send({ type: "error", message }, userId);
   }
 }));

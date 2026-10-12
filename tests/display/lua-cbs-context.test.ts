@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { createDisplayResolver } from '../../src/display/resolver.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
 import { clearDisplaySnapshot, setDisplaySnapshot } from '../../src/display/snapshot.js';
-import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
+import { setWasmoonEnabled } from '../helpers/wasmoon-mode.js';
 
 import type { DisplaySnapshot } from '../../src/display/snapshot.js';
 

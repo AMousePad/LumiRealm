@@ -122,7 +122,6 @@ export function setupImportOverlay(
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingConsentRequestId: string | null = null;
   let pendingCancel: (() => boolean | void) | null = null;
-  let uploadTotalBytes = 0;
   let importing = false;
   const queuedOperations = new Map<string, Extract<BackendToFrontend, { type: 'operation_progress' }>>();
 
@@ -334,7 +333,6 @@ export function setupImportOverlay(
     importing = true;
     activeOperationId = null;
     log.info(`import-overlay: notifyImportStart label=${newLabel} source=${source} cancellable=${!!onCancel} totalBytes=${totalBytes ?? '?'}`);
-    uploadTotalBytes = typeof totalBytes === 'number' && totalBytes > 0 ? totalBytes : 0;
     showOverlay(newLabel);
     pendingCancel = onCancel ?? null;
     cancelBtn.hidden = !pendingCancel;

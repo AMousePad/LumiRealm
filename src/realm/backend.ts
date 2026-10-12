@@ -8,7 +8,6 @@ declare const spindle: SpindleAPI;
 import type { RegexScriptCreateDTO, RegexScriptDTO, SpindleAPI, UserPresetCreateDTO, UserPresetDTO } from 'lumiverse-spindle-types';
 import { isRisuPresetBytes, decodeRisuPreset } from '../core/preset/risup-decoder.js';
 import { translateRisuPreset } from '../core/preset/risup-translator.js';
-import { translatePresetLabels } from '../core/preset/preset-labels.js';
 import { runPresetRegexExclusive, suspendedPresetRule } from '../state/preset-regex-activation.js';
 
 export interface RealmBackendLog {

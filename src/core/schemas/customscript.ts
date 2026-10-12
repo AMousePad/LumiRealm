@@ -29,12 +29,3 @@ export const customscriptSchema = z
   .passthrough();
 
 export type CustomScript = z.infer<typeof customscriptSchema>;
-
-export const KNOWN_REGEX_PHASES = [
-  "editinput",
-  "editprocess",
-  "editoutput",
-  "editdisplay",
-  "edittrans",
-  "disabled",
-] as const;

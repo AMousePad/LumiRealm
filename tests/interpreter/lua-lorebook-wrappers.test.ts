@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
+import { execute as luaExecute } from '../helpers/lua-bridge.js';
 
 describe('Lua lorebook wrappers', () => {
   test('getLoreBooks decodes the synchronous runtime result', async () => {

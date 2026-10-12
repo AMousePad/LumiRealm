@@ -57,7 +57,7 @@ describe("mapCharacter — spec dispatch", () => {
     expect(r.character.name).toBe("Flat Character");
     expect(r.character.description).toBe("flat");
     // v1 → translation note recorded
-    const ext = r.character.extensions["_risu_to_lumi"] as { translation_notes: string[]; spec: string };
+    const ext = r.character.extensions["_lumirealm"] as { translation_notes: string[]; spec: string };
     expect(ext.spec).toBe("v1");
     expect(ext.translation_notes.some((n) => n.includes("v1"))).toBe(true);
   });
@@ -66,7 +66,7 @@ describe("mapCharacter — spec dispatch", () => {
     const v2 = { spec: "chara_card_v2", spec_version: "2.0", data: { name: "V2" } };
     const r = mapCharacter(v2, { uuid: fakeUuid, now: fakeNow });
     expect(r.character.name).toBe("V2");
-    const ext = r.character.extensions["_risu_to_lumi"] as { spec: string; translation_notes: string[] };
+    const ext = r.character.extensions["_lumirealm"] as { spec: string; translation_notes: string[] };
     expect(ext.spec).toBe("chara_card_v2");
     expect(ext.translation_notes.some((n) => n.includes("chara_card_v2"))).toBe(true);
   });
@@ -144,7 +144,7 @@ describe("mapCharacter — extensions preserved", () => {
 
   test("provenance metadata attached", () => {
     const r = mapCharacter(baseV3Card, { uuid: fakeUuid, now: fakeNow, sourceId: "risurealm:abc" });
-    const rtl = r.character.extensions["_risu_to_lumi"] as { source: string; spec: string; spec_version: string };
+    const rtl = r.character.extensions["_lumirealm"] as { source: string; spec: string; spec_version: string };
     expect(rtl.source).toBe("risurealm:abc");
     expect(rtl.spec).toBe("chara_card_v3");
     expect(rtl.spec_version).toBe("3.0");
@@ -268,7 +268,7 @@ describe("mapCharacter — corpus", () => {
       const bundle = readCharx(new Uint8Array(readFileSync(path)), { decodeModule: false });
       const r = mapCharacter(bundle.card, { sourceId: `file:${name}` });
       stats.mapped++;
-      const rtl = r.character.extensions["_risu_to_lumi"] as { spec: string };
+      const rtl = r.character.extensions["_lumirealm"] as { spec: string };
       stats.specCounts[rtl.spec] = (stats.specCounts[rtl.spec] ?? 0) + 1;
       if (r.extracted.backgroundHTML) stats.withBackgroundHTML++;
       if (r.extracted.characterBook) stats.withCharacterBook++;

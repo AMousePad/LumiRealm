@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { DisplaySnapshot } from '../../src/display/snapshot.js';
 import { withCurrentDisplayMessage } from '../../src/display/host-shim.js';
-import { runEditDisplayChain } from '../../src/display/lua-runner.js';
-import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
+import { runEditDisplayChain } from '../helpers/snapshot-display.js';
+import { setWasmoonEnabled } from '../helpers/wasmoon-mode.js';
 import { clearWasmoonEngine } from '../../src/interpreter/lua-wasmoon.js';
 
 function snapshot(luaCode = ''): DisplaySnapshot {

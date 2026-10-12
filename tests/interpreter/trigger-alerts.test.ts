@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { compileTrigger } from '../../src/core/triggers/compile';
+import { compileTrigger } from '../helpers/trigger-compiler/compile';
 import type { TriggerEffect, TriggerScript } from '../../src/core/schemas/triggerscript';
 import type { HostApi } from '../../src/interpreter/host';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime';

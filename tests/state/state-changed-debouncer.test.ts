@@ -12,7 +12,7 @@ import {
   pendingStateChangedTimers,
   resetStateChangedDebouncer,
   STATE_CHANGED_DEBOUNCE_MS,
-} from '../../src/state/state-changed-debouncer.js';
+} from '../helpers/state-changed-debouncer.js';
 
 beforeEach(() => resetStateChangedDebouncer());
 

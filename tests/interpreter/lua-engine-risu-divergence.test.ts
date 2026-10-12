@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { execute } from '../../src/interpreter/lua-bridge';
+import { execute } from '../helpers/lua-bridge.js';
 import { engineCases, engineGlobals } from '../browser/lua-engine-risu-cases';
 
 describe('Embedded Wasmoon parity with Risu runScripted and luaCodeWrapper', () => {

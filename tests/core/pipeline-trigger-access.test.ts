@@ -26,7 +26,7 @@ test.each([
     },
   };
   const original = structuredClone(source);
-  const payload = translateFromStoredSource(source, { mode: 'full', emitPackScripts: false }).risuPayload!;
+  const payload = translateFromStoredSource(source, { mode: 'full', }).risuPayload!;
   expect(payload.triggers).toHaveLength(1);
   expect((payload.triggers[0] as { lowLevelAccess: boolean }).lowLevelAccess).toBe(access === true);
   expect(payload.requires.lowLevelAccess).toBe(access === true);
@@ -37,6 +37,6 @@ test('a character access request requires consent even without triggers', () => 
   const card = { spec: 'chara_card_v3', spec_version: '3.0', data: {
     name: 'Access fixture', extensions: { risuai: { lowLevelAccess: true } },
   } };
-  const payload = translateFromStoredSource({ card, module: null }, { emitPackScripts: false }).risuPayload!;
+  const payload = translateFromStoredSource({ card, module: null }, { }).risuPayload!;
   expect(payload.requires.lowLevelAccess).toBe(true);
 });

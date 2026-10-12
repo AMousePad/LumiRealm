@@ -10,12 +10,7 @@ const RUNNER_ENTRY = 'dist/regex-runner.js';
 const RUNNER_KIND = 'lumirealm-prompt-regex';
 const RUNNER_KEY = 'singleton';
 
-const PROMPT_REGEX_TIMEOUT_MS = (() => {
-  const env = (globalThis as { Bun?: { env?: Record<string, string | undefined> } }).Bun?.env;
-  const raw = env?.LUMIREALM_PROMPT_REGEX_TIMEOUT_MS;
-  const parsed = raw !== undefined ? parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30_000;
-})();
+const PROMPT_REGEX_TIMEOUT_MS = 30_000;
 
 const STARTUP_TIMEOUT_MS = 10_000;
 // Above PROMPT_REGEX_TIMEOUT_MS so the per-request dispatch timeout is the binding

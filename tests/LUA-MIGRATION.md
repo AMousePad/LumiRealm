@@ -62,7 +62,7 @@ are ignored. Cancellation checks run before queued Lua and after suspended
 callbacks. Already issued host effects cannot be undone, and an infinite
 synchronous Lua loop cannot be interrupted by this mechanism.
 
-The manifest gives LumiRealm a 30-second interceptor budget. This overrides the
+The manifest gives LumiRealm a 60-second interceptor budget. This overrides the
 host's 10-second default only for this extension. It provides headroom; it does
 not reduce execution time or impose a new Lua semantic shortcut.
 

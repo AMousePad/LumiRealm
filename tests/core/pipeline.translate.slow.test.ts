@@ -83,11 +83,8 @@ describe("translateCharx — minimal synthetic inputs", () => {
       },
     });
     const bundle = translateCharx(charx, { uuid: fakeUuid, now: fakeNow });
-    // Since M-session5 the BG-HTML is emitted as a Lumiscript trigger.
     expect(bundle.manifest.untranslated.background_html).toBe(false);
-    const bg = bundle.scripts.find((s) => s.name === "risu-bg-html");
-    expect(bg).toBeDefined();
-    expect(bg!.triggers).toEqual(["CHAT_CHANGED", "ls:startup"]);
+    expect(bundle.risuPayload!.background_html).toBe("<style>.x{}</style>");
   });
 
   test("walking-skeleton mode skips BG-HTML emission so count lands in untranslated", () => {
@@ -193,7 +190,7 @@ describe("translateCharx — M10/M11/M14 wiring", () => {
     expect(bundle.manifest.untranslated.character_level_regex).toBe(0);
   });
 
-  test("@@action regex routes to bundle.scripts (M11)", () => {
+  test("@@action regex routes to the runtime payload", () => {
     uuidCounter = 0;
     const charx = makeCharx({
       spec: "chara_card_v3",
@@ -211,13 +208,11 @@ describe("translateCharx — M10/M11/M14 wiring", () => {
     });
     const bundle = translateCharx(charx, { uuid: fakeUuid, now: fakeNow });
     expect(bundle.regexScripts.length).toBe(0);
-    const triggers = bundle.scripts.filter((s) => s.type === "trigger");
-    expect(triggers).toHaveLength(1);
-    expect(triggers[0]!.path).toContain("at-actions/");
+    expect(bundle.risuPayload!.at_actions).toHaveLength(1);
     expect(bundle.manifest.untranslated.at_actions).toBe(1);
   });
 
-  test("char-level triggers compile to scripts/triggers/*.js (M14)", () => {
+  test("char-level triggers remain structured in the runtime payload", () => {
     uuidCounter = 0;
     const charx = makeCharx({
       spec: "chara_card_v3",
@@ -241,12 +236,7 @@ describe("translateCharx — M10/M11/M14 wiring", () => {
       },
     });
     const bundle = translateCharx(charx, { uuid: fakeUuid, now: fakeNow });
-    const triggers = bundle.scripts.filter((s) => s.type === "trigger");
-    expect(triggers).toHaveLength(1);
-    expect(triggers[0]!.path).toContain("triggers/");
-    expect(triggers[0]!.triggers).toEqual(["MESSAGE_SENT"]);
-    expect(triggers[0]!.code).toContain("setvarV1");
-    expect(triggers[0]!.code).toContain('script.require("risu-compat")');
+    expect(bundle.risuPayload!.triggers).toMatchObject([{ type: "input", effect: [{ type: "setvar", var: "seen" }] }]);
   });
 
   test("untranslated counts decrement by translated totals", () => {

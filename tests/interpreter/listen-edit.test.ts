@@ -5,8 +5,8 @@ import {
   type ListenEditTrigger,
 } from '../../src/interpreter/listen-edit.js';
 import type { HostApi, ScriptNS, DispatchData, HostMessage } from '../../src/interpreter/host.js';
-import { makeRisuRegexRuntime, makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
-import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
+import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
+import { execute as luaExecute } from '../helpers/lua-bridge.js';
 
 // ─── Phase 6 — listenEdit orchestrator tests ─────────────────────────────
 //
@@ -46,7 +46,7 @@ function makeMockScriptNS(): ScriptNS {
     require: async (name: string) => {
       // Provide the risu-compat / risu-compat-lua libraries the runtime
       // expects. Both are referenced by makeRisuTriggerRuntime/runLua.
-      if (name === 'risu-compat') return { makeRisuTriggerRuntime, makeRisuRegexRuntime };
+      if (name === 'risu-compat') return { makeRisuTriggerRuntime };
       if (name === 'risu-compat-lua') return { execute: luaExecute };
       throw new Error('mock require: unknown ' + name);
     },

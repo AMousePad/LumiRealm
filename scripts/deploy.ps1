@@ -114,10 +114,6 @@ foreach ($t in $scanTargets) {
       $startIdx = [Math]::Max(0, $first.Index - 60)
       $endIdx = [Math]::Min($t.text.Length, $first.Index + $first.Length + 60)
       $preview = ($t.text.Substring($startIdx, $endIdx - $startIdx)) -replace "`r?`n", ' '
-      if ($env:LUMIREALM_SKIP_SAFETY_CHECK -eq '1') {
-        Write-Host "static safety check SKIPPED (LUMIREALM_SKIP_SAFETY_CHECK=1): $($t.name) $($c.label)"
-        continue
-      }
       Write-Host "STATIC SAFETY CHECK FAIL: $($t.name) $($c.label) -- hits=$($m.Count) first context: ...$preview..."
       $failed = $true
     }

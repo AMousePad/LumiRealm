@@ -21,7 +21,6 @@ function harness(owned = true, remembered = true, onStyleMode: ImportHandlerDeps
       trace.push(`style:${chatId}:${mode}:${userId}`);
       onStyleMode(chatId, mode, userId);
     },
-    invalidateRenderMcpForChat() {},
     invalidateMacroInterceptorForChat() {},
     refreshBgHtml: async () => { trace.push('background'); },
     refreshVariables: async () => { trace.push('snapshot'); },

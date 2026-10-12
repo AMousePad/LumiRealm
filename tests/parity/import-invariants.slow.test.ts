@@ -181,7 +181,7 @@ function runInvariants(cardName: string, raw: CharxBundle, bundle: LumiBundle): 
   // Either condition opts the card out of byte-equality; the rest still
   // catch any silent extract-time normalization.
   {
-    const expected = typeof risuai["backgroundHTML"] === "string"
+    const expected = typeof risuai["backgroundHTML"] === "string" && risuai["backgroundHTML"].length > 0
       ? (risuai["backgroundHTML"] as string)
       : null;
     const regexReplaceStrings = bundle.regexScripts.map((r) => r.replace_string ?? "");
@@ -404,7 +404,7 @@ describe("import-time cross-surface invariants", () => {
 
   // 5. Verbatim passthrough — catches "someone added trim/normalize at
   // extract time" silently.
-  test("risuPayload.background_html byte-identical to data.extensions.risuai.backgroundHTML", () => {
+  test("risuPayload.background_html preserves nonempty source content and represents empty content as null", () => {
     reportFirstFew("bg-html-roundtrip", violations.bgHtmlRoundtrip);
     expect(violations.bgHtmlRoundtrip).toEqual([]);
   });

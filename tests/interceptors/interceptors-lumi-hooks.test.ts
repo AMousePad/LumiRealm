@@ -9,7 +9,6 @@ import type { ActiveCard } from '../../src/interpreter/dispatch.js';
 import type { StoredRisuCard } from '../../src/payload/types.js';
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store.js';
 import { resetMacroInterceptorCache } from '../../src/state/macro-interceptor-cache.js';
-import { resetRenderMcpCache } from '../../src/state/render-mcp-cache.js';
 import { resetListenEditPreloadCache } from '../../src/interpreter/listenedit-preload.js';
 
 interface CapturedHandlers {
@@ -250,7 +249,6 @@ function makeMockDeps(overrides?: Partial<CreateLumiInterceptorsDeps>): {
       debug: () => undefined,
     },
     errMsg: (e) => e instanceof Error ? e.message : String(e),
-    isFeDisplayAuthoritative: () => false,
     isPromptRegexAuthoritative: () => false,
     dispatchPromptRegex: async (_prebuilt, _scripts, messages) => ({ ok: false, changed: false, messages }),
     ...(overrides ?? {}),
@@ -269,7 +267,6 @@ describe('createLumiInterceptors', () => {
 
   afterEach(() => {
     resetMacroInterceptorCache();
-    resetRenderMcpCache();
     resetListenEditPreloadCache();
     teardownSpindle();
   });

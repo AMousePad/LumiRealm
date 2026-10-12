@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { compileTrigger } from '../../src/core/triggers/compile.js';
+import { compileTrigger } from '../helpers/trigger-compiler/compile.js';
 import { interpretTrigger, type InterpConsole } from '../../src/interpreter/trigger-interpreter.js';
 import { compareValues } from '../../src/interpreter/runtime/compare.js';
 import { advanceTriggerControl, type TriggerControlState, type TriggerControlRuntime } from '../../src/core/triggers/control-flow.js';

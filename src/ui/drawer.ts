@@ -287,9 +287,9 @@ export function mountCardsPanel(opts: MountCardsPanelOptions): DrawerHandle {
   ): Promise<void> {
     log.info(
       `drawer.installModuleArtifacts: char=${msg.characterId} module=${msg.moduleId} ` +
-        `lorebookEntries=${msg.lorebookEntries.length} regexScripts=${msg.regexScripts.length}`,
+        `regexScripts=${msg.regexScripts.length}`,
     );
-    let worldBookId: string | null = null;
+    const worldBookId: string | null = null;
     const regexScriptIds: string[] = [];
 
     let regexInstallOk = msg.cleanupStale;

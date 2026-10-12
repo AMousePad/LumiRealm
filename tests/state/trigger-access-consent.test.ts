@@ -21,7 +21,7 @@ function envelope(granted = false, required = true) {
       effect: [{ type: 'triggerlua', code: 'onOutput = function() end' }],
     }] } },
   } }, module: null };
-  const payload = translateFromStoredSource(structuredClone(source), { mode: 'full', emitPackScripts: false }).risuPayload!;
+  const payload = translateFromStoredSource(structuredClone(source), { mode: 'full', }).risuPayload!;
   return buildLumirealmData({ ...payload, requires: { ...payload.requires, lowLevelAccess: false } },
     'old', [], {}, {}, 1, granted ? { low_level_access_granted: true } : {},
     { schema_version: 1, captured_at: 1, ...source, path_to_image_id: {} }, CURRENT_CHARACTER_SCHEMA_VERSION - 1);

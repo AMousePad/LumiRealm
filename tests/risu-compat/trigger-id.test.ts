@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { makeMockContext } from "../../src/core/cbs/index.js";
+import { makeMockContext } from "../helpers/cbs/index.js";
 import { triggerIdHandler } from "../../src/risu-compat/handlers/trigger-id.js";
 
 /**

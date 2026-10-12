@@ -77,10 +77,7 @@ export interface DisplaySnapshot {
   readonly compiledLibraries: readonly CompiledTriggerEntry[];
 }
 
-export type DisplayResolutionMode = 'off' | 'on';
-
 const snapshots = new Map<string, DisplaySnapshot>();
-let mode: DisplayResolutionMode = 'on';
 const snapshotWaiters = new Map<string, Array<(ok: boolean) => void>>();
 
 export function setDisplaySnapshot(snapshot: DisplaySnapshot): void {
@@ -152,14 +149,5 @@ export function snapshotMessagesChanged(prev: DisplaySnapshot, next: DisplaySnap
 export function isDisplayResolutionReady(chatId: string): boolean {
   // Host decides ownership per-character from character.extensions.lumirealm.display_owner.
   // ready() means a snapshot landed so we can resolve, else the host shows raw until invalidate.
-  return mode !== 'off' && snapshots.has(chatId);
-}
-
-export function getDisplayResolutionMode(): DisplayResolutionMode {
-  return mode;
-}
-
-export function setDisplayResolutionMode(next: DisplayResolutionMode): void {
-  if (next !== 'on' && next !== 'off') throw new TypeError(`Unsupported display resolution mode: ${next}`);
-  mode = next;
+  return snapshots.has(chatId);
 }

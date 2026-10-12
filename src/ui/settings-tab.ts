@@ -51,45 +51,6 @@ interface Settings {
 
 type ChannelKey = 'aux' | 'submodel';
 
-interface ChannelDef {
-  readonly key: ChannelKey;
-  /** Settings field for the connection UUID. */
-  readonly connectionField: 'auxConnectionId' | 'submodelConnectionId';
-  /** Settings field for the model override. */
-  readonly modelField: 'auxModelOverride' | 'submodelModelOverride';
-  /** Settings field for the sampler bag. */
-  readonly samplerField: 'auxSamplers' | 'submodelSamplers';
-  /** Section title shown in the drawer. */
-  readonly title: string;
-  /** One-line section description. */
-  readonly description: string;
-  /** Element-id prefix to dodge collisions between the two sections. */
-  readonly idPrefix: string;
-}
-
-const CHANNEL_DEFS: readonly ChannelDef[] = [
-  {
-    key: 'aux',
-    connectionField: 'auxConnectionId',
-    modelField: 'auxModelOverride',
-    samplerField: 'auxSamplers',
-    title: 'Auxiliary Model (axLLMMain)',
-    description:
-      "Routes auxiliary LLM calls through this connection. Low-level access cards usually use this to generate status panels and background-info.",
-    idPrefix: 'rs-aux',
-  },
-  {
-    key: 'submodel',
-    connectionField: 'submodelConnectionId',
-    modelField: 'submodelModelOverride',
-    samplerField: 'submodelSamplers',
-    title: 'Submodel (V2 runLLM submodel channel)',
-    description:
-      "Cards use this for lightweight classifiers / status updaters separate from the main and aux models.",
-    idPrefix: 'rs-submodel',
-  },
-];
-
 interface SamplerDef {
   readonly key: SamplerKey;
   readonly label: string;
@@ -135,7 +96,6 @@ export function mountSettingsPanel(
   let settings: Settings | null = null;
   let connections: readonly ConnectionSummary[] | null = null;
   let imageConnections: readonly ConnectionSummary[] | null = null;
-  let lastSavedTs: number = 0;
 
   // Status pinned at the top so it stays visible across subtabs.
   const status = document.createElement('div');
@@ -170,55 +130,57 @@ export function mountSettingsPanel(
   }
   let activeSubTab: SettingsSubTabId = 'aux';
 
-  // ---------- Auxiliary subtab body ----------------------------------------
-  const auxBody = document.createElement('section');
-  auxBody.className = 'lr-settings-tab-body';
+  function buildModelChannel(channel: ChannelKey, introText: string) {
+    const isAux = channel === 'aux';
+    const prefix = `rs-${channel}`;
+  const body = document.createElement('section');
+  body.className = 'lr-settings-tab-body';
 
-  const auxIntro = document.createElement('p');
-  auxIntro.className = 'lr-settings-intro';
-  auxIntro.textContent = "Routes Lua's axLLMMain / axLLM calls through this connection. Useful for status-window updaters / classifiers separate from the main chat model.";
-  auxBody.appendChild(auxIntro);
+  const intro = document.createElement('p');
+  intro.className = 'lr-settings-intro';
+  intro.textContent = introText;
+  body.appendChild(intro);
 
   const connRow = document.createElement('div');
   connRow.className = 'rs-row';
   const connLabel = document.createElement('label');
   connLabel.className = 'rs-label';
   connLabel.textContent = 'Connection';
-  connLabel.htmlFor = 'rs-aux-conn';
+  connLabel.htmlFor = `${prefix}-conn`;
   connRow.appendChild(connLabel);
   const connSelect = createSearchableSelect({
-    id: 'rs-aux-conn',
+    id: `${prefix}-conn`,
     className: 'rs-trigger',
     placeholder: 'Loading connections…',
     searchPlaceholder: 'Search connections…',
     emptyMessage: 'No matching connections',
     items: [],
     onChange(value) {
-      log.info(`settings-tab: connection changed to "${value ?? '<default>'}"`);
+      log.info(`settings-tab: ${isAux ? '' : 'submodel '}connection changed to "${value ?? (isAux ? '<default>' : '<inherit-aux>')}"`);
       sendToBackend({
         type: 'update_settings',
-        patch: { auxConnectionId: value },
+        patch: { [isAux ? 'auxConnectionId' : 'submodelConnectionId']: value },
       });
     },
   });
   connRow.appendChild(connSelect.root);
-  auxBody.appendChild(connRow);
+  body.appendChild(connRow);
 
   const modelRow = document.createElement('div');
   modelRow.className = 'rs-row';
   const modelLabel = document.createElement('label');
   modelLabel.className = 'rs-label';
   modelLabel.textContent = 'Model override';
-  modelLabel.htmlFor = 'rs-aux-model';
+  modelLabel.htmlFor = `${prefix}-model`;
   modelRow.appendChild(modelLabel);
   const modelInput = document.createElement('input');
-  modelInput.id = 'rs-aux-model';
+  modelInput.id = `${prefix}-model`;
   modelInput.type = 'text';
   modelInput.className = 'rs-input';
   modelInput.placeholder = '(use connection default)';
   modelInput.spellcheck = false;
   modelRow.appendChild(modelInput);
-  auxBody.appendChild(modelRow);
+  body.appendChild(modelRow);
 
   const buttonRow = document.createElement('div');
   buttonRow.className = 'rs-row rs-row-buttons';
@@ -232,15 +194,17 @@ export function mountSettingsPanel(
   resetBtn.type = 'button';
   resetBtn.className = 'lrm-btn';
   resetBtn.textContent = 'Reset';
-  resetBtn.title = 'Clear connection and model.';
+  resetBtn.title = isAux ? 'Clear connection and model.' : 'Clear submodel fields.';
   buttonRow.appendChild(resetBtn);
-  const refreshBtn = document.createElement('button');
+  const refreshBtn = isAux ? document.createElement('button') : null;
+  if (refreshBtn) {
   refreshBtn.type = 'button';
   refreshBtn.className = 'lrm-btn';
   refreshBtn.textContent = 'Refresh';
   refreshBtn.title = 'Re-fetch connection list.';
   buttonRow.appendChild(refreshBtn);
-  auxBody.appendChild(buttonRow);
+  }
+  body.appendChild(buttonRow);
 
   const samplersSection = document.createElement('div');
   samplersSection.className = 'rs-subsection';
@@ -249,130 +213,40 @@ export function mountSettingsPanel(
   const samplersTitle = document.createElement('h4');
   samplersTitle.className = 'rs-subsection-title';
   samplersTitle.textContent = 'Samplers';
-  samplersTitle.title = 'Drag to set, double-click to reset, empty falls back to connection preset.';
+  samplersTitle.title = isAux ? 'Drag to set, double-click to reset, empty falls back to connection preset.' : 'Drag to set, double-click to reset.';
   samplersHeader.appendChild(samplersTitle);
   samplersSection.appendChild(samplersHeader);
   const samplersListEl = document.createElement('div');
   samplersListEl.className = 'rs-samplers-list';
   samplersSection.appendChild(samplersListEl);
-  auxBody.appendChild(samplersSection);
+  body.appendChild(samplersSection);
 
-  const auxPrefillSection = document.createElement('div');
-  auxPrefillSection.className = 'rs-subsection';
-  const auxPrefillRow = document.createElement('label');
-  auxPrefillRow.className = 'rs-checkbox-row';
-  const auxPrefillCheck = document.createElement('input');
-  auxPrefillCheck.type = 'checkbox';
-  auxPrefillCheck.className = 'rs-checkbox';
-  auxPrefillCheck.id = 'rs-aux-prefill';
-  auxPrefillRow.htmlFor = 'rs-aux-prefill';
-  const auxPrefillText = document.createElement('span');
-  auxPrefillText.className = 'rs-checkbox-label';
-  auxPrefillText.textContent = 'Prefill compatibility';
-  auxPrefillText.title = 'Converts the assistant message prefill to a user message prepended with "Begin your response with: <prefill>" to be compatible with models that don\'t support it.';
-  auxPrefillRow.appendChild(auxPrefillCheck);
-  auxPrefillRow.appendChild(auxPrefillText);
-  auxPrefillSection.appendChild(auxPrefillRow);
-  auxBody.appendChild(auxPrefillSection);
+  const prefillSection = document.createElement('div');
+  prefillSection.className = 'rs-subsection';
+  const prefillRow = document.createElement('label');
+  prefillRow.className = 'rs-checkbox-row';
+  const prefillCheck = document.createElement('input');
+  prefillCheck.type = 'checkbox';
+  prefillCheck.className = 'rs-checkbox';
+  prefillCheck.id = isAux ? 'rs-aux-prefill' : 'rs-sub-prefill';
+  prefillRow.htmlFor = isAux ? 'rs-aux-prefill' : 'rs-sub-prefill';
+  const prefillText = document.createElement('span');
+  prefillText.className = 'rs-checkbox-label';
+  prefillText.textContent = 'Prefill compatibility';
+  prefillText.title = 'Converts the assistant message prefill to a user message prepended with "Begin your response with: <prefill>" to be compatible with models that don\'t support it.';
+  prefillRow.appendChild(prefillCheck);
+  prefillRow.appendChild(prefillText);
+  prefillSection.appendChild(prefillRow);
+  body.appendChild(prefillSection);
 
-  // ---------- Sub subtab body ----------------------------------------------
-  const subBody = document.createElement('section');
-  subBody.className = 'lr-settings-tab-body';
+    return { body, connSelect, modelInput, saveModelBtn, resetBtn, refreshBtn, samplersListEl, prefillCheck };
+  }
 
-  const subIntro = document.createElement('p');
-  subIntro.className = 'lr-settings-intro';
-  subIntro.textContent = "Routes V2-effect runLLM(model='submodel') calls through this connection. Cards use this for lightweight classifiers / status updaters separate from the main and aux models. Empty fields inherit from Aux.";
-  subBody.appendChild(subIntro);
-
-  const submodelConnRow = document.createElement('div');
-  submodelConnRow.className = 'rs-row';
-  const submodelConnLabel = document.createElement('label');
-  submodelConnLabel.className = 'rs-label';
-  submodelConnLabel.textContent = 'Connection';
-  submodelConnLabel.htmlFor = 'rs-submodel-conn';
-  submodelConnRow.appendChild(submodelConnLabel);
-  const submodelConnSelect = createSearchableSelect({
-    id: 'rs-submodel-conn',
-    className: 'rs-trigger',
-    placeholder: 'Loading connections…',
-    searchPlaceholder: 'Search connections…',
-    emptyMessage: 'No matching connections',
-    items: [],
-    onChange(value) {
-      log.info(`settings-tab: submodel connection changed to "${value ?? '<inherit-aux>'}"`);
-      sendToBackend({
-        type: 'update_settings',
-        patch: { submodelConnectionId: value },
-      });
-    },
-  });
-  submodelConnRow.appendChild(submodelConnSelect.root);
-  subBody.appendChild(submodelConnRow);
-
-  const submodelModelRow = document.createElement('div');
-  submodelModelRow.className = 'rs-row';
-  const submodelModelLabel = document.createElement('label');
-  submodelModelLabel.className = 'rs-label';
-  submodelModelLabel.textContent = 'Model override';
-  submodelModelLabel.htmlFor = 'rs-submodel-model';
-  submodelModelRow.appendChild(submodelModelLabel);
-  const submodelModelInput = document.createElement('input');
-  submodelModelInput.id = 'rs-submodel-model';
-  submodelModelInput.type = 'text';
-  submodelModelInput.className = 'rs-input';
-  submodelModelInput.placeholder = '(use connection default)';
-  submodelModelInput.spellcheck = false;
-  submodelModelRow.appendChild(submodelModelInput);
-  subBody.appendChild(submodelModelRow);
-
-  const submodelButtonRow = document.createElement('div');
-  submodelButtonRow.className = 'rs-row rs-row-buttons';
-  const submodelSaveModelBtn = document.createElement('button');
-  submodelSaveModelBtn.type = 'button';
-  submodelSaveModelBtn.className = 'lrm-btn lrm-btn-primary';
-  submodelSaveModelBtn.textContent = 'Save';
-  submodelSaveModelBtn.title = 'Save the model override.';
-  submodelButtonRow.appendChild(submodelSaveModelBtn);
-  const submodelResetBtn = document.createElement('button');
-  submodelResetBtn.type = 'button';
-  submodelResetBtn.className = 'lrm-btn';
-  submodelResetBtn.textContent = 'Reset';
-  submodelResetBtn.title = 'Clear submodel fields.';
-  submodelButtonRow.appendChild(submodelResetBtn);
-  subBody.appendChild(submodelButtonRow);
-
-  const submodelSamplersSection = document.createElement('div');
-  submodelSamplersSection.className = 'rs-subsection';
-  const submodelSamplersHeader = document.createElement('div');
-  submodelSamplersHeader.className = 'rs-subsection-header';
-  const submodelSamplersTitle = document.createElement('h4');
-  submodelSamplersTitle.className = 'rs-subsection-title';
-  submodelSamplersTitle.textContent = 'Samplers';
-  submodelSamplersTitle.title = 'Drag to set, double-click to reset.';
-  submodelSamplersHeader.appendChild(submodelSamplersTitle);
-  submodelSamplersSection.appendChild(submodelSamplersHeader);
-  const submodelSamplersListEl = document.createElement('div');
-  submodelSamplersListEl.className = 'rs-samplers-list';
-  submodelSamplersSection.appendChild(submodelSamplersListEl);
-  subBody.appendChild(submodelSamplersSection);
-
-  const submodelPrefillSection = document.createElement('div');
-  submodelPrefillSection.className = 'rs-subsection';
-  const submodelPrefillRow = document.createElement('label');
-  submodelPrefillRow.className = 'rs-checkbox-row';
-  const submodelPrefillCheck = document.createElement('input');
-  submodelPrefillCheck.type = 'checkbox';
-  submodelPrefillCheck.className = 'rs-checkbox';
-  submodelPrefillCheck.id = 'rs-sub-prefill';
-  submodelPrefillRow.htmlFor = 'rs-sub-prefill';
-  const submodelPrefillText = document.createElement('span');
-  submodelPrefillText.className = 'rs-checkbox-label';
-  submodelPrefillText.textContent = 'Prefill compatibility';
-  submodelPrefillText.title = 'Converts the assistant message prefill to a user message prepended with "Begin your response with: <prefill>" to be compatible with models that don\'t support it.';
-  submodelPrefillRow.appendChild(submodelPrefillCheck);
-  submodelPrefillRow.appendChild(submodelPrefillText);
-  submodelPrefillSection.appendChild(submodelPrefillRow);
-  subBody.appendChild(submodelPrefillSection);
+  const { body: auxBody, connSelect, modelInput, saveModelBtn, resetBtn, refreshBtn, samplersListEl, prefillCheck: auxPrefillCheck } = buildModelChannel('aux',
+    "Routes Lua's axLLMMain / axLLM calls through this connection. Useful for status-window updaters / classifiers separate from the main chat model.");
+  const { body: subBody, connSelect: submodelConnSelect, modelInput: submodelModelInput, saveModelBtn: submodelSaveModelBtn,
+    resetBtn: submodelResetBtn, samplersListEl: submodelSamplersListEl, prefillCheck: submodelPrefillCheck } = buildModelChannel('submodel',
+    "Routes V2-effect runLLM(model='submodel') calls through this connection. Cards use this for lightweight classifiers / status updaters separate from the main and aux models. Empty fields inherit from Aux.");
 
   // ---------- Debug subtab body --------------------------------------------
   const debugBody = document.createElement('section');
@@ -1604,7 +1478,7 @@ export function mountSettingsPanel(
     });
   });
 
-  refreshBtn.addEventListener('click', () => {
+  refreshBtn!.addEventListener('click', () => {
     log.info('settings-tab: refresh connections clicked');
     connections = null;
     renderConnectionSelect();
@@ -1797,7 +1671,6 @@ export function mountSettingsPanel(
         imageModelOverride: msg.settings.imageModelOverride,
         naiSettings: msg.settings.naiSettings,
       };
-      lastSavedTs = Date.now();
       render();
       return;
     }

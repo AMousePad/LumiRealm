@@ -2,13 +2,42 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const RISUAI_DIR = process.env['RISUAI_DIR'];
-if (!RISUAI_DIR || !fs.existsSync(RISUAI_DIR)) {
-  console.log("audit-handler-parity: set RISUAI_DIR to a RisuAI checkout to run this gate, skipping.");
-  process.exit(0);
+import { runPipeline } from "../src/interpreter/evaluator/pipeline.js";
+
+interface ParserCheck { passed: boolean; reason: string }
+
+// Risu cbs.ts callbacks for bkspc/erase mutate the parser buffer; declare uses matcherArg.var.
+const PARSER_CASES = [
+  { name: 'bkspc', reason: 'scanner output-buffer rewind', cases: [
+    ['hello world {{bkspc}} user', 'hello user'], ['single{{bkspc}}replacement', 'replacement'],
+  ] },
+  { name: 'erase', reason: 'scanner output-buffer rewind', cases: [
+    ["hello world. unfinished {{erase}} next", 'hello world. next'], ['unfinished{{erase}}replacement', 'replacement'],
+  ] },
+  { name: 'declare', reason: 'literal preservation without a caller variable map; supplied declaration maps are outside this check', cases: [
+    ['{{declare::x}}', '{{declare::x}}'], ['{{declare::{{upper::x}}}}', '{{declare::X}}'],
+    ['{{declare::x}}|{{tempvar::__declared_x__}}', '{{declare::x}}|'],
+    ['{{#if 0}}{{declare::x}}{{/if}}end', 'end'],
+  ] },
+] as const;
+
+export function checkParserMacros(evaluate: (template: string) => string = template => runPipeline({
+  template, phase: 'display', chatId: '', userName: 'User', charName: 'Character',
+  character: {}, chat: {}, variables: {}, reparseMacroResults: false,
+})): ReadonlyMap<string, ParserCheck> {
+  return new Map<string, ParserCheck>(PARSER_CASES.map(({ name, reason, cases }) => {
+    try {
+      for (const [template, expected] of cases) {
+        const actual = evaluate(template);
+        if (actual !== expected) return [name, { passed: false, reason: `${reason}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}` }];
+      }
+      return [name, { passed: true, reason }];
+    } catch (error) {
+      return [name, { passed: false, reason: `${reason}: ${String(error)}` }];
+    }
+  }));
 }
 
-const RISU_CBS = path.join(RISUAI_DIR, "src/ts/cbs.ts");
 const HANDLERS_DIR = "src/risu-compat/handlers";
 
 interface RisuMacro {
@@ -26,8 +55,8 @@ interface OurHandler {
   startLine: number;
 }
 
-function parseRisuMacros(): RisuMacro[] {
-  const src = fs.readFileSync(RISU_CBS, "utf-8");
+function parseRisuMacros(risuDir: string): RisuMacro[] {
+  const src = fs.readFileSync(path.join(risuDir, "src/ts/cbs.ts"), "utf-8");
   const lines = src.split("\n");
   const out: RisuMacro[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -107,10 +136,13 @@ function parseOurHandlers(): OurHandler[] {
   return out;
 }
 
-function classify(
+export function classify(
   handler: OurHandler,
   risu: RisuMacro | null,
+  parserChecks: ReadonlyMap<string, ParserCheck> = new Map(),
 ): { tier: string; reason: string } {
+  const parserCheck = parserChecks.get(handler.name.toLowerCase());
+  if (risu && parserCheck?.passed) return { tier: "OK", reason: parserCheck.reason };
   const body = handler.body;
   const codeOnly = body.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   const fnMatch = codeOnly.match(/=>\s*([\s\S]*?)(?:,\s*['"]|;|$)/);
@@ -152,7 +184,13 @@ function classify(
 }
 
 function main() {
-  const risu = parseRisuMacros();
+  const risuDir = process.env['RISUAI_DIR'];
+  if (!risuDir || !fs.existsSync(risuDir)) {
+    console.error("audit-handler-parity: set RISUAI_DIR to a RisuAI checkout to run this gate.");
+    process.exit(1);
+  }
+  const risu = parseRisuMacros(risuDir);
+  const parserChecks = checkParserMacros();
   const ours = parseOurHandlers();
 
   const risuByName = new Map<string, RisuMacro>();
@@ -172,7 +210,7 @@ function main() {
 
   for (const h of ours) {
     const r = risuByName.get(h.name.toLowerCase()) ?? null;
-    const c = classify(h, r);
+    const c = classify(h, r, parserChecks);
     if (c.tier === "STUB") stubs.push({ handler: h, risu: r, reason: c.reason });
     else if (c.tier === "SUSPECT") suspects.push({ handler: h, risu: r, reason: c.reason });
     else ok.push(1);
@@ -196,7 +234,7 @@ function main() {
 
   for (const m of risu) {
     const nameLc = m.name.toLowerCase();
-    if (lumiNatives.has(nameLc)) continue;
+    if (lumiNatives.has(nameLc) || parserChecks.get(nameLc)?.passed) continue;
     if (ourByName.has(nameLc)) continue;
     let aliasFound = false;
     for (const a of m.aliases) {
@@ -216,6 +254,12 @@ function main() {
   console.log(`SUSPECTS: ${suspects.length}`);
   console.log(`Missing from ours: ${missingFromOurs.length}`);
   console.log(`Extra in ours (not in Risu): ${extraInOurs.length}`);
+  console.log();
+
+  console.log('=== PARSER BEHAVIOR CHECKS (current caller scope) ===');
+  for (const [name, check] of parserChecks) {
+    console.log(`- ${name}: ${check.passed ? 'PASS' : 'FAIL'}: ${check.reason}`);
+  }
   console.log();
 
   if (stubs.length > 0) {
@@ -255,7 +299,7 @@ function main() {
     for (const n of extraInOurs) console.log(`- ${n}`);
   }
 
-  process.exit(stubs.length > 0 ? 1 : 0);
+  process.exit(stubs.length > 0 || missingFromOurs.length > 0 || [...parserChecks.values()].some(check => !check.passed) ? 1 : 0);
 }
 
-main();
+if (import.meta.main) main();

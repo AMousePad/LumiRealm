@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveAttachedHandlesByIdOrNamespace } from '../../src/state/modules-store.js';
+import { resolveAttachedHandlesByIdOrNamespace } from '../helpers/module-namespace-reference.js';
 
 // Direct port of Risu's `getModuleByIds` filter. Matches by EITHER
 // `module.id` OR `module.namespace` and dedup's by id, with direct id

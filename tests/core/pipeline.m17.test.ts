@@ -140,15 +140,16 @@ describe("M17 — mode flag", () => {
   test("mode=walking-skeleton emits only character + lorebook; no scripts, no regex", () => {
     const charx = makeCharx();
     const bundle = translateCharx(charx, { mode: "walking-skeleton" });
-    expect(bundle.scripts).toHaveLength(0);
+    expect(bundle.risuPayload).toBeNull();
     expect(bundle.regexScripts).toHaveLength(0);
   });
 
   test("mode=full emits all surfaces: regex + triggers + @@actions + bg-html", () => {
     const charx = makeCharx();
     const bundle = translateCharx(charx, { mode: "full" });
-    const triggers = bundle.scripts.filter(s => s.type === "trigger");
-    expect(triggers.length).toBeGreaterThanOrEqual(3);
+    expect(bundle.risuPayload!.triggers).toHaveLength(1);
+    expect(bundle.risuPayload!.at_actions).toHaveLength(1);
+    expect(bundle.risuPayload!.background_html).toBeTruthy();
     expect(bundle.regexScripts.length).toBe(1);
     expect(bundle.regexScripts[0]!.name).toBe("echo-regex");
   });
@@ -158,14 +159,13 @@ describe("M17 — mode flag", () => {
     const bundle = translateCharx(charx, { mode: "diagnostic" });
     // Raw CBS preserved (no rewrite) — original `{{user}}` survives.
     expect(bundle.character.description).toBe("{{user}} meets {{char}}");
-    // But scripts are still emitted.
-    expect(bundle.scripts.length).toBeGreaterThan(0);
+    expect(bundle.risuPayload!.triggers.length).toBeGreaterThan(0);
   });
 
   test("mode=full preserves raw CBS", () => {
     const charx = makeCharx();
     const bundle = translateCharx(charx, { mode: "full" });
-    expect(bundle.scripts.length).toBeGreaterThan(0);
+    expect(bundle.risuPayload!.triggers.length).toBeGreaterThan(0);
     expect(bundle.character.description).toBe("{{user}} meets {{char}}");
   });
 
@@ -177,22 +177,20 @@ describe("M17 — mode flag", () => {
     expect(bundle.regexScripts).toHaveLength(0);
   });
 
-  test("emitTriggers:false suppresses trigger + @@action scripts", () => {
+  test("emitTriggers:false reports triggers as untranslated", () => {
     const charx = makeCharx();
     const bundle = translateCharx(charx, {
       mode: "full", emitTriggers: false,
     });
-    const triggers = bundle.scripts.filter(s => s.type === "trigger");
-    // Only the BG-HTML trigger should remain.
-    expect(triggers.every(t => t.name === "risu-bg-html")).toBe(true);
+    expect(bundle.manifest.untranslated.character_level_triggers).toBe(1);
   });
 
-  test("emitBgHtml:false suppresses BG-HTML trigger", () => {
+  test("emitBgHtml:false reports background HTML as untranslated", () => {
     const charx = makeCharx();
     const bundle = translateCharx(charx, {
       mode: "full", emitBgHtml: false,
     });
-    expect(bundle.scripts.some(s => s.name === "risu-bg-html")).toBe(false);
+    expect(bundle.manifest.untranslated.background_html).toBe(true);
   });
 
   test("walking-skeleton mode omits risuPayload", () => {

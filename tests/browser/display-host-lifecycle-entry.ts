@@ -1,5 +1,5 @@
 import { setup } from '../../src/frontend';
-import { clearDisplaySnapshot, getDisplaySnapshot, setDisplayResolutionMode } from '../../src/display/snapshot';
+import { clearDisplaySnapshot, getDisplaySnapshot } from '../../src/display/snapshot';
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store';
 // @ts-expect-error The harness resolves React from the selected host checkout.
 import { createElement, useLayoutEffect } from 'react';
@@ -34,9 +34,11 @@ env.__runDisplayHost = async () => {
     if (String(input).startsWith('data:')) return nativeFetch(input, init);
     requests.push(String(input)); throw Error('Unexpected rendering network request');
   }) as typeof window.fetch;
-  setDisplayResolutionMode('on'); clearDisplaySnapshot(snap.chatId); resetDisplayRegexCachesForTests();
+  clearDisplaySnapshot(snap.chatId); resetDisplayRegexCachesForTests();
   const dispose = setup({
     frontendSessionId: '0123456789abcdef0123456789abcdef',
+    state: { get: () => null, subscribe: () => () => {} },
+    settings: { core: { isReady: () => true } },
     getActiveChat: () => ({ chatId: snap.chatId, characterId: snap.characterId }),
     deferReady() {}, ready() {}, dom: { addStyle: () => () => {} },
     events: { on(name: string, fn: any) {

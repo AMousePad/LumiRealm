@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import type { HostApi } from '../../../src/interpreter/host.js';
 import { makeRisuTriggerRuntime } from '../../../src/interpreter/runtime.js';
 import { makeDispatcherScriptNS } from '../../../src/interpreter/dispatcher.js';
-import { execute } from '../../../src/interpreter/lua-bridge.js';
+import { execute } from '../../helpers/lua-bridge.js';
 import { loadGlobalVars } from '../../../src/interpreter/runtime/chat-state.js';
 import { getRecentFlush, invalidateRecentFlush } from '../../../src/state/recent-flush-cache.js';
 

@@ -12,7 +12,6 @@ import {
 } from '../core/toggle-syntax.js';
 import { expectChatChange } from './own-chat-change.js';
 import { invalidateRecentFlush } from './recent-flush-cache.js';
-import { invalidateRenderMcpForChat } from './render-mcp-cache.js';
 import { invalidateMacroInterceptorForChat } from './macro-interceptor-cache.js';
 import type { VariableStateStore } from './variables-state.js';
 import type { ToggleStateStore } from './toggle-state.js';
@@ -309,7 +308,6 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
       return { ok: false, reason: `chats.update failed: ${errMsg(err)}` };
     }
 
-    invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     invalidateRecentFlush(chatId);
     await refreshBgHtml(active, chatId, userId);
@@ -459,7 +457,6 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
     }
 
     deps.invalidateUserToggleReaders?.(userId);
-    invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
     await refreshVariables(active, chatId, userId, { force: true });

@@ -61,7 +61,6 @@ describe('macro interceptor system context', () => {
         debug() {},
       },
       errMsg: (error: unknown) => String(error),
-      isFeDisplayAuthoritative: () => false,
       isPromptRegexAuthoritative: () => false,
       dispatchPromptRegex: async (_prebuilt: unknown, _scripts: unknown, messages: unknown) => ({
         ok: false,

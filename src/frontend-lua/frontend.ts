@@ -12,11 +12,11 @@ import { runtimeDisplaySnapshot } from './snapshot.js';
 import { runFrontendLuaOperation } from './executor.js';
 import { setDisplayLuaEnvironment } from '../display/lua-runner.js';
 import { FrontendLuaUnavailableError, type FrontendLuaCall, type FrontendLuaOperation } from './protocol.js';
-import type { RuntimeBootstrap, RuntimeSettings, RuntimeStateDto, RuntimeStatePatch } from './state-contract.js';
+import type { RuntimeBootstrap, RuntimeConfig, RuntimeSettings, RuntimeStateDto, RuntimeStatePatch } from './state-contract.js';
 import { sameStateValue, type StateRevision } from './ordered-state.js';
 
 type StateEvent = { event: string; payload: Record<string, unknown>; revision: StateRevision; mutationId?: string };
-interface Entry { config: DisplaySnapshot; settings: RuntimeSettings; state: FrontendRuntimeState; updates: Promise<void>; lifetime: AbortController }
+interface Entry { config: RuntimeConfig; settings: RuntimeSettings; state: FrontendRuntimeState; updates: Promise<void>; lifetime: AbortController }
 
 function displayConfiguration(snapshot: DisplaySnapshot) {
   const { configVersion: _version, vars: _vars, chat: _chat, messagesHost: _messages, ...configuration } = snapshot;
@@ -205,7 +205,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
       }
       return false;
     },
-    async snapshot(value: DisplaySnapshot): Promise<void> {
+    async snapshot(value: RuntimeConfig): Promise<void> {
       const entry = await ensure(value.chatId, value.characterId);
       if ((value.configVersion ?? 0) < (entry.config.configVersion ?? 0)) return;
       entry.config = value; publish(entry);

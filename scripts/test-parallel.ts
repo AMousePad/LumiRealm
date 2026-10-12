@@ -50,7 +50,7 @@ function findTestFiles(): string[] {
   for (const testsDir of roots) {
     try { statSync(testsDir); } catch { continue; }
     for (const f of walk(testsDir)) {
-      if (!f.endsWith(".test.ts")) continue;
+      if (!f.endsWith(".test.ts") || f.endsWith(".slow.test.ts")) continue;
       files.push({ path: f, size: statSync(f).size });
     }
   }

@@ -33,8 +33,6 @@ export interface LifecycleEventHandlerDeps {
   ) => Promise<ActiveCard | null>;
   readonly invalidateActiveForCharacter: (characterId: string, userId: string | undefined) => void;
   readonly onActiveChatEvicted?: (chatId: string) => void;
-  readonly invalidateRenderMcpForChat: (chatId: string) => void;
-  readonly invalidateRenderMcpForMessage: (chatId: string, messageId: string) => void;
   readonly invalidateMacroInterceptorForChat: (chatId: string) => void;
   readonly invalidateListenEditPreload: (chatId: string) => void;
   readonly refreshMessagesCache: (chatId: string, userId: string | undefined) => Promise<void>;
@@ -276,7 +274,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
     for (const [chatId, active] of [...deps.activeCardByChat]) {
       if (active.ownerUserId !== userId) continue;
       affected.add(active.card.character_id);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       deps.invalidateListenEditPreload(chatId);
     }
@@ -307,7 +304,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
     if (!active) return;
     // FE-owned display resolves {{user}}/{{persona}} from the snapshot identity,
     // so a persona change must invalidate + re-push or panels keep the old name.
-    deps.invalidateRenderMcpForChat(chatId);
     deps.invalidateMacroInterceptorForChat(chatId);
     await deps.refreshVariables(active, chatId, userId, { force: true });
     await deps.refreshBgHtml(active, chatId, userId);
@@ -392,7 +388,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       // content the frontend never mounted. Drop it and always re-push on the
       // way in.
       deps.lastSentBgHtmlByChat.delete(chatId);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       void deps.refreshMessagesCache(chatId, userId);
       // Push the display snapshot FIRST: the FE resolver needs it to render and
@@ -423,7 +418,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       const wasOwn = deps.consumeOwnChatChange(chatId);
       if (requiresRefresh) {
         deps.invalidateListenEditPreload(chatId);
-        deps.invalidateRenderMcpForChat(chatId);
         deps.invalidateMacroInterceptorForChat(chatId);
         // Own runtime.flush already updated this cache, only external writes need the drop.
         if (!wasOwn) invalidateRecentFlush(chatId);
@@ -466,7 +460,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       // not here: this event is not awaited and would race prompt assembly.
       // Risu runCurrentChatFunction at sendChat start (pre-prompt-assembly).
       if (userId !== undefined) await deps.runMessageVarPass(chatId, active.card.character_id, userId);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       await deps.refreshBgHtml(active, chatId, userId);
       await deps.refreshVariables(active, chatId, userId);
@@ -487,7 +480,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
           await deps.runBinding(active, chatId, binding, userId, payload.frontendSessionId);
         }
       }
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       void deps.refreshMessagesCache(chatId, userId);
       await deps.refreshBgHtml(active, chatId, userId);
@@ -501,7 +493,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       if (!chatId) return;
       const active = await deps.ensureActiveCardForChat(chatId, characterId, userId);
       if (!active) return;
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       await deps.refreshBgHtml(active, chatId, userId);
       await deps.refreshVariables(active, chatId, userId);
@@ -519,7 +510,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       deps.log.info(`event MESSAGE_SWIPED chatId=${chatId ?? '?'} msgId=${msgId ?? '?'} action=${p.action ?? '?'}`);
       if (!chatId || !msgId) return;
       deps.invalidateListenEditPreload(chatId);
-      deps.invalidateRenderMcpForMessage(chatId, msgId);
       void deps.refreshMessagesCache(chatId, userId);
       const active = await deps.ensureActiveCardForChat(chatId, null, userId);
       if (!active) return;
@@ -539,7 +529,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
         deps.log.warn(`event MESSAGE_EDITED: missing chatId/msgId payload=${JSON.stringify(raw).slice(0, 200)}`);
         return;
       }
-      deps.invalidateRenderMcpForMessage(chatId, msgId);
       void deps.refreshMessagesCache(chatId, userId);
       const newContent = String(p.message?.content ?? '');
       // Self-echo: own writes (Lua setChat, editOutput writeback) called
@@ -557,7 +546,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       deps.log.info(`event MESSAGE_DELETED chatId=${chatId ?? '?'} msgId=${msgId ?? '?'}`);
       if (!chatId) return;
       deps.invalidateListenEditPreload(chatId);
-      if (msgId) deps.invalidateRenderMcpForMessage(chatId, msgId);
       await deps.refreshMessagesCache(chatId, userId);
       const active = await deps.ensureActiveCardForChat(chatId, null, userId);
       if (!active) return;
@@ -574,7 +562,6 @@ export function createLifecycleEventHandlers(deps: LifecycleEventHandlerDeps): L
       deps.log.info(`event CHAT_DELETED chatId=${chatId ?? '?'}`);
       if (!chatId) return;
       deps.invalidateListenEditPreload(chatId);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
       deps.invalidateMessagesCache(chatId);
       invalidateRecentFlush(chatId);

@@ -4,7 +4,7 @@ import type {
   RealmFrontendToBackend,
   RealmBackendToFrontend,
 } from '../realm/messages.js';
-import type { DisplaySnapshot } from '../display/snapshot.js';
+import type { RuntimeConfig } from '../frontend-lua/state-contract.js';
 
 /** One-entry-per-imported-card summary. Backend composes from `StoredRisuCard`
  *  + `spindle.characters.get` name lookup. UI renders directly. */
@@ -146,7 +146,6 @@ export interface PendingRegexScriptMsg {
 export type FrontendToBackend =
   | { type: 'get_cards' }
   | { type: 'display_writeback'; chatId: string; vars: Record<string, string> }
-  | { type: 'display_authority'; chatId: string; authoritative: boolean }
   // Card bytes are streamed to the host tus endpoint (resumable, no WS frame
   // cap), then the worker reads them by id via spindle.uploads.
   | {
@@ -577,7 +576,7 @@ export type BackendToFrontend =
   // per-message template and dynamic chat_index/role.
   | {
       type: 'display_snapshot';
-      snapshot: DisplaySnapshot;
+      snapshot: RuntimeConfig;
       // 'gui-reload' = Risu ReloadGUIPointer analog: FE must invalidate ['*']
       // instead of var-diffing (explicit reloadDisplay or dirty trigger flush).
       reason?: 'gui-reload';
@@ -739,9 +738,6 @@ export type BackendToFrontend =
       /** `null` = global scope: install once for every character. */
       characterId: string | null;
       moduleId: string;
-      /** FE only creates a world_book when `lorebookEntries.length > 0`. */
-      worldBookName: string;
-      lorebookEntries: readonly ModuleLorebookEntry[];
       regexScripts: readonly PendingRegexScriptMsg[];
       /** Delete superseded module rows only after every replacement is owned. */
       cleanupStale: boolean;

@@ -2,7 +2,7 @@ import ts from 'typescript';
 import { LuaFactory } from 'wasmoon';
 import assert from 'node:assert/strict';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime';
-import { execute, clearLuaEngines } from '../../src/interpreter/lua-bridge';
+import { execute, clearLuaEngines } from '../helpers/lua-bridge.js';
 import { runListenEditChain } from '../../src/interpreter/listen-edit';
 import { makeLuaDivergenceHost } from '../helpers/lua-risu-divergence';
 import { basicTriggerContext } from '../helpers/trigger-runtime';
@@ -10,7 +10,7 @@ import { basicTriggerContext } from '../helpers/trigger-runtime';
 const risuDir = process.env.RISUAI_DIR;
 if (!risuDir) throw new Error('Set RISUAI_DIR to the Risu checkout.');
 const revision = Bun.spawnSync(['git', '-C', risuDir, 'rev-parse', 'HEAD']).stdout.toString().trim();
-if (revision !== '669b12ceabe1c5066d3dadbe0973f2188d10cc97') throw new Error('The Risu oracle revision changed; review its caller contracts first.');
+if (revision !== 'e565563a288ebe4c65b6099a1645ba477d1c84b4') throw new Error('The Risu oracle revision changed; review its caller contracts first.');
 const source = await Bun.file(risuDir + '/src/ts/process/scriptings.ts').text();
 const ast = ts.createSourceFile('scriptings.ts', source, ts.ScriptTarget.Latest, true);
 const stripped = ast.statements.filter(s => !ts.isImportDeclaration(s) && !(ts.isClassDeclaration(s) && s.name?.text === 'PyodideContext')).map(s => s.getFullText(ast)).join('\n').replace(/^export /gm, '');
@@ -19,7 +19,7 @@ const compiled = new Bun.Transpiler({ loader: 'ts' }).transformSync(mutex + '\n'
 const factory = new LuaFactory();
 await factory.mountFile('json.lua', await Bun.file(risuDir + '/public/lua/json.lua').text());
 const wrapperStart = source.indexOf('return `', source.indexOf('function luaCodeWrapper(code:string)')) + 8;
-assert.equal((await Bun.file('src/interpreter/lua-wrapper.lua').text()).replace(/\r\n/g, '\n'), source.slice(wrapperStart, source.indexOf('${code}', wrapperStart)).replace(/\r\n/g, '\n'));
+assert.equal((await Bun.file('src/interpreter/lua-wrapper.lua').text()).replace(/\r\n/g, '\n').trimEnd(), source.slice(wrapperStart, source.indexOf('${code}', wrapperStart)).replace(/\r\n/g, '\n').trimEnd());
 
 export function oracle(parse?: (text: string, options: unknown) => string) {
   const chat: any = { message: [{ role: 'user', data: 'Hello', time: 1700000000000 }, { role: 'char', data: 'Welcome', time: 1700000005000 }], scriptstate: { $x: '2' } };

@@ -39,7 +39,12 @@ export type RuntimeStateCommand =
 export type RuntimeSettings = Pick<RisuCompatSettings, 'auxConnectionId' | 'auxModelOverride' | 'auxSamplers' | 'auxPrefillCompat'
   | 'submodelConnectionId' | 'submodelModelOverride' | 'submodelSamplers' | 'submodelPrefillCompat' | 'auxDebugCaptureRequest' | 'auxDebugCaptureResponse'
   | 'imageConnectionId' | 'imageModelOverride' | 'naiSettings'>;
-export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: DisplaySnapshot; settings: RuntimeSettings }
+export type RuntimeConfig = Pick<DisplaySnapshot, 'configVersion' | 'chatId' | 'characterId' | 'scriptstateDefaults'
+  | 'screenWidth' | 'screenHeight' | 'legacyMediaFindings' | 'modulesByNamespace' | 'compiledLibraries'
+  | 'hasEditDisplayLua' | 'hasEditAtActions' | 'luaTriggers' | 'atActions'> & {
+    readonly character: Pick<DisplaySnapshot['character'], 'jailbreakPrompt' | 'globalNote' | 'authorsNote' | 'additionalAssets' | 'emotionImages'>;
+  };
+export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: RuntimeConfig; settings: RuntimeSettings }
 export type RuntimeService =
   | { kind: 'bootstrap' }
   | { kind: 'state.read' }

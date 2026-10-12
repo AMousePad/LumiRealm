@@ -1,7 +1,7 @@
 import { snapshot } from '../helpers/display-lua-fixture.js';
 import { buildPreloaded } from '../../src/display/host-shim.js';
 import { setDisplaySnapshot, getDisplaySnapshot, applyVarDelta } from '../../src/display/snapshot.js';
-import { runEditDisplayChain } from '../../src/display/lua-runner.js';
+import { runEditDisplayChain } from '../helpers/snapshot-display.js';
 import { runFrontendLuaOperation, type FrontendLuaEnvironment } from '../../src/frontend-lua/executor.js';
 import type { HostApi, HostMessage } from '../../src/interpreter/host.js';
 import { LuaFactory } from 'wasmoon';

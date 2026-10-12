@@ -5,7 +5,7 @@ import {
   isLumirealmSidecar,
   type LumirealmArchiveSidecar,
 } from "../export/archive-types.js";
-import { stripPolyglot, isZipArchive, findJpegZipBoundary } from "./polyglot.js";
+import { isZipArchive, findJpegZipBoundary } from "./polyglot.js";
 import { readZip } from "./zip.js";
 
 export interface CharxBundle {
@@ -259,4 +259,4 @@ export function readCharxEntries(
   };
 }
 
-export { stripPolyglot, isZipArchive, findJpegZipBoundary } from "./polyglot.js";
+export { isZipArchive, findJpegZipBoundary } from "./polyglot.js";

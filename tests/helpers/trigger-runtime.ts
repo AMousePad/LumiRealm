@@ -2,9 +2,9 @@ import type { HostApi, TriggerRuntimeOpts } from '../../src/interpreter/host.js'
 import type { TriggerEffect, TriggerScript } from '../../src/core/schemas/triggerscript.js';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
 import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { execute } from './lua-bridge.js';
 import { interpretTrigger } from '../../src/interpreter/trigger-interpreter.js';
-import { compileTrigger } from '../../src/core/triggers/compile.js';
+import { compileTrigger } from './trigger-compiler/compile.js';
 
 export async function runLuaCallback(runtime: Awaited<ReturnType<typeof makeRisuTriggerRuntime>>, body: string) {
   return runtime.runLua(`onRun = async(function(id)\n${body}\nend)`, { entry: 'onRun' });

@@ -12,6 +12,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { zipSync, strToU8 } from 'fflate';
 import { translateCharx } from '../../src/core/pipeline/translate.js';
 import { listLibraryCards } from '../helpers/local-library.js';
 import { importCard, type SpindleImportApi } from '../../src/payload/import.js';
@@ -135,7 +136,7 @@ describe('import_card — full pipeline (lumirealm storage)', () => {
   test('translates, creates character, writes extensions[lumirealm], reports pending assets', async () => {
     const charxBytes = readFileSync(sampleCharxPath);
     const storage = makeMockStorage();
-    const spindle = makeMockSpindle();
+    const spindle = { ...makeMockSpindle(), requestConsent: async () => ({ confirmed: true }) };
     const progress: string[] = [];
 
     const result = await importCard({
@@ -167,7 +168,7 @@ describe('import_card — full pipeline (lumirealm storage)', () => {
     expect(Array.isArray(data.payload.lua_scripts)).toBe(true);
 
     expect(result.lumirealm.schema_version).toBe(1);
-    expect(result.lumirealm).toEqual(data);
+    expect(data).toEqual({ ...result.lumirealm, display_owner: true });
 
     expect(Array.isArray(result.imageIds)).toBe(true);
     expect(result.imageIds.length).toBe(spindle._imageUploads.length);
@@ -180,10 +181,9 @@ describe('import_card — full pipeline (lumirealm storage)', () => {
   });
 
   test('does NOT prompt for consent when card declares no lowLevelAccess', async () => {
-    // The fixture corpus card we picked is a low-level-access-free card
-    // (most of the corpus is). Mock modal records calls so we can assert
-    // the prompt never fires.
-    const charxBytes = readFileSync(sampleCharxPath);
+    const charxBytes = zipSync({ 'card.json': strToU8(JSON.stringify({
+      spec: 'chara_card_v3', spec_version: '3.0', data: { name: 'No consent', extensions: { risuai: { triggerscript: [] } } },
+    })) });
     const storage = makeMockStorage();
     const spindle = makeMockSpindle();
     let modalCalls = 0;
@@ -211,6 +211,7 @@ describe('import_card — full pipeline (lumirealm storage)', () => {
     const charxBytes = readFileSync(sampleCharxPath);
     const storage = makeMockStorage();
     const spindle: SpindleImportApi = {
+      requestConsent: async () => ({ confirmed: true }),
       characters: {
         async create() {
           throw new Error('simulated downstream failure');

@@ -1,13 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { createDisplayResolver } from '../../src/display/resolver.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
 import {
   clearDisplaySnapshot,
-  getDisplayResolutionMode,
-  setDisplayResolutionMode,
   setDisplaySnapshot,
   type DisplaySnapshot,
 } from '../../src/display/snapshot.js';
-import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
+import { setWasmoonEnabled } from '../helpers/wasmoon-mode.js';
 import type { FeRegexScript } from '../../src/display/regex-apply.js';
 import { createActivationPatternCache } from '../../src/display/activation-patterns.js';
 
@@ -120,10 +118,7 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
-  test('rejects retired comparison mode and keeps frontend results authoritative', async () => {
-    setDisplayResolutionMode('on');
-    expect(() => setDisplayResolutionMode('shadow' as 'on')).toThrow(TypeError);
-    expect(getDisplayResolutionMode()).toBe('on');
+  test('keeps frontend results authoritative', async () => {
     setDisplaySnapshot(snapshot());
     const fetch = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected backend comparison'));
     try {

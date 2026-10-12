@@ -601,7 +601,6 @@ describe("migrateCharacterIfNeeded — v6 _risu_array_index backfill", () => {
       {
         sourceId: "test-bundle",
         mode: "full",
-        emitPackScripts: false,
       },
     );
 
@@ -677,7 +676,6 @@ describe("migrateCharacterIfNeeded — v6 _risu_array_index backfill", () => {
       {
         sourceId: "test",
         mode: "full",
-        emitPackScripts: false,
       },
     );
     const expectedIdx = (newBundle.worldBookEntries[0]!.extensions as Record<string, unknown>)['_risu_array_index'];

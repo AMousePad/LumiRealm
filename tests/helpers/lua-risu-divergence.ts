@@ -1,6 +1,6 @@
 import type { HostApi, HostMessage, HostWorldInfoEntry, ScriptNS, TriggerRuntimeOpts } from '../../src/interpreter/host.js';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { execute } from './lua-bridge.js';
 
 export function makeLuaDivergenceHost() {
   const messages: HostMessage[] = [

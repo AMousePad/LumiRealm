@@ -41,15 +41,8 @@ function verify(module: unknown | null, expected: string[]) {
   expect(input).toEqual(before);
   expect(bundle.risuPayload?.triggers).toMatchObject(expected.map((comment) => ({ comment })));
   expect(bundle.risuPayload?.lua_scripts).toEqual(expected.map((label) => `print("${label}")`));
-  expect(bundle.scripts.map((entry) => entry.name)).toEqual(
-    expected.map((label) => `risu-trigger-input-${label}`),
-  );
   expect(bundle.regexScripts.map((entry) => entry.replace_string)).toEqual(expected);
   expect(bundle.risuPayload?.requires.lua).toBe(expected.length > 0);
-  for (const [index, entry] of bundle.scripts.entries()) {
-    expect(entry.code).toContain(expected[index]!);
-    expect(entry.triggers).toEqual(["MESSAGE_SENT"]);
-  }
 }
 
 describe("embedded character source authority", () => {

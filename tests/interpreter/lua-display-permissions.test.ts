@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { execute } from '../helpers/lua-bridge.js';
 import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
 import type { HostApi, HostMessage, TriggerRuntimePreloaded } from '../../src/interpreter/host.js';
 import { runListenEditChain, type ListenEditMode } from '../../src/interpreter/listen-edit.js';

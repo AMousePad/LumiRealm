@@ -17,7 +17,6 @@ export interface MessageVarPassDeps {
     readonly varWrites: ReadonlyArray<readonly [string, string | null]>;
   }>;
   readonly refreshMessagesCache: (chatId: string, userId: string | undefined) => Promise<void>;
-  readonly invalidateRenderMcpForChat: (chatId: string) => void;
   readonly invalidateMacroInterceptorForChat: (chatId: string) => void;
   readonly log: { readonly info: (m: string) => void; readonly warn: (m: string) => void };
   readonly errMsg: (e: unknown) => string;
@@ -82,7 +81,6 @@ export function createMessageVarPass(deps: MessageVarPassDeps): MessageVarPass {
 
     if (wrote > 0) {
       await deps.refreshMessagesCache(chatId, userId);
-      deps.invalidateRenderMcpForChat(chatId);
       deps.invalidateMacroInterceptorForChat(chatId);
     }
     deps.log.info(`runVarStrip: chat=${chatId} strippedMsgs=${wrote} varWrites=${varWrites.length}`);

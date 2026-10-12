@@ -23,7 +23,6 @@ export interface ApplySvgRasterIndexDeps {
     characterId: string | null,
     userId: string | undefined,
   ) => Promise<ActiveCard | null>;
-  readonly invalidateRenderMcpForChat: (chatId: string) => void;
   readonly invalidateMacroInterceptorForChat: (chatId: string) => void;
   readonly onActiveChatEvicted?: (chatId: string) => void;
   readonly refreshBgHtml: (active: ActiveCard, chatId: string, userId: string | undefined) => Promise<void>;
@@ -47,7 +46,6 @@ export function createApplySvgRasterIndex(
     appendImageIdsToJournal,
     activeCardByChat,
     ensureActiveCardForChat,
-    invalidateRenderMcpForChat,
     invalidateMacroInterceptorForChat,
     onActiveChatEvicted,
     refreshBgHtml,
@@ -168,7 +166,6 @@ export function createApplySvgRasterIndex(
         try {
           const reloaded = await ensureActiveCardForChat(chatId, null, userId);
           if (reloaded) {
-            invalidateRenderMcpForChat(chatId);
             invalidateMacroInterceptorForChat(chatId);
             await refreshBgHtml(reloaded, chatId, userId);
           }

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import { makeRisuTriggerRuntime, makeRisuRegexRuntime } from '../../src/interpreter/runtime.js';
-import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
+import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
+import { execute as luaExecute } from '../helpers/lua-bridge.js';
 import type { HostApi, ScriptNS, DispatchData } from '../../src/interpreter/host.js';
 
 // Risu's `setAuthorNote(value)` / `getAuthorNote()` Lua API maps to Lumi's
@@ -52,7 +52,7 @@ function makeMockHostApi(state: MockState): HostApi {
 function makeMockScriptNS(): ScriptNS {
   return {
     require: async (name: string) => {
-      if (name === 'risu-compat') return { makeRisuTriggerRuntime, makeRisuRegexRuntime };
+      if (name === 'risu-compat') return { makeRisuTriggerRuntime };
       if (name === 'risu-compat-lua') return { execute: luaExecute };
       throw new Error('mock require: unknown ' + name);
     },

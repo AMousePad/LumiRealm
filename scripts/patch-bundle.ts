@@ -51,10 +51,6 @@ function processBundle(label: string, path: string): void {
       const idx = patched.indexOf(m[0]);
       const ctx = patched.substring(Math.max(0, idx - 60), Math.min(patched.length, idx + m[0].length + 60))
         .replace(/\r?\n/g, ' ');
-      if (process.env.LUMIREALM_SKIP_SAFETY_CHECK === '1') {
-        console.warn(`[${label}] static safety check SKIPPED (LUMIREALM_SKIP_SAFETY_CHECK=1): ${c.label}`);
-        continue;
-      }
       console.error(`[${label}] STATIC SAFETY CHECK FAIL: ${c.label}\n  context: ...${ctx}...`);
       failed = true;
     }

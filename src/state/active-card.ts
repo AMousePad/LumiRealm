@@ -39,7 +39,6 @@ export interface ActiveCardLoaderDeps {
     risuai: Readonly<Record<string, unknown>>,
     attached: readonly AttachedModuleForRuntime[],
   ) => StoredRisuCard;
-  readonly modulesByNamespaceFromCard: (card: StoredRisuCard) => Readonly<Record<string, readonly string[]>> | null;
   readonly setActiveAssetIndexes: (
     chatId: string,
     indexes: { assets: Readonly<Record<string, AssetIndexEntry>>; emotions: Readonly<Record<string, AssetIndexEntry>> },
@@ -49,12 +48,6 @@ export interface ActiveCardLoaderDeps {
     characterId: string,
     defaults: Readonly<Record<string, string>>,
   ) => void;
-  readonly setActiveModulesByNamespace: (
-    chatId: string,
-    characterId: string,
-    map: Readonly<Record<string, readonly string[]>>,
-  ) => void;
-  readonly clearActiveModulesByNamespace: (chatId: string) => void;
   readonly setActiveLorebook: (
     chatId: string,
     characterId: string,
@@ -131,11 +124,8 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
     buildVersionError,
     loadAttachedModulesForRuntime,
     buildSyntheticStoredCard,
-    modulesByNamespaceFromCard,
     setActiveAssetIndexes,
     setActiveScriptstateDefaults,
-    setActiveModulesByNamespace,
-    clearActiveModulesByNamespace,
     setActiveLorebook,
     fetchLorebookForCharacter,
     hasActiveLorebookForCharacter,
@@ -352,9 +342,6 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
       card.character_id,
       card.risuPayload.scriptstate_defaults ?? {},
     );
-    const mbnForActive = modulesByNamespaceFromCard(card);
-    if (mbnForActive) setActiveModulesByNamespace(chatId, card.character_id, mbnForActive);
-    else clearActiveModulesByNamespace(chatId);
     setActiveCharacterImage(
       chatId,
       imageUrlFromId(fetched.character.image_id ?? null),

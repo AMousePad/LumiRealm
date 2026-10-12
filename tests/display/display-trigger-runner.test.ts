@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { runDisplayTriggerChain } from '../../src/display/trigger-runner.js';
+import { runDisplayTriggerChain } from '../helpers/snapshot-display.js';
 import type { DisplaySnapshot } from '../../src/display/snapshot.js';
 import type { TriggerScript } from '../../src/core/schemas/triggerscript.js';
 

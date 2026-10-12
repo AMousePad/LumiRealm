@@ -528,4 +528,6 @@ export async function interpretTrigger(
   }
 }
 
-export const __test = { LEAVES };
+export function isImplementedTriggerEffect(type: string): boolean {
+  return Object.hasOwn(LEAVES, type);
+}

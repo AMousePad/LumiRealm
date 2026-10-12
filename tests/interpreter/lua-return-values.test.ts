@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { execute } from '../helpers/lua-bridge.js';
 import { runTriggerEffects } from '../helpers/trigger-runtime.js';
 
 describe('Risu Lua callback returns', () => {

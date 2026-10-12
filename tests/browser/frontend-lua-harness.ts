@@ -7,7 +7,7 @@ let oracleSource: string | undefined;
 if (process.env.RISUAI_DIR) {
   const root = process.env.RISUAI_DIR;
   const revision = Bun.spawnSync(['git', '-C', root, 'rev-parse', 'HEAD']).stdout.toString().trim();
-  assert.equal(revision, '669b12ceabe1c5066d3dadbe0973f2188d10cc97', 'Review the Risu oracle before changing its revision');
+  assert.equal(revision, 'e565563a288ebe4c65b6099a1645ba477d1c84b4', 'Review the Risu oracle before changing its revision');
   const source = await Bun.file(root + '/src/ts/process/scriptings.ts').text();
   const ast = ts.createSourceFile('scriptings.ts', source, ts.ScriptTarget.Latest, true);
   const stripped = ast.statements.filter(statement => !ts.isImportDeclaration(statement) && !(ts.isClassDeclaration(statement) && statement.name?.text === 'PyodideContext')).map(statement => statement.getFullText(ast)).join('\n').replace(/^export /gm, '');

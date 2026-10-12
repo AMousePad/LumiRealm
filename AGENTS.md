@@ -61,4 +61,4 @@ Sources:
 ## Layout
 
 - `src/core/` translator (charx reader, mappers, triggers compiler) · `src/interpreter/` CBS evaluator + Lua runtime + dispatch · `src/risu-compat/` CBS macro handlers · `src/display/` frontend display resolver · `src/state/` stores and caches · `src/bghtml/` background-HTML pipeline · `src/ui/` drawer panels · `src/payload/` import pipeline.
-- Discipline gates: `bun test tests/risu-compat/registry.test.ts` (handler/catalog alignment), `RISUAI_DIR=<risu checkout> bun tools/audit-handler-parity.ts` (stub detection; skips without the env var).
+- Discipline gates: `bun test tests/risu-compat/registry.test.ts` (handler/catalog alignment), `RISUAI_DIR=<risu checkout> bun tools/audit-handler-parity.ts` (stub detection; requires the RisuAI checkout path).

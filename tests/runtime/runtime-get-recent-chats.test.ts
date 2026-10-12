@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import { makeRisuTriggerRuntime, makeRisuRegexRuntime } from '../../src/interpreter/runtime.js';
-import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
+import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
+import { execute as luaExecute } from '../helpers/lua-bridge.js';
 import type { HostApi, ScriptNS, DispatchData, HostMessage } from '../../src/interpreter/host.js';
 
 // Risu scriptings.ts declareAPI('getRecentChatsMain') returns the last `count`
@@ -11,7 +11,7 @@ import type { HostApi, ScriptNS, DispatchData, HostMessage } from '../../src/int
 function makeMockScriptNS(): ScriptNS {
   return {
     require: async (name: string) => {
-      if (name === 'risu-compat') return { makeRisuTriggerRuntime, makeRisuRegexRuntime };
+      if (name === 'risu-compat') return { makeRisuTriggerRuntime };
       if (name === 'risu-compat-lua') return { execute: luaExecute };
       throw new Error('mock require: unknown ' + name);
     },

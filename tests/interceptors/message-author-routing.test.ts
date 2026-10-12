@@ -67,7 +67,6 @@ describe('write-time message author routing', () => {
       createReadonlyManySession: () => ({ resolve: async (texts: readonly string[]) => [...texts] }),
       runMessageVarPass: async () => {},
       runBinding: async () => ({ stopSending: false }),
-      isFeDisplayAuthoritative: () => false,
       isPromptRegexAuthoritative: () => false,
       dispatchPromptRegex: async (_input: unknown, _scripts: unknown, messages: unknown[]) => ({
         ok: true,

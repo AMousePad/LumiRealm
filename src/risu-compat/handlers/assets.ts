@@ -201,19 +201,19 @@ register("bgm", (ctx, args) => {
 
 // parser.svelte.ts. `<id>` is a Lumi image UUID; `/api/v1/images/<id>` serves the bytes.
 // All three handlers assume image; audio/video inlays are a known gap.
-register("inlay", (ctx, args) => {
+register("inlay", (_ctx, args) => {
   const id = String(args[0] ?? "");
   if (!id) return "";
   return `<img src="/api/v1/images/${id}"/>`;
 }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
 
-register("inlayed", (ctx, args) => {
+register("inlayed", (_ctx, args) => {
   const id = String(args[0] ?? "");
   if (!id) return "";
   return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>\n\n`;
 }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
 
-register("inlayeddata", (ctx, args) => {
+register("inlayeddata", (_ctx, args) => {
   const id = String(args[0] ?? "");
   if (!id) return "";
   return `<div class="risu-inlay-image x-risu-risu-inlay-image"><img src="/api/v1/images/${id}"/></div>\n\n`;

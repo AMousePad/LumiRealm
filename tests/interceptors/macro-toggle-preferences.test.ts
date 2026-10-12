@@ -38,7 +38,6 @@ function install(userId = 'user'): void {
     getCachedSettingsSync: () => ({ legacyMediaFindings: false }),
     modulesByNamespaceFromCard: () => null,
     resolveReadonly: async (t: string) => t,
-    isFeDisplayAuthoritative: () => false,
     log: { info() {}, warn() {}, error() {}, trace() {}, debug() {} },
     errMsg: String,
   } as unknown as CreateLumiInterceptorsDeps).registerAll();

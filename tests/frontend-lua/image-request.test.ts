@@ -4,7 +4,7 @@ import { FrontendRuntimeState } from '../../src/frontend-lua/state';
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store';
 import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime';
-import { execute, clearLuaEngines } from '../../src/interpreter/lua-bridge';
+import { execute, clearLuaEngines } from '../helpers/lua-bridge.js';
 import type { DisplaySnapshot } from '../../src/display/snapshot';
 
 test('browser Lua forwards image settings and awaits the request service', async () => {

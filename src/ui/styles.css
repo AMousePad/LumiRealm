@@ -927,13 +927,8 @@
   min-width: 0;
 }
 
-.risu-settings-drawer > .rs-section + .rs-section {
-  margin-top: 12px;
-}
 
-/* Settings subtab body — no outer chrome, just stacked rows + samplers.
-   The legacy `.rs-section` outer-box style still exists in case anything
-   else references it, but the live settings panel uses these instead. */
+/* Settings subtab body. */
 .lr-settings-tab-body {
   display: flex;
   flex-direction: column;
@@ -1010,35 +1005,6 @@
 .risu-settings-drawer .rs-intro {
   margin: 0;
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));
-}
-.risu-settings-drawer .rs-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.025));
-  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.07));
-  border-radius: 6px;
-  min-width: 0;
-}
-.risu-settings-drawer .rs-section-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 4px;
-}
-.risu-settings-drawer .rs-section-title {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--lumiverse-text, inherit);
-}
-.risu-settings-drawer .rs-section-desc {
-  font-size: 11.5px;
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.5));
-  line-height: 1.4;
 }
 
 .risu-settings-drawer .rs-row {
@@ -2665,50 +2631,6 @@
   margin: 4px 10px 8px;
   line-height: 1.45;
 }
-.lr-viewer-drawer .lrv-defvar-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px 10px 8px;
-}
-.lr-viewer-drawer .lrv-defvar-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-.lr-viewer-drawer .lrv-defvar-row-overridden .lrv-defvar-input {
-  border-color: var(--lumiverse-primary, rgba(120, 160, 255, 0.5));
-}
-.lr-viewer-drawer .lrv-defvar-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  color: var(--lumiverse-text, inherit);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lr-viewer-drawer .lrv-defvar-input,
-.lr-viewer-drawer .lrv-defvar-name-input {
-  background: var(--lumiverse-bg-elevated, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.1));
-  color: var(--lumiverse-text, inherit);
-  padding: 4px 6px;
-  border-radius: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  min-width: 0;
-}
-.lr-viewer-drawer .lrv-defvar-spacer {
-  display: inline-block;
-  min-width: 56px;
-}
-.lr-viewer-drawer .lrv-defvar-row-new {
-  border: 1px dashed var(--lumiverse-border, rgba(255, 255, 255, 0.15));
-  border-radius: 4px;
-  padding: 4px;
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) auto auto;
-}
 
 /* Asset toolbar (Add asset button + upload status) */
 .lr-viewer-drawer .lrv-asset-toolbar {
@@ -3122,40 +3044,6 @@
 }
 
 /* Lorebook */
-.lr-viewer-drawer .lrv-lorebook-group {
-  border-top: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.05));
-}
-.lr-viewer-drawer .lrv-lorebook-group > summary {
-  cursor: pointer;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 500;
-}
-.lr-viewer-drawer .lrv-lorebook-row {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 6px 16px;
-  border-top: 1px dashed var(--lumiverse-border, rgba(255, 255, 255, 0.04));
-}
-.lr-viewer-drawer .lrv-lorebook-row-disabled { opacity: 0.5; }
-.lr-viewer-drawer .lrv-lorebook-keys {
-  font-size: 11px;
-  color: var(--lumiverse-primary, #8fb6ff);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.lr-viewer-drawer .lrv-lorebook-comment {
-  font-size: 11px;
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.6));
-  font-style: italic;
-}
-.lr-viewer-drawer .lrv-lorebook-content {
-  font-size: 11.5px;
-  color: var(--lumiverse-text, inherit);
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.45;
-}
 
 /* Risu-faithful lorebook viewer: one line per entry, expand for read-only detail. */
 .lr-viewer-drawer .lrv-lb-section {

@@ -1,8 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { makeMockContext } from "../../src/core/cbs/index.js";
+import { makeMockContext } from "../helpers/cbs/index.js";
 import { registry } from "../../src/risu-compat/index.js";
 import "../../src/risu-compat/handlers/index.js";
-import type { CharacterAsset } from "../../src/core/cbs/index.js";
+import type { CharacterAsset } from "../helpers/cbs/index.js";
 
 // Asset-macro handler diff tests. Every case cites
 // parser.svelte.ts:495-582 (Risu imageCBS dispatch) for the expected

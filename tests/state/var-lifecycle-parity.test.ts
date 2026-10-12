@@ -70,7 +70,6 @@ function makeHarness(db: MockDb) {
   const pass = createMessageVarPass({
     stripMessageSetvars: resolver.stripMessageSetvars,
     refreshMessagesCache: async () => {},
-    invalidateRenderMcpForChat: () => {},
     invalidateMacroInterceptorForChat: () => {},
     log: noopLog,
     errMsg: (e) => String(e),

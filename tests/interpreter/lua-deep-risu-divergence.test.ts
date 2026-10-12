@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { LuaFactory } from 'wasmoon';
 import { createLuaExecutor } from '../../src/interpreter/lua-engine.js';
-import { clearLuaEngines, execute } from '../../src/interpreter/lua-bridge.js';
+import { clearLuaEngines, execute } from '../helpers/lua-bridge.js';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
 import { hostCharacterState } from '../../src/interpreter/runtime/lua-state.js';
 import { makeSpindleHost } from '../../src/interpreter/spindle-host.js';

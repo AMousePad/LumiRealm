@@ -4,8 +4,8 @@ import {
   type ListenEditTrigger,
 } from '../../src/interpreter/listen-edit.js';
 import type { HostApi, ScriptNS, DispatchData, HostMessage } from '../../src/interpreter/host.js';
-import { makeRisuRegexRuntime, makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
-import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
+import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
+import { execute as luaExecute } from '../helpers/lua-bridge.js';
 
 // listenEdit chains run against the preloaded snapshot, which only carries the
 // character's own world books. Module lorebooks (a module's own lore rows, such
@@ -34,7 +34,7 @@ function makeMockHostApi(messages: HostMessage[] = []): HostApi {
 function makeMockScriptNS(): ScriptNS {
   return {
     require: async (name: string) => {
-      if (name === 'risu-compat') return { makeRisuTriggerRuntime, makeRisuRegexRuntime };
+      if (name === 'risu-compat') return { makeRisuTriggerRuntime };
       if (name === 'risu-compat-lua') return { execute: luaExecute };
       throw new Error('mock require: unknown ' + name);
     },

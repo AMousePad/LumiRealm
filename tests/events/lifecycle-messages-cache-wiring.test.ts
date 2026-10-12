@@ -29,8 +29,6 @@ function makeDeps(log: CallLog): LifecycleEventHandlerDeps {
     toggleState: { clearChat: () => {} },
     ensureActiveCardForChat: async () => null,
     invalidateActiveForCharacter: () => {},
-    invalidateRenderMcpForChat: () => {},
-    invalidateRenderMcpForMessage: () => {},
     invalidateMacroInterceptorForChat: () => {},
     invalidateListenEditPreload: () => {},
     refreshMessagesCache: async (chatId) => { log.refresh.push(chatId); },
@@ -191,7 +189,6 @@ describe("lifecycle — persona change refresh", () => {
     imageRefreshes: string[];
     varRefreshes: { chatId: string; force: boolean }[];
     bgRefreshes: string[];
-    mcpInvalidates: string[];
   }
 
   function makePersonaDeps(plog: PersonaLog, opts: { risuActive: boolean }): LifecycleEventHandlerDeps {
@@ -203,7 +200,6 @@ describe("lifecycle — persona change refresh", () => {
       ensureActiveCardForChat: LifecycleEventHandlerDeps["ensureActiveCardForChat"];
       refreshVariables: LifecycleEventHandlerDeps["refreshVariables"];
       refreshBgHtml: LifecycleEventHandlerDeps["refreshBgHtml"];
-      invalidateRenderMcpForChat: LifecycleEventHandlerDeps["invalidateRenderMcpForChat"];
     };
     mutable.refreshPersonaImage = async (userId) => { plog.imageRefreshes.push(userId); };
     mutable.ensureActiveCardForChat = async () =>
@@ -212,26 +208,24 @@ describe("lifecycle — persona change refresh", () => {
       plog.varRefreshes.push({ chatId, force: !!o?.force });
     };
     mutable.refreshBgHtml = async (_a, chatId) => { plog.bgRefreshes.push(chatId); };
-    mutable.invalidateRenderMcpForChat = (chatId) => { plog.mcpInvalidates.push(chatId); };
     return deps;
   }
 
   const DEBOUNCE_SETTLE_MS = 400;
 
   test("SETTINGS_UPDATED activePersonaId force-refreshes the active Risu chat", async () => {
-    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [], mcpInvalidates: [] };
+    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [] };
     const h = createLifecycleEventHandlers(makePersonaDeps(plog, { risuActive: true }));
     await h.SETTINGS_UPDATED({ key: "activePersonaId", value: "p2" }, "u1");
     expect(plog.varRefreshes).toEqual([]);
     await new Promise((r) => setTimeout(r, DEBOUNCE_SETTLE_MS));
     expect(plog.imageRefreshes).toEqual(["u1"]);
-    expect(plog.mcpInvalidates).toEqual(["c1"]);
     expect(plog.varRefreshes).toEqual([{ chatId: "c1", force: true }]);
     expect(plog.bgRefreshes).toEqual(["c1"]);
   });
 
   test("batch settings put (keys[]) also triggers the refresh", async () => {
-    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [], mcpInvalidates: [] };
+    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [] };
     const h = createLifecycleEventHandlers(makePersonaDeps(plog, { risuActive: true }));
     await h.SETTINGS_UPDATED({ keys: ["theme", "activePersonaId"] }, "u1");
     await new Promise((r) => setTimeout(r, DEBOUNCE_SETTLE_MS));
@@ -239,7 +233,7 @@ describe("lifecycle — persona change refresh", () => {
   });
 
   test("PERSONA_CHANGED bursts coalesce to one refresh", async () => {
-    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [], mcpInvalidates: [] };
+    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [] };
     const h = createLifecycleEventHandlers(makePersonaDeps(plog, { risuActive: true }));
     for (let i = 0; i < 10; i++) await h.PERSONA_CHANGED({ id: `p${i}` }, "u1");
     await new Promise((r) => setTimeout(r, DEBOUNCE_SETTLE_MS));
@@ -247,18 +241,17 @@ describe("lifecycle — persona change refresh", () => {
   });
 
   test("vanilla active chat: persona image cache refreshes, chat is untouched", async () => {
-    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [], mcpInvalidates: [] };
+    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [] };
     const h = createLifecycleEventHandlers(makePersonaDeps(plog, { risuActive: false }));
     await h.PERSONA_CHANGED({ id: "p1" }, "u1");
     await new Promise((r) => setTimeout(r, DEBOUNCE_SETTLE_MS));
     expect(plog.imageRefreshes).toEqual(["u1"]);
     expect(plog.varRefreshes).toEqual([]);
     expect(plog.bgRefreshes).toEqual([]);
-    expect(plog.mcpInvalidates).toEqual([]);
   });
 
   test("other settings keys do not schedule a refresh", async () => {
-    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [], mcpInvalidates: [] };
+    const plog: PersonaLog = { imageRefreshes: [], varRefreshes: [], bgRefreshes: [] };
     const h = createLifecycleEventHandlers(makePersonaDeps(plog, { risuActive: true }));
     await h.SETTINGS_UPDATED({ key: "theme", value: "dark" }, "u1");
     await new Promise((r) => setTimeout(r, DEBOUNCE_SETTLE_MS));
@@ -296,12 +289,11 @@ test.each(['Provider rejected the request', ''])('failed generation skips output
     generationEndedBindings: ['output'],
     runMessageVarPass: async () => { calls.push('writes'); },
     runBinding: async () => { calls.push('output'); return { stopSending: false }; },
-    invalidateRenderMcpForChat: () => { calls.push('render'); },
     invalidateMacroInterceptorForChat: () => { calls.push('macros'); },
     refreshBgHtml: async () => { calls.push('background'); },
     refreshVariables: async () => { calls.push('variables'); },
   });
   await handlers.GENERATION_ENDED({ chatId: 'chat', error, content: '{{setvar::state::partial}}' }, 'user');
-  expect(calls).toEqual(['render', 'macros', 'background', 'variables']);
+  expect(calls).toEqual(['macros', 'background', 'variables']);
   expect(log.refresh).toEqual(['chat']);
 });

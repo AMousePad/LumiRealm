@@ -1,3 +1,4 @@
+import { FrontendLuaUnavailableError } from '../frontend-lua/protocol.js';
 import type { SpindleDisplayContext } from 'lumiverse-spindle-types';
 import type { DispatchData, HostMessage, HostApi, TriggerRuntimeOpts } from '../interpreter/host.js';
 import { runListenEditChain } from '../interpreter/listen-edit.js';
@@ -6,14 +7,12 @@ import {
   type RuntimeAtAtAction,
 } from '../interpreter/at-actions-runtime.js';
 import {
-  makeSnapshotHostApi,
   buildPreloaded,
   resolveRisuDisplayMessageIndex,
   type DisplayVarWriteback,
-  type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import { applyVarDelta, getDisplaySnapshot, type DisplaySnapshot } from './snapshot.js';
-import { makeDispatcherScriptNS, registerManualTriggers } from '../interpreter/dispatcher.js';
+import { registerManualTriggers } from '../interpreter/dispatcher.js';
 import { setWasmoonExecutor } from '../interpreter/runtime.js';
 import { executeWasmoon } from '../interpreter/lua-wasmoon.js';
 import { makeFrontendScriptNS } from '../frontend-lua/executor.js';
@@ -24,7 +23,10 @@ const varLog = makeSafeLogger('runtime.setVar');
 let environment: ((snapshot: DisplaySnapshot) => { api: HostApi; options: TriggerRuntimeOpts; flush(): Promise<void> }) | undefined;
 
 export function setDisplayLuaEnvironment(provider: typeof environment): void { environment = provider; }
-export function getDisplayLuaEnvironment(snapshot: DisplaySnapshot) { return environment?.(snapshot); }
+export function getDisplayLuaEnvironment(snapshot: DisplaySnapshot) {
+  if (!environment) throw new FrontendLuaUnavailableError('The frontend display runtime is unavailable');
+  return environment(snapshot);
+}
 
 function risuChatIndex(context: SpindleDisplayContext, snap: DisplaySnapshot): number {
   return resolveRisuDisplayMessageIndex(snap, context);
@@ -36,13 +38,12 @@ export async function runEditDisplayChain(
   context: SpindleDisplayContext,
   resolveTemplate: (text: string) => string,
   onVarWrite: DisplayVarWriteback,
-  onEffect?: DisplayRuntimeEffectSink,
   onVarRead?: (name: string, scope: 'chat' | 'global') => void,
   onMessageRead?: () => void,
 ): Promise<string> {
   if (snap.luaTriggers.length === 0) return content;
-  const local = environment?.(snap);
-  const api = local?.api ?? makeSnapshotHostApi(snap, onVarWrite, onEffect);
+  const local = getDisplayLuaEnvironment(snap);
+  const api = local.api;
   const scriptNS = makeFrontendScriptNS();
   registerManualTriggers(scriptNS, snap.compiledLibraries, api);
   const data: DispatchData = {
@@ -94,12 +95,12 @@ export async function runEditDisplayChain(
       wasmoonKey: 'editDisplay',
       ...(onVarRead ? { onVarRead } : {}),
       ...(onMessageRead ? { onMessageRead } : {}),
-      ...local?.options,
+      ...local.options,
       chatId: snap.chatId,
       characterId: snap.characterId,
       luaTemplate: resolveTemplate,
     },
-  ); } finally { await local?.flush(); }
+  ); } finally { await local.flush(); }
 }
 
 export async function runEditDisplayAtActions(
@@ -109,12 +110,11 @@ export async function runEditDisplayAtActions(
   actions: readonly RuntimeAtAtAction[] = snap.atActions,
   options: {
     readonly resolveTemplate?: (text: string) => string | Promise<string>;
-    readonly onEffect?: DisplayRuntimeEffectSink;
   } = {},
 ): Promise<string> {
   if (actions.length === 0) return content;
-  const local = environment?.(snap);
-  const api = local?.api ?? makeSnapshotHostApi(snap, undefined, options.onEffect);
+  const local = getDisplayLuaEnvironment(snap);
+  const api = local.api;
   const role = (context.role ?? undefined) as HostMessage['role'] | undefined;
   try { return await runAtActionsForPhase(actions, 'editdisplay', content, {
     api,
@@ -123,5 +123,5 @@ export async function runEditDisplayAtActions(
     ...(options.resolveTemplate
       ? { resolveTemplate: options.resolveTemplate }
       : {}),
-  }); } finally { await local?.flush(); }
+  }); } finally { await local.flush(); }
 }

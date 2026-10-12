@@ -1,7 +1,6 @@
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { RisuBinding } from '../interpreter/runtime.js';
 import type { FrontendLuaOperation } from '../frontend-lua/protocol.js';
-import { invalidateRenderMcpForChat } from './render-mcp-cache.js';
 import { invalidateMacroInterceptorForChat } from './macro-interceptor-cache.js';
 
 export interface TriggerDispatcherDeps {
@@ -16,7 +15,6 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps) {
     const active = await deps.ensureActiveCardForChat(chatId, null, userId);
     if (!active) throw new Error('The chat has no active Risu runtime');
     await deps.execute(chatId, active.card.character_id, operation, userId, sessionId);
-    invalidateRenderMcpForChat(chatId);
     invalidateMacroInterceptorForChat(chatId);
     await deps.refreshBgHtml(active, chatId, userId);
     await deps.refreshVariables(active, chatId, userId);

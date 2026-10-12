@@ -3,7 +3,7 @@ import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
 import type { HostMessage } from '../../src/interpreter/host.js';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
 
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { execute } from '../helpers/lua-bridge.js';
 import { makeLuaDivergenceHost } from '../helpers/lua-risu-divergence.js';
 
 const messages: HostMessage[] = [

@@ -7,7 +7,6 @@ export * as mappers from "./mappers/index.js";
 export * as schemas from "./schemas/index.js";
 export * as pipeline from "./pipeline/index.js";
 export * as cbs from "./cbs/index.js";
-export * as triggers from "./triggers/index.js";
 export * as payload from "./payload/index.js";
 export {
   buildRisuPayload,

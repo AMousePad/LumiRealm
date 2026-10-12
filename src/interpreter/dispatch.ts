@@ -8,22 +8,6 @@ export interface SpindleEventShape {
   readonly [k: string]: unknown;
 }
 
-export function eventToBinding(event: string): RisuBinding | null {
-  switch (event) {
-    case 'GENERATION_STARTED':
-      return 'start';
-    case 'GENERATION_ENDED':
-      return 'output';
-    default:
-      return null;
-  }
-}
-
-export const GENERATION_STARTED_BINDINGS: readonly RisuBinding[] = [
-  'start',
-  'request',
-];
-
 export const GENERATION_ENDED_BINDINGS: readonly RisuBinding[] = [
   'output',
 ];

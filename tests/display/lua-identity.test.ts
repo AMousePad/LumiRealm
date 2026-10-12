@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { createDisplayResolver } from '../../src/display/resolver.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
 import { clearDisplaySnapshot, setDisplaySnapshot } from '../../src/display/snapshot.js';
 import type { ActiveCard } from '../../src/interpreter/dispatch.js';
-import { clearLuaEngines } from '../../src/interpreter/lua-bridge.js';
-import { assembleDisplaySnapshot } from '../../src/state/display-snapshot-assembly.js';
+import { clearLuaEngines } from '../helpers/lua-bridge.js';
+import { assembleDisplaySnapshot } from '../helpers/display-snapshot-reference.js';
 
 // Risu's runScripted getters read char.name and char.firstMessage, independent of the selected greeting.
 test.each([

@@ -1755,13 +1755,13 @@ var init_assets = __esm(() => {
     return `<div risu-ctrl="bgm___auto___${hit.src}" style="display:none;"></div>
 `;
   }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
-  register12("inlay", (ctx, args) => {
+  register12("inlay", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
     return `<img src="/api/v1/images/${id}"/>`;
   }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
-  register12("inlayed", (ctx, args) => {
+  register12("inlayed", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -1769,7 +1769,7 @@ var init_assets = __esm(() => {
 
 `;
   }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
-  register12("inlayeddata", (ctx, args) => {
+  register12("inlayeddata", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -1803,7 +1803,8 @@ var init_handlers = __esm(() => {
   init_metadata();
   init_assets();
 });
-// src/core/cbs/parser.ts
+
+// src/core/cbs/normalize.ts
 function normalizeMacroName(raw) {
   let out = "";
   for (let i = 0;i < raw.length; i++) {
@@ -1817,18 +1818,7 @@ function normalizeMacroName(raw) {
   }
   return out;
 }
-var OPAQUE_KINDS;
-var init_parser = __esm(() => {
-  OPAQUE_KINDS = new Set([
-    "pure",
-    "pure_display",
-    "ignore",
-    "escape",
-    "each",
-    "func",
-    "code"
-  ]);
-});
+
 // node_modules/zod/v3/helpers/util.js
 var util, objectUtil, ZodParsedType, getParsedType = (data) => {
   const t = typeof data;
@@ -5776,7 +5766,6 @@ function parseCatalog(raw) {
 }
 var init_loader = __esm(() => {
   init_schema();
-  init_parser();
 });
 
 // src/core/cbs/catalog/index.ts
@@ -5784,17 +5773,11 @@ var init_catalog = __esm(() => {
   init_schema();
   init_loader();
 });
-// src/core/cbs/runtime/mock.ts
-var init_mock = () => {};
-
 // src/core/cbs/runtime/index.ts
-var init_runtime = __esm(() => {
-  init_mock();
-});
+var init_runtime = () => {};
 
 // src/core/cbs/index.ts
 var init_cbs = __esm(() => {
-  init_parser();
   init_catalog();
   init_runtime();
 });
@@ -9267,81 +9250,23 @@ content#} form. Returns trimmed content if cond is not the empty string, 0, or -
 });
 
 // src/interpreter/evaluator/builtins.ts
-function parseUTCOffset(s) {
-  const m = /^UTC\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?$/i.exec(s.trim());
-  if (!m)
-    return null;
-  const sign = m[1] === "-" ? -1 : 1;
-  const h = parseInt(m[2], 10);
-  const mm = m[3] ? parseInt(m[3], 10) : 0;
-  return sign * (h + mm / 60);
-}
 function registerBuiltins(register) {
   register("bot", (ctx) => ctx.identity.charName, false);
   register("user", (ctx) => ctx.identity.userName, false);
   register("char", (ctx) => ctx.identity.charName, false);
   register("charname", (ctx) => ctx.identity.charName, false);
   register("notchar", (ctx) => ctx.identity.userName, false);
-  register("not_char", (ctx) => ctx.identity.userName, false);
-  register("newline", () => `
-`, false);
   register("nl", () => `
 `, false);
   register("n", () => `
 `, false);
   register("space", () => " ", false);
   register("noop", () => "", false);
-  register("//", () => "", false);
-  register("comment", () => "", false);
   register("note", () => "", false);
-  register("upper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
   register("uppercase", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
   register("toupper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
-  register("lower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
   register("lowercase", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
   register("tolower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
-  register("random", (ctx, a) => {
-    if (a.length === 0)
-      return String(Math.round(ctx.rng.random()));
-    const allNumeric = a.length <= 2 && a.every((x) => x.trim() !== "" && !isNaN(Number(x)));
-    if (allNumeric) {
-      const min = parseInt(a[0] ?? "", 10) || 0;
-      const max = parseInt(a[1] ?? "", 10) || 1;
-      if (max < min)
-        return String(min);
-      return String(Math.floor(ctx.rng.random() * (max - min + 1)) + min);
-    }
-    const idx = Math.floor(ctx.rng.random() * a.length);
-    return a[idx] ?? "";
-  }, false);
-  register("roll", (ctx, a) => {
-    const notation = a[0] ?? "1d6";
-    const match = /^(\d+)d(\d+)$/i.exec(notation);
-    if (!match)
-      return "0";
-    const count = Math.min(parseInt(match[1], 10), 100);
-    const sides = parseInt(match[2], 10);
-    if (sides < 1 || count < 1)
-      return "0";
-    let total = 0;
-    for (let i = 0;i < count; i++)
-      total += Math.floor(ctx.rng.random() * sides) + 1;
-    return String(total);
-  }, false);
-  register("time", (ctx, a) => {
-    const offset = a[0];
-    const now = new Date(ctx.clock.now());
-    if (offset) {
-      const parsed = parseUTCOffset(offset);
-      if (parsed !== null) {
-        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-        const shifted = new Date(utc + parsed * 3600000);
-        return shifted.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-      }
-    }
-    return now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  }, false);
-  register("jailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
   register("charjailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
 }
 
@@ -15989,7 +15914,6 @@ function primaryFlagAction(actions) {
 
 // src/display/snapshot.ts
 var snapshots = new Map;
-var mode = "on";
 var snapshotWaiters = new Map;
 function setDisplaySnapshot(snapshot) {
   snapshots.set(snapshot.chatId, snapshot);
@@ -16052,15 +15976,7 @@ function snapshotMessagesChanged(prev, next) {
   });
 }
 function isDisplayResolutionReady(chatId) {
-  return mode !== "off" && snapshots.has(chatId);
-}
-function getDisplayResolutionMode() {
-  return mode;
-}
-function setDisplayResolutionMode(next) {
-  if (next !== "on" && next !== "off")
-    throw new TypeError(`Unsupported display resolution mode: ${next}`);
-  mode = next;
+  return snapshots.has(chatId);
 }
 
 // src/display/regex-apply.ts
@@ -16570,6 +16486,21 @@ function createNativeVariableMacros(vars, touched) {
     }
     return { text, terminal: true };
   };
+}
+
+// src/frontend-lua/protocol.ts
+class FrontendLuaUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FrontendLuaUnavailableError";
+  }
+}
+
+class FrontendLuaExecutionError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FrontendLuaExecutionError";
+  }
 }
 
 // src/payload/codec.ts
@@ -18602,56 +18533,6 @@ function compareTriggerCondition(source, target, operator) {
       return true;
   }
 }
-// src/interpreter/runtime/match-template.ts
-function applyMatchTemplate(template, match) {
-  if (!match)
-    return template;
-  let out = "";
-  for (let i = 0;i < template.length; i++) {
-    const c = template[i];
-    if (c !== "$") {
-      out += c;
-      continue;
-    }
-    const next = template[i + 1];
-    if (next === "&") {
-      out += match[0] ?? "";
-      i++;
-      continue;
-    }
-    if (next === "$") {
-      out += "$";
-      i++;
-      continue;
-    }
-    if (next !== undefined && next >= "0" && next <= "9") {
-      const next2 = template[i + 2];
-      if (next2 !== undefined && next2 >= "0" && next2 <= "9") {
-        const twoDigit = Number(next + next2);
-        if (twoDigit >= 1 && twoDigit <= match.length - 1) {
-          out += match[twoDigit] ?? "";
-          i += 2;
-          continue;
-        }
-      }
-      const idx = Number(next);
-      out += match[idx] ?? "";
-      i++;
-      continue;
-    }
-    if (next === "<") {
-      const close = template.indexOf(">", i + 2);
-      if (close > 0 && match.groups) {
-        const name = template.slice(i + 2, close);
-        out += match.groups[name] ?? "";
-        i = close;
-        continue;
-      }
-    }
-    out += c;
-  }
-  return out;
-}
 // src/interpreter/runtime/calc.ts
 init_risu_helpers();
 function calculate(vars, readGlobal, expression, expressionType, outputVar) {
@@ -18665,71 +18546,6 @@ function calculate(vars, readGlobal, expression, expressionType, outputVar) {
   } catch {
     vars.setVar(vars.resolve(outputVar, "value"), "0");
   }
-}
-
-// src/interpreter/runtime/regex-runtime.ts
-async function makeRisuRegexRuntime(api, data, scriptNs, opts = {}) {
-  let currentText = toStr((data && (data.content || data.message || data.text)) ?? "");
-  let dirty = false;
-  function text() {
-    return currentText;
-  }
-  async function setCurrentText(t) {
-    currentText = toStr(t);
-    dirty = true;
-  }
-  async function setExpression(name) {
-    try {
-      if (api.characters.setExpression) {
-        await api.characters.setExpression(toStr(name));
-      } else if (api.chat.setExpression) {
-        await api.chat.setExpression(toStr(name));
-      } else if (api.broadcast?.emit) {
-        api.broadcast.emit("risu:emotion", { name: toStr(name) });
-      }
-    } catch {}
-  }
-  async function inject(content) {
-    try {
-      await api.chat.inject("risu-inject-" + Math.random().toString(36).slice(2, 8), toStr(content), { mode: "context", role: "system" });
-    } catch {}
-  }
-  async function repeatBack(regex, mode) {
-    try {
-      const msgs = await api.chat.getMessages();
-      const recent = msgs.slice(-10);
-      for (let i = recent.length - 1;i >= 0; i--) {
-        const m = toStr(recent[i].content).match(regex);
-        if (!m)
-          continue;
-        const piece = m[0];
-        const suffix = toStr(mode || "").toLowerCase();
-        const endNl = suffix === "end_nl" || suffix === "start_nl";
-        const atStart = suffix === "start" || suffix === "start_nl";
-        const tail = endNl ? `
-` : "";
-        currentText = atStart ? piece + tail + currentText : currentText + tail + piece;
-        dirty = true;
-        break;
-      }
-    } catch {}
-  }
-  async function flush() {
-    if (dirty && data && typeof data === "object") {
-      try {
-        data.content = currentText;
-      } catch {}
-    }
-  }
-  return {
-    text,
-    setCurrentText,
-    setExpression,
-    inject,
-    repeatBack,
-    applyMatchTemplate,
-    flush
-  };
 }
 
 // src/interpreter/runtime.ts
@@ -18750,7 +18566,6 @@ var _wasmoonExec = null;
 function setWasmoonExecutor(fn) {
   _wasmoonExec = fn;
 }
-var _wasmoonEnabled = true;
 async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const invocation = opts.invocationState ?? { stopSending: false };
   const displayMode = !!opts.displayMode;
@@ -19063,13 +18878,12 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     ...preloaded?.scriptstateDefaults !== undefined ? { scriptstateDefaults: preloaded.scriptstateDefaults } : {},
     ...tempVars !== undefined ? { tempVars } : {}
   });
-  const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal } = _vars;
+  const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2 } = _vars;
   let sendAIprompt = false;
   const loopCounter = { value: 0 };
   const additionalSysPrompt = invocation.live.additionalSysPrompt;
   const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage, deferSystemPrompt: Boolean(opts.invocationState) }, (src) => notifyStateChanged(src));
   const {
-    getMessagesTail,
     getMessageCount,
     getLastMessage,
     getMessageAtIndex,
@@ -19299,7 +19113,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     rverbose(`globals keys=${Object.keys(globals).length}: ${Object.keys(globals).slice(0, 20).join(",")}${Object.keys(globals).length > 20 ? "…" : ""}`);
     const wasmoonKey = typeof effective["wasmoonKey"] === "string" ? effective["wasmoonKey"] : null;
     try {
-      let result = wasmoonKey && _wasmoonExec && _wasmoonEnabled ? await _wasmoonExec(codeStr, globals, { ...effective, wasmoonKey }) : await lua.execute(codeStr, globals, effective);
+      let result = wasmoonKey && _wasmoonExec ? await _wasmoonExec(codeStr, globals, { ...effective, wasmoonKey }) : await lua.execute(codeStr, globals, effective);
       if (effective["entry"] === "callListenMain") {
         try {
           result = JSON.parse(result);
@@ -20289,7 +20103,6 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
 }
 
 // src/display/host-shim.ts
-var log4 = makeSafeLogger("display-shim");
 function leadingGreetingOffset(snap) {
   return snap.messagesHost.length > 0 && snap.messagesHost[0].role !== "user" ? 1 : 0;
 }
@@ -20369,1652 +20182,6 @@ function buildPreloaded(snap) {
       }
     }
   };
-}
-function makeSnapshotHostApi(snap, onVarWrite, onEffect) {
-  const noWrite = async () => {};
-  const emitEffect = async (effect) => {
-    await onEffect?.(effect);
-  };
-  const setExpression = async (label) => {
-    const imageId = snap.character.emotionImages[label]?.imageIds[0];
-    if (!imageId)
-      return;
-    await emitEffect({
-      kind: "set-expression",
-      chatId: snap.chatId,
-      characterId: snap.characterId,
-      label,
-      imageId
-    });
-  };
-  const editMessage = async (messageId, content) => {
-    const current = snap.messagesHost.find((message) => message.id === messageId);
-    if (current?.content === content)
-      return;
-    await emitEffect({
-      kind: "edit-message",
-      chatId: snap.chatId,
-      messageId,
-      content
-    });
-  };
-  const setMetadata = async (key, value) => {
-    if (key !== "chat_variables" || !onVarWrite)
-      return;
-    if (!value || typeof value !== "object")
-      return;
-    const orig = snap.vars.local;
-    const out = {};
-    for (const [k, v] of Object.entries(value)) {
-      if (orig[k] === v)
-        continue;
-      const s = typeof v === "string" ? v : String(v);
-      if (orig[k] !== s)
-        out[k] = s;
-    }
-    if (Object.keys(out).length === 0)
-      return;
-    onVarWrite(out);
-  };
-  const getMetadata = (key) => {
-    if (key === "chat_variables")
-      return Promise.resolve({ ...snap.vars.local });
-    if (key === "macro_variables")
-      return Promise.resolve({ global: { ...snap.vars.global } });
-    if (key === "authors_note")
-      return Promise.resolve(snap.chatAuthorsNote ?? undefined);
-    return Promise.resolve(undefined);
-  };
-  const loud = (surface) => log4.error(`[FE-DISPLAY] editDisplay reached api.${surface} — unavailable in browser display resolution; degrading (this diverges from the backend, surface it).`);
-  return {
-    chat: {
-      getChatId: () => snap.chatId,
-      getMessages: () => Promise.resolve(snap.messagesHost),
-      sendMessage: async () => ({ id: "" }),
-      editMessage,
-      deleteMessage: noWrite,
-      getMetadata,
-      setMetadata,
-      inject: noWrite,
-      setExpression
-    },
-    characters: {
-      get: (id) => Promise.resolve({ id, ...snap.character, name: snap.charName, worldBookIds: [] }),
-      update: noWrite,
-      setExpression
-    },
-    personas: {
-      getActive: () => Promise.resolve({ id: "", description: snap.personaText, imageId: snap.personaImageId }),
-      update: noWrite
-    },
-    ui: {
-      toast: () => {
-        loud("ui.toast");
-      },
-      alert: async () => {
-        loud("ui.alert");
-      },
-      prompt: async () => {
-        loud("ui.prompt");
-        return null;
-      },
-      confirm: async () => {
-        loud("ui.confirm");
-        return false;
-      },
-      pick: async () => {
-        loud("ui.pick");
-        return null;
-      },
-      dom: {
-        inject: () => {
-          loud("ui.dom.inject");
-          return { on: () => () => {
-            return;
-          }, remove: () => {
-            return;
-          } };
-        }
-      }
-    },
-    utils: {
-      template: {
-        render: async (text) => {
-          loud("utils.template.render");
-          return text;
-        }
-      }
-    },
-    broadcast: {
-      emit: () => {
-        loud("broadcast.emit");
-      },
-      on: () => {
-        loud("broadcast.on");
-        return () => {
-          return;
-        };
-      }
-    }
-  };
-}
-
-// src/core/mappers/lorebook-decorators.ts
-var TIER1_DECORATOR_NAMES = new Set([
-  "position",
-  "depth",
-  "reverse_depth",
-  "role",
-  "scan_depth",
-  "priority",
-  "probability",
-  "ignore_on_max_context",
-  "additional_keys",
-  "match_full_word",
-  "match_partial_word",
-  "unrecursive",
-  "recursive",
-  "no_recursive_search",
-  "activate",
-  "dont_activate",
-  "end"
-]);
-var TIER2_DECORATOR_NAMES = new Set([
-  "is_greeting",
-  "activate_only_after",
-  "activate_only_every",
-  "keep_activate_after_match",
-  "dont_activate_after_match",
-  "exclude_keys",
-  "exclude_keys_all",
-  "disable_ui_prompt",
-  "is_user_icon",
-  "instruct_depth",
-  "reverse_instruct_depth",
-  "instruct_scan_depth",
-  "inject_lore",
-  "inject_at",
-  "inject_replace",
-  "inject_prepend"
-]);
-
-// src/core/mappers/lorebook-hash.ts
-var LEGACY_ENTRY_HASH_FIELDS_V1 = [
-  "key",
-  "keysecondary",
-  "content",
-  "comment",
-  "position",
-  "depth",
-  "role",
-  "order_value",
-  "selective",
-  "constant",
-  "disabled",
-  "group_name",
-  "group_override",
-  "group_weight",
-  "probability",
-  "scan_depth",
-  "case_sensitive",
-  "match_whole_words",
-  "automation_id",
-  "use_regex",
-  "prevent_recursion",
-  "exclude_recursion",
-  "delay_until_recursion",
-  "priority",
-  "sticky",
-  "cooldown",
-  "delay",
-  "selective_logic",
-  "use_probability"
-];
-var ENTRY_HASH_FIELDS = [
-  ...LEGACY_ENTRY_HASH_FIELDS_V1,
-  "exclude_greeting"
-];
-// src/core/mappers/iframe-policy.ts
-var BOOL_PARAMS = new Set(["autoplay", "controls", "loop", "mute", "playsinline", "rel"]);
-var NUMBER_PARAMS = new Set(["end", "start"]);
-var TOKEN_PARAMS = new Set(["si"]);
-var ALLOWED_QUERY_PARAMS = new Set([...BOOL_PARAMS, ...NUMBER_PARAMS, ...TOKEN_PARAMS]);
-
-// src/bghtml/rewriter.ts
-var CLASS_PREFIX = "x-risu-";
-function shouldSkipHtmlClassToken(tok) {
-  return tok.startsWith("hljs") || tok.startsWith(CLASS_PREFIX);
-}
-function shouldSkipCssClassName(name) {
-  return name.startsWith(CLASS_PREFIX);
-}
-function rewriteClassValue(value) {
-  if (!value)
-    return value;
-  return value.split(/\s+/).filter((t) => t.length > 0).map((t) => shouldSkipHtmlClassToken(t) ? t : CLASS_PREFIX + t).join(" ");
-}
-function rewriteHtmlClasses(html) {
-  return html.replace(/\bclass\s*=\s*(["'])([\s\S]*?)\1/g, (_match, quote, value) => `class=${quote}${rewriteClassValue(value)}${quote}`);
-}
-function unprefixCssClassSelectors(css) {
-  if (!css || css.length === 0)
-    return css;
-  try {
-    return rewriteCss(css, {
-      rewriteClassNames: false,
-      unprefixClassNames: true,
-      rewriteUniversalToHost: false,
-      scopePrefix: "",
-      killDataImports: true
-    });
-  } catch {
-    return css;
-  }
-}
-var DEFAULT_OPTS = {
-  scopePrefix: ".chattext ",
-  rewriteUniversalToHost: true,
-  killDataImports: true,
-  rewriteClassNames: true,
-  unprefixClassNames: false
-};
-function rewriteCss(css, opts = {}) {
-  const o = { ...DEFAULT_OPTS, ...opts };
-  const parser = new CssParser(css);
-  const nodes = parser.parseBlock(true);
-  return serializeNodes(nodes, o, false);
-}
-var NESTING_AT_RULES = new Set([
-  "media",
-  "supports",
-  "container",
-  "document",
-  "-moz-document",
-  "host",
-  "layer",
-  "scope"
-]);
-var DECLARATION_AT_RULES = new Set([
-  "font-face",
-  "page",
-  "property",
-  "counter-style",
-  "viewport",
-  "-ms-viewport"
-]);
-var KEYFRAMES_AT_RULES = new Set(["keyframes", "-webkit-keyframes", "-moz-keyframes", "-o-keyframes"]);
-
-class CssParser {
-  src;
-  pos = 0;
-  constructor(src) {
-    this.src = src;
-  }
-  parseBlock(topLevel) {
-    const out = [];
-    while (this.pos < this.src.length) {
-      const ch = this.src[this.pos];
-      if (ch === undefined)
-        break;
-      if (isWs(ch)) {
-        const start = this.pos;
-        while (this.pos < this.src.length && isWs(this.src[this.pos]))
-          this.pos++;
-        out.push({ kind: "raw", text: this.src.slice(start, this.pos) });
-        continue;
-      }
-      if (ch === "/" && this.src[this.pos + 1] === "*") {
-        out.push({ kind: "raw", text: this.readComment() });
-        continue;
-      }
-      if (!topLevel && ch === "}") {
-        this.pos++;
-        return out;
-      }
-      if (ch === "@") {
-        out.push(this.parseAtRule());
-        continue;
-      }
-      out.push(this.parseStyleRule());
-    }
-    return out;
-  }
-  readComment() {
-    const start = this.pos;
-    this.pos += 2;
-    while (this.pos < this.src.length) {
-      if (this.src[this.pos] === "*" && this.src[this.pos + 1] === "/") {
-        this.pos += 2;
-        return this.src.slice(start, this.pos);
-      }
-      this.pos++;
-    }
-    return this.src.slice(start, this.pos);
-  }
-  parseAtRule() {
-    this.pos++;
-    const nameStart = this.pos;
-    while (this.pos < this.src.length) {
-      const c = this.src[this.pos];
-      if (isWs(c) || c === "{" || c === ";" || c === "(")
-        break;
-      this.pos++;
-    }
-    const name = this.src.slice(nameStart, this.pos);
-    const preludeStart = this.pos;
-    this.skipUntilBlockOrSemi();
-    const prelude = this.src.slice(preludeStart, this.pos);
-    const next = this.src[this.pos];
-    if (next === ";") {
-      this.pos++;
-      return { kind: "at", name, prelude, block: null };
-    }
-    if (next === "{") {
-      this.pos++;
-      const lname = name.toLowerCase();
-      if (DECLARATION_AT_RULES.has(lname)) {
-        const bodyStart = this.pos;
-        this.skipMatchingBrace();
-        const bodyText = this.src.slice(bodyStart, this.pos);
-        if (this.src[this.pos] === "}")
-          this.pos++;
-        return {
-          kind: "at",
-          name,
-          prelude,
-          block: [{ kind: "raw", text: bodyText }]
-        };
-      }
-      const block = this.parseBlock(false);
-      return { kind: "at", name, prelude, block };
-    }
-    return { kind: "at", name, prelude, block: null };
-  }
-  parseStyleRule() {
-    const selStart = this.pos;
-    this.skipUntilBlockOrSemi();
-    const endCh = this.src[this.pos];
-    if (endCh !== "{") {
-      const text = this.src.slice(selStart, this.pos);
-      if (this.src[this.pos] === ";")
-        this.pos++;
-      return { kind: "style", selectorList: text, declarations: "" };
-    }
-    const selectorList = this.src.slice(selStart, this.pos);
-    this.pos++;
-    const bodyStart = this.pos;
-    this.skipMatchingBrace();
-    const body = this.src.slice(bodyStart, this.pos);
-    if (this.src[this.pos] === "}")
-      this.pos++;
-    return { kind: "style", selectorList, declarations: body };
-  }
-  skipUntilBlockOrSemi() {
-    let parens = 0;
-    while (this.pos < this.src.length) {
-      const c = this.src[this.pos];
-      if (c === '"' || c === "'") {
-        this.skipString(c);
-        continue;
-      }
-      if (c === "/" && this.src[this.pos + 1] === "*") {
-        this.readComment();
-        continue;
-      }
-      if (c === "(") {
-        parens++;
-        this.pos++;
-        continue;
-      }
-      if (c === ")") {
-        if (parens > 0)
-          parens--;
-        this.pos++;
-        continue;
-      }
-      if (parens === 0 && (c === "{" || c === ";"))
-        return;
-      this.pos++;
-    }
-  }
-  skipMatchingBrace() {
-    let depth = 1;
-    while (this.pos < this.src.length) {
-      const c = this.src[this.pos];
-      if (c === '"' || c === "'") {
-        this.skipString(c);
-        continue;
-      }
-      if (c === "/" && this.src[this.pos + 1] === "*") {
-        this.readComment();
-        continue;
-      }
-      if (c === "{") {
-        depth++;
-        this.pos++;
-        continue;
-      }
-      if (c === "}") {
-        depth--;
-        if (depth === 0)
-          return;
-        this.pos++;
-        continue;
-      }
-      this.pos++;
-    }
-  }
-  skipString(quote) {
-    this.pos++;
-    while (this.pos < this.src.length) {
-      const c = this.src[this.pos];
-      if (c === "\\") {
-        this.pos += 2;
-        continue;
-      }
-      if (c === quote) {
-        this.pos++;
-        return;
-      }
-      if (c === `
-`)
-        return;
-      this.pos++;
-    }
-  }
-}
-function isWs(c) {
-  return c === " " || c === "\t" || c === `
-` || c === "\r" || c === "\f";
-}
-function serializeNodes(nodes, opts, inKeyframes) {
-  let out = "";
-  for (const n of nodes) {
-    if (n.kind === "raw") {
-      out += n.text;
-    } else if (n.kind === "at") {
-      out += serializeAtRule(n, opts, inKeyframes);
-    } else {
-      out += serializeStyleRule(n, opts, inKeyframes);
-    }
-  }
-  return out;
-}
-function serializeAtRule(at, opts, parentIsKeyframes) {
-  const name = at.name.toLowerCase();
-  if (name === "import" && opts.killDataImports) {
-    const prelude = at.prelude;
-    if (/\burl\(\s*['"]?data:/i.test(prelude) || /^\s*['"]?data:/i.test(prelude)) {
-      return `@import url('data:,');`;
-    }
-  }
-  const preludeStr = at.prelude;
-  if (at.block === null) {
-    return `@${at.name}${preludeStr};`;
-  }
-  if (NESTING_AT_RULES.has(name)) {
-    const inner = serializeNodes(at.block, opts, parentIsKeyframes);
-    return `@${at.name}${preludeStr}{${inner}}`;
-  }
-  if (KEYFRAMES_AT_RULES.has(name)) {
-    const inner = serializeNodes(at.block, opts, true);
-    return `@${at.name}${preludeStr}{${inner}}`;
-  }
-  if (DECLARATION_AT_RULES.has(name)) {
-    const inner = serializeNodes(at.block, opts, parentIsKeyframes);
-    return `@${at.name}${preludeStr}{${inner}}`;
-  }
-  const inner = serializeNodes(at.block, opts, parentIsKeyframes);
-  return `@${at.name}${preludeStr}{${inner}}`;
-}
-function serializeStyleRule(rule, opts, inKeyframes) {
-  if (inKeyframes) {
-    return `${rule.selectorList}{${rule.declarations}}`;
-  }
-  const rewritten = rewriteSelectorList(rule.selectorList, opts);
-  return `${rewritten}{${rule.declarations}}`;
-}
-function splitSelectorList(list) {
-  const parts = [];
-  let start = 0;
-  let parens = 0;
-  let brackets = 0;
-  let inStr = null;
-  for (let i = 0;i < list.length; i++) {
-    const c = list[i];
-    if (inStr) {
-      if (c === "\\") {
-        i++;
-        continue;
-      }
-      if (c === inStr)
-        inStr = null;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      inStr = c;
-      continue;
-    }
-    if (c === "(") {
-      parens++;
-      continue;
-    }
-    if (c === ")") {
-      if (parens > 0)
-        parens--;
-      continue;
-    }
-    if (c === "[") {
-      brackets++;
-      continue;
-    }
-    if (c === "]") {
-      if (brackets > 0)
-        brackets--;
-      continue;
-    }
-    if (c === "," && parens === 0 && brackets === 0) {
-      parts.push(list.slice(start, i));
-      start = i + 1;
-    }
-  }
-  parts.push(list.slice(start));
-  return parts;
-}
-function rewriteSelector(selector, opts) {
-  const leadMatch = /^\s*/.exec(selector);
-  const tailMatch = /\s*$/.exec(selector);
-  const lead = leadMatch[0];
-  const tail = tailMatch[0];
-  let core = selector.slice(lead.length, selector.length - tail.length);
-  if (core.length === 0)
-    return selector;
-  if (opts.rewriteClassNames) {
-    core = core.replace(/(?<![\\])\.(-?[_a-zA-Z][\w-]*)/g, (_m, name) => {
-      if (shouldSkipCssClassName(name)) {
-        return `.${name}`;
-      }
-      return `.${CLASS_PREFIX}${name}`;
-    });
-  } else if (opts.unprefixClassNames) {
-    core = core.replace(/(?<![\\])\.x-risu-(-?[_a-zA-Z][\w-]*)/g, (_m, name) => `.${name}`);
-  }
-  if (opts.rewriteUniversalToHost) {
-    core = rewriteUniversalLead(core);
-  }
-  const startsAtHost = /^:host(\b|[^a-zA-Z_-])/.test(core);
-  if (opts.scopePrefix && !startsAtHost) {
-    core = opts.scopePrefix + core;
-  }
-  return lead + core + tail;
-}
-function rewriteUniversalLead(selector) {
-  const bareMatch = /^(body|html|:root|\*)(?=$|\s|[>+~,{])/.exec(selector);
-  if (bareMatch) {
-    return ":host" + selector.slice(bareMatch[1].length);
-  }
-  const compoundMatch = /^(body|html|:root|\*)(?=[.:\[#])/.exec(selector);
-  if (compoundMatch) {
-    return ":host" + selector.slice(compoundMatch[1].length);
-  }
-  return selector;
-}
-function rewriteSelectorList(list, opts) {
-  return splitSelectorList(list).map((s) => rewriteSelector(s, opts)).join(",");
-}
-var STYLE_BLOCK_RE = /<style(?:\s[^>]*)?>([\s\S]*?)<\/style\s*>/gi;
-function splitAndRewriteBgBundle(bgHtml, opts = {}) {
-  const styles = [];
-  const htmlWithoutStyles = bgHtml.replace(STYLE_BLOCK_RE, (_match, body) => {
-    styles.push(body);
-    return "";
-  });
-  const combinedCss = styles.join(`
-`);
-  const rewrittenCss = combinedCss.length > 0 ? rewriteCss(combinedCss, opts) : "";
-  const rewrittenHtml = rewriteHtmlClasses(htmlWithoutStyles);
-  return { css: rewrittenCss, html: rewrittenHtml };
-}
-// src/core/triggers/types.ts
-function resolveCall(value, kind) {
-  return `__risu.resolve(${JSON.stringify(value)}, ${JSON.stringify(kind)})`;
-}
-function setVarCall(name, value) {
-  return `__risu.setVar(${JSON.stringify(name)}, ${value})`;
-}
-function indent(ctx) {
-  return "  ".repeat(Math.max(0, ctx.indent));
-}
-function line(ctx, body) {
-  return indent(ctx) + body;
-}
-
-// src/core/triggers/opcodes/v1.ts
-function emitSetvar(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.setvarV1(${JSON.stringify(effect.var)}, ${JSON.stringify(effect.operator)}, ${JSON.stringify(effect.value)});`);
-  return { code, needsAwait: true };
-}
-function emitImpersonate(op, ctx) {
-  const effect = op;
-  const value = resolveCall(effect.value, "value");
-  const code = line(ctx, `await __risu.impersonate(${JSON.stringify(effect.role)}, ${value});`);
-  return { code, needsAwait: true };
-}
-function emitSystemPrompt(op, ctx) {
-  const effect = op;
-  const value = resolveCall(effect.value, "value");
-  const code = line(ctx, `await __risu.systemPrompt(${JSON.stringify(effect.location)}, ${value});`);
-  return { code, needsAwait: true };
-}
-function emitCommand(op, ctx) {
-  const effect = op;
-  const value = resolveCall(effect.value, "value");
-  const code = line(ctx, `await __risu.command(${value});`);
-  return { code, needsAwait: true };
-}
-function emitStop(_op, ctx) {
-  return { code: line(ctx, `__risu.stopSending = true;`), needsAwait: false };
-}
-function emitRuntrigger(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.runTrigger(${JSON.stringify(effect.value)});`);
-  return { code, needsAwait: true };
-}
-function emitCutChat(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.cutChat(Number(${resolveCall(effect.start, "value")}), Number(${resolveCall(effect.end, "value")}));`);
-  return { code, needsAwait: true };
-}
-function emitModifyChat(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.modifyChat(Number(${resolveCall(effect.index, "value")}), ${resolveCall(effect.value, "value")});`);
-  return { code, needsAwait: true };
-}
-function emitShowAlert(op, ctx) {
-  const effect = op;
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* showAlert skipped — requires lowLevelAccess */`), needsAwait: false };
-  }
-  if (ctx.displayMode) {
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  }
-  const value = resolveCall(effect.value, "value");
-  const inputVar = resolveCall(effect.inputVar, "value");
-  const code = line(ctx, `await __risu.showAlert(${JSON.stringify(effect.alertType)}, ${value}, ${inputVar});`);
-  return { code, needsAwait: true };
-}
-function emitSendAIprompt(_op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* sendAIprompt skipped — requires lowLevelAccess */`), needsAwait: false };
-  }
-  return { code: line(ctx, `__risu.sendAIprompt = true;`), needsAwait: false };
-}
-function emitRunLLM(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* runLLM skipped — requires lowLevelAccess */`), needsAwait: false };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `await __risu.runLLM(${resolveCall(effect.value, "value")}, "model")`)};`);
-  return { code, needsAwait: true };
-}
-function emitRunAxLLM(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* runAxLLM skipped — requires lowLevelAccess */`), needsAwait: false };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `await __risu.runLLM(${resolveCall(effect.value, "value")}, "submodel")`)};`);
-  return { code, needsAwait: true };
-}
-function emitCheckSimilarity(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return {
-      code: line(ctx, `/* checkSimilarity skipped — requires lowLevelAccess */`),
-      needsAwait: false
-    };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `(await __risu.checkSimilarity(${resolveCall(effect.value, "value")}, ${resolveCall(effect.source, "value")})).join("§")`)};`);
-  return { code, needsAwait: true };
-}
-function emitExtractRegex(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* extractRegex skipped — requires lowLevelAccess */`), needsAwait: false };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `__risu.extractRegex(${resolveCall(effect.value, "value")}, ${JSON.stringify(effect.regex)}, ${JSON.stringify(effect.flags)}, ${JSON.stringify(effect.result)}, true)`)};`);
-  return { code, needsAwait: false };
-}
-function emitImgGen(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* runImgGen skipped — requires lowLevelAccess */`), needsAwait: false };
-  }
-  const effect = op;
-  const code = line(ctx, `${setVarCall(effect.inputVar, `await __risu.runImgGen(${resolveCall(effect.value, "value")}, ${resolveCall(effect.negValue, "value")})`)};`);
-  return { code, needsAwait: true };
-}
-function emitTriggerCode(op, ctx) {
-  const effect = op;
-  const label = JSON.stringify(String(effect.code ?? "").slice(0, 60));
-  const code = line(ctx, `__risu.warnDroppedTriggerCode && __risu.warnDroppedTriggerCode(${label});`);
-  return { code, needsAwait: false };
-}
-function emitTriggerLua(op, ctx) {
-  const effect = op;
-  const code = line(ctx, `await __risu.runLua(${JSON.stringify(effect.code)});`);
-  return { code, needsAwait: true };
-}
-var V1_EMITTERS = {
-  setvar: emitSetvar,
-  impersonate: emitImpersonate,
-  systemprompt: emitSystemPrompt,
-  command: emitCommand,
-  stop: emitStop,
-  runtrigger: emitRuntrigger,
-  cutchat: emitCutChat,
-  modifychat: emitModifyChat,
-  showAlert: emitShowAlert,
-  sendAIprompt: emitSendAIprompt,
-  runLLM: emitRunLLM,
-  runAxLLM: emitRunAxLLM,
-  checkSimilarity: emitCheckSimilarity,
-  extractRegex: emitExtractRegex,
-  runImgGen: emitImgGen,
-  triggercode: emitTriggerCode,
-  triggerlua: emitTriggerLua
-};
-
-// src/core/triggers/opcodes/v2.ts
-function setResultCall(name, value, direct = false) {
-  return direct ? `__risu.setVar(${resolveCall(name, "value")}, ${value})` : `__risu.setResult(${JSON.stringify(name)}, ${value})`;
-}
-function emitRegexEffect(op, ctx) {
-  return { code: line(ctx, `__risu.regexEffect(${JSON.stringify(op)});`), needsAwait: false };
-}
-function emitCollectionEffect(op, ctx) {
-  return { code: line(ctx, `__risu.collectionEffect(${JSON.stringify(op)});`), needsAwait: false };
-}
-function emitV2SetVar(op, ctx) {
-  const e = op;
-  const code = line(ctx, `const __value = ${resolveCall(e.value, e.valueType === "value" ? "value" : "var")};
-` + line(ctx, `await __risu.setvarV2(${resolveCall(e.var, "value")}, ${JSON.stringify(e.operator)}, __value);`));
-  return { code, needsAwait: true };
-}
-function emitV2DeclareLocalVar(op, ctx) {
-  const e = op;
-  const code = line(ctx, `const __value = ${resolveCall(e.value, e.valueType === "value" ? "value" : "var")};
-` + line(ctx, `__risu.declareLocalVar(${resolveCall(e.var, "value")}, __value, ${JSON.stringify(e.indent)});`));
-  return { code, needsAwait: false };
-}
-function emitStructuralNoop(_op, _ctx) {
-  return { code: "", needsAwait: false };
-}
-function emitV2Header(_op, _ctx) {
-  return { code: "", needsAwait: false };
-}
-function emitV2Comment(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `// ${(e.value ?? "").replace(/\r?\n/g, " ").slice(0, 120)}`),
-    needsAwait: false
-  };
-}
-function emitV2StopTrigger(_op, ctx) {
-  return { code: line(ctx, `return;`), needsAwait: false };
-}
-function emitV2ConsoleLog(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `console.log(${resolveCall(e.source, e.sourceType)});`),
-    needsAwait: false
-  };
-}
-function emitV2CutChat(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.cutChat(Number(${resolveCall(e.start, e.startType === "value" ? "value" : "var")}), Number(${resolveCall(e.end, e.endType === "value" ? "value" : "var")}), true);`),
-    needsAwait: true
-  };
-}
-function emitV2ModifyChat(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.modifyChat(Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2SystemPrompt(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.systemPrompt(${JSON.stringify(e.location)}, ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2Impersonate(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.impersonate(${JSON.stringify(e.role)}, ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2Command(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.command(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2SendAIprompt(_op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* v2SendAIprompt skipped — lowLevelAccess only */`), needsAwait: false };
-  }
-  return { code: line(ctx, `__risu.sendAIprompt = true;`), needsAwait: false };
-}
-function emitV2StopPromptSending(_op, ctx) {
-  return { code: line(ctx, `__risu.stopSending = true;`), needsAwait: false };
-}
-function emitV2UpdateGUI(_op, ctx) {
-  return { code: line(ctx, `await __risu.updateGUI();`), needsAwait: true };
-}
-function emitV2UpdateChatAt(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.updateChatAt(Number(${JSON.stringify(e.index)}));`),
-    needsAwait: true
-  };
-}
-function emitV2Wait(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.sleep(Number(${resolveCall(e.value, e.valueType)}) * 1000);`),
-    needsAwait: true
-  };
-}
-function emitV2Tokenize(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(await __risu.tokenize(${resolveCall(e.value, e.valueType)}))`)};`),
-    needsAwait: true
-  };
-}
-function emitV2QuickSearchChat(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.quickSearchChat(${resolveCall(e.value, e.valueType)}, ${JSON.stringify(e.condition)}, Number(${resolveCall(e.depth, e.depthType)})) ? "1" : "0"`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLastMessage(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastMessage()`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetMessageAtIndex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getMessageAtIndex(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetMessageCount(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getMessageCount())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLastUserMessage(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastUserMessage()`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLastCharMessage(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLastCharMessage()`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetFirstMessage(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getFirstMessage()`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2ShowAlert(op, ctx) {
-  if (ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.showAlert("normal", ${resolveCall(e.value, e.valueType)}, "");`),
-    needsAwait: true
-  };
-}
-function emitV2RunLLM(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* v2RunLLM skipped — lowLevelAccess only */`), needsAwait: false };
-  }
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.runLLM(${resolveCall(e.value, e.valueType)}, ${JSON.stringify(e.model)}, ${Boolean(e.streaming)})`)};`),
-    needsAwait: true
-  };
-}
-function emitV2GetAlertInput(op, ctx) {
-  if (ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.alertInput(${resolveCall(e.display, e.displayType)})`)};`),
-    needsAwait: true
-  };
-}
-function emitV2GetAlertSelect(op, ctx) {
-  if (ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.alertSelect(${resolveCall(e.display, e.displayType)}, String(${resolveCall(e.value, e.valueType)}).split("|"))`)};`),
-    needsAwait: true
-  };
-}
-function emitV2CheckSimilarity(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* v2CheckSimilarity skipped — lowLevelAccess only */`), needsAwait: false };
-  }
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `(await __risu.checkSimilarity(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.source, e.sourceType)})).join("§")`)};`),
-    needsAwait: true
-  };
-}
-function emitV2ImgGen(op, ctx) {
-  if (!ctx.lowLevelAccess) {
-    return { code: line(ctx, `/* v2ImgGen skipped — lowLevelAccess only */`), needsAwait: false };
-  }
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.runImgGen(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.negValue, e.negValueType)})`)};`),
-    needsAwait: true
-  };
-}
-function emitV2ExtractRegex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.extractRegex(${resolveCall(e.value, e.valueType)}, ${resolveCall(e.regex, e.regexType)}, ${resolveCall(e.flags, e.flagsType)}, () => ${resolveCall(e.result, e.resultType)})`)};`),
-    needsAwait: false
-  };
-}
-function emitV2Random(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.random(Number(${resolveCall(e.min, e.minType)}), Number(${resolveCall(e.max, e.maxType)})))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetCharAt(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `(String(${resolveCall(e.source, e.sourceType)})[Number(${resolveCall(e.index, e.indexType)})] ?? "null")`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetCharCount(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(String(${resolveCall(e.source, e.sourceType)}).length)`)};`),
-    needsAwait: false
-  };
-}
-function emitV2ToLowerCase(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(${resolveCall(e.source, e.sourceType)}).toLowerCase()`)};`),
-    needsAwait: false
-  };
-}
-function emitV2ToUpperCase(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(${resolveCall(e.source, e.sourceType)}).toUpperCase()`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetCharAt(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.setCharAt(${resolveCall(e.source, e.sourceType)}, Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)})`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SplitString(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `JSON.stringify(__risu.splitString(${resolveCall(e.source, e.sourceType)}, ${resolveCall(e.delimiter, e.delimiterType)}, ${JSON.stringify(e.delimiterType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2ConcatString(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(${resolveCall(e.source1, e.source1Type)}) + String(${resolveCall(e.source2, e.source2Type)})`)};`),
-    needsAwait: false
-  };
-}
-function emitV2Calculate(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `__risu.calculate(${JSON.stringify(e.expression)}, ${JSON.stringify(e.expressionType)}, ${JSON.stringify(e.outputVar)});`),
-    needsAwait: false
-  };
-}
-function emitV2MakeArrayVar(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `{ const name = ${resolveCall(e.var, "value")}; if (name.startsWith('[') && name.endsWith(']')) return 'abort'; __risu.setVar(name, "[]"); }`),
-    needsAwait: false
-  };
-}
-function emitV2MakeDictVar(op, ctx) {
-  const e = op;
-  if (e.var.startsWith("{") && e.var.endsWith("}"))
-    return { code: line(ctx, "return 'abort';"), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setVar(${resolveCall(e.var, "value")}, "{}");`),
-    needsAwait: false
-  };
-}
-function emitV2ClearDict(op, ctx) {
-  const e = op;
-  if (e.var.startsWith("{") && e.var.endsWith("}"))
-    return { code: line(ctx, "return 'abort';"), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setVar(${resolveCall(e.var, "value")}, "{}");`),
-    needsAwait: false
-  };
-}
-function emitV2GetCharacterDesc(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getCharacterDesc()`, true)};`),
-    needsAwait: true
-  };
-}
-function emitV2SetCharacterDesc(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setCharacterDesc(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetPersonaDesc(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getPersonaDesc()`, true)};`),
-    needsAwait: true
-  };
-}
-function emitV2SetPersonaDesc(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setPersonaDesc(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetReplaceGlobalNote(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getReplaceGlobalNote()`, true)};`),
-    needsAwait: true
-  };
-}
-function emitV2SetReplaceGlobalNote(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setReplaceGlobalNote(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetAuthorNote(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `await __risu.getAuthorNote()`, true)};`),
-    needsAwait: true
-  };
-}
-function emitV2SetAuthorNote(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setAuthorNote(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2ModifyLorebook(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.modifyLorebook(${resolveCall(e.target, e.targetType)}, ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetLorebook(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLorebookByKey(${resolveCall(e.target, e.targetType)})`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLorebookCount(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getLorebookCount())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLorebookEntry(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLorebookEntry(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetLorebookActivation(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setLorebookActivation(Number(${resolveCall(e.index, e.indexType)}), ${Boolean(e.value)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetLorebookIndexViaName(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getLorebookIndexViaName(${resolveCall(e.name, e.nameType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetAllLorebooks(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `JSON.stringify(__risu.getAllLorebooks())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLorebookByName(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `JSON.stringify(__risu.getLorebookByName(${resolveCall(e.name, e.nameType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2GetLorebookByIndex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getLorebookByIndex(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2CreateLorebook(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.createLorebook(${resolveCall(e.name, e.nameType)}, ${resolveCall(e.key, e.keyType)}, ${resolveCall(e.content, e.contentType)}, Number(${resolveCall(e.insertOrder, e.insertOrderType)}));`),
-    needsAwait: true
-  };
-}
-function emitV2ModifyLorebookByIndex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.modifyLorebookByIndex(Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.name, e.nameType)}, ${resolveCall(e.key, e.keyType)}, ${resolveCall(e.content, e.contentType)}, ${resolveCall(e.insertOrder, e.insertOrderType)});`),
-    needsAwait: true
-  };
-}
-function emitV2DeleteLorebookByIndex(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.deleteLorebookByIndex(Number(${resolveCall(e.index, e.indexType)}));`),
-    needsAwait: true
-  };
-}
-function emitV2GetLorebookCountNew(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getLorebookCount())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetLorebookAlwaysActive(op, ctx) {
-  const e = op;
-  return {
-    code: line(ctx, `await __risu.setLorebookAlwaysActive(Number(${resolveCall(e.index, e.indexType)}), ${Boolean(e.value)});`),
-    needsAwait: true
-  };
-}
-function emitV2GetDisplayState(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getDisplayState()`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetDisplayState(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setDisplayState(${resolveCall(e.value, e.valueType)});`),
-    needsAwait: false
-  };
-}
-function emitV2GetRequestState(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getRequestState(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetRequestState(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setRequestState(Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: false
-  };
-}
-function emitV2GetRequestStateRole(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `__risu.getRequestStateRole(Number(${resolveCall(e.index, e.indexType)}))`)};`),
-    needsAwait: false
-  };
-}
-function emitV2SetRequestStateRole(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `__risu.setRequestStateRole(Number(${resolveCall(e.index, e.indexType)}), ${resolveCall(e.value, e.valueType)});`),
-    needsAwait: false
-  };
-}
-function emitV2GetRequestStateLength(op, ctx) {
-  const e = op;
-  if (!ctx.displayMode)
-    return { code: line(ctx, `return 'abort';`), needsAwait: false };
-  return {
-    code: line(ctx, `${setResultCall(e.outputVar, `String(__risu.getRequestStateLength())`, true)};`),
-    needsAwait: false
-  };
-}
-function emitV2RunTrigger(op, ctx) {
-  const e = op;
-  return { code: line(ctx, `await __risu.runTrigger(${JSON.stringify(e.target)});`), needsAwait: true };
-}
-var V2_EMITTERS = {
-  v2Header: emitV2Header,
-  v2If: emitStructuralNoop,
-  v2IfVar: emitStructuralNoop,
-  v2IfAdvanced: emitStructuralNoop,
-  v2Else: emitStructuralNoop,
-  v2EndIndent: emitStructuralNoop,
-  v2Loop: emitStructuralNoop,
-  v2LoopNTimes: emitStructuralNoop,
-  v2BreakLoop: emitStructuralNoop,
-  v2Comment: emitV2Comment,
-  v2StopTrigger: emitV2StopTrigger,
-  v2ConsoleLog: emitV2ConsoleLog,
-  v2SetVar: emitV2SetVar,
-  v2DeclareLocalVar: emitV2DeclareLocalVar,
-  v2CutChat: emitV2CutChat,
-  v2ModifyChat: emitV2ModifyChat,
-  v2SystemPrompt: emitV2SystemPrompt,
-  v2Impersonate: emitV2Impersonate,
-  v2Command: emitV2Command,
-  v2SendAIprompt: emitV2SendAIprompt,
-  v2StopPromptSending: emitV2StopPromptSending,
-  v2UpdateGUI: emitV2UpdateGUI,
-  v2UpdateChatAt: emitV2UpdateChatAt,
-  v2Wait: emitV2Wait,
-  v2Tokenize: emitV2Tokenize,
-  v2QuickSearchChat: emitV2QuickSearchChat,
-  v2GetLastMessage: emitV2GetLastMessage,
-  v2GetMessageAtIndex: emitV2GetMessageAtIndex,
-  v2GetMessageCount: emitV2GetMessageCount,
-  v2GetLastUserMessage: emitV2GetLastUserMessage,
-  v2GetLastCharMessage: emitV2GetLastCharMessage,
-  v2GetFirstMessage: emitV2GetFirstMessage,
-  v2ShowAlert: emitV2ShowAlert,
-  v2RunLLM: emitV2RunLLM,
-  v2GetAlertInput: emitV2GetAlertInput,
-  v2GetAlertSelect: emitV2GetAlertSelect,
-  v2CheckSimilarity: emitV2CheckSimilarity,
-  v2ImgGen: emitV2ImgGen,
-  v2ExtractRegex: emitV2ExtractRegex,
-  v2RegexTest: emitRegexEffect,
-  v2ReplaceString: emitRegexEffect,
-  v2Random: emitV2Random,
-  v2GetCharAt: emitV2GetCharAt,
-  v2GetCharCount: emitV2GetCharCount,
-  v2ToLowerCase: emitV2ToLowerCase,
-  v2ToUpperCase: emitV2ToUpperCase,
-  v2SetCharAt: emitV2SetCharAt,
-  v2SplitString: emitV2SplitString,
-  v2ConcatString: emitV2ConcatString,
-  v2Calculate: emitV2Calculate,
-  v2MakeArrayVar: emitV2MakeArrayVar,
-  v2GetArrayVarLength: emitCollectionEffect,
-  v2GetArrayVar: emitCollectionEffect,
-  v2SetArrayVar: emitCollectionEffect,
-  v2PushArrayVar: emitCollectionEffect,
-  v2PopArrayVar: emitCollectionEffect,
-  v2ShiftArrayVar: emitCollectionEffect,
-  v2UnshiftArrayVar: emitCollectionEffect,
-  v2SpliceArrayVar: emitCollectionEffect,
-  v2SliceArrayVar: emitCollectionEffect,
-  v2JoinArrayVar: emitCollectionEffect,
-  v2GetIndexOfValueInArrayVar: emitCollectionEffect,
-  v2RemoveIndexFromArrayVar: emitCollectionEffect,
-  v2MakeDictVar: emitV2MakeDictVar,
-  v2GetDictVar: emitCollectionEffect,
-  v2SetDictVar: emitCollectionEffect,
-  v2DeleteDictKey: emitCollectionEffect,
-  v2HasDictKey: emitCollectionEffect,
-  v2ClearDict: emitV2ClearDict,
-  v2GetDictSize: emitCollectionEffect,
-  v2GetDictKeys: emitCollectionEffect,
-  v2GetDictValues: emitCollectionEffect,
-  v2GetCharacterDesc: emitV2GetCharacterDesc,
-  v2SetCharacterDesc: emitV2SetCharacterDesc,
-  v2GetPersonaDesc: emitV2GetPersonaDesc,
-  v2SetPersonaDesc: emitV2SetPersonaDesc,
-  v2GetReplaceGlobalNote: emitV2GetReplaceGlobalNote,
-  v2SetReplaceGlobalNote: emitV2SetReplaceGlobalNote,
-  v2GetAuthorNote: emitV2GetAuthorNote,
-  v2SetAuthorNote: emitV2SetAuthorNote,
-  v2ModifyLorebook: emitV2ModifyLorebook,
-  v2GetLorebook: emitV2GetLorebook,
-  v2GetLorebookCount: emitV2GetLorebookCount,
-  v2GetLorebookEntry: emitV2GetLorebookEntry,
-  v2SetLorebookActivation: emitV2SetLorebookActivation,
-  v2GetLorebookIndexViaName: emitV2GetLorebookIndexViaName,
-  v2GetAllLorebooks: emitV2GetAllLorebooks,
-  v2GetLorebookByName: emitV2GetLorebookByName,
-  v2GetLorebookByIndex: emitV2GetLorebookByIndex,
-  v2CreateLorebook: emitV2CreateLorebook,
-  v2ModifyLorebookByIndex: emitV2ModifyLorebookByIndex,
-  v2DeleteLorebookByIndex: emitV2DeleteLorebookByIndex,
-  v2GetLorebookCountNew: emitV2GetLorebookCountNew,
-  v2SetLorebookAlwaysActive: emitV2SetLorebookAlwaysActive,
-  v2GetDisplayState: emitV2GetDisplayState,
-  v2SetDisplayState: emitV2SetDisplayState,
-  v2GetRequestState: emitV2GetRequestState,
-  v2SetRequestState: emitV2SetRequestState,
-  v2GetRequestStateRole: emitV2GetRequestStateRole,
-  v2SetRequestStateRole: emitV2SetRequestStateRole,
-  v2GetRequestStateLength: emitV2GetRequestStateLength,
-  v2RunTrigger: emitV2RunTrigger
-};
-
-// src/core/triggers/opcodes/index.ts
-var EMITTERS = {
-  ...V1_EMITTERS,
-  ...V2_EMITTERS
-};
-
-// src/core/triggers/compile.ts
-function compileTrigger(trigger, opts = {}) {
-  const issues = [];
-  const baseIndent = opts.baseIndent ?? 1;
-  const ctx = {
-    indent: baseIndent,
-    issues,
-    lowLevelAccess: Boolean(opts.lowLevelAccess ?? trigger.lowLevelAccess ?? false),
-    displayMode: Boolean(opts.displayMode ?? false),
-    loopDepth: 0
-  };
-  const out = [];
-  if (triggerNeedsTemplates(trigger)) {
-    out.push(line2(ctx, "await __risu.prepareTemplates();"));
-  }
-  const hasConditions = Array.isArray(trigger.conditions) && trigger.conditions.length > 0;
-  if (hasConditions) {
-    out.push(line2(ctx, `if (!__risu.checkConditions(${JSON.stringify(trigger.conditions)})) return;`));
-  }
-  const effects = trigger.effect ?? [];
-  if (effects.length > 0) {
-    const controlEffects = effects.map((effect) => CONTROL_OPS.has(effect.type) ? effect : { type: effect.type, ..."indent" in effect ? { indent: effect.indent } : {} });
-    out.push(line2(ctx, `const __effects = ${JSON.stringify(controlEffects)};`));
-    out.push(line2(ctx, `const __control = { loops: {}, ticks: 0 };`));
-    out.push(line2(ctx, `for (let __index = 0; __index < __effects.length; __index++) {`));
-    const inner = { ...ctx, indent: ctx.indent + 1 };
-    out.push(line2(inner, `const __next = await __risu.advanceControl(__effects, __index, __control);`));
-    out.push(line2(inner, `if (__next !== undefined) { __index = __next; continue; }`));
-    out.push(line2(inner, `switch (__index) {`));
-    const leafCtx = { ...inner, indent: inner.indent + 2 };
-    for (const [index, op] of effects.entries()) {
-      if (CONTROL_OPS.has(op.type))
-        continue;
-      const emitter = EMITTERS[op.type];
-      if (!emitter) {
-        issues.push({ opcode: op.type, message: "unknown opcode: likely a newer RisuAI version. Card may not work properly. Contact `amousepad` on Discord if you see this message.", severity: "warn" });
-        out.push(line2(inner, "/* unknown opcode skipped */"));
-        continue;
-      }
-      out.push(line2(inner, `case ${index}: {`));
-      out.push(emitter(op, leafCtx).code);
-      out.push(line2(leafCtx, `break;`));
-      out.push(line2(inner, `}`));
-    }
-    out.push(line2(inner, `}`));
-    out.push(line2(ctx, `}`));
-  }
-  const unimplementedCounts = {};
-  for (const issue of issues) {
-    if (!issue.message.startsWith("unknown opcode"))
-      continue;
-    unimplementedCounts[issue.opcode] = (unimplementedCounts[issue.opcode] ?? 0) + 1;
-  }
-  return {
-    body: out.filter((s) => s.length > 0).join(`
-`),
-    issues,
-    unimplementedCounts,
-    hasConditions
-  };
-}
-function line2(ctx, body) {
-  return indent(ctx) + body;
-}
-
-// src/core/mappers/triggers.ts
-var BINDING_EVENT_MAP = {
-  input: ["MESSAGE_SENT"],
-  output: ["GENERATION_ENDED"],
-  display: ["CHARACTER_MESSAGE_RENDERED"],
-  start: ["ls:startup", "CHAT_CHANGED"],
-  manual: [],
-  request: ["GENERATION_STARTED"]
-};
-function compileTriggers(triggers, opts) {
-  const files = [];
-  const issues = [];
-  const opcodeUnimplemented = {};
-  let luaCount = 0;
-  const seenSlugs = new Set;
-  triggers.forEach((t, i) => {
-    if (!t.type || !Object.prototype.hasOwnProperty.call(BINDING_EVENT_MAP, t.type)) {
-      issues.push({
-        path: `trigger[${i}]`,
-        message: `unknown binding type "${t.type}" — skipped`
-      });
-      return;
-    }
-    const displayMode = t.type === "display";
-    const lowLevelAccess = Boolean(t.lowLevelAccess);
-    const compiled = compileTrigger(t, { displayMode, lowLevelAccess });
-    for (const [opcode, count] of Object.entries(compiled.unimplementedCounts)) {
-      opcodeUnimplemented[opcode] = (opcodeUnimplemented[opcode] ?? 0) + count;
-    }
-    for (const issue of compiled.issues) {
-      if (issue.severity === "error") {
-        issues.push({
-          path: `trigger[${i}]`,
-          message: `${issue.opcode}: ${issue.message}`
-        });
-      }
-    }
-    const hasLua = Array.isArray(t.effect) && t.effect.some((e) => e.type === "triggerlua");
-    if (hasLua)
-      luaCount++;
-    const slug = uniqueSlug(t.comment ?? "", t.type, i, seenSlugs);
-    const events = BINDING_EVENT_MAP[t.type] ?? [];
-    const runtimeLib = opts.runtimeLibrary ?? "risu-compat";
-    const isManual = t.type === "manual";
-    const code = renderTriggerCode({
-      slug,
-      name: nameFor(t, i, isManual ? "manual" : t.type),
-      characterId: opts.characterId,
-      binding: t.type,
-      events,
-      displayMode,
-      lowLevelAccess,
-      comment: t.comment ?? "",
-      body: compiled.body,
-      hasConditions: compiled.hasConditions,
-      index: i,
-      isManual,
-      runtimeLib
-    });
-    const bindings = isManual ? undefined : [
-      {
-        type: "character",
-        characterId: opts.characterId,
-        displayName: opts.characterName ?? opts.characterId
-      }
-    ];
-    const scriptName = isManual ? `risu-manual-${slug}` : `risu-trigger-${t.type}-${slug}`;
-    const entry = {
-      name: scriptName,
-      code,
-      type: isManual ? "library" : "trigger",
-      folder: isManual ? "risu/manual" : `risu/${t.type}`,
-      path: isManual ? `scripts/libraries/${scriptName}.js` : `scripts/triggers/${scriptName}.js`,
-      ...events.length > 0 ? { triggers: events } : {},
-      ...bindings ? { bindings } : {}
-    };
-    files.push(entry);
-  });
-  return { files, issues, opcodeUnimplemented, luaCount };
-}
-function nameFor(t, i, fallback) {
-  const c = (t.comment ?? "").trim();
-  return c.length > 0 ? c : `risu_${fallback}_${i}`;
-}
-function renderTriggerCode(a) {
-  const frontmatter = [
-    `// @name       ${a.name}`,
-    `// @type       ${a.isManual ? "library" : "trigger"}`,
-    ...a.events.length > 0 ? [`// @triggers   ${a.events.join(", ")}`] : [],
-    `// @folder     ${a.isManual ? "risu/manual" : `risu/${a.binding}`}`,
-    `// @description LumiRealm translated trigger (character ${a.characterId}, binding ${a.binding}, source index ${a.index})`
-  ].join(`
-`);
-  const comment = [
-    `//`,
-    `// source comment: ${sanitizeComment(a.comment)}`,
-    `//`
-  ].join(`
-`);
-  const rtOpts = JSON.stringify({
-    displayMode: a.displayMode,
-    lowLevelAccess: a.lowLevelAccess,
-    binding: a.binding,
-    characterId: a.characterId
-  });
-  const bodyText = a.body.length > 0 ? a.body : "    // (empty trigger body)";
-  const inner = [
-    `const __rc = await script.require(${JSON.stringify(a.runtimeLib)});`,
-    `const __risu = await __rc.makeRisuTriggerRuntime(api, data, script, ${a.isManual ? `{ ...${rtOpts}, invocationState: invokeCtx.invocationState }` : rtOpts});`,
-    `try {`,
-    bodyText,
-    `} finally {`,
-    `  await __risu.flush();`,
-    `}`
-  ].join(`
-`);
-  if (a.isManual) {
-    return [
-      frontmatter,
-      comment,
-      ``,
-      `module.exports = {`,
-      `  async run(invokeCtx) {`,
-      `    const api = invokeCtx.api;`,
-      `    const data = invokeCtx.data || {};`,
-      `    const script = invokeCtx.script;`,
-      indent2(inner, "    "),
-      `  },`,
-      `};`,
-      ``
-    ].join(`
-`);
-  }
-  return [frontmatter, comment, ``, inner, ``].join(`
-`);
-}
-function indent2(text, prefix) {
-  return text.split(`
-`).map((line) => line.length > 0 ? prefix + line : line).join(`
-`);
-}
-function sanitizeComment(s) {
-  return s.replace(/\r?\n/g, " ").replace(/\*\//g, "*\\/").slice(0, 200);
-}
-function uniqueSlug(comment, type, index, seen) {
-  const base = slugify(comment) || `${type}_${index}`;
-  let candidate = base;
-  let n = 1;
-  while (seen.has(candidate)) {
-    n++;
-    candidate = `${base}_${n}`;
-  }
-  seen.add(candidate);
-  return candidate;
-}
-function slugify(s) {
-  const out = [];
-  for (let i = 0;i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95 || c === 45) {
-      out.push(s[i]);
-    } else if (c === 32 || c === 9) {
-      out.push("_");
-    }
-  }
-  return out.join("").slice(0, 64);
-}
-// src/frontend-lua/protocol.ts
-class FrontendLuaUnavailableError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "FrontendLuaUnavailableError";
-  }
-}
-
-class FrontendLuaExecutionError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "FrontendLuaExecutionError";
-  }
 }
 
 // src/interpreter/trigger-interpreter.ts
@@ -22500,20 +20667,62 @@ async function interpretTrigger(trigger, rt, console2, opts) {
   }
 }
 
+// src/core/mappers/triggers.ts
+var BINDING_EVENT_MAP = {
+  input: ["MESSAGE_SENT"],
+  output: ["GENERATION_ENDED"],
+  display: ["CHARACTER_MESSAGE_RENDERED"],
+  start: ["ls:startup", "CHAT_CHANGED"],
+  manual: [],
+  request: ["GENERATION_STARTED"]
+};
+function prepareTriggerEntries(triggers) {
+  const seen = new Set;
+  return triggers.flatMap((source, index) => {
+    if (!Object.hasOwn(BINDING_EVENT_MAP, source.type))
+      return [];
+    const slug = uniqueSlug(source.comment ?? "", source.type, index, seen);
+    return [{
+      name: source.type === "manual" ? `risu-manual-${slug}` : `risu-trigger-${source.type}-${slug}`,
+      type: source.type === "manual" ? "library" : "trigger",
+      triggers: BINDING_EVENT_MAP[source.type],
+      source
+    }];
+  });
+}
+function uniqueSlug(comment, type, index, seen) {
+  const base = slugify(comment) || `${type}_${index}`;
+  let candidate = base;
+  let n = 1;
+  while (seen.has(candidate)) {
+    n++;
+    candidate = `${base}_${n}`;
+  }
+  seen.add(candidate);
+  return candidate;
+}
+function slugify(s) {
+  const out = [];
+  for (let i = 0;i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95 || c === 45) {
+      out.push(s[i]);
+    } else if (c === 32 || c === 9) {
+      out.push("_");
+    }
+  }
+  return out.join("").slice(0, 64);
+}
+
 // src/interpreter/dispatcher.ts
 function makeDispatcherScriptNS(execute = async () => {
   throw new FrontendLuaUnavailableError("Lua execution requires a frontend executor");
 }) {
   const nlog = makeSafeLogger("scriptNS").info;
   let manual;
-  const risuCompat = { makeRisuTriggerRuntime, makeRisuRegexRuntime };
   const risuCompatLua = { execute };
   return {
     async require(name) {
-      if (name === "risu-compat") {
-        nlog(`require('risu-compat') → OK`);
-        return risuCompat;
-      }
       if (name === "risu-compat-lua") {
         nlog(`require('risu-compat-lua') → OK`);
         return risuCompatLua;
@@ -22532,30 +20741,16 @@ function makeDispatcherScriptNS(execute = async () => {
   };
 }
 function prepareTriggerSources(rawTriggers, characterId) {
-  const compiled = compileTriggers(rawTriggers, { characterId });
-  const out = [];
-  for (let i = 0;i < compiled.files.length; i++) {
-    const f = compiled.files[i];
-    const sourceTrigger = rawTriggers[i];
-    if (!sourceTrigger)
-      continue;
-    const binding = sourceTrigger.type;
-    out.push({
-      name: f.name,
-      code: f.code,
-      type: f.type,
-      triggers: f.triggers ?? [],
-      binding,
-      source: sourceTrigger,
-      rtOpts: {
-        displayMode: binding === "display",
-        lowLevelAccess: Boolean(sourceTrigger.lowLevelAccess),
-        binding,
-        characterId
-      }
-    });
-  }
-  return out;
+  return prepareTriggerEntries(rawTriggers).map((entry) => ({
+    ...entry,
+    binding: entry.source.type,
+    rtOpts: {
+      displayMode: entry.source.type === "display",
+      lowLevelAccess: Boolean(entry.source.lowLevelAccess),
+      binding: entry.source.type,
+      characterId
+    }
+  }));
 }
 function triggerMatchesBinding(t, binding) {
   const firstEffect = t.source?.effect?.[0];
@@ -23378,16 +21573,18 @@ function setDisplayLuaEnvironment(provider) {
   environment = provider;
 }
 function getDisplayLuaEnvironment(snapshot) {
-  return environment?.(snapshot);
+  if (!environment)
+    throw new FrontendLuaUnavailableError("The frontend display runtime is unavailable");
+  return environment(snapshot);
 }
 function risuChatIndex(context, snap) {
   return resolveRisuDisplayMessageIndex(snap, context);
 }
-async function runEditDisplayChain(snap, content, context, resolveTemplate, onVarWrite, onEffect, onVarRead, onMessageRead) {
+async function runEditDisplayChain(snap, content, context, resolveTemplate, onVarWrite, onVarRead, onMessageRead) {
   if (snap.luaTriggers.length === 0)
     return content;
-  const local = environment?.(snap);
-  const api = local?.api ?? makeSnapshotHostApi(snap, onVarWrite, onEffect);
+  const local = getDisplayLuaEnvironment(snap);
+  const api = local.api;
   const scriptNS = makeFrontendScriptNS();
   registerManualTriggers(scriptNS, snap.compiledLibraries, api);
   const data = {
@@ -23432,20 +21629,20 @@ async function runEditDisplayChain(snap, content, context, resolveTemplate, onVa
       wasmoonKey: "editDisplay",
       ...onVarRead ? { onVarRead } : {},
       ...onMessageRead ? { onMessageRead } : {},
-      ...local?.options,
+      ...local.options,
       chatId: snap.chatId,
       characterId: snap.characterId,
       luaTemplate: resolveTemplate
     });
   } finally {
-    await local?.flush();
+    await local.flush();
   }
 }
 async function runEditDisplayAtActions(snap, content, context, actions = snap.atActions, options = {}) {
   if (actions.length === 0)
     return content;
-  const local = environment?.(snap);
-  const api = local?.api ?? makeSnapshotHostApi(snap, undefined, options.onEffect);
+  const local = getDisplayLuaEnvironment(snap);
+  const api = local.api;
   const role = context.role ?? undefined;
   try {
     return await runAtActionsForPhase(actions, "editdisplay", content, {
@@ -23455,12 +21652,12 @@ async function runEditDisplayAtActions(snap, content, context, actions = snap.at
       ...options.resolveTemplate ? { resolveTemplate: options.resolveTemplate } : {}
     });
   } finally {
-    await local?.flush();
+    await local.flush();
   }
 }
 
 // src/display/trigger-runner.ts
-var log5 = makeSafeLogger("display-trigger");
+var log4 = makeSafeLogger("display-trigger");
 function formatConsoleArgs(args) {
   return args.map((value) => {
     try {
@@ -23471,19 +21668,19 @@ function formatConsoleArgs(args) {
   }).join(" ").slice(0, 600);
 }
 var triggerConsole = {
-  log: (...args) => log5.info(`console.log: ${formatConsoleArgs(args)}`),
-  warn: (...args) => log5.warn(`console.warn: ${formatConsoleArgs(args)}`),
-  error: (...args) => log5.error(`console.error: ${formatConsoleArgs(args)}`),
-  info: (...args) => log5.info(`console.info: ${formatConsoleArgs(args)}`)
+  log: (...args) => log4.info(`console.log: ${formatConsoleArgs(args)}`),
+  warn: (...args) => log4.warn(`console.warn: ${formatConsoleArgs(args)}`),
+  error: (...args) => log4.error(`console.error: ${formatConsoleArgs(args)}`),
+  info: (...args) => log4.info(`console.info: ${formatConsoleArgs(args)}`)
 };
 async function runDisplayTriggerChain(snap, content) {
   const triggers = selectRestrictedTriggers(snap.luaTriggers.map((entry) => entry.source), "display");
   if (triggers.length === 0)
     return { content, ran: false };
   const local = getDisplayLuaEnvironment(snap);
-  const { luaChat: _chat, luaVariables: _variables, ...options } = local?.options ?? {};
+  const { luaChat: _chat, luaVariables: _variables, ...options } = local.options;
   try {
-    const runtime = await makeRisuTriggerRuntime(local?.api ?? makeSnapshotHostApi(snap), {
+    const runtime = await makeRisuTriggerRuntime(local.api, {
       characterId: snap.characterId,
       characterName: snap.charName,
       userName: snap.userName
@@ -23514,16 +21711,16 @@ async function runDisplayTriggerChain(snap, content) {
       }
       return { content: runtime.getDisplayState(), ran: true };
     } catch (err) {
-      log5.warn(`display trigger chain failed: ${String(err)}`);
+      log4.warn(`display trigger chain failed: ${String(err)}`);
       return { content, ran: true };
     } finally {
       await runtime.flush();
     }
   } catch (err) {
-    log5.warn(`display trigger runtime failed: ${String(err)}`);
+    log4.warn(`display trigger runtime failed: ${String(err)}`);
     return { content, ran: true };
   } finally {
-    await local?.flush();
+    await local.flush();
   }
 }
 
@@ -23730,7 +21927,7 @@ function stripDisplayStyleImports(content) {
 }
 
 // src/display/resolver.ts
-var log6 = makeSafeLogger("display-resolver");
+var log5 = makeSafeLogger("display-resolver");
 var DBG_MARKS = ["\uD83D\uDD04", "<CombatChoice", "<ActivityChoice", "<Panel>", "■■■", "intro", "★■", "\uD83E\uDDB6"];
 function dbgMarks(s) {
   return DBG_MARKS.filter((m) => s.includes(m)).join(",");
@@ -23743,7 +21940,7 @@ async function getSnapshotOrWait(chatId) {
   const ok = await waitForSnapshot(chatId, SNAPSHOT_WAIT_MS);
   if (ok)
     return getDisplaySnapshot(chatId);
-  log6.error(`[FE-DISPLAY] snapshot did not arrive for owned chat=${chatId} within ${SNAPSHOT_WAIT_MS}ms — ` + `failing LOUD (raw content shown). The host must NOT fall back to backend resolution for an owned chat.`);
+  log5.error(`[FE-DISPLAY] snapshot did not arrive for owned chat=${chatId} within ${SNAPSHOT_WAIT_MS}ms — ` + `failing LOUD (raw content shown). The host must NOT fall back to backend resolution for an owned chat.`);
   return;
 }
 function buildInput(snap, content, context) {
@@ -23787,7 +21984,7 @@ function warnActionBinding(scriptId, reason) {
   if (warnedActionBindings.size >= 256)
     warnedActionBindings.clear();
   warnedActionBindings.add(key);
-  log6.warn(`applyScripts: skipped module row=${scriptId}: ${reason}`);
+  log5.warn(`applyScripts: skipped module row=${scriptId}: ${reason}`);
 }
 function scriptApplies(script, context) {
   if (script.disabled === true)
@@ -23854,7 +22051,7 @@ function displayBehaviorContext(snap, context) {
     ...greeting !== undefined ? { previousContent: greeting } : {}
   };
 }
-async function runApply(snap, args, recorder, activationPatterns, cache, onEffect) {
+async function runApply(snap, args, recorder, activationPatterns, cache) {
   const ctx = args.context;
   const placement = ctx.isUser ? "user_input" : "ai_output";
   const scopeOrder = { global: 0, character: 1, chat: 2 };
@@ -23864,7 +22061,7 @@ async function runApply(snap, args, recorder, activationPatterns, cache, onEffec
     const result = prepared.get(script.id);
     if (!(result instanceof ActivationPatternError))
       return true;
-    log6.error(`applyScripts: activation input failed for rule=${script.id}: ${String(result)}`);
+    log5.error(`applyScripts: activation input failed for rule=${script.id}: ${String(result)}`);
     return false;
   }), snap.atActions);
   const hasRepeatBack = plan.some((step) => step.kind === "script" && readRegexMatchActions(step.script.metadata).includes("repeat_back"));
@@ -23919,8 +22116,7 @@ async function runApply(snap, args, recorder, activationPatterns, cache, onEffec
           if (dependencies.effects)
             reads.volatile = true;
           content = await runEditDisplayAtActions(snap, content, ctx, [step.action], {
-            resolveTemplate: (text) => evalTemplate(snap, text, ctx, reads),
-            ...onEffect ? { onEffect } : {}
+            resolveTemplate: (text) => evalTemplate(snap, text, ctx, reads)
           });
           continue;
         }
@@ -23961,7 +22157,7 @@ async function runApply(snap, args, recorder, activationPatterns, cache, onEffec
   }
   return content;
 }
-function createDisplayResolver(writeback, onEffect, activationPatterns = createActivationPatternCache()) {
+function createDisplayResolver(writeback, activationPatterns = createActivationPatternCache()) {
   const scriptCache = new Map;
   return {
     finalizeWithoutScripts: true,
@@ -24004,7 +22200,7 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
               reparseMacroResults: false,
               currentMessageIndexOverride: -1
             }));
-          }, (vars) => writeback?.(chatId, vars), onEffect, (name, scope) => {
+          }, (vars) => writeback?.(chatId, vars), (name, scope) => {
             if (scope === "global")
               recorder.touched.add(`global:${name}`);
             else {
@@ -24031,16 +22227,15 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
               recorder.volatile = true;
           }
           body = await runEditDisplayAtActions(liveSnap, body, args.context, rowlessAtActions, {
-            resolveTemplate: (text) => evalTemplate(liveSnap, text, args.context, recorder),
-            ...onEffect ? { onEffect } : {}
+            resolveTemplate: (text) => evalTemplate(liveSnap, text, args.context, recorder)
           });
         }
         feContent = body;
       } catch (err) {
-        log6.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
+        log5.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
-      log6.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
+      log5.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
       return {
         content: feContent,
         ...processingState !== undefined ? { processingState } : {},
@@ -24066,7 +22261,7 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
           cacheable[key] = !recorder.volatile;
         }
       } catch (err) {
-        log6.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Showing raw content.`);
+        log5.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
       return { resolved, touchedVars, cacheable };
@@ -24081,15 +22276,15 @@ function createDisplayResolver(writeback, onEffect, activationPatterns = createA
       let feContent;
       const recorder = { touched: new Set, volatile: false };
       try {
-        feContent = args.scripts.length === 0 ? args.content : await runApply(snap, args, recorder, activationPatterns, scriptCache, onEffect);
+        feContent = args.scripts.length === 0 ? args.content : await runApply(snap, args, recorder, activationPatterns, scriptCache);
         if (args.processingState !== feContent) {
           feContent = finalizeDisplayAssets(buildInput(snap, feContent, args.context), recorder);
         }
       } catch (err) {
-        log6.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
+        log5.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
-      log6.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} placement=${args.context.isUser ? "user" : "ai"} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
+      log5.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} placement=${args.context.isUser ? "user" : "ai"} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
       return {
         content: stripDisplayStyleImports(feContent),
         touchedVars: [...recorder.touched],
@@ -24912,26 +23107,8 @@ function createFrontendLuaUi(ctx) {
   } };
 }
 
-// src/state/lorebook-cache.ts
-var byCharacter2 = new Map;
-var chatToCharacter2 = new Map;
-
 // src/interpreter/screen-dims-cache.ts
 var byUser = new Map;
-
-// src/interpreter/image-cache.ts
-var characterImageByChat = new Map;
-var personaImageByUser = new Map;
-function imageUrlFromId(imageId) {
-  if (!imageId || typeof imageId !== "string" || imageId.length === 0)
-    return "";
-  return `/api/v1/images/${imageId}`;
-}
-
-// src/interpreter/greeting-index.ts
-function toRisuFirstMessageIndex(value) {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value - 1 : -1;
-}
 
 // src/state/display-snapshot-assembly.ts
 function buildDisplayChatStateFromView(view) {
@@ -24966,6 +23143,20 @@ function buildDisplayChatState(messagesHost) {
   return buildDisplayChatStateFromView(buildRisuChatView({ messages: messagesHost }));
 }
 
+// src/interpreter/greeting-index.ts
+function toRisuFirstMessageIndex(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value - 1 : -1;
+}
+
+// src/interpreter/image-cache.ts
+var characterImageByChat = new Map;
+var personaImageByUser = new Map;
+function imageUrlFromId(imageId) {
+  if (!imageId || typeof imageId !== "string" || imageId.length === 0)
+    return "";
+  return `/api/v1/images/${imageId}`;
+}
+
 // src/state/lorebook-fetch.ts
 function lumiEntryToRisuLore(e) {
   const keyStr = (e.key ?? []).join(",");
@@ -24990,7 +23181,6 @@ function runtimeDisplaySnapshot(config, state) {
   const messagesHost = state.hostMessages();
   const view = buildRisuChatView({ messages: messagesHost });
   const note = state.metadata("authors_note");
-  const { selectedGreeting: _greeting, ...configCharacter } = config.character;
   const lorebookHost = state.lore();
   return {
     ...config,
@@ -25001,7 +23191,7 @@ function runtimeDisplaySnapshot(config, state) {
     personaImage: imageUrlFromId(persona?.imageId) ?? "",
     chatAuthorsNote: note && typeof note === "object" ? note : null,
     character: {
-      ...configCharacter,
+      ...config.character,
       description: character.description ?? "",
       firstMessage: character.firstMessage ?? "",
       personality: String(character.personality ?? ""),
@@ -26288,13 +24478,8 @@ var styles_default = `.risu-compat-drawer {\r
   min-width: 0;\r
 }\r
 \r
-.risu-settings-drawer > .rs-section + .rs-section {\r
-  margin-top: 12px;\r
-}\r
 \r
-/* Settings subtab body — no outer chrome, just stacked rows + samplers.\r
-   The legacy \`.rs-section\` outer-box style still exists in case anything\r
-   else references it, but the live settings panel uses these instead. */\r
+/* Settings subtab body. */\r
 .lr-settings-tab-body {\r
   display: flex;\r
   flex-direction: column;\r
@@ -26371,35 +24556,6 @@ var styles_default = `.risu-compat-drawer {\r
 .risu-settings-drawer .rs-intro {\r
   margin: 0;\r
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.65));\r
-}\r
-.risu-settings-drawer .rs-section {\r
-  display: flex;\r
-  flex-direction: column;\r
-  gap: 8px;\r
-  padding: 10px;\r
-  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.025));\r
-  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.07));\r
-  border-radius: 6px;\r
-  min-width: 0;\r
-}\r
-.risu-settings-drawer .rs-section-header {\r
-  display: flex;\r
-  flex-direction: column;\r
-  gap: 4px;\r
-  margin-bottom: 4px;\r
-}\r
-.risu-settings-drawer .rs-section-title {\r
-  margin: 0;\r
-  font-size: 12px;\r
-  font-weight: 600;\r
-  text-transform: uppercase;\r
-  letter-spacing: 0.5px;\r
-  color: var(--lumiverse-text, inherit);\r
-}\r
-.risu-settings-drawer .rs-section-desc {\r
-  font-size: 11.5px;\r
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.5));\r
-  line-height: 1.4;\r
 }\r
 \r
 .risu-settings-drawer .rs-row {\r
@@ -28026,50 +26182,6 @@ var styles_default = `.risu-compat-drawer {\r
   margin: 4px 10px 8px;\r
   line-height: 1.45;\r
 }\r
-.lr-viewer-drawer .lrv-defvar-list {\r
-  display: flex;\r
-  flex-direction: column;\r
-  gap: 4px;\r
-  padding: 4px 10px 8px;\r
-}\r
-.lr-viewer-drawer .lrv-defvar-row {\r
-  display: grid;\r
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) auto;\r
-  gap: 8px;\r
-  align-items: center;\r
-}\r
-.lr-viewer-drawer .lrv-defvar-row-overridden .lrv-defvar-input {\r
-  border-color: var(--lumiverse-primary, rgba(120, 160, 255, 0.5));\r
-}\r
-.lr-viewer-drawer .lrv-defvar-name {\r
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\r
-  font-size: 12px;\r
-  color: var(--lumiverse-text, inherit);\r
-  overflow: hidden;\r
-  text-overflow: ellipsis;\r
-  white-space: nowrap;\r
-}\r
-.lr-viewer-drawer .lrv-defvar-input,\r
-.lr-viewer-drawer .lrv-defvar-name-input {\r
-  background: var(--lumiverse-bg-elevated, rgba(255, 255, 255, 0.04));\r
-  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.1));\r
-  color: var(--lumiverse-text, inherit);\r
-  padding: 4px 6px;\r
-  border-radius: 4px;\r
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\r
-  font-size: 12px;\r
-  min-width: 0;\r
-}\r
-.lr-viewer-drawer .lrv-defvar-spacer {\r
-  display: inline-block;\r
-  min-width: 56px;\r
-}\r
-.lr-viewer-drawer .lrv-defvar-row-new {\r
-  border: 1px dashed var(--lumiverse-border, rgba(255, 255, 255, 0.15));\r
-  border-radius: 4px;\r
-  padding: 4px;\r
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) auto auto;\r
-}\r
 \r
 /* Asset toolbar (Add asset button + upload status) */\r
 .lr-viewer-drawer .lrv-asset-toolbar {\r
@@ -28483,40 +26595,6 @@ var styles_default = `.risu-compat-drawer {\r
 }\r
 \r
 /* Lorebook */\r
-.lr-viewer-drawer .lrv-lorebook-group {\r
-  border-top: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.05));\r
-}\r
-.lr-viewer-drawer .lrv-lorebook-group > summary {\r
-  cursor: pointer;\r
-  padding: 6px 12px;\r
-  font-size: 12px;\r
-  font-weight: 500;\r
-}\r
-.lr-viewer-drawer .lrv-lorebook-row {\r
-  display: flex;\r
-  flex-direction: column;\r
-  gap: 3px;\r
-  padding: 6px 16px;\r
-  border-top: 1px dashed var(--lumiverse-border, rgba(255, 255, 255, 0.04));\r
-}\r
-.lr-viewer-drawer .lrv-lorebook-row-disabled { opacity: 0.5; }\r
-.lr-viewer-drawer .lrv-lorebook-keys {\r
-  font-size: 11px;\r
-  color: var(--lumiverse-primary, #8fb6ff);\r
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;\r
-}\r
-.lr-viewer-drawer .lrv-lorebook-comment {\r
-  font-size: 11px;\r
-  color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.6));\r
-  font-style: italic;\r
-}\r
-.lr-viewer-drawer .lrv-lorebook-content {\r
-  font-size: 11.5px;\r
-  color: var(--lumiverse-text, inherit);\r
-  white-space: pre-wrap;\r
-  word-break: break-word;\r
-  line-height: 1.45;\r
-}\r
 \r
 /* Risu-faithful lorebook viewer: one line per entry, expand for read-only detail. */\r
 .lr-viewer-drawer .lrv-lb-section {\r
@@ -29561,7 +27639,7 @@ var error_default = DetailedError;
 
 // node_modules/tus-js-client/lib.esm/logger.js
 var isEnabled = false;
-function log7(msg) {
+function log6(msg) {
   if (!isEnabled)
     return;
   console.log(msg);
@@ -30397,9 +28475,9 @@ var BaseUpload = /* @__PURE__ */ function() {
       }
       this.options.fingerprint(file, this.options).then(function(fingerprint) {
         if (fingerprint == null) {
-          log7("No fingerprint was calculated meaning that the upload cannot be stored in the URL storage.");
+          log6("No fingerprint was calculated meaning that the upload cannot be stored in the URL storage.");
         } else {
-          log7("Calculated fingerprint: ".concat(fingerprint));
+          log6("Calculated fingerprint: ".concat(fingerprint));
         }
         _this2._fingerprint = fingerprint;
         if (_this2._source) {
@@ -30504,7 +28582,7 @@ var BaseUpload = /* @__PURE__ */ function() {
           return;
         }
         _this3.url = resolveUrl(_this3.options.endpoint, location2);
-        log7("Created upload at ".concat(_this3.url));
+        log6("Created upload at ".concat(_this3.url));
         _this3._emitSuccess(res);
       })["catch"](function(err) {
         _this3._emitError(err);
@@ -30515,17 +28593,17 @@ var BaseUpload = /* @__PURE__ */ function() {
     value: function _startSingleUpload() {
       this._aborted = false;
       if (this.url != null) {
-        log7("Resuming upload from previous URL: ".concat(this.url));
+        log6("Resuming upload from previous URL: ".concat(this.url));
         this._resumeUpload();
         return;
       }
       if (this.options.uploadUrl != null) {
-        log7("Resuming upload from provided URL: ".concat(this.options.uploadUrl));
+        log6("Resuming upload from provided URL: ".concat(this.options.uploadUrl));
         this.url = this.options.uploadUrl;
         this._resumeUpload();
         return;
       }
-      log7("Creating a new upload");
+      log6("Creating a new upload");
       this._createUpload();
     }
   }, {
@@ -30656,7 +28734,7 @@ var BaseUpload = /* @__PURE__ */ function() {
           return;
         }
         _this6.url = resolveUrl(_this6.options.endpoint, location2);
-        log7("Created upload at ".concat(_this6.url));
+        log6("Created upload at ".concat(_this6.url));
         if (typeof _this6.options.onUploadUrlAvailable === "function") {
           _this6.options.onUploadUrlAvailable();
         }
@@ -32106,6 +30184,408 @@ function isLogTransportNoise(type) {
   return type === "log_request_state" || type === "log_state_pushed" || type === "log_export_pushed";
 }
 
+// src/core/mappers/iframe-policy.ts
+var BOOL_PARAMS = new Set(["autoplay", "controls", "loop", "mute", "playsinline", "rel"]);
+var NUMBER_PARAMS = new Set(["end", "start"]);
+var TOKEN_PARAMS = new Set(["si"]);
+var ALLOWED_QUERY_PARAMS = new Set([...BOOL_PARAMS, ...NUMBER_PARAMS, ...TOKEN_PARAMS]);
+
+// src/bghtml/rewriter.ts
+var CLASS_PREFIX = "x-risu-";
+function shouldSkipHtmlClassToken(tok) {
+  return tok.startsWith("hljs") || tok.startsWith(CLASS_PREFIX);
+}
+function shouldSkipCssClassName(name) {
+  return name.startsWith(CLASS_PREFIX);
+}
+function rewriteClassValue(value) {
+  if (!value)
+    return value;
+  return value.split(/\s+/).filter((t) => t.length > 0).map((t) => shouldSkipHtmlClassToken(t) ? t : CLASS_PREFIX + t).join(" ");
+}
+function rewriteHtmlClasses(html) {
+  return html.replace(/\bclass\s*=\s*(["'])([\s\S]*?)\1/g, (_match, quote, value) => `class=${quote}${rewriteClassValue(value)}${quote}`);
+}
+function unprefixCssClassSelectors(css) {
+  if (!css || css.length === 0)
+    return css;
+  try {
+    return rewriteCss(css, {
+      rewriteClassNames: false,
+      unprefixClassNames: true,
+      rewriteUniversalToHost: false,
+      scopePrefix: "",
+      killDataImports: true
+    });
+  } catch {
+    return css;
+  }
+}
+var DEFAULT_OPTS = {
+  scopePrefix: ".chattext ",
+  rewriteUniversalToHost: true,
+  killDataImports: true,
+  rewriteClassNames: true,
+  unprefixClassNames: false
+};
+function rewriteCss(css, opts = {}) {
+  const o = { ...DEFAULT_OPTS, ...opts };
+  const parser = new CssParser(css);
+  const nodes = parser.parseBlock(true);
+  return serializeNodes(nodes, o, false);
+}
+var NESTING_AT_RULES = new Set([
+  "media",
+  "supports",
+  "container",
+  "document",
+  "-moz-document",
+  "host",
+  "layer",
+  "scope"
+]);
+var DECLARATION_AT_RULES = new Set([
+  "font-face",
+  "page",
+  "property",
+  "counter-style",
+  "viewport",
+  "-ms-viewport"
+]);
+var KEYFRAMES_AT_RULES = new Set(["keyframes", "-webkit-keyframes", "-moz-keyframes", "-o-keyframes"]);
+
+class CssParser {
+  src;
+  pos = 0;
+  constructor(src) {
+    this.src = src;
+  }
+  parseBlock(topLevel) {
+    const out = [];
+    while (this.pos < this.src.length) {
+      const ch = this.src[this.pos];
+      if (ch === undefined)
+        break;
+      if (isWs(ch)) {
+        const start = this.pos;
+        while (this.pos < this.src.length && isWs(this.src[this.pos]))
+          this.pos++;
+        out.push({ kind: "raw", text: this.src.slice(start, this.pos) });
+        continue;
+      }
+      if (ch === "/" && this.src[this.pos + 1] === "*") {
+        out.push({ kind: "raw", text: this.readComment() });
+        continue;
+      }
+      if (!topLevel && ch === "}") {
+        this.pos++;
+        return out;
+      }
+      if (ch === "@") {
+        out.push(this.parseAtRule());
+        continue;
+      }
+      out.push(this.parseStyleRule());
+    }
+    return out;
+  }
+  readComment() {
+    const start = this.pos;
+    this.pos += 2;
+    while (this.pos < this.src.length) {
+      if (this.src[this.pos] === "*" && this.src[this.pos + 1] === "/") {
+        this.pos += 2;
+        return this.src.slice(start, this.pos);
+      }
+      this.pos++;
+    }
+    return this.src.slice(start, this.pos);
+  }
+  parseAtRule() {
+    this.pos++;
+    const nameStart = this.pos;
+    while (this.pos < this.src.length) {
+      const c = this.src[this.pos];
+      if (isWs(c) || c === "{" || c === ";" || c === "(")
+        break;
+      this.pos++;
+    }
+    const name = this.src.slice(nameStart, this.pos);
+    const preludeStart = this.pos;
+    this.skipUntilBlockOrSemi();
+    const prelude = this.src.slice(preludeStart, this.pos);
+    const next = this.src[this.pos];
+    if (next === ";") {
+      this.pos++;
+      return { kind: "at", name, prelude, block: null };
+    }
+    if (next === "{") {
+      this.pos++;
+      const lname = name.toLowerCase();
+      if (DECLARATION_AT_RULES.has(lname)) {
+        const bodyStart = this.pos;
+        this.skipMatchingBrace();
+        const bodyText = this.src.slice(bodyStart, this.pos);
+        if (this.src[this.pos] === "}")
+          this.pos++;
+        return {
+          kind: "at",
+          name,
+          prelude,
+          block: [{ kind: "raw", text: bodyText }]
+        };
+      }
+      const block = this.parseBlock(false);
+      return { kind: "at", name, prelude, block };
+    }
+    return { kind: "at", name, prelude, block: null };
+  }
+  parseStyleRule() {
+    const selStart = this.pos;
+    this.skipUntilBlockOrSemi();
+    const endCh = this.src[this.pos];
+    if (endCh !== "{") {
+      const text = this.src.slice(selStart, this.pos);
+      if (this.src[this.pos] === ";")
+        this.pos++;
+      return { kind: "style", selectorList: text, declarations: "" };
+    }
+    const selectorList = this.src.slice(selStart, this.pos);
+    this.pos++;
+    const bodyStart = this.pos;
+    this.skipMatchingBrace();
+    const body = this.src.slice(bodyStart, this.pos);
+    if (this.src[this.pos] === "}")
+      this.pos++;
+    return { kind: "style", selectorList, declarations: body };
+  }
+  skipUntilBlockOrSemi() {
+    let parens = 0;
+    while (this.pos < this.src.length) {
+      const c = this.src[this.pos];
+      if (c === '"' || c === "'") {
+        this.skipString(c);
+        continue;
+      }
+      if (c === "/" && this.src[this.pos + 1] === "*") {
+        this.readComment();
+        continue;
+      }
+      if (c === "(") {
+        parens++;
+        this.pos++;
+        continue;
+      }
+      if (c === ")") {
+        if (parens > 0)
+          parens--;
+        this.pos++;
+        continue;
+      }
+      if (parens === 0 && (c === "{" || c === ";"))
+        return;
+      this.pos++;
+    }
+  }
+  skipMatchingBrace() {
+    let depth = 1;
+    while (this.pos < this.src.length) {
+      const c = this.src[this.pos];
+      if (c === '"' || c === "'") {
+        this.skipString(c);
+        continue;
+      }
+      if (c === "/" && this.src[this.pos + 1] === "*") {
+        this.readComment();
+        continue;
+      }
+      if (c === "{") {
+        depth++;
+        this.pos++;
+        continue;
+      }
+      if (c === "}") {
+        depth--;
+        if (depth === 0)
+          return;
+        this.pos++;
+        continue;
+      }
+      this.pos++;
+    }
+  }
+  skipString(quote) {
+    this.pos++;
+    while (this.pos < this.src.length) {
+      const c = this.src[this.pos];
+      if (c === "\\") {
+        this.pos += 2;
+        continue;
+      }
+      if (c === quote) {
+        this.pos++;
+        return;
+      }
+      if (c === `
+`)
+        return;
+      this.pos++;
+    }
+  }
+}
+function isWs(c) {
+  return c === " " || c === "\t" || c === `
+` || c === "\r" || c === "\f";
+}
+function serializeNodes(nodes, opts, inKeyframes) {
+  let out = "";
+  for (const n of nodes) {
+    if (n.kind === "raw") {
+      out += n.text;
+    } else if (n.kind === "at") {
+      out += serializeAtRule(n, opts, inKeyframes);
+    } else {
+      out += serializeStyleRule(n, opts, inKeyframes);
+    }
+  }
+  return out;
+}
+function serializeAtRule(at, opts, parentIsKeyframes) {
+  const name = at.name.toLowerCase();
+  if (name === "import" && opts.killDataImports) {
+    const prelude = at.prelude;
+    if (/\burl\(\s*['"]?data:/i.test(prelude) || /^\s*['"]?data:/i.test(prelude)) {
+      return `@import url('data:,');`;
+    }
+  }
+  const preludeStr = at.prelude;
+  if (at.block === null) {
+    return `@${at.name}${preludeStr};`;
+  }
+  if (NESTING_AT_RULES.has(name)) {
+    const inner = serializeNodes(at.block, opts, parentIsKeyframes);
+    return `@${at.name}${preludeStr}{${inner}}`;
+  }
+  if (KEYFRAMES_AT_RULES.has(name)) {
+    const inner = serializeNodes(at.block, opts, true);
+    return `@${at.name}${preludeStr}{${inner}}`;
+  }
+  if (DECLARATION_AT_RULES.has(name)) {
+    const inner = serializeNodes(at.block, opts, parentIsKeyframes);
+    return `@${at.name}${preludeStr}{${inner}}`;
+  }
+  const inner = serializeNodes(at.block, opts, parentIsKeyframes);
+  return `@${at.name}${preludeStr}{${inner}}`;
+}
+function serializeStyleRule(rule, opts, inKeyframes) {
+  if (inKeyframes) {
+    return `${rule.selectorList}{${rule.declarations}}`;
+  }
+  const rewritten = rewriteSelectorList(rule.selectorList, opts);
+  return `${rewritten}{${rule.declarations}}`;
+}
+function splitSelectorList(list) {
+  const parts = [];
+  let start = 0;
+  let parens = 0;
+  let brackets = 0;
+  let inStr = null;
+  for (let i = 0;i < list.length; i++) {
+    const c = list[i];
+    if (inStr) {
+      if (c === "\\") {
+        i++;
+        continue;
+      }
+      if (c === inStr)
+        inStr = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      inStr = c;
+      continue;
+    }
+    if (c === "(") {
+      parens++;
+      continue;
+    }
+    if (c === ")") {
+      if (parens > 0)
+        parens--;
+      continue;
+    }
+    if (c === "[") {
+      brackets++;
+      continue;
+    }
+    if (c === "]") {
+      if (brackets > 0)
+        brackets--;
+      continue;
+    }
+    if (c === "," && parens === 0 && brackets === 0) {
+      parts.push(list.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(list.slice(start));
+  return parts;
+}
+function rewriteSelector(selector, opts) {
+  const leadMatch = /^\s*/.exec(selector);
+  const tailMatch = /\s*$/.exec(selector);
+  const lead = leadMatch[0];
+  const tail = tailMatch[0];
+  let core = selector.slice(lead.length, selector.length - tail.length);
+  if (core.length === 0)
+    return selector;
+  if (opts.rewriteClassNames) {
+    core = core.replace(/(?<![\\])\.(-?[_a-zA-Z][\w-]*)/g, (_m, name) => {
+      if (shouldSkipCssClassName(name)) {
+        return `.${name}`;
+      }
+      return `.${CLASS_PREFIX}${name}`;
+    });
+  } else if (opts.unprefixClassNames) {
+    core = core.replace(/(?<![\\])\.x-risu-(-?[_a-zA-Z][\w-]*)/g, (_m, name) => `.${name}`);
+  }
+  if (opts.rewriteUniversalToHost) {
+    core = rewriteUniversalLead(core);
+  }
+  const startsAtHost = /^:host(\b|[^a-zA-Z_-])/.test(core);
+  if (opts.scopePrefix && !startsAtHost) {
+    core = opts.scopePrefix + core;
+  }
+  return lead + core + tail;
+}
+function rewriteUniversalLead(selector) {
+  const bareMatch = /^(body|html|:root|\*)(?=$|\s|[>+~,{])/.exec(selector);
+  if (bareMatch) {
+    return ":host" + selector.slice(bareMatch[1].length);
+  }
+  const compoundMatch = /^(body|html|:root|\*)(?=[.:\[#])/.exec(selector);
+  if (compoundMatch) {
+    return ":host" + selector.slice(compoundMatch[1].length);
+  }
+  return selector;
+}
+function rewriteSelectorList(list, opts) {
+  return splitSelectorList(list).map((s) => rewriteSelector(s, opts)).join(",");
+}
+var STYLE_BLOCK_RE = /<style(?:\s[^>]*)?>([\s\S]*?)<\/style\s*>/gi;
+function splitAndRewriteBgBundle(bgHtml, opts = {}) {
+  const styles = [];
+  const htmlWithoutStyles = bgHtml.replace(STYLE_BLOCK_RE, (_match, body) => {
+    styles.push(body);
+    return "";
+  });
+  const combinedCss = styles.join(`
+`);
+  const rewrittenCss = combinedCss.length > 0 ? rewriteCss(combinedCss, opts) : "";
+  const rewrittenHtml = rewriteHtmlClasses(htmlWithoutStyles);
+  return { css: rewrittenCss, html: rewrittenHtml };
+}
+
 // src/state/module-artifact-project.ts
 function readRisuMetadata2(row) {
   if (!row.metadata || typeof row.metadata !== "object")
@@ -32430,8 +30910,8 @@ function mountCardsPanel(opts) {
     }
   }
   async function installModuleArtifacts(msg) {
-    log.info(`drawer.installModuleArtifacts: char=${msg.characterId} module=${msg.moduleId} ` + `lorebookEntries=${msg.lorebookEntries.length} regexScripts=${msg.regexScripts.length}`);
-    let worldBookId = null;
+    log.info(`drawer.installModuleArtifacts: char=${msg.characterId} module=${msg.moduleId} ` + `regexScripts=${msg.regexScripts.length}`);
+    const worldBookId = null;
     const regexScriptIds = [];
     let regexInstallOk = msg.cleanupStale;
     let cleanupCompleted = !msg.cleanupStale;
@@ -34057,7 +32537,6 @@ function mountSettingsPanel(opts) {
   let settings = null;
   let connections = null;
   let imageConnections = null;
-  let lastSavedTs = 0;
   const status = document.createElement("div");
   status.className = "rs-status";
   root.appendChild(status);
@@ -34086,194 +32565,120 @@ function mountSettingsPanel(opts) {
     subnavBtns.set(def.id, btn);
   }
   let activeSubTab = "aux";
-  const auxBody = document.createElement("section");
-  auxBody.className = "lr-settings-tab-body";
-  const auxIntro = document.createElement("p");
-  auxIntro.className = "lr-settings-intro";
-  auxIntro.textContent = "Routes Lua's axLLMMain / axLLM calls through this connection. Useful for status-window updaters / classifiers separate from the main chat model.";
-  auxBody.appendChild(auxIntro);
-  const connRow = document.createElement("div");
-  connRow.className = "rs-row";
-  const connLabel = document.createElement("label");
-  connLabel.className = "rs-label";
-  connLabel.textContent = "Connection";
-  connLabel.htmlFor = "rs-aux-conn";
-  connRow.appendChild(connLabel);
-  const connSelect = createSearchableSelect({
-    id: "rs-aux-conn",
-    className: "rs-trigger",
-    placeholder: "Loading connections…",
-    searchPlaceholder: "Search connections…",
-    emptyMessage: "No matching connections",
-    items: [],
-    onChange(value) {
-      log.info(`settings-tab: connection changed to "${value ?? "<default>"}"`);
-      sendToBackend({
-        type: "update_settings",
-        patch: { auxConnectionId: value }
-      });
+  function buildModelChannel(channel, introText) {
+    const isAux = channel === "aux";
+    const prefix = `rs-${channel}`;
+    const body = document.createElement("section");
+    body.className = "lr-settings-tab-body";
+    const intro = document.createElement("p");
+    intro.className = "lr-settings-intro";
+    intro.textContent = introText;
+    body.appendChild(intro);
+    const connRow = document.createElement("div");
+    connRow.className = "rs-row";
+    const connLabel = document.createElement("label");
+    connLabel.className = "rs-label";
+    connLabel.textContent = "Connection";
+    connLabel.htmlFor = `${prefix}-conn`;
+    connRow.appendChild(connLabel);
+    const connSelect = createSearchableSelect({
+      id: `${prefix}-conn`,
+      className: "rs-trigger",
+      placeholder: "Loading connections…",
+      searchPlaceholder: "Search connections…",
+      emptyMessage: "No matching connections",
+      items: [],
+      onChange(value) {
+        log.info(`settings-tab: ${isAux ? "" : "submodel "}connection changed to "${value ?? (isAux ? "<default>" : "<inherit-aux>")}"`);
+        sendToBackend({
+          type: "update_settings",
+          patch: { [isAux ? "auxConnectionId" : "submodelConnectionId"]: value }
+        });
+      }
+    });
+    connRow.appendChild(connSelect.root);
+    body.appendChild(connRow);
+    const modelRow = document.createElement("div");
+    modelRow.className = "rs-row";
+    const modelLabel = document.createElement("label");
+    modelLabel.className = "rs-label";
+    modelLabel.textContent = "Model override";
+    modelLabel.htmlFor = `${prefix}-model`;
+    modelRow.appendChild(modelLabel);
+    const modelInput = document.createElement("input");
+    modelInput.id = `${prefix}-model`;
+    modelInput.type = "text";
+    modelInput.className = "rs-input";
+    modelInput.placeholder = "(use connection default)";
+    modelInput.spellcheck = false;
+    modelRow.appendChild(modelInput);
+    body.appendChild(modelRow);
+    const buttonRow = document.createElement("div");
+    buttonRow.className = "rs-row rs-row-buttons";
+    const saveModelBtn = document.createElement("button");
+    saveModelBtn.type = "button";
+    saveModelBtn.className = "lrm-btn lrm-btn-primary";
+    saveModelBtn.textContent = "Save";
+    saveModelBtn.title = "Save the model override.";
+    buttonRow.appendChild(saveModelBtn);
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "lrm-btn";
+    resetBtn.textContent = "Reset";
+    resetBtn.title = isAux ? "Clear connection and model." : "Clear submodel fields.";
+    buttonRow.appendChild(resetBtn);
+    const refreshBtn = isAux ? document.createElement("button") : null;
+    if (refreshBtn) {
+      refreshBtn.type = "button";
+      refreshBtn.className = "lrm-btn";
+      refreshBtn.textContent = "Refresh";
+      refreshBtn.title = "Re-fetch connection list.";
+      buttonRow.appendChild(refreshBtn);
     }
-  });
-  connRow.appendChild(connSelect.root);
-  auxBody.appendChild(connRow);
-  const modelRow = document.createElement("div");
-  modelRow.className = "rs-row";
-  const modelLabel = document.createElement("label");
-  modelLabel.className = "rs-label";
-  modelLabel.textContent = "Model override";
-  modelLabel.htmlFor = "rs-aux-model";
-  modelRow.appendChild(modelLabel);
-  const modelInput = document.createElement("input");
-  modelInput.id = "rs-aux-model";
-  modelInput.type = "text";
-  modelInput.className = "rs-input";
-  modelInput.placeholder = "(use connection default)";
-  modelInput.spellcheck = false;
-  modelRow.appendChild(modelInput);
-  auxBody.appendChild(modelRow);
-  const buttonRow = document.createElement("div");
-  buttonRow.className = "rs-row rs-row-buttons";
-  const saveModelBtn = document.createElement("button");
-  saveModelBtn.type = "button";
-  saveModelBtn.className = "lrm-btn lrm-btn-primary";
-  saveModelBtn.textContent = "Save";
-  saveModelBtn.title = "Save the model override.";
-  buttonRow.appendChild(saveModelBtn);
-  const resetBtn = document.createElement("button");
-  resetBtn.type = "button";
-  resetBtn.className = "lrm-btn";
-  resetBtn.textContent = "Reset";
-  resetBtn.title = "Clear connection and model.";
-  buttonRow.appendChild(resetBtn);
-  const refreshBtn = document.createElement("button");
-  refreshBtn.type = "button";
-  refreshBtn.className = "lrm-btn";
-  refreshBtn.textContent = "Refresh";
-  refreshBtn.title = "Re-fetch connection list.";
-  buttonRow.appendChild(refreshBtn);
-  auxBody.appendChild(buttonRow);
-  const samplersSection = document.createElement("div");
-  samplersSection.className = "rs-subsection";
-  const samplersHeader = document.createElement("div");
-  samplersHeader.className = "rs-subsection-header";
-  const samplersTitle = document.createElement("h4");
-  samplersTitle.className = "rs-subsection-title";
-  samplersTitle.textContent = "Samplers";
-  samplersTitle.title = "Drag to set, double-click to reset, empty falls back to connection preset.";
-  samplersHeader.appendChild(samplersTitle);
-  samplersSection.appendChild(samplersHeader);
-  const samplersListEl = document.createElement("div");
-  samplersListEl.className = "rs-samplers-list";
-  samplersSection.appendChild(samplersListEl);
-  auxBody.appendChild(samplersSection);
-  const auxPrefillSection = document.createElement("div");
-  auxPrefillSection.className = "rs-subsection";
-  const auxPrefillRow = document.createElement("label");
-  auxPrefillRow.className = "rs-checkbox-row";
-  const auxPrefillCheck = document.createElement("input");
-  auxPrefillCheck.type = "checkbox";
-  auxPrefillCheck.className = "rs-checkbox";
-  auxPrefillCheck.id = "rs-aux-prefill";
-  auxPrefillRow.htmlFor = "rs-aux-prefill";
-  const auxPrefillText = document.createElement("span");
-  auxPrefillText.className = "rs-checkbox-label";
-  auxPrefillText.textContent = "Prefill compatibility";
-  auxPrefillText.title = `Converts the assistant message prefill to a user message prepended with "Begin your response with: <prefill>" to be compatible with models that don't support it.`;
-  auxPrefillRow.appendChild(auxPrefillCheck);
-  auxPrefillRow.appendChild(auxPrefillText);
-  auxPrefillSection.appendChild(auxPrefillRow);
-  auxBody.appendChild(auxPrefillSection);
-  const subBody = document.createElement("section");
-  subBody.className = "lr-settings-tab-body";
-  const subIntro = document.createElement("p");
-  subIntro.className = "lr-settings-intro";
-  subIntro.textContent = "Routes V2-effect runLLM(model='submodel') calls through this connection. Cards use this for lightweight classifiers / status updaters separate from the main and aux models. Empty fields inherit from Aux.";
-  subBody.appendChild(subIntro);
-  const submodelConnRow = document.createElement("div");
-  submodelConnRow.className = "rs-row";
-  const submodelConnLabel = document.createElement("label");
-  submodelConnLabel.className = "rs-label";
-  submodelConnLabel.textContent = "Connection";
-  submodelConnLabel.htmlFor = "rs-submodel-conn";
-  submodelConnRow.appendChild(submodelConnLabel);
-  const submodelConnSelect = createSearchableSelect({
-    id: "rs-submodel-conn",
-    className: "rs-trigger",
-    placeholder: "Loading connections…",
-    searchPlaceholder: "Search connections…",
-    emptyMessage: "No matching connections",
-    items: [],
-    onChange(value) {
-      log.info(`settings-tab: submodel connection changed to "${value ?? "<inherit-aux>"}"`);
-      sendToBackend({
-        type: "update_settings",
-        patch: { submodelConnectionId: value }
-      });
-    }
-  });
-  submodelConnRow.appendChild(submodelConnSelect.root);
-  subBody.appendChild(submodelConnRow);
-  const submodelModelRow = document.createElement("div");
-  submodelModelRow.className = "rs-row";
-  const submodelModelLabel = document.createElement("label");
-  submodelModelLabel.className = "rs-label";
-  submodelModelLabel.textContent = "Model override";
-  submodelModelLabel.htmlFor = "rs-submodel-model";
-  submodelModelRow.appendChild(submodelModelLabel);
-  const submodelModelInput = document.createElement("input");
-  submodelModelInput.id = "rs-submodel-model";
-  submodelModelInput.type = "text";
-  submodelModelInput.className = "rs-input";
-  submodelModelInput.placeholder = "(use connection default)";
-  submodelModelInput.spellcheck = false;
-  submodelModelRow.appendChild(submodelModelInput);
-  subBody.appendChild(submodelModelRow);
-  const submodelButtonRow = document.createElement("div");
-  submodelButtonRow.className = "rs-row rs-row-buttons";
-  const submodelSaveModelBtn = document.createElement("button");
-  submodelSaveModelBtn.type = "button";
-  submodelSaveModelBtn.className = "lrm-btn lrm-btn-primary";
-  submodelSaveModelBtn.textContent = "Save";
-  submodelSaveModelBtn.title = "Save the model override.";
-  submodelButtonRow.appendChild(submodelSaveModelBtn);
-  const submodelResetBtn = document.createElement("button");
-  submodelResetBtn.type = "button";
-  submodelResetBtn.className = "lrm-btn";
-  submodelResetBtn.textContent = "Reset";
-  submodelResetBtn.title = "Clear submodel fields.";
-  submodelButtonRow.appendChild(submodelResetBtn);
-  subBody.appendChild(submodelButtonRow);
-  const submodelSamplersSection = document.createElement("div");
-  submodelSamplersSection.className = "rs-subsection";
-  const submodelSamplersHeader = document.createElement("div");
-  submodelSamplersHeader.className = "rs-subsection-header";
-  const submodelSamplersTitle = document.createElement("h4");
-  submodelSamplersTitle.className = "rs-subsection-title";
-  submodelSamplersTitle.textContent = "Samplers";
-  submodelSamplersTitle.title = "Drag to set, double-click to reset.";
-  submodelSamplersHeader.appendChild(submodelSamplersTitle);
-  submodelSamplersSection.appendChild(submodelSamplersHeader);
-  const submodelSamplersListEl = document.createElement("div");
-  submodelSamplersListEl.className = "rs-samplers-list";
-  submodelSamplersSection.appendChild(submodelSamplersListEl);
-  subBody.appendChild(submodelSamplersSection);
-  const submodelPrefillSection = document.createElement("div");
-  submodelPrefillSection.className = "rs-subsection";
-  const submodelPrefillRow = document.createElement("label");
-  submodelPrefillRow.className = "rs-checkbox-row";
-  const submodelPrefillCheck = document.createElement("input");
-  submodelPrefillCheck.type = "checkbox";
-  submodelPrefillCheck.className = "rs-checkbox";
-  submodelPrefillCheck.id = "rs-sub-prefill";
-  submodelPrefillRow.htmlFor = "rs-sub-prefill";
-  const submodelPrefillText = document.createElement("span");
-  submodelPrefillText.className = "rs-checkbox-label";
-  submodelPrefillText.textContent = "Prefill compatibility";
-  submodelPrefillText.title = `Converts the assistant message prefill to a user message prepended with "Begin your response with: <prefill>" to be compatible with models that don't support it.`;
-  submodelPrefillRow.appendChild(submodelPrefillCheck);
-  submodelPrefillRow.appendChild(submodelPrefillText);
-  submodelPrefillSection.appendChild(submodelPrefillRow);
-  subBody.appendChild(submodelPrefillSection);
+    body.appendChild(buttonRow);
+    const samplersSection = document.createElement("div");
+    samplersSection.className = "rs-subsection";
+    const samplersHeader = document.createElement("div");
+    samplersHeader.className = "rs-subsection-header";
+    const samplersTitle = document.createElement("h4");
+    samplersTitle.className = "rs-subsection-title";
+    samplersTitle.textContent = "Samplers";
+    samplersTitle.title = isAux ? "Drag to set, double-click to reset, empty falls back to connection preset." : "Drag to set, double-click to reset.";
+    samplersHeader.appendChild(samplersTitle);
+    samplersSection.appendChild(samplersHeader);
+    const samplersListEl = document.createElement("div");
+    samplersListEl.className = "rs-samplers-list";
+    samplersSection.appendChild(samplersListEl);
+    body.appendChild(samplersSection);
+    const prefillSection = document.createElement("div");
+    prefillSection.className = "rs-subsection";
+    const prefillRow = document.createElement("label");
+    prefillRow.className = "rs-checkbox-row";
+    const prefillCheck = document.createElement("input");
+    prefillCheck.type = "checkbox";
+    prefillCheck.className = "rs-checkbox";
+    prefillCheck.id = isAux ? "rs-aux-prefill" : "rs-sub-prefill";
+    prefillRow.htmlFor = isAux ? "rs-aux-prefill" : "rs-sub-prefill";
+    const prefillText = document.createElement("span");
+    prefillText.className = "rs-checkbox-label";
+    prefillText.textContent = "Prefill compatibility";
+    prefillText.title = `Converts the assistant message prefill to a user message prepended with "Begin your response with: <prefill>" to be compatible with models that don't support it.`;
+    prefillRow.appendChild(prefillCheck);
+    prefillRow.appendChild(prefillText);
+    prefillSection.appendChild(prefillRow);
+    body.appendChild(prefillSection);
+    return { body, connSelect, modelInput, saveModelBtn, resetBtn, refreshBtn, samplersListEl, prefillCheck };
+  }
+  const { body: auxBody, connSelect, modelInput, saveModelBtn, resetBtn, refreshBtn, samplersListEl, prefillCheck: auxPrefillCheck } = buildModelChannel("aux", "Routes Lua's axLLMMain / axLLM calls through this connection. Useful for status-window updaters / classifiers separate from the main chat model.");
+  const {
+    body: subBody,
+    connSelect: submodelConnSelect,
+    modelInput: submodelModelInput,
+    saveModelBtn: submodelSaveModelBtn,
+    resetBtn: submodelResetBtn,
+    samplersListEl: submodelSamplersListEl,
+    prefillCheck: submodelPrefillCheck
+  } = buildModelChannel("submodel", "Routes V2-effect runLLM(model='submodel') calls through this connection. Cards use this for lightweight classifiers / status updaters separate from the main and aux models. Empty fields inherit from Aux.");
   const debugBody = document.createElement("section");
   debugBody.className = "lr-settings-tab-body";
   const debugIntro = document.createElement("p");
@@ -35590,7 +33995,6 @@ ${willDeleteRows ? "Deleted rows cannot be recovered. " : ""}${willRetranslate ?
         imageModelOverride: msg.settings.imageModelOverride,
         naiSettings: msg.settings.naiSettings
       };
-      lastSavedTs = Date.now();
       render();
       return;
     }
@@ -41490,7 +39894,6 @@ function setupImportOverlay(log, sendToBackend) {
   let hideTimer;
   let pendingConsentRequestId = null;
   let pendingCancel = null;
-  let uploadTotalBytes = 0;
   let importing = false;
   const queuedOperations = new Map;
   function setIndeterminate() {
@@ -41688,7 +40091,6 @@ function setupImportOverlay(log, sendToBackend) {
     importing = true;
     activeOperationId = null;
     log.info(`import-overlay: notifyImportStart label=${newLabel} source=${source} cancellable=${!!onCancel} totalBytes=${totalBytes ?? "?"}`);
-    uploadTotalBytes = typeof totalBytes === "number" && totalBytes > 0 ? totalBytes : 0;
     showOverlay(newLabel);
     pendingCancel = onCancel ?? null;
     cancelBtn.hidden = !pendingCancel;
@@ -44609,37 +43011,9 @@ function setup(ctx) {
   cleanups.push(() => frontendLua.dispose());
   const displayResolver = createDisplayResolver((chatId, vars) => {
     frontendLua.writeback(chatId, vars);
-  }, (effect) => {
-    if (effect.kind === "set-expression") {
-      display.setExpression(effect);
-      return;
-    }
-    ctx.chats.updateMessage(effect.chatId, effect.messageId, { content: effect.content }).catch((err) => {
-      flog2.warn(`display action message update failed chat=${effect.chatId} ` + `message=${effect.messageId}: ${String(err)}`);
-    });
   }, activationPatterns);
   cleanups.push(display.registerResolver(displayResolver));
   cleanups.push(setupHostServices(ctx));
-  const sendDisplayAuthority = (chatId) => {
-    if (!chatId)
-      return;
-    ctx.sendToBackend({
-      type: "display_authority",
-      chatId,
-      authoritative: getDisplayResolutionMode() === "on"
-    });
-  };
-  window.__lumirealmDisplayMode = (m) => {
-    const mode = m;
-    setDisplayResolutionMode(mode);
-    sendDisplayAuthority(activeRisuChatId);
-    flog2.info(`display resolution mode='${mode}'`);
-  };
-  cleanups.push(() => {
-    try {
-      delete window.__lumirealmDisplayMode;
-    } catch {}
-  });
   const dumpBubble = () => {
     const out = [];
     const bubbles = document.querySelectorAll("[data-message-id]");
@@ -44996,13 +43370,12 @@ function setup(ctx) {
       const prevChatId = activeRisuChatId;
       activeRisuChatId = msg.chatId;
       bgRenderer.setActiveChat(msg.chatId);
-      sendDisplayAuthority(msg.chatId);
       if (activeRisuChatId !== prevChatId) {
         displayResolver.resetScriptCache();
         activationPatterns.invalidate();
         if (sidebar)
           sidebar.setActiveChatId(activeRisuChatId);
-        if (getDisplayResolutionMode() !== "off" && msg.chatId && getDisplaySnapshot(msg.chatId)) {
+        if (msg.chatId && getDisplaySnapshot(msg.chatId)) {
           display.invalidate(["*"]);
         }
       }

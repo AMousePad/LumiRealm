@@ -1702,13 +1702,13 @@ var init_assets = __esm(() => {
     return `<div risu-ctrl="bgm___auto___${hit.src}" style="display:none;"></div>
 `;
   }, "BGM control marker. parser.svelte.ts. Lumi has no engine to act on it.");
-  register12("inlay", (ctx, args) => {
+  register12("inlay", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
     return `<img src="/api/v1/images/${id}"/>`;
   }, "Bare inlay image (no wrapper). Risu parser.svelte.ts.");
-  register12("inlayed", (ctx, args) => {
+  register12("inlayed", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -1716,7 +1716,7 @@ var init_assets = __esm(() => {
 
 `;
   }, "Wrapped inlay image. Risu parser.svelte.ts + 688.");
-  register12("inlayeddata", (ctx, args) => {
+  register12("inlayeddata", (_ctx, args) => {
     const id = String(args[0] ?? "");
     if (!id)
       return "";
@@ -1750,7 +1750,8 @@ var init_handlers = __esm(() => {
   init_metadata();
   init_assets();
 });
-// src/core/cbs/parser.ts
+
+// src/core/cbs/normalize.ts
 function normalizeMacroName(raw) {
   let out = "";
   for (let i = 0;i < raw.length; i++) {
@@ -1764,18 +1765,7 @@ function normalizeMacroName(raw) {
   }
   return out;
 }
-var OPAQUE_KINDS;
-var init_parser = __esm(() => {
-  OPAQUE_KINDS = new Set([
-    "pure",
-    "pure_display",
-    "ignore",
-    "escape",
-    "each",
-    "func",
-    "code"
-  ]);
-});
+
 // node_modules/zod/v3/helpers/util.js
 var util, objectUtil, ZodParsedType, getParsedType = (data) => {
   const t = typeof data;
@@ -5723,7 +5713,6 @@ function parseCatalog(raw) {
 }
 var init_loader = __esm(() => {
   init_schema();
-  init_parser();
 });
 
 // src/core/cbs/catalog/index.ts
@@ -5731,17 +5720,11 @@ var init_catalog = __esm(() => {
   init_schema();
   init_loader();
 });
-// src/core/cbs/runtime/mock.ts
-var init_mock = () => {};
-
 // src/core/cbs/runtime/index.ts
-var init_runtime = __esm(() => {
-  init_mock();
-});
+var init_runtime = () => {};
 
 // src/core/cbs/index.ts
 var init_cbs = __esm(() => {
-  init_parser();
   init_catalog();
   init_runtime();
 });
@@ -9214,81 +9197,23 @@ content#} form. Returns trimmed content if cond is not the empty string, 0, or -
 });
 
 // src/interpreter/evaluator/builtins.ts
-function parseUTCOffset(s) {
-  const m = /^UTC\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?$/i.exec(s.trim());
-  if (!m)
-    return null;
-  const sign = m[1] === "-" ? -1 : 1;
-  const h = parseInt(m[2], 10);
-  const mm = m[3] ? parseInt(m[3], 10) : 0;
-  return sign * (h + mm / 60);
-}
 function registerBuiltins(register) {
   register("bot", (ctx) => ctx.identity.charName, false);
   register("user", (ctx) => ctx.identity.userName, false);
   register("char", (ctx) => ctx.identity.charName, false);
   register("charname", (ctx) => ctx.identity.charName, false);
   register("notchar", (ctx) => ctx.identity.userName, false);
-  register("not_char", (ctx) => ctx.identity.userName, false);
-  register("newline", () => `
-`, false);
   register("nl", () => `
 `, false);
   register("n", () => `
 `, false);
   register("space", () => " ", false);
   register("noop", () => "", false);
-  register("//", () => "", false);
-  register("comment", () => "", false);
   register("note", () => "", false);
-  register("upper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
   register("uppercase", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
   register("toupper", (_ctx, a) => (a[0] ?? "").toUpperCase(), false);
-  register("lower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
   register("lowercase", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
   register("tolower", (_ctx, a) => (a[0] ?? "").toLowerCase(), false);
-  register("random", (ctx, a) => {
-    if (a.length === 0)
-      return String(Math.round(ctx.rng.random()));
-    const allNumeric = a.length <= 2 && a.every((x) => x.trim() !== "" && !isNaN(Number(x)));
-    if (allNumeric) {
-      const min = parseInt(a[0] ?? "", 10) || 0;
-      const max = parseInt(a[1] ?? "", 10) || 1;
-      if (max < min)
-        return String(min);
-      return String(Math.floor(ctx.rng.random() * (max - min + 1)) + min);
-    }
-    const idx = Math.floor(ctx.rng.random() * a.length);
-    return a[idx] ?? "";
-  }, false);
-  register("roll", (ctx, a) => {
-    const notation = a[0] ?? "1d6";
-    const match = /^(\d+)d(\d+)$/i.exec(notation);
-    if (!match)
-      return "0";
-    const count = Math.min(parseInt(match[1], 10), 100);
-    const sides = parseInt(match[2], 10);
-    if (sides < 1 || count < 1)
-      return "0";
-    let total = 0;
-    for (let i = 0;i < count; i++)
-      total += Math.floor(ctx.rng.random() * sides) + 1;
-    return String(total);
-  }, false);
-  register("time", (ctx, a) => {
-    const offset = a[0];
-    const now = new Date(ctx.clock.now());
-    if (offset) {
-      const parsed = parseUTCOffset(offset);
-      if (parsed !== null) {
-        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-        const shifted = new Date(utc + parsed * 3600000);
-        return shifted.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-      }
-    }
-    return now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  }, false);
-  register("jailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
   register("charjailbreak", (ctx) => ctx.character.jailbreakPrompt ?? "", false);
 }
 

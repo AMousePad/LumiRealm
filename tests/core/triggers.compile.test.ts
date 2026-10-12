@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { compileTrigger } from "../../src/core/triggers/compile.js";
+import { compileTrigger } from "../helpers/trigger-compiler/compile.js";
 import type { TriggerScript } from "../../src/core/schemas/triggerscript.js";
 
 function mk(effect: unknown[], over: Partial<TriggerScript> = {}): TriggerScript {
@@ -64,7 +64,7 @@ describe("M13 compiler — unknown opcode handling", () => {
   test("unknown opcode surfaces as warn issue + comment", () => {
     // Unknown opcodes (likely a newer RisuAI version) are intentionally
     // emitted as `severity: 'warn'` for graceful degradation rather than
-    // hard-fail at import. See `src/core/triggers/compile.ts:170-178`.
+    // hard-fail at import.
     const t = mk([{ type: "completelyFakeOpcode" }]);
     const out = compileTrigger(t);
     expect(out.issues.some((i) => i.severity === "warn" && i.message.startsWith("unknown opcode"))).toBe(true);

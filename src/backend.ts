@@ -76,10 +76,6 @@ import {
   getActiveLorebookByCharacter,
 } from './state/lorebook-cache.js';
 import { fetchLorebookForCharacter } from './state/lorebook-fetch.js';
-import {
-  setActiveModulesByNamespace,
-  clearActiveModulesByNamespace,
-} from './interpreter/modules-by-namespace-cache.js';
 import { clearVarOverlay } from './interpreter/evaluator/context.js';
 import { invalidateListenEditPreload } from './interpreter/listenedit-preload.js';
 import { setCachedMessages, invalidateCachedMessages } from './interpreter/messages-cache.js';
@@ -154,7 +150,7 @@ import {
   makeMaybeFinalizeImport,
 } from './boot/misc.js';
 import { createVariablesTogglesService } from './state/variables-toggles.js';
-import { assembleDisplaySnapshot } from './state/display-snapshot-assembly.js';
+import { assembleRuntimeConfig } from './state/display-snapshot-assembly.js';
 import { createSettingsService } from './state/settings-service.js';
 import { makeCaptureUserId } from './boot/capture-user.js';
 import { createImportCardOrchestrator } from './boot/import-card.js';
@@ -172,12 +168,7 @@ import { consumeOwnChatChange } from './state/own-chat-change.js';
 import { consumeOwnCharacterEdit, expectCharacterEdit } from './state/own-character-edit.js';
 import { recompileDerivedPayload } from './state/derived-payload.js';
 import { consumeIfOurWrite } from './state/recent-writes.js';
-import {
-  invalidateRenderMcpForChat,
-  invalidateRenderMcpForMessage,
-} from './state/render-mcp-cache.js';
 import { invalidateMacroInterceptorForChat } from './state/macro-interceptor-cache.js';
-import { scheduleStateChangedRefresh as scheduleDebouncedRefresh } from './state/state-changed-debouncer.js';
 import {
   logStore,
   loadPersistedLogState,
@@ -360,37 +351,6 @@ const variableState = new VariableStateStore();
 
 const toggleState = new ToggleStateStore();
 
-function scheduleStateChangedRefresh(chatId: string, userId: string | undefined): void {
-  log.debug(`scheduleStateChangedRefresh: scheduling for chat=${chatId}`);
-  scheduleDebouncedRefresh(
-    chatId,
-    async () => {
-      const active = activeCardByChat.get(chatId);
-      if (!active) {
-        log.debug(`scheduleStateChangedRefresh: skipped (no active card) chat=${chatId}`);
-        return;
-      }
-      const t0 = Date.now();
-      // Body content resolves at render time via the 'render' MCP origin.
-      // Var changes invalidate the render-MCP cache (per CHAT_CHANGED) and
-      // Lumi's per-touchedVars displayRegexContentCache, which together
-      // re-fetch only the affected bubbles. No bake walk here.
-      invalidateRenderMcpForChat(chatId);
-      invalidateMacroInterceptorForChat(chatId);
-      await refreshBgHtml(active, chatId, userId);
-      // Risu's reloadDisplay/v2UpdateGUI bump ReloadGUIPointer (full repaint).
-      // guiReload makes the FE invalidate ['*'] once the fresh snapshot lands.
-      await refreshVariables(active, chatId, userId, { guiReload: true });
-      log.debug(`scheduleStateChangedRefresh: completed chat=${chatId} elapsed=${Date.now() - t0}ms`);
-    },
-    (err) => log.error(`scheduleStateChangedRefresh: refresh threw chat=${chatId}: ${errMsg(err)}`),
-  );
-}
-
-function makeStateChangedCallback(chatId: string, userId: string | undefined): () => void {
-  return () => scheduleStateChangedRefresh(chatId, userId);
-}
-
 // Per-user settings cache. Defaults to DEFAULT_SETTINGS until first read,
 // so Lua dispatches before `request_settings` arrives fall back gracefully.
 
@@ -412,7 +372,6 @@ const getSkipAssetThumbnails = async (uid: string): Promise<boolean> =>
   (await getSettingsForUser(uid)).skipAssetThumbnails;
 const getCachedSettingsSync = settingsService.getCachedSettingsSync;
 const applySettingsPatch = settingsService.applySettingsPatch;
-const makeAuxDebugCapture = settingsService.makeAuxDebugCapture;
 const listConnectionsForUser = settingsService.listConnectionsForUser;
 const activeCardByChat = new Map<string, ActiveCard>();
 // Tracks the last chat each user opened so a page-refresh (SETTINGS_UPDATED
@@ -505,8 +464,6 @@ const orphanOrchestrator = createOrphanOrchestrator({
   log,
   errMsg,
 });
-
-const detectDeletedWhileOff = (userId: string) => orphanOrchestrator.detectDeletedWhileOff(userId);
 const scanOrphanedImages = (userId: string) => orphanOrchestrator.scanOrphanedImages(userId);
 const listStaleModuleRegexIds = (userId: string) => orphanOrchestrator.listStaleModuleRegexIds(userId);
 const listStaleCharRegexIds = (userId: string) => orphanOrchestrator.listStaleCharRegexIds(userId);
@@ -762,47 +719,18 @@ function dumpPayload(raw: unknown): string {
 // Capture userId from every event callback so operator-scoped Spindle calls
 // succeed before any frontend message arrives.
 
-// Decoupled from bg-html paint so empty-bg cards activate.
-const FE_DISPLAY_ENABLED = (() => {
-  const v = (globalThis as { Bun?: { env?: Record<string, string | undefined> } }).Bun?.env?.LUMIREALM_FE_DISPLAY;
-  return v !== '0' && v !== 'false';
-})();
-
-const PROMPT_REGEX_ENV = (() => {
-  const v = (globalThis as { Bun?: { env?: Record<string, string | undefined> } }).Bun?.env?.LUMIREALM_PROMPT_REGEX;
-  return v !== '0' && v !== 'false';
-})();
-
-// The host-skip side of the apply<=>skip invariant rides spindle.promptRegex.setOwnedChats.
-const PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE = typeof spindle.promptRegex?.setOwnedChats === 'function';
-
-const PROMPT_REGEX_ACTIVE = PROMPT_REGEX_ENV && PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE;
-
-if (PROMPT_REGEX_ENV && !PROMPT_REGEX_HOST_OWNERSHIP_AVAILABLE) {
-  log.warn(
-    'Inline prompt regex is enabled (LUMIREALM_PROMPT_REGEX) and backendProcesses is available, but ' +
-      'spindle.promptRegex.setOwnedChats is missing on this host; declining prompt-regex ownership so the host ' +
-      'keeps its own pass (a host that cannot be told to skip would otherwise double-apply). Upgrade Lumiverse to ' +
-      'enable inline prompt regex.',
-  );
-}
-
-const promptRegexRunnerClient = PROMPT_REGEX_ACTIVE
-  ? createPromptRegexRunnerClient({ log, errMsg })
-  : null;
+const promptRegexRunnerClient = createPromptRegexRunnerClient({ log, errMsg });
 
 const promptRegexOwnedByUser = new Map<string, string>();
 let promptRegexOwnedSnapshot = '';
 
 function syncPromptRegexOwnedChats(): void {
-  if (!PROMPT_REGEX_ACTIVE) return;
   const owned = new Set<string>();
   for (const chatId of promptRegexOwnedByUser.values()) owned.add(chatId);
   const next = [...owned].sort().join(' ');
   if (next === promptRegexOwnedSnapshot) return;
   promptRegexOwnedSnapshot = next;
   const api = spindle.promptRegex;
-  if (typeof api?.setOwnedChats !== 'function') return;
   try {
     api.setOwnedChats([...owned]);
   } catch (err) {
@@ -811,7 +739,6 @@ function syncPromptRegexOwnedChats(): void {
 }
 
 function dropPromptRegexOwnershipForChat(chatId: string): void {
-  if (!PROMPT_REGEX_ACTIVE) return;
   let dropped = false;
   for (const [uid, owned] of promptRegexOwnedByUser) {
     if (owned === chatId) {
@@ -869,7 +796,7 @@ function sendSetActiveChat(
     log.warn(`sendSetActiveChat: ${(err as Error).message}`);
   }
   if (activeCharacterId !== null) void touchCharacterRecency(activeCharacterId, userId);
-  if (PROMPT_REGEX_ACTIVE && userId !== undefined) {
+  if (userId !== undefined) {
     const nowOwned = activeChatId !== null;
     const prevOwned = promptRegexOwnedByUser.get(userId);
     if (nowOwned) {
@@ -881,7 +808,7 @@ function sendSetActiveChat(
         // resumes its own pass). Fire-and-forget — chat-open must not block on spawn.
         const claimedChat = activeChatId!;
         const claimingUser = userId;
-        void promptRegexRunnerClient?.warmUp(claimingUser).then((ok) => {
+        void promptRegexRunnerClient.warmUp(claimingUser).then((ok) => {
           if (ok) return;
           if (promptRegexOwnedByUser.get(claimingUser) !== claimedChat) return;
           log.error(
@@ -923,11 +850,8 @@ const activeCardLoader = createActiveCardLoader({
   buildVersionError: (missing) => new RisuCompatVersionError(missing, EXTENSION_VERSION),
   loadAttachedModulesForRuntime: (userId, ids) => loadAttachedModulesForRuntime(userId, ids),
   buildSyntheticStoredCard,
-  modulesByNamespaceFromCard,
   setActiveAssetIndexes,
   setActiveScriptstateDefaults,
-  setActiveModulesByNamespace,
-  clearActiveModulesByNamespace,
   setActiveLorebook,
   fetchLorebookForCharacter: (worldBookIds, userId) => fetchLorebookForCharacter(worldBookIds, userId),
   hasActiveLorebookForCharacter,
@@ -972,7 +896,6 @@ const applySvgRasterIndex = createApplySvgRasterIndex({
   appendImageIdsToJournal: (userId, charId, ids) => appendImageIdsToJournal(journalStorage(), userId, charId, ids),
   activeCardByChat,
   ensureActiveCardForChat,
-  invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
   refreshBgHtml,
@@ -983,9 +906,9 @@ const applySvgRasterIndex = createApplySvgRasterIndex({
 const TRANSLATE_TARGET_LANG = 'en';
 
 let runtimeConfigVersion = 0;
-async function assembleRuntimeSnapshot(active: ActiveCard, chatId: string, userId: string, vars: import('./display/snapshot.js').DisplaySnapshot['vars']) {
+async function assembleRuntimeSnapshot(active: ActiveCard, chatId: string, userId: string) {
   const configVersion = ++runtimeConfigVersion;
-  const snapshot = await assembleDisplaySnapshot({
+  const snapshot = await assembleRuntimeConfig({
     modulesByNamespaceFromCard,
     legacyMediaFindings: uid => getCachedSettingsSync(uid).legacyMediaFindings,
     getCompiledLibraries: active => {
@@ -994,7 +917,7 @@ async function assembleRuntimeSnapshot(active: ActiveCard, chatId: string, userI
       if (!compiled) { compiled = prepareTriggers(active.card.risuPayload, id); compiledByCharacter.set(id, compiled); }
       return compiled.filter(entry => entry.type === 'library');
     },
-  }, active, chatId, userId, vars);
+  }, active, chatId, userId);
   return { ...snapshot, configVersion };
 }
 
@@ -1004,7 +927,6 @@ const variablesTogglesService = createVariablesTogglesService({
     invalidateToggleMacroCache(userId);
     for (const [chatId, active] of activeCardByChat) {
       if (active.ownerUserId !== userId) continue;
-      invalidateRenderMcpForChat(chatId);
       invalidateMacroInterceptorForChat(chatId);
       invalidateListenEditPreload(chatId);
     }
@@ -1017,9 +939,8 @@ const variablesTogglesService = createVariablesTogglesService({
   ensureActiveCardForChat,
   refreshBgHtml,
   send,
-  pushDisplaySnapshot: (active, chatId, userId, vars, opts) => {
-    if (!FE_DISPLAY_ENABLED) return;
-    void assembleRuntimeSnapshot(active, chatId, userId, vars)
+  pushDisplaySnapshot: (active, chatId, userId, _vars, opts) => {
+    void assembleRuntimeSnapshot(active, chatId, userId)
       .then((snapshot) => {
         send({
           type: 'display_snapshot',
@@ -1040,7 +961,7 @@ const writeToggleValue = variablesTogglesService.writeToggleValue;
 const frontendLua = createFrontendLuaBackend(spindle as typeof spindle & FrontendLuaHostContract, async (chatId, characterId, userId) => {
   const active = await ensureActiveCardForChat(chatId, characterId, userId);
   if (!active) throw new Error('The chat has no active Risu runtime');
-  const snapshot = await assembleRuntimeSnapshot(active, chatId, userId, { local: {}, global: {}, chat: {} });
+  const snapshot = await assembleRuntimeSnapshot(active, chatId, userId);
   return { snapshot, settings: getCachedSettingsSync(userId) };
 });
 spindle.on('FRONTEND_SESSION_CLOSED', userScoped(async (raw, userId) => {
@@ -1058,19 +979,15 @@ const runBinding = triggerDispatcher.runBinding;
 const dispatchManualTrigger = triggerDispatcher.dispatchManualTrigger;
 const dispatchButtonClick = triggerDispatcher.dispatchButtonClick;
 
-const feDisplayShadowOptOut = new Set<string>();
 
 createLumiInterceptors({
   executeFrontend: frontendLua.call,
   prepareTriggerContext: readonlyResolver.prepareTriggerContext,
   activeCardByChat,
   captureUserId,
-  isFeDisplayAuthoritative: (chatId) => FE_DISPLAY_ENABLED && !feDisplayShadowOptOut.has(chatId),
-  isPromptRegexAuthoritative: (chatId: string) => PROMPT_REGEX_ACTIVE && isPromptRegexOwnedChat(chatId),
+  isPromptRegexAuthoritative: (chatId: string) => isPromptRegexOwnedChat(chatId),
   dispatchPromptRegex: (prebuilt, scripts, messages, userId) =>
-    promptRegexRunnerClient
-      ? promptRegexRunnerClient.dispatch(prebuilt, scripts, messages, userId)
-      : Promise.resolve({ ok: false, changed: false, messages }),
+    promptRegexRunnerClient.dispatch(prebuilt, scripts, messages, userId),
   ensureActiveCardForChat,
   getCachedSettingsSync,
   modulesByNamespaceFromCard,
@@ -1119,7 +1036,6 @@ async function refreshMessagesCache(chatId: string, _userId: string | undefined)
 const messageVarPass = createMessageVarPass({
   stripMessageSetvars: readonlyResolver.stripMessageSetvars,
   refreshMessagesCache,
-  invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
   log,
   errMsg,
@@ -1141,8 +1057,6 @@ const lifecycleHandlers = createLifecycleEventHandlers({
   // Trampoline: characterModuleAttach is wired below, this defers the lookup to call time.
   invalidateActiveForCharacter: (characterId, userId) => characterModuleAttach.invalidateActiveForCharacter(characterId, userId),
   onActiveChatEvicted: dropPromptRegexOwnershipForChat,
-  invalidateRenderMcpForChat,
-  invalidateRenderMcpForMessage,
   invalidateMacroInterceptorForChat,
   invalidateListenEditPreload,
   refreshMessagesCache,
@@ -1417,7 +1331,6 @@ const charactersAttachedTo = characterModuleAttach.charactersAttachedTo;
 const syncModuleWorldBook = worldBookOps.syncModuleWorldBook;
 void worldBookOps.addWorldBookToCharacter;
 void worldBookOps.removeWorldBookFromCharacter;
-const dispatchModuleArtifactInstall = worldBookOps.dispatchModuleArtifactInstall;
 
 const lorebookImporter = createLorebookImporter({
   readLumirealm: (characterId, userId) => readLumirealm(charactersApi(), characterId, userId),
@@ -1813,7 +1726,6 @@ const importHandlers = createImportHandlers({
   ensureActiveCardForChat,
   sendSetActiveChat,
   setChatStyleMode,
-  invalidateRenderMcpForChat,
   invalidateMacroInterceptorForChat,
   refreshBgHtml,
   refreshVariables,
@@ -2028,10 +1940,6 @@ const handlerRegistry: HandlerRegistry = {
       ok: msg.ok,
       deleted: msg.deleted,
     });
-  },
-  display_authority: async (msg) => {
-    if (msg.authoritative) feDisplayShadowOptOut.delete(msg.chatId);
-    else feDisplayShadowOptOut.add(msg.chatId);
   },
   active_preset: async (msg, ctx) => {
     await applyActivePreset(spindle.regex_scripts, ctx.userId, msg.presetId);

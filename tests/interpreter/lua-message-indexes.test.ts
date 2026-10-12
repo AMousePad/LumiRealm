@@ -4,7 +4,7 @@ import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
 import { commitInvocation, type TriggerInvocationState } from '../../src/interpreter/runtime/invocation.js';
 import type { HostApi, HostMessage } from '../../src/interpreter/host.js';
 
-import { execute, clearLuaEngines } from '../../src/interpreter/lua-bridge.js';
+import { execute, clearLuaEngines } from '../helpers/lua-bridge.js';
 
 afterEach(clearLuaEngines);
 

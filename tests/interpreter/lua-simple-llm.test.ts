@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HostApi } from '../../src/interpreter/host';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime';
-import { clearLuaEngines } from '../../src/interpreter/lua-bridge';
+import { clearLuaEngines } from '../helpers/lua-bridge.js';
 import { divergenceLuaScriptNS, makeLuaDivergenceHost } from '../helpers/lua-risu-divergence';
 
 afterEach(clearLuaEngines);

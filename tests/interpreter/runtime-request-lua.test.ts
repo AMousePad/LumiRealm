@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { makeRisuTriggerRuntime, makeRisuRegexRuntime } from '../../src/interpreter/runtime.js';
-import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
+import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
+import { execute as luaExecute } from '../helpers/lua-bridge.js';
 import {
   resetRequestRateLimit,
   setRequestClock,
@@ -14,7 +14,7 @@ import type { HostApi, HostCorsFetch, ScriptNS } from '../../src/interpreter/hos
 function scriptNs(): ScriptNS {
   return {
     require: async (name: string) => {
-      if (name === 'risu-compat') return { makeRisuTriggerRuntime, makeRisuRegexRuntime };
+      if (name === 'risu-compat') return { makeRisuTriggerRuntime };
       if (name === 'risu-compat-lua') return { execute: luaExecute };
       throw new Error(name);
     },

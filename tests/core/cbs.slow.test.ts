@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { listLibraryCards } from "../helpers/local-library.js";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseCbs, serialize, lex, normalizeMacroName, parseMacroInner } from "../../src/core/cbs/index.js";
+import { parseCbs, serialize, lex, normalizeMacroName, parseMacroInner } from "../helpers/cbs/index.js";
 import { readCharx } from "../../src/core/charx/reader.js";
 
 // ─── helpers: round-trip assertion ─────────────────────────────────────────

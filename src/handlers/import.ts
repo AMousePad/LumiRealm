@@ -34,7 +34,6 @@ export interface ImportHandlerDeps {
     userId: string,
   ) => void;
   readonly setChatStyleMode: (chatId: string, mode: 'bounded' | 'extension-relaxed', userId: string | undefined) => void;
-  readonly invalidateRenderMcpForChat: (chatId: string) => void;
   readonly invalidateMacroInterceptorForChat: (chatId: string) => void;
   readonly refreshBgHtml: (active: ActiveCard, chatId: string, userId: string) => Promise<void>;
   readonly refreshVariables: (
@@ -141,7 +140,6 @@ export function createImportHandlers(deps: ImportHandlerDeps): {
             if (active) {
               // Host layout claims are frontend state and must be replayed after a reload.
               deps.setChatStyleMode(lastChat, 'extension-relaxed', ctx.userId);
-              deps.invalidateRenderMcpForChat(lastChat);
               deps.invalidateMacroInterceptorForChat(lastChat);
               await deps.refreshBgHtml(active, lastChat, ctx.userId);
               await deps.refreshVariables(active, lastChat, ctx.userId, { force: true });

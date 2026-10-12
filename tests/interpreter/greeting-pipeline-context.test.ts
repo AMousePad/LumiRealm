@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { buildBackendPipelineInput } from '../../src/interceptors/prompt-regex-apply.js';
 import { runPipeline } from '../../src/interpreter/evaluator/pipeline.js';
-import { assembleDisplaySnapshot } from '../../src/state/display-snapshot-assembly.js';
+import { assembleDisplaySnapshot } from '../helpers/display-snapshot-reference.js';
 import { clearMessagesCache } from '../../src/interpreter/messages-cache.js';
 
 const character = {

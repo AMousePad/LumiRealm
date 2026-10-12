@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
-import { clearLuaEngines, execute } from '../../src/interpreter/lua-bridge.js';
+import { clearLuaEngines, execute } from '../helpers/lua-bridge.js';
 import { observeLuaHostState, prepareLuaHostState } from '../../src/interpreter/runtime/lua-state.js';
 import { makeLuaDivergenceHost, divergenceLuaScriptNS } from '../helpers/lua-risu-divergence.js';
 import { basicTriggerContext } from '../helpers/trigger-runtime.js';

@@ -77,7 +77,6 @@ export async function retranslateCharacterFromCurrentSource(
       {
         sourceId: `repair:${args.characterId}`,
         mode: 'full',
-        emitPackScripts: false,
         ...(backgroundHtmlOverride !== undefined ? { backgroundHtmlOverride } : {}),
       },
     );

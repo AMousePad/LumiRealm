@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { dispatchBinding, dispatchByManualName, makeDispatcherScriptNS, registerManualTriggers, type CompiledTriggerEntry } from '../../src/interpreter/dispatcher.js';
 import type { HostApi, TriggerRuntimeOpts } from '../../src/interpreter/host.js';
 import type { TriggerScript } from '../../src/core/schemas/triggerscript.js';
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { execute } from '../helpers/lua-bridge.js';
 
 function entry(source: TriggerScript): CompiledTriggerEntry {
-  return { name: source.comment, source, code: '', type: 'trigger', triggers: [], binding: source.type,
+  return { name: source.comment, source, type: 'trigger', triggers: [], binding: source.type,
     rtOpts: { characterId: 'character', displayMode: false, lowLevelAccess: false, binding: source.type } };
 }
 

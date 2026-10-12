@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { createDisplayResolver } from '../../src/display/resolver.js';
-import { runEditDisplayChain } from '../../src/display/lua-runner.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
+import { runEditDisplayChain } from '../helpers/snapshot-display.js';
 import { applyVarDelta, clearDisplaySnapshot, getDisplaySnapshot, setDisplaySnapshot, type DisplaySnapshot } from '../../src/display/snapshot.js';
-import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
+import { setWasmoonEnabled } from '../helpers/wasmoon-mode.js';
 
 function snapshot(code: string, chatId = 'shared-display'): DisplaySnapshot {
   return {

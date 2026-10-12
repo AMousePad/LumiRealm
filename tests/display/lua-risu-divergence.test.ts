@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { createDisplayResolver } from '../../src/display/resolver.js';
-import { runEditDisplayChain } from '../../src/display/lua-runner.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
+import { runEditDisplayChain } from '../helpers/snapshot-display.js';
 import { clearDisplaySnapshot, setDisplaySnapshot, snapshotMessagesChanged, type DisplaySnapshot } from '../../src/display/snapshot.js';
 import { withCurrentDisplayMessage } from '../../src/display/host-shim.js';
-import { type DisplayRuntimeEffect } from '../../src/display/host-shim.js';
-import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
+import { type DisplayRuntimeEffect } from '../helpers/snapshot-host.js';
+import { setWasmoonEnabled } from '../helpers/wasmoon-mode.js';
 
 // RisuAI e565563a: src/ts/process/scriptings.ts runScripted and runLuaEditTrigger.
 // Strict mode makes these executable known failures red until their fixes land.

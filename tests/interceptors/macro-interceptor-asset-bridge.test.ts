@@ -44,7 +44,6 @@ function deps(active: ActiveCard): CreateLumiInterceptorsDeps {
     activeCardByChat: new Map([[CHAT_ID, active]]),
     executeFrontend: async () => { throw new Error('Unexpected Lua call in asset macro test'); },
     captureUserId: () => undefined,
-    isFeDisplayAuthoritative: () => false,
     isPromptRegexAuthoritative: () => false,
     dispatchPromptRegex: async (_prebuilt, _scripts, messages) => ({
       ok: false,

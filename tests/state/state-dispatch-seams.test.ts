@@ -3,7 +3,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   buildDispatchSeams,
   type BuildDispatchSeamsArgs,
-} from '../../src/state/dispatch-seams.js';
+} from '../helpers/dispatch-seams.js';
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store.js';
 
 const NOOP_REMEMBER = (_chatId: string, _msgId: string, _content: string): void => { void _chatId; void _msgId; void _content; };

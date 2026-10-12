@@ -3,7 +3,7 @@ import type { HostApi, HostMessage, TriggerRuntimeOpts } from '../../src/interpr
 import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
 import { runListenEditChain } from '../../src/interpreter/listen-edit.js';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
-import { execute, clearLuaEngines } from '../../src/interpreter/lua-bridge.js';
+import { execute, clearLuaEngines } from '../helpers/lua-bridge.js';
 
 afterEach(() => clearLuaEngines());
 

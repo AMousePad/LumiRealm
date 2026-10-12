@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { assembleDisplaySnapshot } from '../../src/state/display-snapshot-assembly.js';
-import { runEditDisplayChain } from '../../src/display/lua-runner.js';
+import { assembleDisplaySnapshot } from '../helpers/display-snapshot-reference.js';
+import { runEditDisplayChain } from '../helpers/snapshot-display.js';
 import { buildPreloaded } from '../../src/display/host-shim.js';
-import { setWasmoonEnabled } from '../../src/interpreter/runtime.js';
+import { setWasmoonEnabled } from '../helpers/wasmoon-mode.js';
 import type { ActiveCard } from '../../src/interpreter/dispatch.js';
 
 const globals = globalThis as unknown as { spindle: unknown };

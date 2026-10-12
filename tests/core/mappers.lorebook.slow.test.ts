@@ -187,12 +187,8 @@ describe("mapLoreBookEntry — field mapping", () => {
     expect(out.extensions["risu_extentions"]).toEqual({ risu_case_sensitive: false });
   });
 
-  test("decorators at the top of content are parsed + mapped + stripped from content", () => {
-    // Integration test for the lorebook-decorators wiring: decorators
-    // listed at the top of `content` should:
-    //   1. Map to Lumi-native entry fields (Tier 1).
-    //   2. Be stripped from the entry's `content` body.
-    //   3. Stash unmapped (Tier 2/3) decorators on extensions._risu_decorators.
+  test("mapped decorators become fields while runtime decorators remain in content", () => {
+    // The host evaluates greeting-dependent activation when selecting lore.
     const out = mapLoreBookEntry(
       parseLoreBook({
         ...baseEntry,
@@ -209,11 +205,8 @@ describe("mapLoreBookEntry — field mapping", () => {
     expect(out.position).toBe(1); // after_desc
     expect(out.role).toBe("assistant");
     expect(out.key).toEqual(["apple", "cherry", "durian"]);
-    expect(out.content).toBe("actual entry body here\nsecond line");
-    // Tier 2 stash for the future runtime intercept.
-    const stashed = out.extensions["_risu_decorators"] as Array<{ name: string; args: string[] }>;
-    expect(stashed).toBeDefined();
-    expect(stashed.some((d) => d.name === "is_greeting" && d.args[0] === "0")).toBe(true);
+    expect(out.content).toBe("@@is_greeting 0\nactual entry body here\nsecond line");
+    expect(out.extensions["_risu_decorators"]).toBeUndefined();
   });
 
   test("entry with NO decorators leaves content + extensions untouched by decorator pass", () => {

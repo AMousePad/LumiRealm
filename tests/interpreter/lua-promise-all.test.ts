@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { execute } from '../helpers/lua-bridge.js';
 
 describe('Lua Promise.all', () => {
   test('awaits host promises in input order and accepts resolved and plain values', async () => {

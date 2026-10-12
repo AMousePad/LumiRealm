@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { execute, clearLuaEngines } from '../../src/interpreter/lua-bridge.js';
+import { execute, clearLuaEngines } from '../helpers/lua-bridge.js';
 import { LuaCallbackError, LuaChunkError } from '../../src/interpreter/lua-engine.js';
 
 afterEach(async () => { await clearLuaEngines(); await clearLuaEngines('other-user'); });

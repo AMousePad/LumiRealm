@@ -48,7 +48,7 @@ export function isRisuPresetBytes(bytes: Uint8Array, fileName = ''): boolean {
   return false;
 }
 
-export async function decodeRisuPreset(bytes: Uint8Array, fileName = ''): Promise<RisuPresetRaw> {
+export async function decodeRisuPreset(bytes: Uint8Array, _fileName = ''): Promise<RisuPresetRaw> {
   // 1. Plain JSON
   if (bytes.length > 0 && bytes[0] === 0x7b /* '{' */) {
     try {

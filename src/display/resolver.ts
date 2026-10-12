@@ -35,7 +35,6 @@ import {
   withCurrentDisplayMessage,
   resolveHostDisplayMessageIndex,
   resolveRisuDisplayMessageIndex,
-  type DisplayRuntimeEffectSink,
 } from './host-shim.js';
 import { buildModuleDisplayPlan } from './module-action-plan.js';
 import { deferDisplayAssets, displayAssetBaseline, finalizeDisplayAssets, parseDisplayCaller } from './caller-parser.js';
@@ -216,7 +215,6 @@ async function runApply(
   recorder: VarReadRecorder,
   activationPatterns: ActivationPatternCache,
   cache: Map<string, SpindleDisplayResolveResult>,
-  onEffect?: DisplayRuntimeEffectSink,
 ): Promise<string> {
   const ctx = args.context;
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
@@ -283,7 +281,6 @@ async function runApply(
           if (dependencies.effects) reads.volatile = true;
           content = await runEditDisplayAtActions(snap, content, ctx, [step.action], {
             resolveTemplate: text => evalTemplate(snap, text, ctx, reads),
-            ...(onEffect ? { onEffect } : {}),
           });
           continue;
         }
@@ -319,7 +316,6 @@ async function runApply(
 
 export function createDisplayResolver(
   writeback?: DisplayWritebackSink,
-  onEffect?: DisplayRuntimeEffectSink,
   activationPatterns: ActivationPatternCache = createActivationPatternCache(),
 ): SpindleDisplayResolver & { resetScriptCache(): void } {
   const scriptCache = new Map<string, SpindleDisplayResolveResult>();
@@ -365,7 +361,6 @@ export function createDisplayResolver(
               }));
             },
             (vars) => writeback?.(chatId, vars),
-            onEffect,
             // Same key shape as the CBS recorder so snapshot-diff invalidation
             // matches entries whose var reads happened inside Lua.
             (name, scope) => {
@@ -400,7 +395,6 @@ export function createDisplayResolver(
             {
               resolveTemplate: (text) =>
                 evalTemplate(liveSnap, text, args.context, recorder),
-              ...(onEffect ? { onEffect } : {}),
             },
           );
         }
@@ -452,7 +446,7 @@ export function createDisplayResolver(
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
       try {
         feContent = args.scripts.length === 0 ? args.content
-          : await runApply(snap, args, recorder, activationPatterns, scriptCache, onEffect);
+          : await runApply(snap, args, recorder, activationPatterns, scriptCache);
         if (args.processingState !== feContent) {
           feContent = finalizeDisplayAssets(buildInput(snap, feContent, args.context), recorder);
         }

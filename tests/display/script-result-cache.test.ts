@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mapRegex } from '../../src/core/mappers/regex.js';
-import { createDisplayResolver } from '../../src/display/resolver.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
 import { clearDisplaySnapshot, setDisplaySnapshot } from '../../src/display/snapshot.js';
 import type { FeRegexScript } from '../../src/display/regex-apply.js';
 import { snapshot, context } from '../helpers/display-lua-fixture.js';

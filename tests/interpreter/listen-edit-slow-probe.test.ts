@@ -1,8 +1,8 @@
 import { describe, test, expect, afterEach } from 'bun:test';
 import { runListenEditChain, type ListenEditTrigger } from '../../src/interpreter/listen-edit.js';
 import type { HostApi, ScriptNS, DispatchData, HostMessage } from '../../src/interpreter/host.js';
-import { makeRisuRegexRuntime, makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
-import { execute as luaExecute } from '../../src/interpreter/lua-bridge.js';
+import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
+import { execute as luaExecute } from '../helpers/lua-bridge.js';
 import { logStore } from '../../src/log/store.js';
 
 // ─── Slow-chain attribution ───────────────────────────────────────────────
@@ -16,7 +16,7 @@ import { logStore } from '../../src/log/store.js';
 function makeMockScriptNS(): ScriptNS {
   return {
     require: async (name: string) => {
-      if (name === 'risu-compat') return { makeRisuTriggerRuntime, makeRisuRegexRuntime };
+      if (name === 'risu-compat') return { makeRisuTriggerRuntime };
       if (name === 'risu-compat-lua') return { execute: luaExecute };
       throw new Error('mock require: unknown ' + name);
     },

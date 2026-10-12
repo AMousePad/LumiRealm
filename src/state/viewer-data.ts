@@ -9,7 +9,7 @@ import type {
   ViewerTriggerEffectSummary,
   ViewerTriggerEntry,
 } from '../types/messages.js';
-import type { LumirealmCharacterData, StoredRegexScript } from '../payload/types.js';
+import type { LumirealmCharacterData } from '../payload/types.js';
 import type { ModuleEnvelope } from './modules-store.js';
 import { imageUrlFromId } from '../interpreter/image-cache.js';
 import { extractCardSideBackgroundHtml } from '../core/mappers/background-html.js';

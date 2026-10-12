@@ -211,7 +211,8 @@ test('saved drawer globals reach CBS and Lua on open, change and deletion withou
     expect((await read())?.content).toBe(expected);
     expect(refreshes).toEqual([false]);
     expect(invalidations).toEqual([['global:toggle_mode']]);
-    await runtime.snapshot({ ...config, configVersion: sequence, vars: { ...config.vars, global: { toggle_mode: 'stale' } } });
+    const staleConfig = { ...config, configVersion: sequence, vars: { ...config.vars, global: { toggle_mode: 'stale' } } };
+    await runtime.snapshot(staleConfig);
     expect((await read())?.content).toBe(expected);
     await runtime.manual(config.chatId, { kind: 'manual', name: 'readToggle' });
     expect(getDisplaySnapshot(config.chatId)?.vars.local.seen).toBe(expected);

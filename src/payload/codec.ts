@@ -4,7 +4,6 @@ import type {
   LumirealmUserOverrides,
   RisuPayload,
   StoredRegexScript,
-  StoredRisuCard,
 } from './types.js';
 
 export class RisuCompatUnsupportedError extends Error {
@@ -76,26 +75,6 @@ export function preValidateRequires(
     missing.push(feature);
   }
   return { ok: missing.length === 0, missing, degraded };
-}
-
-export function makeStoredCard(
-  characterId: string,
-  extensionVersion: string,
-  payload: RisuPayload,
-  assetIndex: Record<string, AssetIndexEntry>,
-  emotionIndex: Record<string, AssetIndexEntry> = {},
-  regexScripts?: readonly StoredRegexScript[],
-): StoredRisuCard {
-  return {
-    schema_version: 1,
-    character_id: characterId,
-    stored_at: Date.now(),
-    extension_version: extensionVersion,
-    risuPayload: payload,
-    asset_index: assetIndex,
-    emotion_index: emotionIndex,
-    ...(regexScripts && regexScripts.length > 0 ? { regex_scripts: regexScripts } : {}),
-  };
 }
 
 export function buildLumirealmData(

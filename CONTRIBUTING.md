@@ -41,7 +41,7 @@ bun install
 bun run build
 ```
 
-This typechecks, bundles `src/backend.ts` / `src/regex-runner.ts` / `src/frontend.ts` into `dist/`, applies sandbox-compatibility patches, and runs a static safety check mirroring the host's dangerous-capability scan. Run the build to validate source changes, but leave generated `dist/` changes out of source commits. Deployment uses the local built bundles; build a source checkout before installing unpublished changes.
+This typechecks, bundles `src/backend.ts` / `src/regex-runner.ts` / `src/frontend.ts` into `dist/`, applies sandbox-compatibility patches, and runs a static safety check mirroring the host's dangerous-capability scan. Run the build after source changes and include the rebuilt `dist/` in the same commit. Deployment uses the local built bundles.
 
 ## Tests
 

@@ -4,22 +4,19 @@ import { parseRisuModule } from "../schemas/parse.js";
 import { mapCharacter } from "../mappers/character.js";
 import { mapLoreBook, mapLoreBookWithStats } from "../mappers/lorebook.js";
 import { mapRegex, type AtAtAction } from "../mappers/regex.js";
-import { compileAtActions } from "../mappers/at-actions.js";
-import { compileTriggers } from "../mappers/triggers.js";
-import { buildBackgroundHtmlScript } from "../mappers/background-html.js";
+import { analyzeTriggers } from "../mappers/triggers.js";
 import { newUuid, nowMs } from "../mappers/util.js";
 import { customscriptSchema, type CustomScript } from "../schemas/customscript.js";
 import { triggerscriptSchema, type TriggerScript } from "../schemas/triggerscript.js";
 import type { LoreBook } from "../schemas/lorebook.js";
-import type { LumiCharacter, LumiRegexScript, LumiWorldBook, LumiWorldBookEntry } from "../lumiverse/types.js";
-import type { LumiBundle, ScriptPackEntry, TranslationManifest, UntranslatedSummary } from "./types.js";
+import type { LumiRegexScript, LumiWorldBook, LumiWorldBookEntry } from "../lumiverse/types.js";
+import type { LumiBundle, TranslationManifest, UntranslatedSummary } from "./types.js";
 import { TranslationError } from "../errors.js";
 import { buildRisuPayload } from "./risu-payload.js";
 import { prepareBackgroundHtmlForRuntime } from "../mappers/background-html.js";
 import {
   SvgIndexer,
   extractAndReplaceSvgs,
-  type SvgRasterTask,
 } from "../svg-rasterize.js";
 import type { RisuPayload } from "../payload/types.js";
 
@@ -43,7 +40,6 @@ export interface TranslateCharxOptions {
   readonly emitRegex?: boolean;
   readonly emitTriggers?: boolean;
   readonly emitBgHtml?: boolean;
-  readonly emitPackScripts?: boolean;
   /** Existing-character authoring override, translated with the same SVG index as the card. */
   readonly backgroundHtmlOverride?: string | null;
 }
@@ -121,26 +117,6 @@ function expandInlineDataUriAssets(
   return synthesized;
 }
 
-/** The exact lore list the importer fed to `mapLoreBook`. Export re-derives its
- *  baseline through this so the two directions cannot drift on the
- *  module-lore-wins rule. */
-export function resolveSourceLoreEntries(
-  card: unknown,
-  module: unknown | null,
-): readonly LoreBook[] {
-  const moduleLore = module && typeof module === "object"
-    ? (module as { lorebook?: unknown }).lorebook
-    : null;
-  if (Array.isArray(moduleLore) && moduleLore.length > 0) {
-    return moduleLore as readonly LoreBook[];
-  }
-  const data = (card as { data?: unknown } | null)?.data;
-  const book = data && typeof data === "object"
-    ? (data as { character_book?: unknown }).character_book
-    : undefined;
-  return extractCharacterBookEntries(book, []);
-}
-
 export function translateFromCharxBundle(
   bundle: ReturnType<typeof readCharx>,
   opts: TranslateCharxOptions = {},
@@ -190,7 +166,6 @@ export function translateFromCharxBundle(
   let moduleCjs = false;
   let backgroundEmbedding = false;
   let mcp = false;
-  let moduleName: string | null = null;
   if (bundle.moduleEnvelope) {
     try {
       const parsed = parseRisuModule(bundle.moduleEnvelope.module);
@@ -200,7 +175,6 @@ export function translateFromCharxBundle(
       moduleLorebook = (parsed.module.lorebook ?? []) as readonly LoreBook[];
       moduleRegexScripts = (parsed.module.regex ?? []) as readonly CustomScript[];
       moduleTriggerScripts = (parsed.module.trigger ?? []) as readonly TriggerScript[];
-      moduleName = parsed.module.name;
       moduleRegexCount = parsed.module.regex?.length ?? 0;
       moduleTriggerCount = parsed.module.trigger?.length ?? 0;
       moduleCjs = typeof parsed.module.cjs === "string" && parsed.module.cjs.length > 0;
@@ -336,44 +310,8 @@ export function translateFromCharxBundle(
   );
   const allTriggers = [...charTriggerScripts, ...moduleTriggerScripts]
     .map((trigger) => ({ ...trigger, lowLevelAccess }));
-  const atActionsOut = wantTriggers
-    ? compileAtActions(allAtActions, {
-        characterId: charMap.character.id,
-        characterName: charMap.character.name,
-      })
-    : { files: [] as ScriptPackEntry[], issues: [] as { path: string; message: string }[] };
-  const triggersOut = wantTriggers
-    ? compileTriggers(
-        allTriggers,
-        {
-          characterId: charMap.character.id,
-          characterName: charMap.character.name,
-        },
-      )
-    : {
-        files: [] as ScriptPackEntry[],
-        issues: [] as { path: string; message: string }[],
-        opcodeUnimplemented: {} as Record<string, number>,
-        luaCount: 0,
-      };
-  const bgHtml = wantBgHtml
-    ? buildBackgroundHtmlScript(charMap.extracted.backgroundHTML ?? null, {
-        characterId: charMap.character.id,
-        characterName: charMap.character.name,
-      })
-    : { file: null as ScriptPackEntry | null, issues: [] as { path: string; message: string }[] };
-  for (const iss of bgHtml.issues) issues.push(iss);
-
-  const emitPackScripts = opts.emitPackScripts !== false;
-  const scripts: readonly ScriptPackEntry[] = emitPackScripts
-    ? [
-        ...atActionsOut.files,
-        ...triggersOut.files,
-        ...(bgHtml.file ? [bgHtml.file] : []),
-      ]
-    : [];
-  for (const iss of atActionsOut.issues) issues.push(iss);
-  for (const iss of triggersOut.issues) issues.push(iss);
+  const triggersOut = analyzeTriggers(wantTriggers ? allTriggers : []);
+  for (const issue of triggersOut.issues) issues.push(issue);
 
   const assetsMap = opts.includeAssets === false ? new Map<string, Uint8Array>() : bundle.assets;
 
@@ -385,7 +323,7 @@ export function translateFromCharxBundle(
 
   const translatedCharRegex = charRegexOut.rows.length + charRegexOut.skipped.length;
   const translatedModuleRegex = moduleRegexOut.rows.length + moduleRegexOut.skipped.length;
-  const translatedTriggers = triggersOut.files.length;
+  const translatedTriggers = triggersOut.count;
 
   const untranslated: UntranslatedSummary = {
     module_regex: Math.max(0, moduleRegexCount - translatedModuleRegex),
@@ -398,7 +336,7 @@ export function translateFromCharxBundle(
     virtualscript: isNonEmpty(charMap.extracted.virtualScript),
     default_variables: isNonEmpty(charMap.extracted.defaultVariables),
     ...(isNonEmpty(charMap.extracted.additionalText) ? { additional_text: true } : {}),
-    background_html: isNonEmpty(charMap.extracted.backgroundHTML) && bgHtml.file === null,
+    background_html: isNonEmpty(charMap.extracted.backgroundHTML) && !wantBgHtml,
     background_embedding: backgroundEmbedding,
     ...(mcp ? { mcp: true } : {}),
     module_cjs: moduleCjs,
@@ -541,7 +479,6 @@ export function translateFromCharxBundle(
     worldBook,
     worldBookEntries,
     regexScripts,
-    scripts,
     risuPayload,
     assets: assetsMap,
     preferredAvatar,

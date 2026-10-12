@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
-import { EMITTERS } from "../../src/core/triggers/opcodes/index.js";
+import { EMITTERS } from "../helpers/trigger-compiler/opcodes/index.js";
 import { KNOWN_V1_EFFECTS, KNOWN_V2_OPCODES, KNOWN_CODE_EFFECTS } from "../../src/core/schemas/triggerscript.js";
-import type { EmitContext } from "../../src/core/triggers/types.js";
+import type { EmitContext } from "../helpers/trigger-compiler/types.js";
 
 function makeCtx(over: Partial<EmitContext> = {}): EmitContext {
   return {

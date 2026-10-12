@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mapRegex } from '../../src/core/mappers/regex.js';
 import { projectModuleRegexEntries } from '../../src/state/module-artifact-project.js';
-import { createDisplayResolver } from '../../src/display/resolver.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
 import { clearDisplaySnapshot, setDisplaySnapshot, type DisplaySnapshot } from '../../src/display/snapshot.js';
 import type { FeRegexScript } from '../../src/display/regex-apply.js';
 import type { CustomScript } from '../../src/core/schemas/customscript.js';

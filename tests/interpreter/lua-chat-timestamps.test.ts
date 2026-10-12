@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
 import { makeSpindleHost } from '../../src/interpreter/spindle-host.js';
-import { assembleDisplaySnapshot } from '../../src/state/display-snapshot-assembly.js';
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { assembleDisplaySnapshot } from '../helpers/display-snapshot-reference.js';
+import { execute } from '../helpers/lua-bridge.js';
 import { runtimeMessage } from '../../src/frontend-lua/state-contract.js';
 
 const rows = [

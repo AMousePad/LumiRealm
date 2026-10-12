@@ -217,7 +217,6 @@ export function createMigrationsRunner(deps: MigrationsFactoryDeps): MigrationsR
     invalidateActiveForCharacter,
     toastFor,
     charactersAttachedTo,
-    refreshAttachedModule,
     log,
     errMsg,
   } = deps;

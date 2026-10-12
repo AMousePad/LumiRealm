@@ -6,7 +6,7 @@ import {
   type InterpConsole,
 } from '../interpreter/trigger-interpreter.js';
 import { makeSafeLogger } from '../util/safe-log.js';
-import { buildPreloaded, makeSnapshotHostApi } from './host-shim.js';
+import { buildPreloaded } from './host-shim.js';
 import type { DisplaySnapshot } from './snapshot.js';
 import { getDisplayLuaEnvironment } from './lua-runner.js';
 
@@ -47,11 +47,11 @@ export async function runDisplayTriggerChain(
   );
   if (triggers.length === 0) return { content, ran: false };
   const local = getDisplayLuaEnvironment(snap);
-  const { luaChat: _chat, luaVariables: _variables, ...options } = local?.options ?? {};
+  const { luaChat: _chat, luaVariables: _variables, ...options } = local.options;
 
   try {
     const runtime = await makeRisuTriggerRuntime(
-      local?.api ?? makeSnapshotHostApi(snap),
+      local.api,
       {
         characterId: snap.characterId,
         characterName: snap.charName,
@@ -90,5 +90,5 @@ export async function runDisplayTriggerChain(
   } catch (err) {
     log.warn(`display trigger runtime failed: ${String(err)}`);
     return { content, ran: true };
-  } finally { await local?.flush(); }
+  } finally { await local.flush(); }
 }

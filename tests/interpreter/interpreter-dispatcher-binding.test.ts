@@ -29,7 +29,7 @@ function entry(spec: {
   const binding = spec.binding ?? 'start';
   return {
     name: spec.name ?? 'test',
-    code: '',
+
     type: spec.type ?? 'trigger',
     triggers: [],
     binding,
@@ -136,7 +136,7 @@ describe('triggerMatchesBinding: edge cases / hostile inputs', () => {
   test('source.effect missing entirely (defensive): falls through to strict filter without crash', () => {
     const t: CompiledTriggerEntry = {
       name: 't',
-      code: '',
+
       type: 'trigger',
       triggers: [],
       binding: 'start',

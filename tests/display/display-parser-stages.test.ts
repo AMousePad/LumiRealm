@@ -1,8 +1,8 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mapRegex } from '../../src/core/mappers/regex.js';
-import { createDisplayResolver } from '../../src/display/resolver.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
 import { clearDisplaySnapshot, setDisplaySnapshot, type DisplaySnapshot } from '../../src/display/snapshot.js';
-import { clearLuaEngines } from '../../src/interpreter/lua-bridge.js';
+import { clearLuaEngines } from '../helpers/lua-bridge.js';
 
 function snapshot(hook: string): DisplaySnapshot {
   const messages = [

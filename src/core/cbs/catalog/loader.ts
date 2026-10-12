@@ -1,5 +1,5 @@
 import { macroCatalogSchema, type MacroCatalog, type MacroCatalogEntry, isComplete } from "./schema.js";
-import { normalizeMacroName } from "../parser.js";
+import { normalizeMacroName } from "../normalize.js";
 
 export class CatalogIndex {
   private readonly entriesByCanonical = new Map<string, MacroCatalogEntry>();

@@ -4,9 +4,9 @@ import type { HostApi, HostMessage } from '../../../src/interpreter/host.js';
 import type { TriggerEffect, TriggerScript } from '../../../src/core/schemas/triggerscript.js';
 import { makeRisuTriggerRuntime } from '../../../src/interpreter/runtime.js';
 import { makeDispatcherScriptNS } from '../../../src/interpreter/dispatcher.js';
-import { execute } from '../../../src/interpreter/lua-bridge.js';
+import { execute } from '../../helpers/lua-bridge.js';
 import { interpretTrigger } from '../../../src/interpreter/trigger-interpreter.js';
-import { compileTrigger } from '../../../src/core/triggers/compile.js';
+import { compileTrigger } from '../../helpers/trigger-compiler/compile.js';
 import { basicTriggerContext } from '../../helpers/trigger-runtime.js';
 
 async function fixture(withGreeting = true) {

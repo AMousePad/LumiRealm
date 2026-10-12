@@ -193,12 +193,7 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
     );
   }
 
-  async function dispatchModuleArtifactInstall(
-    characterId: string,
-    env: ModuleEnvelope,
-    userId: string | undefined,
-    options?: ModuleArtifactInstallOptions,
-  ): Promise<void> {
+  function moduleRegex(env: ModuleEnvelope, characterId: string | null, options?: ModuleArtifactInstallOptions) {
     const m = env.module as {
       name?: unknown;
       regex?: readonly unknown[];
@@ -207,7 +202,7 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
       ? m.name
       : env.id;
     let stableIndex = 0;
-    const regexScripts = projectModuleRegexEntries(
+    return projectModuleRegexEntries(
       env.id,
       moduleName,
       characterId,
@@ -225,20 +220,26 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
         ? { ...script, metadata: { ...script.metadata, imported_script_id: normalizeScriptId(legacyId) } }
         : script;
     });
-    const lorebookEntries: never[] = [];
+  }
+
+  async function dispatchModuleArtifactInstall(
+    characterId: string,
+    env: ModuleEnvelope,
+    userId: string | undefined,
+    options?: ModuleArtifactInstallOptions,
+  ): Promise<void> {
+    const regexScripts = moduleRegex(env, characterId, options);
     const ownership = userId === undefined
       ? { allOwned: false, scripts: regexScripts }
       : await ensureRegexOwnership(spindle.regex_scripts, regexScripts, userId);
     log.info(
       `dispatchModuleArtifactInstall: module=${env.id} char=${characterId} ` +
-        `lorebookEntries=${lorebookEntries.length} regexScripts=${regexScripts.length}`,
+        `regexScripts=${regexScripts.length}`,
     );
     send({
       type: 'install_module_artifacts',
       characterId,
       moduleId: env.id,
-      worldBookName: `Module: ${moduleName}`,
-      lorebookEntries,
       regexScripts: ownership.scripts,
       cleanupStale: ownership.allOwned,
       ...(options?.requestId ? { requestId: options.requestId } : {}),
@@ -253,8 +254,6 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
     userId: string | undefined,
     options?: ModuleArtifactInstallOptions,
   ): Promise<{ worldBookId: string | null }> {
-    const m = env.module as { name?: unknown; regex?: readonly unknown[] };
-    const moduleName = typeof m.name === 'string' && m.name.length > 0 ? m.name : env.id;
 
     let addedWorldBookId: string | null = null;
     const wbId = env.installed_world_book_id ?? null;
@@ -276,25 +275,7 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
       }
     }
 
-    let stableIndex = 0;
-    const regexScripts = projectModuleRegexEntries(
-      env.id,
-      moduleName,
-      null,
-      m.regex,
-      () => options?.stableIdPrefix
-        ? `${options.stableIdPrefix}_${stableIndex++}`
-        : cryptoUuidLocal(),
-    ).map((script) => {
-      const sourceRow = (script.metadata?._risu as { source_row_index?: unknown } | undefined)
-        ?.source_row_index;
-      const legacyId = typeof sourceRow === 'number'
-        ? options?.legacyScriptIdsBySourceRow?.get(sourceRow)
-        : undefined;
-      return legacyId
-        ? { ...script, metadata: { ...script.metadata, imported_script_id: normalizeScriptId(legacyId) } }
-        : script;
-    });
+    const regexScripts = moduleRegex(env, null, options);
     const ownership = userId === undefined
       ? { allOwned: false, scripts: regexScripts }
       : await ensureRegexOwnership(spindle.regex_scripts, regexScripts, userId);
@@ -305,8 +286,6 @@ export function createWorldBookOps(deps: WorldBookOpsDeps): WorldBookOps {
       type: 'install_module_artifacts',
       characterId: null,
       moduleId: env.id,
-      worldBookName: `Module: ${moduleName}`,
-      lorebookEntries: [],
       regexScripts: ownership.scripts,
       cleanupStale: ownership.allOwned,
       ...(options?.requestId ? { requestId: options.requestId } : {}),

@@ -2,7 +2,7 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { LuaFactory } from 'wasmoon';
-import { execute, clearLuaEngines } from '../../src/interpreter/lua-bridge.js';
+import { execute, clearLuaEngines } from '../helpers/lua-bridge.js';
 
 // Run with BASELINE_DIR and RISUAI_DIR pointing at the comparison checkouts.
 const baselineDir = process.env.BASELINE_DIR;

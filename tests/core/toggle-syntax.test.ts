@@ -1,8 +1,7 @@
+import { collectModuleToggleDsl, groupToggles } from '../helpers/toggle-syntax.js';
 import { describe, expect, test } from 'bun:test';
 import {
-  collectModuleToggleDsl,
   extractToggleKeys,
-  groupToggles,
   parseToggleSyntax,
   type SidebarToggle,
 } from '../../src/core/toggle-syntax.js';

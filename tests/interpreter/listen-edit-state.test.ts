@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { clearLuaEngines } from '../../src/interpreter/lua-bridge';
+import { clearLuaEngines } from '../helpers/lua-bridge.js';
 import { runListenEditChain, type ListenEditMode } from '../../src/interpreter/listen-edit';
 import { divergenceLuaScriptNS, makeLuaDivergenceHost } from '../helpers/lua-risu-divergence';
 

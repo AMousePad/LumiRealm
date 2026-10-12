@@ -1,10 +1,9 @@
 
 import type { TriggerScript } from '../core/schemas/index.js';
-import { compileTriggers } from '../core/mappers/index.js';
+import { prepareTriggerEntries } from '../core/mappers/triggers.js';
 import type { RisuPayload } from '../core/payload/index.js';
 import {
   makeRisuTriggerRuntime,
-  makeRisuRegexRuntime,
 } from './runtime.js';
 import type { ExecuteOpts } from './lua-engine.js';
 import { FrontendLuaUnavailableError } from '../frontend-lua/protocol.js';
@@ -27,11 +26,9 @@ export type LuaExecutor = (code: string, globals: Record<string, unknown>, opts?
 export function makeDispatcherScriptNS(execute: LuaExecutor = async () => { throw new FrontendLuaUnavailableError('Lua execution requires a frontend executor'); }): DispatcherScriptNS {
   const nlog = makeSafeLogger('scriptNS').info;
   let manual: ManualRunner | undefined;
-  const risuCompat = { makeRisuTriggerRuntime, makeRisuRegexRuntime };
   const risuCompatLua = { execute };
   return {
     async require(name: string): Promise<unknown> {
-      if (name === 'risu-compat') { nlog(`require('risu-compat') → OK`); return risuCompat; }
       if (name === 'risu-compat-lua') { nlog(`require('risu-compat-lua') → OK`); return risuCompatLua; }
       if (manual && name.startsWith('risu-manual-')) {
         const runner = manual;
@@ -54,7 +51,6 @@ export interface TriggerRtOpts {
 
 export interface CompiledTriggerEntry {
   readonly name: string;
-  readonly code: string;
   readonly type: 'trigger' | 'library';
   readonly triggers: readonly string[];
   readonly binding: RisuBinding;
@@ -71,32 +67,18 @@ export function prepareTriggers(
 }
 
 export function prepareTriggerSources(rawTriggers: readonly TriggerScript[], characterId: string): readonly CompiledTriggerEntry[] {
-  const compiled = compileTriggers(rawTriggers, { characterId });
-  const out: CompiledTriggerEntry[] = [];
-  for (let i = 0; i < compiled.files.length; i++) {
-    const f = compiled.files[i]!;
-    const sourceTrigger = rawTriggers[i];
-    if (!sourceTrigger) continue;
-    const binding = sourceTrigger.type as RisuBinding;
-    out.push({
-      name: f.name,
-      code: f.code,
-      type: f.type,
-      triggers: f.triggers ?? [],
-      binding,
-      source: sourceTrigger,
-      rtOpts: {
-        displayMode: binding === 'display',
-        lowLevelAccess: Boolean(sourceTrigger.lowLevelAccess),
-        binding,
-        characterId,
-      },
-    });
-  }
-  return out;
+  return prepareTriggerEntries(rawTriggers).map(entry => ({
+    ...entry,
+    binding: entry.source.type,
+    rtOpts: {
+      displayMode: entry.source.type === 'display',
+      lowLevelAccess: Boolean(entry.source.lowLevelAccess),
+      binding: entry.source.type,
+      characterId,
+    },
+  }));
 }
 
-export const GENERATION_ENDED_EXTRA: readonly RisuBinding[] = ['display'];
 
 export interface DispatchCtx {
   readonly compiledTriggers: readonly CompiledTriggerEntry[];

@@ -66,11 +66,12 @@ describe("schemas — synthetic", () => {
     expect(r.effect).toEqual([]);
   });
 
-  test("triggerscript rejects unknown binding type", () => {
+  test("triggerscript preserves unknown bindings as manual triggers", () => {
     const r = triggerscriptSchema.safeParse({
-      comment: "", type: "bogus_binding", conditions: [], effect: [],
+      comment: "named trigger", type: "bogus_binding", conditions: [], effect: [{ type: "triggerlua", code: "return 1" }],
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data).toMatchObject({ type: "manual", comment: "named trigger", effect: [{ type: "triggerlua", code: "return 1" }] });
   });
 
   test("triggerscript effect is lenient — accepts unknown opcode", () => {

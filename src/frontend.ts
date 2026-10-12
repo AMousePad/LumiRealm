@@ -5,16 +5,8 @@ import { createDisplayResolver } from './display/resolver.js';
 import { setupFrontendLua } from './frontend-lua/frontend.js';
 import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
-  setDisplaySnapshot,
   getDisplaySnapshot,
-  applyVarDelta,
-  diffSnapshotVars,
-  snapshotMessagesChanged,
-  getDisplayResolutionMode,
-  setDisplayResolutionMode,
-  type DisplayResolutionMode,
 } from './display/snapshot.js';
-import { MSG_DEP_KEY } from './interpreter/evaluator/context.js';
 import { STYLES } from './ui/styles.js';
 import { createSidebar } from './ui/sidebar.js';
 import { createAuxDebugPanel } from './ui/aux-debug.js';
@@ -130,46 +122,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       // init re-runs every render, and writeback clobbers committed progress.
       frontendLua.writeback(chatId, vars);
     },
-    (effect) => {
-      if (effect.kind === 'set-expression') {
-        display.setExpression(effect);
-        return;
-      }
-      void ctx.chats.updateMessage(
-        effect.chatId,
-        effect.messageId,
-        { content: effect.content },
-      ).catch((err) => {
-        flog.warn(
-          `display action message update failed chat=${effect.chatId} ` +
-            `message=${effect.messageId}: ${String(err)}`,
-        );
-      });
-    },
     activationPatterns,
   );
   cleanups.push(display.registerResolver(displayResolver));
   cleanups.push(setupHostServices(ctx));
-  // Ownership is per-character: the host reads character.extensions.lumirealm.display_owner
-  // (stamped by writeLumirealm + the boot backfill). display_authority is a separate signal
-  // telling the backend to short-circuit ('on') or keep resolving ('off').
-  const sendDisplayAuthority = (chatId: string | null): void => {
-    if (!chatId) return;
-    ctx.sendToBackend({
-      type: 'display_authority',
-      chatId,
-      authoritative: getDisplayResolutionMode() === 'on',
-    });
-  };
-  (window as unknown as { __lumirealmDisplayMode?: (m: DisplayResolutionMode) => void }).__lumirealmDisplayMode = (m: DisplayResolutionMode) => {
-    const mode = m;
-    setDisplayResolutionMode(mode);
-    sendDisplayAuthority(activeRisuChatId);
-    flog.info(`display resolution mode='${mode}'`);
-  };
-  cleanups.push(() => {
-    try { delete (window as unknown as Record<string, unknown>).__lumirealmDisplayMode; } catch { /* */ }
-  });
   const dumpBubble = (): unknown => {
     const out: unknown[] = [];
     const bubbles = document.querySelectorAll('[data-message-id]');
@@ -557,12 +513,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       const prevChatId = activeRisuChatId;
       activeRisuChatId = msg.chatId;
       bgRenderer.setActiveChat(msg.chatId);
-      sendDisplayAuthority(msg.chatId);
       if (activeRisuChatId !== prevChatId) {
         displayResolver.resetScriptCache();
         activationPatterns.invalidate();
         if (sidebar) sidebar.setActiveChatId(activeRisuChatId);
-        if (getDisplayResolutionMode() !== 'off' && msg.chatId && getDisplaySnapshot(msg.chatId)) {
+        if (msg.chatId && getDisplaySnapshot(msg.chatId)) {
           display.invalidate(['*']);
         }
       }

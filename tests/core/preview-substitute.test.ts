@@ -7,7 +7,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { substituteForPreview } from '../../src/core/preview/substitute.js';
+import { substituteForPreview } from '../helpers/preview-substitute.js';
 
 describe('substituteForPreview: empty / passthrough', () => {
   test('empty string → empty string', () => {

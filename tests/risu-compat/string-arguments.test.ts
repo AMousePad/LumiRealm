@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { makeMockContext } from '../../src/core/cbs/index.js';
+import { makeMockContext } from '../helpers/cbs/index.js';
 import { runPipeline } from '../../src/interpreter/evaluator/pipeline.js';
 import { registry } from '../../src/risu-compat/index.js';
 

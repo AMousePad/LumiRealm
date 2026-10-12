@@ -1,5 +1,5 @@
 import { snapshot, context, chatId } from '../helpers/display-lua-fixture.js';
-import { createDisplayResolver } from '../../src/display/resolver.js';
+import { createDisplayResolver } from '../helpers/snapshot-display.js';
 import { clearDisplaySnapshot, getDisplaySnapshot, setDisplaySnapshot } from '../../src/display/snapshot.js';
 import { logStore } from '../../src/log/store.js';
 

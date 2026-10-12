@@ -13,7 +13,6 @@ import type {
   HostPersona,
   HostWorldInfoEntry,
   InjectOpts,
-  HostCorsFetch,
   HostCorsResponse,
 } from './host.js';
 import { readEffectiveGlobals } from '../state/toggle-preferences.js';
@@ -164,18 +163,8 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   const host: HostApi = {
     luaStateScope: backendLuaStateScope(userId),
     ...(uid !== undefined ? { userId: uid } : {}),
-    // Permission-gated CORS proxy (`spindle.cors`; `cors_proxy` is declared in
-    // spindle.json and the host enforces the grant). Backs Lua `request`, and is
-    // left out on hosts that predate the API — the runtime then reports a
-    // transport failure instead of rejecting the Lua call.
-    ...(typeof spindle.cors === 'function'
-      ? {
-          // Upstream Risu: fetchNative(url, { method: 'GET' }) — GET only, no
-          // headers, no body.
-          corsFetch: async (url: string, init?: { readonly method?: string }) =>
-            (await spindle.cors(url, { method: init?.method ?? 'GET' })) as HostCorsResponse,
-        }
-      : {}),
+    corsFetch: async (url: string, init?: { readonly method?: string }) =>
+      (await spindle.cors(url, { method: init?.method ?? 'GET' })) as HostCorsResponse,
     getGlobalVariables: async () => {
       if (!uid) throw new TypeError('Global variables require a user ID');
       const raw = await getMetadata('macro_variables');
@@ -424,7 +413,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     },
   };
 
-  if (typeof spindle !== 'undefined' && spindle.imageGen) {
+  {
     (host as { imageGen?: HostApi['imageGen'] }).imageGen = {
       async generate(prompt: string, opts) {
         const input: Record<string, unknown> = {
@@ -443,7 +432,7 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     };
   }
 
-  if (typeof spindle !== 'undefined' && spindle.images) {
+  {
     (host as { images?: HostApi['images'] }).images = {
       async uploadFromDataUrl(dataUrl: string, name?: string): Promise<string | { id: string }> {
         const res = await spindle.images.uploadFromDataUrl(dataUrl, {

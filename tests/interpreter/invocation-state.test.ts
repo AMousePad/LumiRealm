@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import type { TriggerScript, TriggerEffect } from '../../src/core/schemas/triggerscript.js';
 import type { HostApi, HostMessage, InjectOpts } from '../../src/interpreter/host.js';
 import { dispatchByManualName, dispatchBinding, prepareTriggers, registerManualTriggers, makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
-import { execute } from '../../src/interpreter/lua-bridge.js';
+import { execute } from '../helpers/lua-bridge.js';
 import { makeRisuTriggerRuntime, withDispatchContext } from '../../src/interpreter/runtime.js';
 import { initializeInvocation, type TriggerInvocationState } from '../../src/interpreter/runtime/invocation.js';
 import { basicTriggerContext } from '../helpers/trigger-runtime.js';

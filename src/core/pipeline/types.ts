@@ -2,37 +2,11 @@ import type { LumiCharacter, LumiRegexScript, LumiWorldBook, LumiWorldBookEntry 
 import type { RisuPayload } from "../payload/types.js";
 import type { SvgRasterTask } from "../svg-rasterize.js";
 
-export interface ScriptBindingEntry {
-  readonly type: "character" | "chat";
-  readonly characterId?: string;
-  readonly chatId?: string;
-  readonly displayName: string;
-}
-
-export interface ScriptMetadata {
-  readonly description?: string;
-  readonly author?: string;
-  readonly version?: string;
-  readonly tags?: readonly string[];
-}
-
-export interface ScriptPackEntry {
-  readonly name: string;
-  readonly code: string;
-  readonly type: "trigger" | "library";
-  readonly triggers?: readonly string[];
-  readonly bindings?: readonly ScriptBindingEntry[];
-  readonly folder?: string;
-  readonly metadata?: ScriptMetadata;
-  readonly path: string;
-}
-
 export interface LumiBundle {
   readonly character: LumiCharacter;
   readonly worldBook: LumiWorldBook | null;
   readonly worldBookEntries: readonly LumiWorldBookEntry[];
   readonly regexScripts: readonly LumiRegexScript[];
-  readonly scripts: readonly ScriptPackEntry[];
   readonly risuPayload: RisuPayload | null;
   readonly assets: ReadonlyMap<string, Uint8Array>;
   /**

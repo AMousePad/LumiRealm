@@ -25,6 +25,8 @@ let originalGlobalConfirm: typeof globalThis.confirm | undefined;
 const mountedPanels: ModulesPanelHandle[] = [];
 
 beforeEach(() => {
+  const task = currentTask();
+  if (task) finishTask(task.id);
   window = new Window();
   originalDocument = (globalThis as unknown as { document?: Document }).document;
   (globalThis as unknown as { document: Document }).document = window.document as unknown as Document;

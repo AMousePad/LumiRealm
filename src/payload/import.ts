@@ -277,9 +277,6 @@ export async function importCard(args: ImportCardArgs): Promise<ImportResult> {
   const bundle: LumiBundle = translateFromCharxBundle(charxBundle, {
     sourceId: args.sourceId ?? `file:${args.fileName}`,
     mode: 'full',
-    // emitPackScripts triggers fengari/json.lua disk reads; those paths
-    // are absent in dist/backend.js, so disable pack-script generation.
-    emitPackScripts: false,
   });
   const assets = new Map<string, Uint8Array | DeferredAsset>(args.prepared?.assets);
   for (const [path, bytes] of bundle.assets) assets.set(path, bytes);

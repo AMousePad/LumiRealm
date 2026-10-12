@@ -24,7 +24,6 @@ import {
   makeLorebookApi,
   sortLorebookEntriesBySourceOrder,
   withModuleLorebooks,
-  keyToArray,
   type LorebookCache,
 } from './runtime/lorebook.js';
 import { evaluate } from './evaluator/index.js';
@@ -64,10 +63,7 @@ type WasmoonExec = (
   opts: ExecuteOpts & { wasmoonKey: string },
 ) => Promise<unknown>;
 let _wasmoonExec: WasmoonExec | null = null;
-export function setWasmoonExecutor(fn: WasmoonExec): void { _wasmoonExec = fn; }
-let _wasmoonEnabled = true;
-export function setWasmoonEnabled(b: boolean): void { _wasmoonEnabled = b; }
-export function isWasmoonEnabled(): boolean { return _wasmoonEnabled; }
+export function setWasmoonExecutor(fn: WasmoonExec | null): void { _wasmoonExec = fn; }
 
 // Compiled triggers' rtOpts are JSON-frozen, so non-serialisable fields
 // (Function, Set) ride the side-channel. Safe: dispatch is serial,
@@ -197,7 +193,6 @@ export interface RisuTriggerRuntime {
   warnDroppedTriggerCode(label?: string): void;
 }
 
-export type { RisuRegexRuntime } from './runtime/regex-runtime.js';
 
 export async function makeRisuTriggerRuntime(
   api: HostApi,
@@ -592,7 +587,7 @@ export async function makeRisuTriggerRuntime(
       : {}),
     ...(tempVars !== undefined ? { tempVars } : {}),
   });
-  const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2, getLocal } = _vars;
+  const { getVar, setVar, resolve, declareLocalVar, setvarV1, setvarV2 } = _vars;
 
   let sendAIprompt = false;
   const loopCounter: { value: number } = { value: 0 };
@@ -600,7 +595,7 @@ export async function makeRisuTriggerRuntime(
 
   const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage, deferSystemPrompt: Boolean(opts.invocationState) }, (src) => notifyStateChanged(src));
   const {
-    getMessagesTail, getMessageCount, getLastMessage, getMessageAtIndex,
+    getMessageCount, getLastMessage, getMessageAtIndex,
     getLastUserMessage, getLastCharMessage, getFirstMessage,
     impersonate, systemPrompt, command, cutChat: cutChatMessages, modifyChat,
     updateGUI, updateChatAt, tokenize, quickSearchChat,
@@ -822,7 +817,7 @@ export async function makeRisuTriggerRuntime(
     rverbose(`globals keys=${Object.keys(globals).length}: ${Object.keys(globals).slice(0, 20).join(',')}${Object.keys(globals).length > 20 ? '…' : ''}`);
     const wasmoonKey = typeof effective['wasmoonKey'] === 'string' ? effective['wasmoonKey'] as string : null;
     try {
-      let result = (wasmoonKey && _wasmoonExec && _wasmoonEnabled)
+      let result = (wasmoonKey && _wasmoonExec)
         ? await _wasmoonExec(codeStr, globals, { ...effective as ExecuteOpts, wasmoonKey })
         : await lua.execute(codeStr, globals, effective);
       if (effective['entry'] === 'callListenMain') {
@@ -1506,6 +1501,3 @@ export async function makeRisuTriggerRuntime(
 
   return publicApi;
 }
-
-
-export { makeRisuRegexRuntime } from './runtime/regex-runtime.js';

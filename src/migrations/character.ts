@@ -1088,7 +1088,6 @@ export async function migrateCharacterIfNeeded(
       {
         sourceId: `migrate:${args.characterId}`,
         mode: 'full',
-        emitPackScripts: false,
       },
     );
   } catch (err) {

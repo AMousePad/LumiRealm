@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { puaDecodeFeMacros, puaEncodeFeMacros } from "../../src/util/pua-roundtrip.js";
+import { puaDecodeFeMacros, puaEncodeFeMacros } from "../helpers/pua-roundtrip.js";
 
 describe("puaEncodeFeMacros / puaDecodeFeMacros", () => {
   test("no-op on empty / no-brace input", () => {

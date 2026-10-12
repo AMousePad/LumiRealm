@@ -1,3 +1,4 @@
+import type { GenerationContextShape, LlmMessage } from '../adapters/spindle-extras.js';
 type HostApi = import('lumiverse-spindle-types').SpindleAPI;
 type MacroHandler = Parameters<HostApi['registerMacroInterceptor']>[0];
 type InterceptHandler = import('lumiverse-spindle-types').InterceptorHandler;
@@ -8,7 +9,6 @@ declare const spindle: Omit<HostApi, 'registerInterceptor' | 'registerContextHan
 };
 
 import type { ActiveCard } from '../interpreter/dispatch.js';
-import type { TriggerScript } from '../core/schemas/triggerscript.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import { runPipeline } from '../interpreter/evaluator/pipeline.js';
 import type { VarReadRecorder } from '../interpreter/evaluator/context.js';
@@ -18,16 +18,7 @@ import {
   coerceAtActions,
   isRowlessAtAction,
 } from '../interpreter/at-actions-runtime.js';
-import { puaEncodeFeMacros, puaDecodeFeMacros } from '../util/pua-roundtrip.js';
-import { panelTrace } from '../util/perf.js';
 import { perfEnabled, perfRecord } from '../util/perf.js';
-import {
-  lookupRenderMcp,
-  lookupInFlightRenderMcp,
-  markRenderMcpInFlight,
-  cacheRenderMcp,
-  renderMcpCacheStats,
-} from '../state/render-mcp-cache.js';
 import {
   lookupMacroInterceptor,
   cacheMacroInterceptor,
@@ -55,11 +46,6 @@ import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import { userIdAls } from '../interpreter/runtime/als.js';
 import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import type { FrontendLuaOperation } from '../frontend-lua/protocol.js';
-import { mergeLlmText, projectLlmText } from '../util/llm-message-content.js';
-import {
-  type GenerationContextShape,
-  type LlmMessage,
-} from '../adapters/spindle-extras.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 import type { InjectAtPlan } from '../payload/lorebook-decorator-runtime.js';
 import { buildRisuWorldInfoChatPlacements } from '../payload/risu-world-info-depth-placement.js';
@@ -75,7 +61,6 @@ export interface CreateLumiInterceptorsDeps {
   readonly prepareTriggerContext: import('../state/readonly-resolver.js').ReadonlyResolver['prepareTriggerContext'];
   readonly activeCardByChat: Map<string, ActiveCard>;
   readonly captureUserId: (userId: string | undefined, where: string) => void;
-  readonly isFeDisplayAuthoritative: (chatId: string) => boolean;
   readonly isPromptRegexAuthoritative: (chatId: string) => boolean;
   readonly dispatchPromptRegex: (
     prebuilt: import('./prompt-regex-apply.js').PrebuiltPipelineInput,
@@ -129,15 +114,6 @@ export interface LumiInterceptors {
   readonly registerAll: () => void;
 }
 
-// Module lore rows live on the card payload rather than in the host lorebook,
-// so listenEdit chains have to pass them to the runtime explicitly.
-function collectRuntimeModuleLorebooks(active: ActiveCard): readonly unknown[] {
-  const extra = active.card.risuPayload.extra as
-    | { runtime_module_lorebooks?: Record<string, readonly unknown[]> }
-    | undefined;
-  return Object.values(extra?.runtime_module_lorebooks ?? {}).flat();
-}
-
 function cardDisablesRecursiveWorldInfo(active: ActiveCard): boolean {
   const source = active.lumirealm.source?.card;
   if (!source || typeof source !== 'object' || Array.isArray(source)) return false;
@@ -188,24 +164,10 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
   let diagInterceptorCall = 0;
   let mcpInFlight = 0;
   let mcpEnterSeq = 0;
-  let lastCacheStatsAt = 0;
   let lastMicCacheStatsAt = 0;
 
   function withMaybeUser<T>(userId: string | undefined, fn: () => Promise<T>): Promise<T> {
     return userId !== undefined ? (userIdAls.run(userId, fn) as Promise<T>) : fn();
-  }
-
-  function maybeEmitCacheStats(): void {
-    const stats = renderMcpCacheStats();
-    const lookups = stats.hits + stats.misses;
-    if (lookups < 200) return;
-    const now = Date.now();
-    if (now - lastCacheStatsAt < 5_000) return;
-    lastCacheStatsAt = now;
-    const ratio = lookups > 0 ? Math.round((stats.hits / lookups) * 100) : 0;
-    log.info(
-      `[render-mcp-cache] size=${stats.size} hits=${stats.hits} misses=${stats.misses} ratio=${ratio}%`,
-    );
   }
 
   function maybeEmitMicCacheStats(): void {
@@ -473,192 +435,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
           return;
         }
 
-        if (ctx.origin === 'render') {
-          if (deps.isFeDisplayAuthoritative(ctx.chatId)) {
-            log.trace(
-              `messageContentProcessor.exit #${seq} path=fe-owned-passthrough chat=${ctx.chatId} msg=${ctx.messageId ?? '<new>'} total=${Date.now() - tStart}ms (FE owns display; backend skips render-MCP)`,
-            );
-            return;
-          }
-          const triggers = active.card.risuPayload.triggers as ReadonlyArray<{
-            effect?: ReadonlyArray<{ type?: string }>;
-          }>;
-          const luaScripts = active.card.risuPayload.lua_scripts;
-          const hasLuaTrigger = triggers.some(
-            (t) => t.effect?.[0]?.type === 'triggerlua',
-          );
-          const renderAtActions = coerceAtActions(
-            active.card.risuPayload.at_actions,
-          ).filter(isRowlessAtAction);
-          const rawIdx = ctx.extra?.['messageIndex'];
-          const messageIndex = typeof rawIdx === 'number' ? rawIdx : 0;
-          const risuChatIdx = Math.max(-1, messageIndex - 1);
-
-          if (ctx.messageId) {
-            const cached = lookupRenderMcp(ctx.chatId, ctx.messageId, ctx.content);
-            maybeEmitCacheStats();
-            if (cached) {
-              const totalMs = Date.now() - tStart;
-              if (cached.kind === 'noop') {
-                log.trace(
-                  `messageContentProcessor.exit #${seq} path=render-cache-noop chat=${ctx.chatId} msg=${ctx.messageId} idx=${messageIndex} total=${totalMs}ms`,
-                );
-                return;
-              }
-              log.trace(
-                `messageContentProcessor.exit #${seq} path=render-cache-hit chat=${ctx.chatId} msg=${ctx.messageId} idx=${messageIndex} before_len=${ctx.content.length} after_len=${cached.content.length} total=${totalMs}ms`,
-              );
-              return { content: cached.content };
-            }
-            const inFlight = lookupInFlightRenderMcp(ctx.chatId, ctx.messageId, ctx.content);
-            if (inFlight) {
-              const shared = await inFlight;
-              const totalMs = Date.now() - tStart;
-              if (shared.kind === 'noop') {
-                log.info(
-                  `messageContentProcessor.exit #${seq} path=render-inflight-share-noop chat=${ctx.chatId} msg=${ctx.messageId} idx=${messageIndex} total=${totalMs}ms`,
-                );
-                return;
-              }
-              log.info(
-                `messageContentProcessor.exit #${seq} path=render-inflight-share chat=${ctx.chatId} msg=${ctx.messageId} idx=${messageIndex} before_len=${ctx.content.length} after_len=${shared.content.length} total=${totalMs}ms`,
-              );
-              return { content: shared.content };
-            }
-          }
-
-          let workResolve: (r: { kind: 'noop' } | { kind: 'transformed'; content: string }) => void = () => {};
-          let workReject: (e: unknown) => void = () => {};
-          const workPromise = new Promise<{ kind: 'noop' } | { kind: 'transformed'; content: string }>((res, rej) => {
-            workResolve = res;
-            workReject = rej;
-          });
-          workPromise.catch(() => { /* swallow — the work itself logs errors */ });
-          if (ctx.messageId) {
-            markRenderMcpInFlight(ctx.chatId, ctx.messageId, ctx.content, workPromise);
-          }
-
-          const editChain = triggers.map((t, i) => ({
-            source: t,
-            luaCode: luaScripts[i] ?? '',
-          }));
-          const moduleLorebooks = collectRuntimeModuleLorebooks(active);
-          try {
-            const editApi = makeSpindleHost({
-              chatId: ctx.chatId,
-              characterId: active.card.character_id,
-              userId: ctx.userId,
-            });
-            // Risu resolves CBS (risuChatParser rmVar+visualize) BEFORE the
-            // editdisplay Lua hook runs, so the hook sees only the active
-            // {{#if}} branch, not the raw body. FE-resolved macros stay
-            // PUA-protected so resolveDisplayMacros gets current persona.
-            const puaResolve = async (text: string): Promise<string> => {
-              if (text.indexOf('{{') < 0) return text;
-              const enc = puaEncodeFeMacros(text);
-              const resolved = await deps.resolveReadonly(
-                enc.text, ctx.chatId, active.card.character_id, ctx.userId,
-                { rmVar: true },
-              );
-              return puaDecodeFeMacros(resolved, enc.tokens);
-            };
-            let transformed = ctx.content;
-            panelTrace('mcp.render.in', transformed);
-            let preResolveMs = 0;
-            {
-              const tPre = Date.now();
-              try {
-                transformed = await puaResolve(transformed);
-              } catch (err) {
-                log.warn(
-                  `messageContentProcessor.render pre-resolve threw: ${errMsg(err)}. Continuing with raw content.`,
-                );
-              }
-              preResolveMs = Date.now() - tPre;
-            }
-            panelTrace('mcp.render.afterPreResolve', transformed);
-            let chainMs = 0;
-            if (hasLuaTrigger) {
-              const tChain = Date.now();
-              transformed = await deps.executeFrontend<string>(ctx.chatId, active.card.character_id,
-                { kind: 'edit', mode: 'editDisplay', value: transformed, meta: { index: risuChatIdx } },
-                ctx.userId, (ctx as { frontendSessionId?: string }).frontendSessionId);
-              chainMs = Date.now() - tChain;
-              log.trace(
-                `messageContentProcessor.render chain.elapsed #${seq} chain=${chainMs}ms (mcp_total_so_far=${Date.now() - tStart}ms)`,
-              );
-            }
-            panelTrace('mcp.render.afterLua', transformed);
-            let atActionsMs = 0;
-            if (renderAtActions.length > 0) {
-              const tAt = Date.now();
-              try {
-                transformed = await runAtActionsForPhase(renderAtActions, 'editdisplay', transformed, {
-                  api: editApi,
-                  chatIndex: risuChatIdx,
-                  role: 'assistant',
-                });
-              } catch (err) {
-                log.warn(
-                  `messageContentProcessor.render at-actions threw: ${errMsg(err)}. Continuing with prior content.`,
-                );
-              }
-              atActionsMs = Date.now() - tAt;
-            }
-            panelTrace('mcp.render.afterAtActions', transformed);
-
-            // Second resolve for any CBS the hook emitted, mirroring Risu's
-            // processScriptFull parser pass after the editdisplay hook.
-            let resolveMs = 0;
-            if (transformed.indexOf('{{') >= 0) {
-              const tResolve = Date.now();
-              try {
-                transformed = await puaResolve(transformed);
-              } catch (err) {
-                log.warn(
-                  `messageContentProcessor.render body-resolve threw: ${errMsg(err)}. Returning pre-resolve content.`,
-                );
-              }
-              resolveMs = Date.now() - tResolve;
-            }
-            panelTrace('mcp.render.afterBodyResolve', transformed);
-
-            const totalMs = Date.now() - tStart;
-            const otherOverhead = totalMs - preResolveMs - chainMs - atActionsMs - resolveMs - (tB - tA);
-            if (perfEnabled()) {
-              perfRecord("mcp.render.total", totalMs);
-              perfRecord("mcp.render.preResolve", preResolveMs);
-              if (hasLuaTrigger) perfRecord("mcp.render.luaChain", chainMs);
-              if (renderAtActions.length > 0) perfRecord("mcp.render.atActions", atActionsMs);
-              perfRecord("mcp.render.bodyResolve", resolveMs);
-              perfRecord("mcp.render.ensureCard", tB - tA);
-            }
-            if (transformed === ctx.content) {
-              if (ctx.messageId) {
-                cacheRenderMcp(ctx.chatId, ctx.messageId, ctx.content, { kind: 'noop' });
-              }
-              workResolve({ kind: 'noop' });
-              log.trace(
-                `messageContentProcessor.exit #${seq} path=render-noop chat=${ctx.chatId} msg=${ctx.messageId ?? '<?>'} idx=${messageIndex} total=${totalMs}ms (pre=${preResolveMs}ms chain=${chainMs}ms at_actions=${atActionsMs}ms resolve=${resolveMs}ms ensure=${tB - tA}ms other=${otherOverhead}ms)`,
-              );
-              return;
-            }
-            if (ctx.messageId) {
-              cacheRenderMcp(ctx.chatId, ctx.messageId, ctx.content, { kind: 'transformed', content: transformed });
-            }
-            workResolve({ kind: 'transformed', content: transformed });
-            log.trace(
-              `messageContentProcessor.exit #${seq} path=render-transformed chat=${ctx.chatId} msg=${ctx.messageId ?? '<?>'} idx=${messageIndex} before_len=${ctx.content.length} after_len=${transformed.length} total=${totalMs}ms (pre=${preResolveMs}ms chain=${chainMs}ms at_actions=${atActionsMs}ms resolve=${resolveMs}ms ensure=${tB - tA}ms other=${otherOverhead}ms)`,
-            );
-            return { content: transformed };
-          } catch (err) {
-            workReject(err);
-            log.warn(
-              `messageContentProcessor.exit #${seq} path=render-threw chat=${ctx.chatId} msg=${ctx.messageId ?? '<?>'} err=${errMsg(err)} total=${Date.now() - tStart}ms`,
-            );
-            return;
-          }
-        }
+        if (ctx.origin === 'render') return;
 
         // Write-time origins hold raw post-unbake (body macros resolve at the render origin), and we run editoutput @@-actions and the doc-boundary normalize so DOMPurify keeps leading style blocks.
         const isUserMessage = ctx.isUser;
