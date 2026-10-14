@@ -35,6 +35,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
   const localCalls = new Set<AbortController>();
   let connected = true;
   let connectionGeneration = 0;
+  let reconnectChat: { chatId: string; characterId: string } | undefined;
 
   function remove(entry: Entry, reason: string): void {
     entry.lifetime.abort(new FrontendLuaUnavailableError(reason));
@@ -187,6 +188,9 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
     for (const entry of entries.values()) { try { observe(entry, value); } catch (error) { remove(entry, 'The Lua state could not be synchronized'); report(error); } }
   })));
   cleanups.push(ctx.events.on('__ws_close', () => {
+    const { chatId } = ctx.getActiveChat();
+    const characterId = chatId ? entries.get(chatId)?.state.characterId ?? loading.get(chatId)?.characterId : undefined;
+    if (chatId && characterId) reconnectChat = { chatId, characterId };
     connected = false; receiver.dispose(); services.dispose(); ui.dispose();
     connectionGeneration++; loading.clear();
     for (const controller of localCalls) controller.abort(new FrontendLuaUnavailableError('The frontend Lua connection closed'));
@@ -195,6 +199,15 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
   cleanups.push(ctx.events.on('__ws_open', () => {
     connected = true;
     receiver = createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), reply => ctx.sendToBackend(reply));
+  }));
+  cleanups.push(ctx.events.on('CONNECTED', raw => {
+    const userId = (raw as { userId?: unknown } | null)?.userId;
+    if (!connected || typeof userId !== 'string' || !userId) return;
+    const active = ctx.getActiveChat();
+    if (reconnectChat?.chatId === active.chatId && reconnectChat?.characterId === active.characterId) {
+      void ensure(reconnectChat.chatId, reconnectChat.characterId).catch(report);
+    }
+    reconnectChat = undefined;
   }));
   return {
     receive(raw: unknown): boolean {

@@ -23231,6 +23231,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
   const localCalls = new Set;
   let connected = true;
   let connectionGeneration = 0;
+  let reconnectChat;
   function remove(entry, reason) {
     entry.lifetime.abort(new FrontendLuaUnavailableError(reason));
     entries.delete(entry.state.chatId);
@@ -23469,6 +23470,10 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       }
     }));
   cleanups.push(ctx.events.on("__ws_close", () => {
+    const { chatId } = ctx.getActiveChat();
+    const characterId = chatId ? entries.get(chatId)?.state.characterId ?? loading.get(chatId)?.characterId : undefined;
+    if (chatId && characterId)
+      reconnectChat = { chatId, characterId };
     connected = false;
     receiver.dispose();
     services.dispose();
@@ -23483,6 +23488,16 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
   cleanups.push(ctx.events.on("__ws_open", () => {
     connected = true;
     receiver = createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), (reply) => ctx.sendToBackend(reply));
+  }));
+  cleanups.push(ctx.events.on("CONNECTED", (raw) => {
+    const userId = raw?.userId;
+    if (!connected || typeof userId !== "string" || !userId)
+      return;
+    const active = ctx.getActiveChat();
+    if (reconnectChat?.chatId === active.chatId && reconnectChat?.characterId === active.characterId) {
+      ensure(reconnectChat.chatId, reconnectChat.characterId).catch(report);
+    }
+    reconnectChat = undefined;
   }));
   return {
     receive(raw) {
