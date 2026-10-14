@@ -32,9 +32,11 @@ async function fixture(code: string, configure?: (state: RuntimeStateDto) => voi
   const resolver = createDisplayResolver();
   const refreshes: boolean[] = [];
   const invalidations: string[][] = [];
+  const activeChat = { chatId: config.chatId, characterId: config.characterId };
   let runtime!: ReturnType<typeof setupFrontendLua>;
   const ctx = {
     frontendSessionId: '0123456789abcdef0123456789abcdef',
+    getActiveChat: () => activeChat,
     events: { on(name: string, handler: (value: unknown, metadata?: { stateRevision: StateRevision }) => void) { events.set(name, handler); return () => events.delete(name); } },
     sendToBackend(raw: unknown) {
       const call = structuredClone(raw) as RuntimeServiceCall;
@@ -61,8 +63,81 @@ async function fixture(code: string, configure?: (state: RuntimeStateDto) => voi
   }, error => failures.push(error));
   cleanups.push(() => { runtime.dispose(); clearDisplaySnapshot(config.chatId); });
   await runtime.snapshot(config);
-  return { runtime, config, state, calls, events, failures, resolver, refreshes, invalidations, entered: entered.promise };
+  return { runtime, config, state, calls, events, failures, resolver, refreshes, invalidations, activeChat, ctx, entered: entered.promise };
 }
+
+test.each([
+  { edited: false, failedAttempts: 0 },
+  { edited: true, failedAttempts: 0 },
+  { edited: false, failedAttempts: 2 },
+])('reconnect restores display regex with fresh state: %j', async ({ edited, failedAttempts }) => {
+  const { config, state, calls, events, failures, resolver, invalidations } = await fixture('');
+  const scripts = mapRegex([{ in: 'PANEL', out: '<section>{{lastmessage}}</section>', type: 'editdisplay', flag: 'g', ableFlag: true, comment: '' }], { characterId: config.characterId }).rows;
+  const render = () => resolver.applyScripts({ content: 'PANEL', scripts: [...scripts], context });
+  expect((await render())?.content.trim()).toBe('<section>Hello</section>');
+  events.get('__ws_close')!({});
+  expect(resolver.ready(config.chatId)).toBe(false);
+  for (let attempt = 0; attempt < failedAttempts; attempt++) events.get('__ws_close')!({});
+  state.messages[1]!.content = 'While offline';
+  state.revision = { epoch: 'host', sequence: 2 };
+  invalidations.length = 0;
+  events.get('__ws_open')!({});
+  events.get('CONNECTED')!({});
+  await Bun.sleep(0);
+  expect(calls.map(call => call.request.kind)).toEqual(['bootstrap']);
+  expect(resolver.ready(config.chatId)).toBe(false);
+  events.get('CONNECTED')!({ userId: 'test-user' });
+  if (edited) events.get('MESSAGE_EDITED')!({ chatId: config.chatId, message: {
+    id: 'user-message', role: 'user', content: 'After edit', index_in_chat: 1,
+  } }, { stateRevision: { epoch: 'host', sequence: 3 } });
+  await Bun.sleep(0);
+  expect(resolver.ready(config.chatId)).toBe(true);
+  expect((await render())?.content.trim()).toBe(`<section>${edited ? 'After edit' : 'While offline'}</section>`);
+  expect(calls.map(call => call.request.kind)).toEqual(['bootstrap', 'bootstrap']);
+  expect(invalidations).toContainEqual(['*']);
+  expect(failures).toEqual([]);
+});
+
+test.each(['chat', 'character'])('reconnect does not bootstrap a changed %s', async changed => {
+  const { config, calls, events, failures, resolver, activeChat } = await fixture('');
+  events.get('__ws_close')!({});
+  if (changed === 'chat') activeChat.chatId = 'native-chat';
+  activeChat.characterId = 'native-character';
+  events.get('__ws_open')!({});
+  events.get('CONNECTED')!({ userId: 'test-user' });
+  await Bun.sleep(0);
+  expect(resolver.ready(config.chatId)).toBe(false);
+  expect(calls.map(call => call.request.kind)).toEqual(['bootstrap']);
+  expect(failures).toEqual([]);
+});
+
+test('reconnect retries interrupted recovery and ignores the old connection reply', async () => {
+  const { runtime, config, state, events, failures, resolver, ctx } = await fixture('');
+  const pending: RuntimeServiceCall[] = [];
+  ctx.sendToBackend = raw => { pending.push(raw as RuntimeServiceCall); };
+  events.get('__ws_close')!({});
+  events.get('__ws_open')!({});
+  events.get('CONNECTED')!({ userId: 'test-user' });
+  expect(pending).toHaveLength(1);
+  events.get('__ws_close')!({});
+  events.get('__ws_open')!({});
+  events.get('CONNECTED')!({ userId: 'test-user' });
+  expect(pending).toHaveLength(2);
+  const reply = (call: RuntimeServiceCall, content: string) => {
+    state.messages[1]!.content = content;
+    runtime.receive(structuredClone({ type: 'lua_service_reply', requestId: call.requestId, ok: true,
+      value: { snapshot: config, state, settings: DEFAULT_SETTINGS } }));
+  };
+  reply(pending[0]!, 'Stale');
+  await Bun.sleep(0);
+  expect(resolver.ready(config.chatId)).toBe(false);
+  reply(pending[1]!, 'Fresh');
+  await Bun.sleep(0);
+  expect(resolver.ready(config.chatId)).toBe(true);
+  expect(getDisplaySnapshot(config.chatId)?.chat.lastMessage).toBe('Fresh');
+  expect(failures).toHaveLength(1);
+  expect(String(failures[0])).toContain('connection closed');
+});
 
 test('named Lua settings refresh cached regex labels after changed variables, without an explicit reload', async () => {
   const { runtime, config, calls, resolver, refreshes } = await fixture(`
