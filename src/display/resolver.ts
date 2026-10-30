@@ -28,7 +28,7 @@ import { isRisuRegexScript, type FeRegexScript, type FeRegexMatch } from './rege
 import { ActivationPatternError, createActivationPatternCache, type ActivationPatternCache } from './activation-patterns.js';
 import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
 import { decorateNativeRegexActions } from './regex-actions.js';
-import { createNativeVariableMacros } from './native-variable-macros.js';
+import { createNativeVariableMacros, type NativePresetVariables } from './native-variable-macros.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
 import { runDisplayTriggerChain } from './trigger-runner.js';
 import {
@@ -41,6 +41,19 @@ import { deferDisplayAssets, displayAssetBaseline, finalizeDisplayAssets, parseD
 import { evaluate } from '../interpreter/evaluator/scanner.js';
 import { stripDisplayStyleImports } from './style-imports.js';
 const log = makeSafeLogger('display-resolver');
+
+type PresetDisplayContext = SpindleDisplayContext & {
+  presetContext?: { variables?: NativePresetVariables };
+  presetRegexIds?: string[];
+};
+
+function nativeTemplateResolver(snap: DisplaySnapshot, context: PresetDisplayContext, recorder: VarReadRecorder, preset = false) {
+  let variables: ReturnType<typeof createNativeVariableMacros> | undefined;
+  return (text: string) => {
+    variables ??= createNativeVariableMacros(snap.vars, recorder.touched, preset ? context.presetContext?.variables : undefined);
+    return runPipeline(buildInput(snap, text, context), { recorder, resolveLeaf: variables });
+  };
+}
 
 const DBG_MARKS = ['🔄', '<CombatChoice', '<ActivityChoice', '<Panel>', '■■■', 'intro', '★■', '🦶'];
 function dbgMarks(s: string): string {
@@ -216,7 +229,7 @@ async function runApply(
   activationPatterns: ActivationPatternCache,
   cache: Map<string, SpindleDisplayResolveResult>,
 ): Promise<string> {
-  const ctx = args.context;
+  const ctx = args.context as PresetDisplayContext;
   const placement = ctx.isUser ? 'user_input' : 'ai_output';
   // Match the host execution pipeline's scope order; UI list sort numbers
   // overlap between global presets and character rules.
@@ -242,11 +255,9 @@ async function runApply(
     : {};
   if (hasRepeatBack) recorder.touched.add(MSG_DEP_KEY);
   let content = args.content;
-  let nativeVariables: ReturnType<typeof createNativeVariableMacros> | undefined;
-  const nativeEval = (text: string): string => {
-    nativeVariables ??= createNativeVariableMacros(snap.vars, recorder.touched);
-    return runPipeline(buildInput(snap, text, ctx), { recorder, resolveLeaf: nativeVariables });
-  };
+  const nativeEval = nativeTemplateResolver(snap, ctx, recorder);
+  const presetIds = new Set(ctx.presetRegexIds);
+  const presetEval = presetIds.size ? nativeTemplateResolver(snap, ctx, recorder, true) : nativeEval;
 
   // Risu processScriptFull caches after Lua/CBS, including evaluated <cbs> inputs.
   // Native rows stay live and split cache batches without changing execution order.
@@ -284,10 +295,10 @@ async function runApply(
           });
           continue;
         }
-        const coreScripts = [toCoreScript(step.script, nativeEval, prepared)];
+        const coreScripts = [toCoreScript(step.script, presetIds.has(step.script.id) ? presetEval : nativeEval, prepared)];
         while (index + 1 < end && plan[index + 1]?.kind === 'script') {
           const next = plan[++index]!;
-          if (next.kind === 'script') coreScripts.push(toCoreScript(next.script, nativeEval, prepared));
+          if (next.kind === 'script') coreScripts.push(toCoreScript(next.script, presetIds.has(next.script.id) ? presetEval : nativeEval, prepared));
         }
         content = applyRegexScriptsCore(content, coreScripts, {
           placement,
@@ -425,7 +436,11 @@ export function createDisplayResolver(
       try {
         for (const [key, template] of Object.entries(args.templates)) {
           const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
-          resolved[key] = runPipeline(buildInput(snap, template, args.context), { recorder });
+          const context = args.context as PresetDisplayContext;
+          const sourceRule = /^(?:find|replace):(.+)$/.exec(key)?.[1];
+          resolved[key] = sourceRule && context.presetRegexIds?.includes(sourceRule)
+            ? nativeTemplateResolver(snap, context, recorder, true)(template)
+            : runPipeline(buildInput(snap, template, context), { recorder });
           touchedVars[key] = [...recorder.touched];
           cacheable[key] = !recorder.volatile;
         }

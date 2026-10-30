@@ -16437,14 +16437,50 @@ function decorateNativeRegexActions(html, scriptId, actions, match, input) {
 
 // src/display/native-variable-macros.ts
 var VARIABLE_MACRO = /^(get|set|add|inc|dec|has|delete|flush)(var|gvar|globalvar|chatvar)$/;
-function createNativeVariableMacros(vars, touched) {
-  const scopes = {
-    local: new Map,
-    global: new Map(Object.entries(vars.global)),
-    chat: new Map(Object.entries(vars.local))
+function ownValue(values, key) {
+  return values && Object.hasOwn(values, key) ? values[key] : undefined;
+}
+function variableScope(initial) {
+  let changes;
+  const get = (key) => changes?.has(key) ? changes.get(key) : ownValue(initial, key);
+  return {
+    get,
+    has: (key) => changes?.has(key) ? changes.get(key) !== undefined : initial !== undefined && Object.hasOwn(initial, key),
+    set(key, value) {
+      (changes ??= new Map).set(key, value);
+    },
+    delete(key) {
+      (changes ??= new Map).set(key, undefined);
+    }
   };
+}
+function createNativeVariableMacros(vars, touched, preset) {
+  const scopes = {
+    local: variableScope(preset?.local),
+    global: variableScope(preset?.global ?? vars.global),
+    chat: variableScope(preset?.chat ?? vars.local)
+  };
+  const defaults = preset?.prompt_defaults;
+  const selections = preset?.prompt_selections;
   return (name, args) => {
     const normalized = name.trim().toLowerCase();
+    if (preset && name.startsWith("."))
+      return { text: String(scopes.local.get(name.slice(1).trim()) ?? ""), terminal: false };
+    if (preset && /^(var|promptvar|presetvar|vardefault|promptvardefault|presetvardefault|haspromptvar|haspresetvar|hasvar)$/.test(normalized)) {
+      const key = (args[0] ?? "").trim();
+      if (!key)
+        return { text: normalized.startsWith("has") ? "false" : "", terminal: true };
+      if (normalized.startsWith("has"))
+        return { text: String(scopes.local.has(key) || defaults !== undefined && Object.hasOwn(defaults, key)), terminal: true };
+      if (normalized.endsWith("default"))
+        return { text: String(ownValue(defaults, key) ?? ""), terminal: false };
+      if ((args[1] ?? "").trim().toLowerCase() === "ison") {
+        const wanted = (args[2] ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+        const selected = ownValue(selections, key);
+        return { text: String(wanted.every((value) => selected?.includes(value))), terminal: true };
+      }
+      return { text: String(scopes.local.get(key) ?? ownValue(defaults, key) ?? ""), terminal: false };
+    }
     const alias = normalized === "varexists" ? "hasvar" : normalized === "gvarexists" ? "hasgvar" : normalized;
     const match = VARIABLE_MACRO.exec(alias);
     if (!match)
@@ -21943,6 +21979,13 @@ function stripDisplayStyleImports(content) {
 
 // src/display/resolver.ts
 var log5 = makeSafeLogger("display-resolver");
+function nativeTemplateResolver(snap, context, recorder, preset = false) {
+  let variables;
+  return (text) => {
+    variables ??= createNativeVariableMacros(snap.vars, recorder.touched, preset ? context.presetContext?.variables : undefined);
+    return runPipeline(buildInput(snap, text, context), { recorder, resolveLeaf: variables });
+  };
+}
 var DBG_MARKS = ["\uD83D\uDD04", "<CombatChoice", "<ActivityChoice", "<Panel>", "■■■", "intro", "★■", "\uD83E\uDDB6"];
 function dbgMarks(s) {
   return DBG_MARKS.filter((m) => s.includes(m)).join(",");
@@ -22084,11 +22127,9 @@ async function runApply(snap, args, recorder, activationPatterns, cache) {
   if (hasRepeatBack)
     recorder.touched.add(MSG_DEP_KEY);
   let content = args.content;
-  let nativeVariables;
-  const nativeEval = (text) => {
-    nativeVariables ??= createNativeVariableMacros(snap.vars, recorder.touched);
-    return runPipeline(buildInput(snap, text, ctx), { recorder, resolveLeaf: nativeVariables });
-  };
+  const nativeEval = nativeTemplateResolver(snap, ctx, recorder);
+  const presetIds = new Set(ctx.presetRegexIds);
+  const presetEval = presetIds.size ? nativeTemplateResolver(snap, ctx, recorder, true) : nativeEval;
   for (let start = 0;start < plan.length; ) {
     const risu = isRisuRegexScript(plan[start].script);
     let end = start + 1;
@@ -22135,11 +22176,11 @@ async function runApply(snap, args, recorder, activationPatterns, cache) {
           });
           continue;
         }
-        const coreScripts = [toCoreScript(step.script, nativeEval, prepared)];
+        const coreScripts = [toCoreScript(step.script, presetIds.has(step.script.id) ? presetEval : nativeEval, prepared)];
         while (index + 1 < end && plan[index + 1]?.kind === "script") {
           const next = plan[++index];
           if (next.kind === "script")
-            coreScripts.push(toCoreScript(next.script, nativeEval, prepared));
+            coreScripts.push(toCoreScript(next.script, presetIds.has(next.script.id) ? presetEval : nativeEval, prepared));
         }
         content = applyRegexScriptsCore(content, coreScripts, {
           placement,
@@ -22271,7 +22312,9 @@ function createDisplayResolver(writeback, activationPatterns = createActivationP
       try {
         for (const [key, template] of Object.entries(args.templates)) {
           const recorder = { touched: new Set, volatile: false };
-          resolved[key] = runPipeline(buildInput(snap, template, args.context), { recorder });
+          const context = args.context;
+          const sourceRule = /^(?:find|replace):(.+)$/.exec(key)?.[1];
+          resolved[key] = sourceRule && context.presetRegexIds?.includes(sourceRule) ? nativeTemplateResolver(snap, context, recorder, true)(template) : runPipeline(buildInput(snap, template, context), { recorder });
           touchedVars[key] = [...recorder.touched];
           cacheable[key] = !recorder.volatile;
         }

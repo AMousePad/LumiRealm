@@ -118,6 +118,34 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
+  test('selected native rules use captured preset variables while character CBS retains its snapshot', async () => {
+    const snap = { ...snapshot(), vars: { local: { mode: 'CHARACTER' }, global: {}, chat: {} } }; setDisplaySnapshot(snap);
+    const resolver = createDisplayResolver();
+    const scripts = [
+      displayRule({ id: 'native', scope: 'global', replace_string: '<outer>{{var::mode}}</outer>', substitute_macros: 'escaped' }),
+      displayRule({ id: 'inner', scope: 'global', find_regex: '(?<=<outer>)([AB])(?=</outer>)', replace_string: '<inner>$1</inner>' }),
+      displayRule({ id: 'character', scope: 'character', find_regex: '</outer>$', replace_string: '</outer>:{{getvar::mode}}', metadata: { _risu: { phase: 'editdisplay' } } }),
+    ];
+    for (const mode of ['A', 'B', 'A']) {
+      const context = { chatId: 'chat-1', characterId: 'char-1', isUser: false, depth: 0,
+        presetRegexIds: ['native', 'inner'], presetContext: { variables: { local: { mode }, global: {}, chat: {} } } };
+      expect((await resolver.resolveBody({ content: '{{getvar::mode}}', context }))?.content).toBe('CHARACTER');
+      expect((await resolver.applyScripts({ content: 'TOKEN', scripts, context }))?.content).toBe(`<outer><inner>${mode}</inner></outer>:CHARACTER`);
+      expect((await resolver.resolveTemplates({ context, templates: { 'replace:native': '{{var::mode}}', 'replace:character': '{{getvar::mode}}' } }))?.resolved)
+        .toEqual({ 'replace:native': mode, 'replace:character': 'CHARACTER' });
+    }
+    expect(snap.vars.local.mode).toBe('CHARACTER');
+  });
+
+  test('captured native writes flow through one ordered chain without leaking into another swipe', async () => {
+    setDisplaySnapshot(snapshot()); const resolver = createDisplayResolver();
+    const scripts = [displayRule({ id: 'first', replace_string: '{{incvar::n}}', substitute_macros: 'escaped' }),
+      displayRule({ id: 'second', find_regex: '^3$', replace_string: '{{getvar::n}}', substitute_macros: 'escaped' })];
+    const context = { chatId: 'chat-1', isUser: false, depth: 0, presetRegexIds: ['first', 'second'],
+      presetContext: { variables: { local: { n: '2' } } } };
+    for (let i = 0; i < 2; i++) expect((await resolver.applyScripts({ content: 'TOKEN', scripts, context }))?.content).toBe('3');
+    expect(context.presetContext.variables.local.n).toBe('2');
+  });
   test('keeps frontend results authoritative', async () => {
     setDisplaySnapshot(snapshot());
     const fetch = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected backend comparison'));
