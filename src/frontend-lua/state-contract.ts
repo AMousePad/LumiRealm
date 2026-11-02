@@ -42,6 +42,8 @@ export type RuntimeSettings = Pick<RisuCompatSettings, 'auxConnectionId' | 'auxM
 export type RuntimeConfig = Pick<DisplaySnapshot, 'configVersion' | 'chatId' | 'characterId' | 'scriptstateDefaults'
   | 'screenWidth' | 'screenHeight' | 'legacyMediaFindings' | 'modulesByNamespace' | 'compiledLibraries'
   | 'hasEditDisplayLua' | 'hasEditAtActions' | 'luaTriggers' | 'atActions'> & {
+    readonly togglePreferences: Record<string, string> | null;
+    readonly presetToggles: Readonly<Record<string, string>>;
     readonly character: Pick<DisplaySnapshot['character'], 'jailbreakPrompt' | 'globalNote' | 'authorsNote' | 'additionalAssets' | 'emotionImages'>;
   };
 export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: RuntimeConfig; settings: RuntimeSettings }

@@ -123,6 +123,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
         if (entry) publish(entry, keys);
       });
       entry = { config: value.snapshot, settings: value.settings, state, updates: Promise.resolve(), lifetime: new AbortController() };
+      state.setToggles(value.snapshot.togglePreferences, value.snapshot.presetToggles);
       entries.set(chatId, entry);
       for (const event of events) observe(entry, event);
       publish(entry);
@@ -221,7 +222,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
     async snapshot(value: RuntimeConfig): Promise<void> {
       const entry = await ensure(value.chatId, value.characterId);
       if ((value.configVersion ?? 0) < (entry.config.configVersion ?? 0)) return;
-      entry.config = value; publish(entry);
+      entry.config = value; entry.state.setToggles(value.togglePreferences, value.presetToggles); publish(entry);
     },
     settings(value: RuntimeSettings): void { for (const entry of entries.values()) entry.settings = value; },
     writeback(chatId: string, values: Record<string, string>): void {

@@ -50,7 +50,7 @@ export function buildDisplayChatState(
   return buildDisplayChatStateFromView(buildRisuChatView({ messages: messagesHost }));
 }
 
-export function assembleRuntimeConfig(deps: RuntimeConfigDeps, active: ActiveCard, chatId: string, userId: string): RuntimeConfig {
+export function assembleRuntimeConfig(deps: RuntimeConfigDeps, active: ActiveCard, chatId: string, userId: string): Omit<RuntimeConfig, 'togglePreferences' | 'presetToggles'> {
   const triggers = active.card.risuPayload.triggers as readonly TriggerScript[];
   const luaScripts = active.card.risuPayload.lua_scripts;
   const hasEditDisplayLua = triggers.some((t) => t.effect?.[0]?.type === 'triggerlua');

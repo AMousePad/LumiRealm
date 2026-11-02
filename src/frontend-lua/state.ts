@@ -4,6 +4,7 @@ import { OrderedRuntimeState, type StatePatch, type StateRevision } from './orde
 import { runtimeMessage, runtimeCharacter, runtimePersona, runtimeLore, type RuntimeStateDto, type RuntimeStatePatch, type RuntimeStateCommand, type RuntimeStateWrite } from './state-contract.js';
 import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import { parseGlobalVars } from '../interpreter/runtime/chat-state.js';
+import { mergeEffectiveGlobals } from '../state/toggle-preferences.js';
 
 type Fields = Record<string, unknown>;
 const key = (group: string, id: string, field: string) => JSON.stringify([group, id, field]);
@@ -25,6 +26,7 @@ export class FrontendRuntimeState {
   private activeChatMutation: symbol | undefined;
   private greeting: string | undefined;
   private readonly messageObservers = new Set<(ids: ReadonlySet<string>) => void>();
+  private toggles: { preferences: Record<string, string> | null; preset: Readonly<Record<string, string>> } = { preferences: null, preset: {} };
 
   constructor(initial: RuntimeStateDto,
     private readonly persist: (command: RuntimeStateCommand, mutationId: string) => Promise<RuntimeStateWrite>,
@@ -113,8 +115,16 @@ export class FrontendRuntimeState {
   persona(): HostPersona | null { const value = this.object('persona'); return runtimePersona(value.id ? value as RuntimeStateDto['persona'] : null); }
   metadata(name: string): unknown { return name === 'chat_variables' ? this.variables() : this.state.get(key('metadata', '', name)); }
   variables(): Record<string, string | null> { return this.object('vars') as Record<string, string | null>; }
-  globalVariables(): Record<string, string | null> { return this.object('global') as Record<string, string | null>; }
-  variable(name: string, global = false): string | null | undefined { return this.state.get(key(global ? 'global' : 'vars', '', name)) as string | null | undefined; }
+  // Same overlay the backend applies in readEffectiveGlobals: saved toggles live outside chat metadata.
+  setToggles(preferences: Record<string, string> | null, preset: Readonly<Record<string, string>>): void { this.toggles = { preferences, preset }; }
+  globalVariables(): Record<string, string | null> {
+    return mergeEffectiveGlobals(this.object('global') as Record<string, string | null>, this.toggles.preferences, this.toggles.preset);
+  }
+  variable(name: string, global = false): string | null | undefined {
+    if (!global) return this.state.get(key('vars', '', name)) as string | null | undefined;
+    const globals = this.globalVariables();
+    return Object.hasOwn(globals, name) ? globals[name] : undefined;
+  }
   stageVariables(values: Record<string, string | null>): void {
     if (!Object.keys(values).length) return;
     const patch = new Map<string, unknown>();

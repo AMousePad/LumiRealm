@@ -1,4 +1,5 @@
 import type { DisplaySnapshot } from '../../src/display/snapshot.js';
+import type { RuntimeConfig } from '../../src/frontend-lua/state-contract.js';
 
 export const chatId = 'lua-display-parity';
 export const context = {
@@ -6,7 +7,7 @@ export const context = {
   messageIndex: 1, isUser: true, depth: 0,
 };
 
-export function snapshot(code: string): DisplaySnapshot {
+export function snapshot(code: string): DisplaySnapshot & RuntimeConfig {
   return {
     chatId, characterId: 'character', userName: 'User', charName: 'Character',
     personaText: '', personaImage: '', personaImageId: null, chatAuthorsNote: null,
@@ -34,6 +35,6 @@ export function snapshot(code: string): DisplaySnapshot {
       { id: 'greeting', role: 'assistant', content: 'Greeting' },
       { id: 'user-message', role: 'user', content: 'Hello', createdAt: 1700000000000 },
     ],
-    lorebookHost: [], atActions: [], compiledLibraries: [],
+    lorebookHost: [], atActions: [], compiledLibraries: [], togglePreferences: null, presetToggles: {},
   };
 }

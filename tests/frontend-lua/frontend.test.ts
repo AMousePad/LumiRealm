@@ -295,6 +295,22 @@ test('saved drawer globals reach CBS and Lua on open, change and deletion withou
   expect(calls.map(call => call.request.kind)).toEqual(['bootstrap', 'state.write', 'state.write']);
 });
 
+test('saved toggle preferences override chat toggles for CBS and Lua', async () => {
+  const { runtime, config, resolver } = await fixture(`
+    function readToggle(id) setChatVar(id,'seen',getGlobalVar(id,'toggle_mode')) end
+  `, state => { state.chat.metadata.macro_variables = { global: { toggle_mode: '0', other: 'kept' } }; });
+  const read = async (name: string) => (await resolver.resolveBody({ content: `{{getglobalvar::${name}}}`, context }))?.content;
+  expect(await read('toggle_mode')).toBe('0');
+  for (const [configVersion, togglePreferences, expected] of [[2, { toggle_mode: '1' }, '1'], [3, {}, 'null']] as const) {
+    await runtime.snapshot({ ...config, configVersion, togglePreferences, presetToggles: { toggle_preset: 'preset' } });
+    expect(await read('toggle_mode')).toBe(expected);
+    await runtime.manual(config.chatId, { kind: 'manual', name: 'readToggle' });
+    expect(getDisplaySnapshot(config.chatId)?.vars.local.seen).toBe(expected);
+  }
+  expect(await read('toggle_preset')).toBe('preset');
+  expect(await read('other')).toBe('kept');
+});
+
 async function triggerFixture(sources: TriggerScript[]) {
   const f = await fixture('');
   await f.runtime.snapshot({ ...f.config, luaTriggers: sources.map(source => ({ source,

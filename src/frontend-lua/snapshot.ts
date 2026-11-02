@@ -8,7 +8,7 @@ import { imageUrlFromId } from '../interpreter/image-cache.js';
 import { lumiEntryToRisuLore } from '../state/lorebook-fetch.js';
 import type { WorldBookEntryDTO } from 'lumiverse-spindle-types';
 
-export function runtimeDisplaySnapshot(config: RuntimeConfig, state: FrontendRuntimeState): DisplaySnapshot {
+export function runtimeDisplaySnapshot({ togglePreferences: _preferences, presetToggles: _preset, ...config }: RuntimeConfig, state: FrontendRuntimeState): DisplaySnapshot {
   const character = state.character();
   const persona = state.persona();
   const messagesHost = state.hostMessages();

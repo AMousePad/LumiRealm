@@ -40,7 +40,7 @@ test('configuration needs no host reads and preserves the display assembled from
     lore: [{ id: 'lore', world_book_id: 'book', content: 'Live lore', order_value: 3 }],
     globalVariables: { currentGlobal: 'yes' },
   }, async () => { throw new Error('Unexpected state write'); }, () => {});
-  const value = runtimeDisplaySnapshot(config, state);
+  const value = runtimeDisplaySnapshot({ ...config, togglePreferences: null, presetToggles: {} }, state);
   expect(value).toEqual(runtimeDisplaySnapshot(previous, state));
   expect(value.character.additionalAssets).toBe(previous.character.additionalAssets);
   expect(value).toMatchObject({ charName: 'Live character', userName: 'Live user',
