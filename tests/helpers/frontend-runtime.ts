@@ -2,12 +2,12 @@ import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import { setupFrontendLua } from '../../src/frontend-lua/frontend.js';
 import type { FrontendLuaOperation, FrontendLuaReply } from '../../src/frontend-lua/protocol.js';
 import type { RuntimeServiceCall } from '../../src/frontend-lua/services.js';
-import type { RuntimeStateDto } from '../../src/frontend-lua/state-contract.js';
+import type { RuntimeConfig, RuntimeStateDto } from '../../src/frontend-lua/state-contract.js';
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store.js';
 import { snapshot } from './display-lua-fixture.js';
 import type { DisplaySnapshot } from '../../src/display/snapshot.js';
 
-export async function frontendRuntime(code: string | DisplaySnapshot, invalidate: (chatId: string, keys: string[], resetScripts?: boolean) => void = () => {}) {
+export async function frontendRuntime(code: string | (DisplaySnapshot & RuntimeConfig), invalidate: (chatId: string, keys: string[], resetScripts?: boolean) => void = () => {}) {
   const config = typeof code === 'string' ? snapshot(code) : code;
   const state: RuntimeStateDto = { revision: { epoch: 'host', sequence: 1 },
     chat: { id: config.chatId, metadata: { chat_variables: config.vars.local, macro_variables: { global: config.vars.global } } },
