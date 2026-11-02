@@ -15,7 +15,9 @@ export function runtimeDisplaySnapshot({ moduleLorebooks, ...config }: RuntimeCo
   const messagesHost = state.hostMessages();
   const view = buildRisuChatView({ messages: messagesHost });
   const note = state.metadata('authors_note');
-  const lorebookHost = withModuleLorebooks(state.lore(), moduleLorebooks, character.worldBookIds);
+  const lore = state.lore();
+  // Module rows keep Risu's string keys, so only Lua's host lorebook takes them.
+  const lorebookHost = withModuleLorebooks(lore, moduleLorebooks, character.worldBookIds);
   return {
     ...config, charName: character.name ?? '', userName: persona?.name ?? '', personaText: persona?.description ?? '',
     personaImageId: persona?.imageId ?? null, personaImage: imageUrlFromId(persona?.imageId) ?? '',
@@ -32,6 +34,6 @@ export function runtimeDisplaySnapshot({ moduleLorebooks, ...config }: RuntimeCo
     },
     messagesHost, chat: buildDisplayChatState(messagesHost),
     vars: { local: state.variables(), global: state.globalVariables(), chat: {} },
-    lorebookHost, lorebook: lorebookHost.map(entry => lumiEntryToRisuLore(entry as unknown as WorldBookEntryDTO)),
+    lorebookHost, lorebook: lore.map(entry => lumiEntryToRisuLore(entry as unknown as WorldBookEntryDTO)),
   };
 }

@@ -23181,7 +23181,8 @@ function runtimeDisplaySnapshot({ moduleLorebooks, ...config }, state) {
   const messagesHost = state.hostMessages();
   const view = buildRisuChatView({ messages: messagesHost });
   const note = state.metadata("authors_note");
-  const lorebookHost = withModuleLorebooks(state.lore(), moduleLorebooks, character.worldBookIds);
+  const lore = state.lore();
+  const lorebookHost = withModuleLorebooks(lore, moduleLorebooks, character.worldBookIds);
   return {
     ...config,
     charName: character.name ?? "",
@@ -23210,7 +23211,7 @@ function runtimeDisplaySnapshot({ moduleLorebooks, ...config }, state) {
     chat: buildDisplayChatState(messagesHost),
     vars: { local: state.variables(), global: state.globalVariables(), chat: {} },
     lorebookHost,
-    lorebook: lorebookHost.map((entry) => lumiEntryToRisuLore(entry))
+    lorebook: lore.map((entry) => lumiEntryToRisuLore(entry))
   };
 }
 

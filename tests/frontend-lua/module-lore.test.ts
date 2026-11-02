@@ -14,7 +14,7 @@ test('runtime config carries global module lore into the display snapshot lorebo
       triggers: [], lua_scripts: [], at_actions: [], scriptstate_defaults: {},
       extra: { runtime_module_lorebooks: {
         attached: [{ comment: 'attached-row', content: 'stale attached', worldBookId: 'attached' }],
-        global: [{ comment: 'prelude', content: 'global module', worldBookId: 'global-book' }],
+        global: [{ comment: 'prelude', content: 'global module', key: 'prelude, boot', worldBookId: 'global-book' }],
       } },
     },
   } } as unknown as ActiveCard;
@@ -29,6 +29,7 @@ test('runtime config carries global module lore into the display snapshot lorebo
   const value = runtimeDisplaySnapshot(config, state);
   expect(value.lorebookHost.map(entry => [entry.comment, entry.content]))
     .toEqual([['attached-row', 'live attached'], ['prelude', 'global module']]);
+  expect(value.lorebook.map(entry => entry.comment)).toEqual(['attached-row']);
   expect(value).not.toHaveProperty('moduleLorebooks');
 });
 
