@@ -9,7 +9,8 @@ import { snapshot } from '../helpers/display-lua-fixture.js';
 afterEach(() => clearScreenDims('config-owner'));
 
 test('configuration needs no host reads and preserves the display assembled from revisioned state', () => {
-  const previous = snapshot('function onStart() end');
+  const previous = { ...snapshot('function onStart() end'),
+    scriptstateDefaults: { mode: 'default' }, modulesByNamespace: { attached: ['asset-a'] } };
   setScreenDims('config-owner', { width: previous.screenWidth, height: previous.screenHeight });
   const active = { lumirealm: { user_overrides: {} }, card: {
     character_id: previous.characterId, asset_index: previous.character.additionalAssets,
@@ -41,10 +42,16 @@ test('configuration needs no host reads and preserves the display assembled from
     globalVariables: { currentGlobal: 'yes' },
   }, async () => { throw new Error('Unexpected state write'); }, () => {});
   const value = runtimeDisplaySnapshot({ ...config, togglePreferences: null, presetToggles: {} }, state);
-  expect(value).toEqual(runtimeDisplaySnapshot(previous, state));
   expect(value.character.additionalAssets).toBe(previous.character.additionalAssets);
   expect(value).toMatchObject({ charName: 'Live character', userName: 'Live user',
     personaText: 'Live persona', chatAuthorsNote: { content: 'Current note', depth: 3 },
     vars: { local: { current: 'yes' }, global: { currentGlobal: 'yes' } },
+    scriptstateDefaults: { mode: 'default' }, modulesByNamespace: { attached: ['asset-a'] },
+    screenWidth: 1280, screenHeight: 720, hasEditDisplayLua: true,
+    luaTriggers: [{ luaCode: 'function onStart() end', source: { type: 'manual' } }],
+    character: { firstMessage: 'First', selectedGreeting: 'Selected greeting', selectedAlternateGreetingIndex: 0 },
+    lorebook: [{ content: 'Live lore', insertorder: 3 }],
+    lorebookHost: [{ id: 'lore', worldBookId: 'book', content: 'Live lore', orderValue: 3 }],
+    chat: { lastMessage: 'Current message', messages: [{ role: 'user', content: 'Current message' }] },
   });
 });

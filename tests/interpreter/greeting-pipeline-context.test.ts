@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { buildBackendPipelineInput } from '../../src/interceptors/prompt-regex-apply.js';
 import { runPipeline } from '../../src/interpreter/evaluator/pipeline.js';
-import { assembleDisplaySnapshot } from '../helpers/display-snapshot-reference.js';
+import { runtimeSnapshot } from '../helpers/runtime-snapshot.js';
+import type { ActiveCard } from '../../src/interpreter/dispatch.js';
 import { clearMessagesCache } from '../../src/interpreter/messages-cache.js';
 
 const character = {
@@ -26,7 +27,7 @@ const messages = [
   },
 ];
 
-function installSpindle(canonicalIndex: number | undefined = 2): void {
+function installSpindle(canonicalIndex?: number): void {
   (globalThis as { spindle?: unknown }).spindle = {
     userStorage: { getJson: async () => null },
     chats: {
@@ -52,9 +53,23 @@ afterEach(() => {
   delete (globalThis as { spindle?: unknown }).spindle;
 });
 
+function displaySnapshot(canonicalIndex: number) {
+  const active = {
+    ownerUserId: 'user-1', lumirealm: { user_overrides: {} }, card: {
+      character_id: character.id, asset_index: {}, emotion_index: {},
+      risuPayload: { triggers: [], lua_scripts: [], at_actions: [], scriptstate_defaults: {} },
+    },
+  } as unknown as ActiveCard;
+  return runtimeSnapshot(active, {
+    revision: { epoch: 'host', sequence: 1 }, chat: { id: 'chat-1', metadata: { activeGreetingIndex: canonicalIndex } },
+    character, persona: { id: 'persona', name: 'User' },
+    messages: messages.map((message, index_in_chat) => ({ ...message, index_in_chat })), lore: [], globalVariables: {},
+  });
+}
+
 describe('selected greeting context', () => {
   test('prompt-regex context carries greeting identity and effective content', async () => {
-    installSpindle();
+    installSpindle(2);
     const prebuilt = await buildBackendPipelineInput(
       'chat-1',
       'char-1',
@@ -96,31 +111,7 @@ describe('selected greeting context', () => {
   });
 
   test('frontend display snapshot carries the same greeting state', async () => {
-    installSpindle();
-    const active = {
-      card: {
-        character_id: 'char-1',
-        asset_index: {},
-        emotion_index: {},
-        risuPayload: {
-          triggers: [],
-          lua_scripts: [],
-          at_actions: [],
-          scriptstate_defaults: {},
-        },
-      },
-    };
-    const snapshot = await assembleDisplaySnapshot(
-      {
-        modulesByNamespaceFromCard: () => null,
-        legacyMediaFindings: () => false,
-        getCompiledLibraries: () => [],
-      },
-      active as never,
-      'chat-1',
-      'user-1',
-      { local: {}, global: {}, chat: {} },
-    );
+    const snapshot = displaySnapshot(2);
 
     expect(snapshot.character.selectedAlternateGreetingIndex).toBe(1);
     expect(snapshot.character.selectedGreeting).toBe('Edited alternate two');
@@ -131,31 +122,7 @@ describe('selected greeting context', () => {
   });
 
   test('canonical default selection overrides stale greeting-message metadata', async () => {
-    installSpindle(0);
-    const active = {
-      card: {
-        character_id: 'char-1',
-        asset_index: {},
-        emotion_index: {},
-        risuPayload: {
-          triggers: [],
-          lua_scripts: [],
-          at_actions: [],
-          scriptstate_defaults: {},
-        },
-      },
-    };
-    const snapshot = await assembleDisplaySnapshot(
-      {
-        modulesByNamespaceFromCard: () => null,
-        legacyMediaFindings: () => false,
-        getCompiledLibraries: () => [],
-      },
-      active as never,
-      'chat-1',
-      'user-1',
-      { local: {}, global: {}, chat: {} },
-    );
+    const snapshot = displaySnapshot(0);
 
     expect(snapshot.character.selectedAlternateGreetingIndex).toBe(-1);
   });

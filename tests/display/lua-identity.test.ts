@@ -3,20 +3,19 @@ import { createDisplayResolver } from '../helpers/snapshot-display.js';
 import { clearDisplaySnapshot, setDisplaySnapshot } from '../../src/display/snapshot.js';
 import type { ActiveCard } from '../../src/interpreter/dispatch.js';
 import { clearLuaEngines } from '../helpers/lua-bridge.js';
-import { assembleDisplaySnapshot } from '../helpers/display-snapshot-reference.js';
+import { runtimeSnapshot } from '../helpers/runtime-snapshot.js';
 
 // Risu's runScripted getters read char.name and char.firstMessage, independent of the selected greeting.
 test.each([
   { name: 'Record name', firstMessage: 'Base greeting' },
   { name: '', firstMessage: '' },
 ])('display Lua reads the stored character identity: %j', async ({ name, firstMessage }) => {
-  const global = globalThis as unknown as { spindle?: unknown };
-  const previous = global.spindle;
   const chatId = 'lua-identity';
   const luaCode = `listenEdit('editDisplay', function(id, text)
     return getName(id) .. '|' .. getCharacterFirstMessage(id)
   end)`;
   const active = {
+    ownerUserId: 'user', lumirealm: { user_overrides: {} },
     card: {
       character_id: 'character', asset_index: {}, emotion_index: {},
       risuPayload: {
@@ -25,21 +24,15 @@ test.each([
       },
     },
   } as unknown as ActiveCard;
-  global.spindle = {
-    characters: { get: async () => ({ name, nickname: 'Nickname', first_mes: firstMessage,
-      alternate_greetings: ['Alternate greeting'], world_book_ids: [] }) },
-    personas: { getActive: async () => ({ name: 'User' }) },
-    chats: { get: async () => ({ metadata: { activeGreetingIndex: 1 } }) },
-    chat: { getMessages: async () => [
-      { id: 'greeting', role: 'assistant', content: 'Edited selected greeting' },
-      { id: 'message', role: 'user', content: 'Hello' },
-    ] },
-  };
   try {
-    const snapshot = await assembleDisplaySnapshot({
-      modulesByNamespaceFromCard: () => ({}), legacyMediaFindings: () => false,
-      getCompiledLibraries: () => [],
-    }, active, chatId, 'user', { local: {}, global: {}, chat: {} });
+    const snapshot = runtimeSnapshot(active, {
+      revision: { epoch: 'host', sequence: 1 }, chat: { id: chatId, metadata: { activeGreetingIndex: 1 } },
+      character: { id: 'character', name, nickname: 'Nickname', first_mes: firstMessage, alternate_greetings: ['Alternate greeting'], world_book_ids: [] },
+      persona: { id: 'persona', name: 'User' }, lore: [], globalVariables: {}, messages: [
+        { id: 'greeting', role: 'assistant', content: 'Edited selected greeting', index_in_chat: 0 },
+        { id: 'message', role: 'user', content: 'Hello', index_in_chat: 1 },
+      ],
+    });
     expect(snapshot.charName).toBe(name);
     expect(snapshot.character.firstMessage).toBe(firstMessage);
     expect(snapshot.character.selectedGreeting).toBe('Edited selected greeting');
@@ -54,7 +47,5 @@ test.each([
   } finally {
     clearDisplaySnapshot(chatId);
     await clearLuaEngines();
-    if (previous === undefined) delete global.spindle;
-    else global.spindle = previous;
   }
 });

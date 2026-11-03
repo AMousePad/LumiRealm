@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { makeDispatcherScriptNS } from '../../src/interpreter/dispatcher.js';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
 import { makeSpindleHost } from '../../src/interpreter/spindle-host.js';
-import { assembleDisplaySnapshot } from '../helpers/display-snapshot-reference.js';
+import { runtimeSnapshot } from '../helpers/runtime-snapshot.js';
 import { execute } from '../helpers/lua-bridge.js';
 import { runtimeMessage } from '../../src/frontend-lua/state-contract.js';
 
@@ -36,12 +36,13 @@ describe('Risu runScripted chat timestamps', () => {
   for (const path of ['backend', 'display snapshot', 'frontend state'] as const) {
     test(`${path} exposes the same timestamps through public Lua readers`, async () => {
       const api = host();
-      const snapshot = path === 'display snapshot' ? await assembleDisplaySnapshot({
-        modulesByNamespaceFromCard: () => null, legacyMediaFindings: () => false,
-        getCompiledLibraries: () => [],
-      }, { card: { character_id: 'character', asset_index: {}, emotion_index: {},
+      const snapshot = path === 'display snapshot' ? runtimeSnapshot({ ownerUserId: 'user', lumirealm: { user_overrides: {} }, card: { character_id: 'character', asset_index: {}, emotion_index: {},
         risuPayload: { triggers: [], lua_scripts: [], at_actions: [], scriptstate_defaults: {} },
-      } } as never, 'chat', 'user', { local: {}, global: {}, chat: {} }) : null;
+      } } as never, {
+        revision: { epoch: 'host', sequence: 1 }, chat: { id: 'chat', metadata: {} },
+        character: { id: 'character', name: 'Character', world_book_ids: [] }, persona: { id: 'persona', name: 'User' },
+        messages: rows.map((row, index_in_chat) => ({ ...row, index_in_chat })), lore: [], globalVariables: {},
+      }) : null;
       const runtime = await makeRisuTriggerRuntime(api, {}, makeDispatcherScriptNS(execute), {
         binding: 'manual', preloaded: { varsCache: {}, globalVars: {},
           lorebook: { entries: [], primaryBookId: null },

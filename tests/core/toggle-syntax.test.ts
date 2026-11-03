@@ -1,9 +1,7 @@
-import { collectModuleToggleDsl, groupToggles } from '../helpers/toggle-syntax.js';
 import { describe, expect, test } from 'bun:test';
 import {
   extractToggleKeys,
   parseToggleSyntax,
-  type SidebarToggle,
 } from '../../src/core/toggle-syntax.js';
 
 // Direct port of Risu's `parseToggleSyntax` semantics: every test here
@@ -106,91 +104,6 @@ describe('parseToggleSyntax', () => {
     expect(parseToggleSyntax('\n\nenable=A\n\n')).toEqual([
       { key: 'enable', value: 'A', type: undefined, options: [] },
     ]);
-  });
-});
-
-describe('groupToggles', () => {
-  test('flat list with no groups → unchanged', () => {
-    const flat: SidebarToggle[] = [
-      { key: 'a', value: 'A', type: undefined, options: [] },
-      { key: 'b', value: 'B', type: undefined, options: [] },
-    ];
-    expect(groupToggles(flat)).toEqual(flat);
-  });
-
-  test('group … groupEnd nests children, drops groupEnd', () => {
-    const flat = parseToggleSyntax(
-      ['enable=Enable',
-       '=Appearance=group',
-       'avatar=Show avatar',
-       'theme=Theme=select=dark,light',
-       '==groupEnd',
-       'verbose=Verbose'].join('\n'),
-    );
-    const grouped = groupToggles(flat);
-    expect(grouped).toHaveLength(3);
-    expect(grouped[0]).toMatchObject({ key: 'enable' });
-    expect(grouped[1]).toMatchObject({ type: 'group', value: 'Appearance' });
-    const grp = grouped[1] as { type: 'group'; children: SidebarToggle[] };
-    expect(grp.children).toHaveLength(2);
-    expect(grp.children[0]).toMatchObject({ key: 'avatar' });
-    expect(grouped[2]).toMatchObject({ key: 'verbose' });
-  });
-
-  test('groupEnd without open group → silently dropped', () => {
-    const flat = parseToggleSyntax(['a=A', '==groupEnd', 'b=B'].join('\n'));
-    expect(groupToggles(flat)).toHaveLength(2);
-  });
-
-  test('group never closed → trailing entries collected into open group', () => {
-    const flat = parseToggleSyntax(['=Group=group', 'a=A', 'b=B'].join('\n'));
-    const grouped = groupToggles(flat);
-    expect(grouped).toHaveLength(1);
-    const grp = grouped[0] as { type: 'group'; children: SidebarToggle[] };
-    expect(grp.children).toHaveLength(2);
-  });
-
-  test('second `group` while one open → opens new group alongside (Risu reducer parity)', () => {
-    const flat = parseToggleSyntax(
-      ['=G1=group', 'a=A', '=G2=group', 'b=B'].join('\n'),
-    );
-    const grouped = groupToggles(flat);
-    expect(grouped).toHaveLength(2);
-    expect((grouped[0] as { children: SidebarToggle[] }).children).toHaveLength(1);
-    expect((grouped[1] as { children: SidebarToggle[] }).children).toHaveLength(1);
-  });
-});
-
-describe('collectModuleToggleDsl', () => {
-  test('no modules → empty', () => {
-    expect(collectModuleToggleDsl([])).toBe('');
-  });
-
-  test('skips modules without DSL', () => {
-    expect(
-      collectModuleToggleDsl([
-        { customModuleToggle: undefined },
-        { customModuleToggle: '' },
-        { customModuleToggle: null },
-      ]),
-    ).toBe('');
-  });
-
-  test('newline-sandwich concatenation matches Risu getModuleToggles', () => {
-    const out = collectModuleToggleDsl([
-      { customModuleToggle: 'a=A' },
-      { customModuleToggle: 'b=B' },
-    ]);
-    expect(out).toBe('\na=A\n\nb=B\n');
-  });
-
-  test('preserves order across modules', () => {
-    const out = collectModuleToggleDsl([
-      { customModuleToggle: 'first=First' },
-      { customModuleToggle: 'second=Second' },
-    ]);
-    const parsed = parseToggleSyntax(out);
-    expect(parsed.map((t) => ('key' in t ? t.key : null))).toEqual(['first', 'second']);
   });
 });
 
