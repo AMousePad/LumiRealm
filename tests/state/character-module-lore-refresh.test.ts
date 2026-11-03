@@ -37,9 +37,9 @@ test('module invalidation publishes changed lore for the visible owner chat', as
     readLumirealm: async () => ({ data: current.lumirealm }), readAttachedModuleEnvelopes: async () => [],
     ensureActiveCardForChat, refreshBgHtml: async () => {},
     send: message => { sent.push(message); },
-    pushDisplaySnapshot: (value, chatId, userId) => { sent.push({ type: 'display_snapshot', snapshot: assembleRuntimeConfig({
+    pushDisplaySnapshot: (value, chatId, userId) => { sent.push({ type: 'display_snapshot', snapshot: { ...assembleRuntimeConfig({
       modulesByNamespaceFromCard: () => null, legacyMediaFindings: () => false, getCompiledLibraries: () => [],
-    }, value, chatId, userId) }); },
+    }, value, chatId, userId), togglePreferences: null, presetToggles: {} } }); },
     log, errMsg: String,
   });
   const attach = createCharacterModuleAttach({

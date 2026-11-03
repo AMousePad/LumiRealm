@@ -151,6 +151,8 @@ import {
 } from './boot/misc.js';
 import { createVariablesTogglesService } from './state/variables-toggles.js';
 import { assembleRuntimeConfig } from './state/display-snapshot-assembly.js';
+import { readTogglePreferences } from './state/toggle-preferences.js';
+import { presetToggleValues } from './state/preset-toggle-values.js';
 import { createSettingsService } from './state/settings-service.js';
 import { makeCaptureUserId } from './boot/capture-user.js';
 import { createImportCardOrchestrator } from './boot/import-card.js';
@@ -918,7 +920,7 @@ async function assembleRuntimeSnapshot(active: ActiveCard, chatId: string, userI
       return compiled.filter(entry => entry.type === 'library');
     },
   }, active, chatId, userId);
-  return { ...snapshot, configVersion };
+  return { ...snapshot, configVersion, togglePreferences: await readTogglePreferences(userId), presetToggles: presetToggleValues(chatId, userId) };
 }
 
 const variablesTogglesService = createVariablesTogglesService({

@@ -49,9 +49,9 @@ async function fixture(characterBook: 'absent' | 'empty' | 'populated', attached
       ] } : {}) } },
     },
   } } as unknown as ActiveCard;
-  const config = assembleRuntimeConfig({
+  const config = { ...assembleRuntimeConfig({
     modulesByNamespaceFromCard: () => null, legacyMediaFindings: () => false, getCompiledLibraries: () => [],
-  }, card, 'module-chat', 'owner');
+  }, card, 'module-chat', 'owner'), togglePreferences: null, presetToggles: {} };
   const state: RuntimeStateDto = {
     revision: { epoch: 'host', sequence: 1 }, chat: { id: config.chatId, metadata: { chat_variables: {} } },
     character: { id: config.characterId, world_book_ids: [

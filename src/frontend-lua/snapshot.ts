@@ -9,7 +9,7 @@ import { lumiEntryToRisuLore } from '../state/lorebook-fetch.js';
 import { withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
 import type { WorldBookEntryDTO } from 'lumiverse-spindle-types';
 
-export function runtimeDisplaySnapshot({ moduleLorebooks, ...config }: RuntimeConfig, state: FrontendRuntimeState): DisplaySnapshot {
+export function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferences, presetToggles: _preset, ...config }: RuntimeConfig, state: FrontendRuntimeState): DisplaySnapshot {
   const character = state.character();
   const persona = state.persona();
   const messagesHost = state.hostMessages();

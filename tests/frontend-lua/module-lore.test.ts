@@ -26,7 +26,7 @@ test('runtime config carries global module lore into the display snapshot lorebo
     character: { id: 'character', world_book_ids: ['attached'] }, persona: null, messages: [],
     lore: [{ id: 'live', world_book_id: 'attached', comment: 'attached-row', content: 'live attached' }], globalVariables: {},
   }, async () => { throw new Error('Unexpected write'); }, () => {});
-  const value = runtimeDisplaySnapshot(config, state);
+  const value = runtimeDisplaySnapshot({ ...config, togglePreferences: null, presetToggles: {} }, state);
   expect(value.lorebookHost.map(entry => [entry.comment, entry.content]))
     .toEqual([['attached-row', 'live attached'], ['prelude', 'global module']]);
   expect(value.lorebook.map(entry => entry.comment)).toEqual(['attached-row']);

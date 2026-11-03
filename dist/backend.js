@@ -36403,7 +36403,7 @@ async function assembleRuntimeSnapshot(active, chatId, userId) {
       return compiled.filter((entry) => entry.type === "library");
     }
   }, active, chatId, userId);
-  return { ...snapshot, configVersion };
+  return { ...snapshot, configVersion, togglePreferences: await readTogglePreferences(userId), presetToggles: presetToggleValues(chatId, userId) };
 }
 var variablesTogglesService = createVariablesTogglesService({
   visibleChatForUser: (userId) => lastActiveChatByUser.get(userId),

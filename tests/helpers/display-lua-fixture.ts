@@ -35,6 +35,6 @@ export function snapshot(code: string): DisplaySnapshot & RuntimeConfig {
       { id: 'greeting', role: 'assistant', content: 'Greeting' },
       { id: 'user-message', role: 'user', content: 'Hello', createdAt: 1700000000000 },
     ],
-    lorebookHost: [], moduleLorebooks: [], atActions: [], compiledLibraries: [],
+    lorebookHost: [], moduleLorebooks: [], atActions: [], compiledLibraries: [], togglePreferences: null, presetToggles: {},
   };
 }

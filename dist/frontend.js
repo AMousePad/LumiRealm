@@ -22557,6 +22557,18 @@ function runtimeLore(value) {
   return { ...value, worldBookId: String(value.world_book_id ?? ""), orderValue: Number(value.order_value ?? 0) };
 }
 
+// src/state/toggle-preferences.ts
+var chains2 = new Map;
+function mergeEffectiveGlobals(legacy, preferences, presetToggles = {}) {
+  if (preferences === null)
+    return { ...presetToggles, ...legacy };
+  return {
+    ...presetToggles,
+    ...Object.fromEntries(Object.entries(legacy).filter(([key]) => !key.startsWith("toggle_"))),
+    ...preferences
+  };
+}
+
 // src/frontend-lua/state.ts
 var key = (group, id, field) => JSON.stringify([group, id, field]);
 
@@ -22579,6 +22591,7 @@ class FrontendRuntimeState {
   activeChatMutation;
   greeting;
   messageObservers = new Set;
+  toggles = { preferences: null, preset: {} };
   constructor(initial, persist, changed) {
     this.persist = persist;
     this.changed = changed;
@@ -22689,11 +22702,24 @@ class FrontendRuntimeState {
   variables() {
     return this.object("vars");
   }
+  setToggles(preferences, preset) {
+    this.toggles = { preferences, preset };
+  }
   globalVariables() {
-    return this.object("global");
+    return mergeEffectiveGlobals(this.object("global"), this.toggles.preferences, this.toggles.preset);
   }
   variable(name, global2 = false) {
-    return this.state.get(key(global2 ? "global" : "vars", "", name));
+    if (!global2)
+      return this.state.get(key("vars", "", name));
+    const { preferences, preset } = this.toggles;
+    if (preferences !== null && Object.hasOwn(preferences, name))
+      return preferences[name];
+    if (preferences === null || !name.startsWith("toggle_")) {
+      const value = this.state.get(key("global", "", name));
+      if (value !== undefined)
+        return value;
+    }
+    return Object.hasOwn(preset, name) ? preset[name] : undefined;
   }
   stageVariables(values) {
     if (!Object.keys(values).length)
@@ -23190,7 +23216,7 @@ function lumiEntryToRisuLore(e) {
 }
 
 // src/frontend-lua/snapshot.ts
-function runtimeDisplaySnapshot({ moduleLorebooks, ...config }, state) {
+function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferences, presetToggles: _preset, ...config }, state) {
   const character = state.character();
   const persona = state.persona();
   const messagesHost = state.hostMessages();
@@ -23365,6 +23391,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
           publish(entry, keys);
       });
       entry = { config: value.snapshot, settings: value.settings, state, updates: Promise.resolve(), lifetime: new AbortController };
+      state.setToggles(value.snapshot.togglePreferences, value.snapshot.presetToggles);
       entries.set(chatId, entry);
       for (const event of events)
         observe(entry, event);
@@ -23533,6 +23560,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       if ((value.configVersion ?? 0) < (entry.config.configVersion ?? 0))
         return;
       entry.config = value;
+      entry.state.setToggles(value.togglePreferences, value.presetToggles);
       publish(entry);
     },
     settings(value) {
