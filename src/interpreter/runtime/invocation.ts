@@ -88,7 +88,7 @@ export function invocationHostApi(state: TriggerInvocationState): HostApi {
 export function cloneInvocation(state: TriggerInvocationState): TriggerInvocationState {
   messageBaseline(state);
   return {
-    ...(state.localLore ? { localLore: { character: structuredClone(characterLocalLore(state.localLore)), chat: structuredClone(state.localLore.chat), access: state.localLore.access, selection: state.localLore.selection } }
+    ...(state.localLore ? { localLore: { character: characterLocalLore(state.localLore), chat: state.localLore.chat, access: state.localLore.access, selection: state.localLore.selection } }
       : state.localLoreAccess ? { localLore: createLocalLoreFrame(state.localLoreAccess) } : {}),
     ...(state.localLoreAccess ? { localLoreAccess: state.localLoreAccess } : {}),
     varsCache: { ...state.varsCache },

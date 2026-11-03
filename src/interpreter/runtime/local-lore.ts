@@ -5,6 +5,7 @@ export const LOCAL_LORE_KEY = 'lumirealm_local_lore';
 
 export interface LocalLoreAccess {
   selection?: LocalLoreSelection;
+  /** Writes replace snapshots; callers must not mutate these arrays or entries. */
   get(): readonly LoreBook[];
   upsert(entry: LoreBook): Promise<void>;
   replace?(entries: readonly LoreBook[]): Promise<void>;
@@ -20,7 +21,8 @@ const selections = new WeakMap<LocalLoreAccess, LocalLoreSelection>();
 export function createLocalLoreFrame(access: LocalLoreAccess): LocalLoreFrame {
   let selection = access.selection ?? selections.get(access);
   if (!selection) { selection = { current: null }; selections.set(access, selection); }
-  return { character: structuredClone(access.get()), chat: structuredClone(access.get()), access, selection };
+  const entries = access.get();
+  return { character: entries, chat: entries, access, selection };
 }
 export function characterLocalLore(frame: LocalLoreFrame): readonly LoreBook[] {
   return frame.selection.current === frame ? frame.access.get() : frame.character;
@@ -31,11 +33,12 @@ export function upsertFrameLocalLore(frame: LocalLoreFrame, entry: LoreBook): Pr
 }
 export async function publishLocalLoreFrame(frame: LocalLoreFrame, source: 'character' | 'chat'): Promise<void> {
   const previous = frame.selection.current;
-  if (previous) previous.character = structuredClone(frame.access.get());
+  const current = frame.access.get();
+  if (previous) previous.character = current;
   if (source === 'character') frame.selection.current = frame;
   const entries = frame[source];
   if (frame.selection.current) frame.selection.current.character = entries;
-  if (JSON.stringify(frame.access.get()) === JSON.stringify(entries)) return;
+  if (current === entries || JSON.stringify(current) === JSON.stringify(entries)) return;
   try {
     if (!frame.access.replace) throw new RisuCompatUnsupportedError('localLore', 'requires copied chat adoption');
     await frame.access.replace(entries);

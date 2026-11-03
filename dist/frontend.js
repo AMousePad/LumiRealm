@@ -18411,7 +18411,8 @@ function createLocalLoreFrame(access) {
     selection = { current: null };
     selections.set(access, selection);
   }
-  return { character: structuredClone(access.get()), chat: structuredClone(access.get()), access, selection };
+  const entries = access.get();
+  return { character: entries, chat: entries, access, selection };
 }
 function characterLocalLore(frame) {
   return frame.selection.current === frame ? frame.access.get() : frame.character;
@@ -18423,14 +18424,15 @@ function upsertFrameLocalLore(frame, entry) {
 }
 async function publishLocalLoreFrame(frame, source) {
   const previous = frame.selection.current;
+  const current = frame.access.get();
   if (previous)
-    previous.character = structuredClone(frame.access.get());
+    previous.character = current;
   if (source === "character")
     frame.selection.current = frame;
   const entries = frame[source];
   if (frame.selection.current)
     frame.selection.current.character = entries;
-  if (JSON.stringify(frame.access.get()) === JSON.stringify(entries))
+  if (current === entries || JSON.stringify(current) === JSON.stringify(entries))
     return;
   try {
     if (!frame.access.replace)
@@ -18527,7 +18529,7 @@ function invocationHostApi(state) {
 function cloneInvocation(state) {
   messageBaseline(state);
   return {
-    ...state.localLore ? { localLore: { character: structuredClone(characterLocalLore(state.localLore)), chat: structuredClone(state.localLore.chat), access: state.localLore.access, selection: state.localLore.selection } } : state.localLoreAccess ? { localLore: createLocalLoreFrame(state.localLoreAccess) } : {},
+    ...state.localLore ? { localLore: { character: characterLocalLore(state.localLore), chat: state.localLore.chat, access: state.localLore.access, selection: state.localLore.selection } } : state.localLoreAccess ? { localLore: createLocalLoreFrame(state.localLoreAccess) } : {},
     ...state.localLoreAccess ? { localLoreAccess: state.localLoreAccess } : {},
     varsCache: { ...state.varsCache },
     messagesCache: state.messagesCache.map((message) => ({ ...message })),
