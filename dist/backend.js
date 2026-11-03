@@ -4436,152 +4436,6 @@ var init_trigger_id = __esm(() => {
   });
 });
 
-// src/risu-compat/handlers/context-reads.ts
-function register(name, handler, description) {
-  registry.register({
-    name,
-    handler,
-    description,
-    category: "Risu / Context",
-    scoped: false
-  });
-}
-function recurse(ctx, field) {
-  return ctx.evaluate ? ctx.evaluate(field) : field;
-}
-function formatDuration(ms) {
-  let seconds = Math.floor(ms / 1000);
-  let minutes = Math.floor(seconds / 60);
-  let hours = Math.floor(minutes / 60);
-  seconds = seconds % 60;
-  minutes = minutes % 60;
-  return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-}
-function makeArray(arr) {
-  return JSON.stringify(arr.map((v) => {
-    if (typeof v === "string")
-      return v.replaceAll("::", "\\u003A\\u003A");
-    return v;
-  }));
-}
-var init_context_reads = __esm(() => {
-  init_registry();
-  register("description", (ctx) => recurse(ctx, ctx.character.description), "Returns the character description, recursively parsed.");
-  register("personality", (ctx) => recurse(ctx, ctx.character.personality), "Returns the character personality field, recursively parsed.");
-  register("scenario", (ctx) => recurse(ctx, ctx.character.scenario), "Returns the character scenario field, recursively parsed.");
-  register("persona", (ctx) => recurse(ctx, ctx.identity.personaText), "Returns the user persona prompt, recursively parsed.");
-  register("exampledialogue", (ctx) => recurse(ctx, ctx.character.exampleDialogue), "Returns the character's example dialogue field, recursively parsed.");
-  register("mainprompt", (ctx) => recurse(ctx, ctx.character.mainPrompt), "Returns the system/main prompt configured for the current character, recursively parsed.");
-  register("jb", (ctx) => recurse(ctx, ctx.character.jailbreakPrompt), "Returns the jailbreak prompt text, recursively parsed.");
-  register("globalnote", (ctx) => recurse(ctx, ctx.character.globalNote), "Returns the global note (system note / ujb), recursively parsed.");
-  register("authornote", (ctx) => recurse(ctx, ctx.character.authorsNote), "Returns the author's note for the current chat, recursively parsed.");
-  register("model", (ctx) => ctx.aiModel, "Returns the id of the currently selected AI model.");
-  register("axmodel", (ctx) => ctx.axModel, "Returns the id of the auxiliary/secondary model.");
-  register("role", (ctx) => {
-    if (ctx.role !== null)
-      return lumiRoleToRisu(ctx.role);
-    if (ctx.cbsContext)
-      return "null";
-    if (ctx.promptRegexLiteralVars)
-      return "null";
-    if (ctx.isFirstMessage)
-      return "char";
-    return "null";
-  }, "Returns the role of the current message ('user', 'char'/'assistant', 'system').");
-  register("isfirstmsg", (ctx) => {
-    if (ctx.cbsContext)
-      return "0";
-    if (ctx.promptRegexLiteralVars)
-      return "0";
-    if (ctx.currentMessageIndex !== null && ctx.currentMessageIndex !== undefined) {
-      return ctx.currentMessageIndex === -1 ? "1" : "0";
-    }
-    return ctx.isFirstMessage ? "1" : "0";
-  }, "Returns '1' if the current context is the first (greeting) message, '0' otherwise.");
-  register("unixtime", (ctx) => Math.floor(ctx.clock.now() / 1000).toString(), "Returns the current unix timestamp in seconds.");
-  register("time", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
-  }, "Returns the current local time in H:M:S format (unpadded, matching Risu).");
-  register("isotime", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getUTCHours()}:${d.getUTCMinutes()}:${d.getUTCSeconds()}`;
-  }, "Returns the current UTC time in H:M:S format.");
-  register("isodate", (ctx) => {
-    const d = new Date(ctx.clock.now());
-    return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
-  }, "Returns the current UTC date in YYYY-M-D format (month/day not zero-padded, matching Risu).");
-  register("messagetime", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    const msg = msgs[ctx.currentMessageIndex];
-    if (!msg)
-      return "[Cannot get time]";
-    if (!msg.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return new Date(msg.createdAt).toLocaleTimeString();
-  }, "Returns the local time the current message was sent.");
-  register("messagedate", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    const msg = msgs[ctx.currentMessageIndex];
-    if (!msg)
-      return "[Cannot get time]";
-    if (!msg.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return new Date(msg.createdAt).toLocaleDateString();
-  }, "Returns the local date the current message was sent.");
-  register("messageunixtimearray", (ctx) => {
-    const arr = ctx.messages.all().map((m) => String(m.createdAt ?? 0));
-    return makeArray(arr);
-  }, "Returns a JSON-encoded array of all message unix timestamps (milliseconds).");
-  register("idleduration", (ctx) => {
-    const msgs = ctx.messages.all();
-    if (msgs.length === 0)
-      return "00:00:00";
-    const last = msgs[msgs.length - 1];
-    if (!last.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    return formatDuration(ctx.clock.now() - last.createdAt);
-  }, "Returns HH:MM:SS since the most recent message.");
-  register("messageidleduration", (ctx) => {
-    if (ctx.currentMessageIndex === null)
-      return "[Cannot get time]";
-    const msgs = ctx.messages.all();
-    let pointer = ctx.currentMessageIndex;
-    let message;
-    let previous;
-    let stage = "findLast";
-    while (pointer >= 0) {
-      const m = msgs[pointer];
-      if (m && m.role === "user") {
-        if (stage === "findLast") {
-          message = m;
-          stage = "findSecondLast";
-        } else {
-          previous = m;
-          break;
-        }
-      }
-      pointer--;
-    }
-    if (!message)
-      return "[No user message found]";
-    if (!previous)
-      return "[No previous user message found]";
-    if (!message.createdAt)
-      return "[Cannot get time, message was sent in older version]";
-    if (!previous.createdAt)
-      return "[Cannot get time, previous message was sent in older version]";
-    return formatDuration(message.createdAt - previous.createdAt);
-  }, "Returns HH:MM:SS between the current and the previous user message.");
-  register("br", () => `
-`, "Returns a literal newline character.");
-  register("blank", () => "", "Returns an empty string.");
-});
-
 // src/risu-compat/risu-helpers.ts
 function parseArray2(s) {
   try {
@@ -4597,7 +4451,7 @@ function parseDict(s) {
   } catch {}
   return {};
 }
-function makeArray2(arr) {
+function makeArray(arr) {
   return JSON.stringify(arr.map((v) => {
     if (typeof v === "string")
       return v.replaceAll("::", "\\u003A\\u003A");
@@ -4633,15 +4487,21 @@ function pickHashRand(cid, word) {
     randF();
   return randF();
 }
-function dateTimeFormat(main, time = 0) {
-  const date = time === 0 ? new Date : new Date(time);
+function dateTimeFormat(main, time = 0, now = Date.now) {
+  const date = new Date(time === 0 ? now() : time);
   if (!main)
     return "";
   if (main.startsWith(":"))
     main = main.substring(1);
   if (main.length > 300)
     return "";
-  return main.replace(/YYYY/g, date.getFullYear().toString()).replace(/YY/g, date.getFullYear().toString().substring(2)).replace(/MMMM/g, new Intl.DateTimeFormat("en", { month: "long" }).format(date)).replace(/MMM/g, new Intl.DateTimeFormat("en", { month: "short" }).format(date)).replace(/MM/g, (date.getMonth() + 1).toString().padStart(2, "0")).replace(/DDDD/g, Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)).toString()).replace(/DD/g, date.getDate().toString().padStart(2, "0")).replace(/dddd/g, new Intl.DateTimeFormat("en", { weekday: "long" }).format(date)).replace(/ddd/g, new Intl.DateTimeFormat("en", { weekday: "short" }).format(date)).replace(/HH/g, date.getHours().toString().padStart(2, "0")).replace(/hh/g, (date.getHours() % 12 || 12).toString().padStart(2, "0")).replace(/mm/g, date.getMinutes().toString().padStart(2, "0")).replace(/ss/g, date.getSeconds().toString().padStart(2, "0")).replace(/X/g, Math.floor(date.getTime() / 1000).toString()).replace(/x/g, date.getTime().toString()).replace(/A/g, date.getHours() >= 12 ? "PM" : "AM");
+  if (!Number.isFinite(date.getTime()))
+    throw new RangeError("Invalid time value");
+  return main.replace(/YYYY/g, date.getFullYear().toString()).replace(/YY/g, date.getFullYear().toString().substring(2)).replace(/MMMM/g, main.includes("MMMM") ? new Intl.DateTimeFormat("en", { month: "long" }).format(date) : "").replace(/MMM/g, main.includes("MMM") ? new Intl.DateTimeFormat("en", { month: "short" }).format(date) : "").replace(/MM/g, (date.getMonth() + 1).toString().padStart(2, "0")).replace(/DDDD/g, Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)).toString()).replace(/DD/g, date.getDate().toString().padStart(2, "0")).replace(/dddd/g, main.includes("dddd") ? new Intl.DateTimeFormat("en", { weekday: "long" }).format(date) : "").replace(/ddd/g, main.includes("ddd") ? new Intl.DateTimeFormat("en", { weekday: "short" }).format(date) : "").replace(/HH/g, date.getHours().toString().padStart(2, "0")).replace(/hh/g, (date.getHours() % 12 || 12).toString().padStart(2, "0")).replace(/mm/g, date.getMinutes().toString().padStart(2, "0")).replace(/ss/g, date.getSeconds().toString().padStart(2, "0")).replace(/X/g, Math.floor(date.getTime() / 1000).toString()).replace(/x/g, date.getTime().toString()).replace(/A/g, date.getHours() >= 12 ? "PM" : "AM");
+}
+function formatDateTimeArgs(args, now) {
+  const time = args[1] ? Number(args[1]) / 1000 : 0;
+  return dateTimeFormat(args[0] ?? "", Number.isNaN(time) ? 0 : time, now);
 }
 function calcString(text, readLocal, readGlobal) {
   const depthText = [""];
@@ -4791,6 +4651,155 @@ var init_risu_helpers = __esm(() => {
   OPERATOR_CHARS = new Set(Object.keys(OPERATORS));
 });
 
+// src/risu-compat/handlers/context-reads.ts
+function register(name, handler, description) {
+  registry.register({
+    name,
+    handler,
+    description,
+    category: "Risu / Context",
+    scoped: false
+  });
+}
+function recurse(ctx, field) {
+  return ctx.evaluate ? ctx.evaluate(field) : field;
+}
+function formatDuration(ms) {
+  let seconds = Math.floor(ms / 1000);
+  let minutes = Math.floor(seconds / 60);
+  let hours = Math.floor(minutes / 60);
+  seconds = seconds % 60;
+  minutes = minutes % 60;
+  return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+function makeArray2(arr) {
+  return JSON.stringify(arr.map((v) => {
+    if (typeof v === "string")
+      return v.replaceAll("::", "\\u003A\\u003A");
+    return v;
+  }));
+}
+var init_context_reads = __esm(() => {
+  init_registry();
+  init_risu_helpers();
+  register("description", (ctx) => recurse(ctx, ctx.character.description), "Returns the character description, recursively parsed.");
+  register("personality", (ctx) => recurse(ctx, ctx.character.personality), "Returns the character personality field, recursively parsed.");
+  register("scenario", (ctx) => recurse(ctx, ctx.character.scenario), "Returns the character scenario field, recursively parsed.");
+  register("persona", (ctx) => recurse(ctx, ctx.identity.personaText), "Returns the user persona prompt, recursively parsed.");
+  register("exampledialogue", (ctx) => recurse(ctx, ctx.character.exampleDialogue), "Returns the character's example dialogue field, recursively parsed.");
+  register("mainprompt", (ctx) => recurse(ctx, ctx.character.mainPrompt), "Returns the system/main prompt configured for the current character, recursively parsed.");
+  register("jb", (ctx) => recurse(ctx, ctx.character.jailbreakPrompt), "Returns the jailbreak prompt text, recursively parsed.");
+  register("globalnote", (ctx) => recurse(ctx, ctx.character.globalNote), "Returns the global note (system note / ujb), recursively parsed.");
+  register("authornote", (ctx) => recurse(ctx, ctx.character.authorsNote), "Returns the author's note for the current chat, recursively parsed.");
+  register("model", (ctx) => ctx.aiModel, "Returns the id of the currently selected AI model.");
+  register("axmodel", (ctx) => ctx.axModel, "Returns the id of the auxiliary/secondary model.");
+  register("role", (ctx) => {
+    if (ctx.role !== null)
+      return lumiRoleToRisu(ctx.role);
+    if (ctx.cbsContext)
+      return "null";
+    if (ctx.promptRegexLiteralVars)
+      return "null";
+    if (ctx.isFirstMessage)
+      return "char";
+    return "null";
+  }, "Returns the role of the current message ('user', 'char'/'assistant', 'system').");
+  register("isfirstmsg", (ctx) => {
+    if (ctx.cbsContext)
+      return "0";
+    if (ctx.promptRegexLiteralVars)
+      return "0";
+    if (ctx.currentMessageIndex !== null && ctx.currentMessageIndex !== undefined) {
+      return ctx.currentMessageIndex === -1 ? "1" : "0";
+    }
+    return ctx.isFirstMessage ? "1" : "0";
+  }, "Returns '1' if the current context is the first (greeting) message, '0' otherwise.");
+  register("unixtime", (ctx) => Math.floor(ctx.clock.now() / 1000).toString(), "Returns the current unix timestamp in seconds.");
+  register("time", (ctx, args) => {
+    if (args.length > 0)
+      return formatDateTimeArgs(args, () => ctx.clock.now());
+    const d = new Date(ctx.clock.now());
+    return `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
+  }, "Returns the current local time in H:M:S format (unpadded, matching Risu).");
+  register("isotime", (ctx) => {
+    const d = new Date(ctx.clock.now());
+    return `${d.getUTCHours()}:${d.getUTCMinutes()}:${d.getUTCSeconds()}`;
+  }, "Returns the current UTC time in H:M:S format.");
+  register("isodate", (ctx) => {
+    const d = new Date(ctx.clock.now());
+    return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+  }, "Returns the current UTC date in YYYY-M-D format (month/day not zero-padded, matching Risu).");
+  register("messagetime", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    const msg = msgs[ctx.currentMessageIndex];
+    if (!msg)
+      return "[Cannot get time]";
+    if (!msg.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return new Date(msg.createdAt).toLocaleTimeString();
+  }, "Returns the local time the current message was sent.");
+  register("messagedate", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    const msg = msgs[ctx.currentMessageIndex];
+    if (!msg)
+      return "[Cannot get time]";
+    if (!msg.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return new Date(msg.createdAt).toLocaleDateString();
+  }, "Returns the local date the current message was sent.");
+  register("messageunixtimearray", (ctx) => {
+    const arr = ctx.messages.all().map((m) => String(m.createdAt ?? 0));
+    return makeArray2(arr);
+  }, "Returns a JSON-encoded array of all message unix timestamps (milliseconds).");
+  register("idleduration", (ctx) => {
+    const msgs = ctx.messages.all();
+    if (msgs.length === 0)
+      return "00:00:00";
+    const last = msgs[msgs.length - 1];
+    if (!last.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    return formatDuration(ctx.clock.now() - last.createdAt);
+  }, "Returns HH:MM:SS since the most recent message.");
+  register("messageidleduration", (ctx) => {
+    if (ctx.currentMessageIndex === null)
+      return "[Cannot get time]";
+    const msgs = ctx.messages.all();
+    let pointer = ctx.currentMessageIndex;
+    let message;
+    let previous;
+    let stage = "findLast";
+    while (pointer >= 0) {
+      const m = msgs[pointer];
+      if (m && m.role === "user") {
+        if (stage === "findLast") {
+          message = m;
+          stage = "findSecondLast";
+        } else {
+          previous = m;
+          break;
+        }
+      }
+      pointer--;
+    }
+    if (!message)
+      return "[No user message found]";
+    if (!previous)
+      return "[No previous user message found]";
+    if (!message.createdAt)
+      return "[Cannot get time, message was sent in older version]";
+    if (!previous.createdAt)
+      return "[Cannot get time, previous message was sent in older version]";
+    return formatDuration(message.createdAt - previous.createdAt);
+  }, "Returns HH:MM:SS between the current and the previous user message.");
+  register("br", () => `
+`, "Returns a literal newline character.");
+  register("blank", () => "", "Returns an empty string.");
+});
+
 // src/risu-compat/handlers/math.ts
 function register2(name, handler, description) {
   registry.register({ name, handler, description, category: "Risu / Math", scoped: false });
@@ -4867,7 +4876,7 @@ var init_strings = __esm(() => {
   init_registry();
   init_risu_helpers();
   register4("replace", (_c, a) => a[0].replaceAll(a[1], a[2]), "Replaces all occurrences of needle with replacement.");
-  register4("split", (_c, a) => makeArray2(a[0].split(a[1])), "Splits a string on the delimiter and returns a JSON array.");
+  register4("split", (_c, a) => makeArray(a[0].split(a[1])), "Splits a string on the delimiter and returns a JSON array.");
   register4("join", (_c, a) => parseArray2(a[0]).join(a[1]), "Joins a JSON array using the given separator.");
   register4("spread", (_c, a) => parseArray2(a[0]).join("::"), "Joins a JSON array using :: as the separator.");
   register4("trim", (_c, a) => a[0].trim(), "Strips leading/trailing whitespace.");
@@ -4892,29 +4901,29 @@ var init_arrays = __esm(() => {
   register5("arrayshift", (_c, a) => {
     const arr = parseArray2(a[0]);
     arr.shift();
-    return makeArray2(arr);
+    return makeArray(arr);
   }, "Removes and discards the first element.");
   register5("arraypop", (_c, a) => {
     const arr = parseArray2(a[0]);
     arr.pop();
-    return makeArray2(arr);
+    return makeArray(arr);
   }, "Removes and discards the last element.");
   register5("arraypush", (_c, a) => {
     const arr = parseArray2(a[0]);
     arr.push(a[1]);
-    return makeArray2(arr);
+    return makeArray(arr);
   }, "Appends a new element.");
   register5("arraysplice", (_c, a) => {
     const arr = parseArray2(a[0]);
     arr.splice(Number(a[1]), Number(a[2]), a[3]);
-    return makeArray2(arr);
+    return makeArray(arr);
   }, "Risu-style splice: (array, start, deleteCount, newElement).");
   register5("arrayassert", (_c, a) => {
     const arr = parseArray2(a[0]);
     const idx = Number(a[1]);
     if (idx >= arr.length)
       arr[idx] = a[2];
-    return makeArray2(arr);
+    return makeArray(arr);
   }, "Sets arr[idx] = value if idx is out of bounds; else leaves array unchanged.");
   register5("arrayelement", (_c, a) => {
     const el = parseArray2(a[0]).at(Number(a[1])) ?? "null";
@@ -4946,7 +4955,7 @@ var init_arrays = __esm(() => {
       return "null";
     }
   }, "Walks a JSON structure by successive keys/indices. Returns 'null' if any step fails.");
-  register5("makearray", (_c, a) => makeArray2(a), "Creates a JSON array from the given arguments.");
+  register5("makearray", (_c, a) => makeArray(a), "Creates a JSON array from the given arguments.");
   register5("makedict", (_c, a) => {
     const d = {};
     for (const pair of a) {
@@ -4967,13 +4976,13 @@ var init_arrays = __esm(() => {
       for (let i = start;i < end; i += step)
         out.push(i.toString());
     }
-    return makeArray2(out);
+    return makeArray(out);
   }, "Creates a range. [n] \u2192 [0,1,\u2026,n-1]. [a,b] \u2192 [a,\u2026,b-1]. [a,b,s] \u2192 step s.");
   register5("filter", (_c, a) => {
     const arr = parseArray2(a[0]);
     const mode = ["all", "nonempty", "unique"].indexOf(a[1] ?? "all");
     const filterType = mode === -1 ? 0 : mode;
-    return makeArray2(arr.filter((f, i) => {
+    return makeArray(arr.filter((f, i) => {
       switch (filterType) {
         case 0:
           return f !== "" && i === arr.indexOf(f);
@@ -5216,16 +5225,14 @@ var init_misc = __esm(() => {
       const d = new Date(ctx.clock.now());
       return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
     }
-    const t = a[1] ? Number(a[1]) : 0;
-    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
+    return formatDateTimeArgs(a, () => ctx.clock.now());
   }, "Formats a date. No args \u2192 YYYY-M-D. First arg is format, optional second arg is unix ms.");
   register8("datetimeformat", (ctx, a) => {
     if (a.length === 0) {
       const d = new Date(ctx.clock.now());
       return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
     }
-    const t = a[1] ? Number(a[1]) : 0;
-    return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
+    return formatDateTimeArgs(a, () => ctx.clock.now());
   }, "Alias of {{date::fmt}}.");
   register8("hiddenkey", () => "", "A key that activates lorebook entries without being sent to the model.");
   register8("comment", (ctx, a) => {
@@ -5280,7 +5287,7 @@ var init_misc = __esm(() => {
     const list = map[ns];
     if (!list || list.length === 0)
       return "";
-    return makeArray2(list);
+    return makeArray(list);
   }, "Returns a JSON array of asset names for the specified module namespace. Returns empty string if namespace not found.");
   register8("metadata", (ctx, a) => {
     const key = a[0].toLocaleLowerCase();
@@ -5364,15 +5371,15 @@ var init_chat_context = __esm(() => {
   init_registry();
   init_risu_helpers();
   register9("lorebook", (ctx) => {
-    return makeArray2(ctx.lorebook.map((e) => JSON.stringify(e)));
+    return makeArray(ctx.lorebook.map((e) => JSON.stringify(e)));
   }, "Returns all active lorebook entries as a JSON array (character + chat + module lore concatenated).");
   register9("userhistory", (ctx) => {
     const filtered = ctx.messages.all().filter((m) => m.role === "user").map((m) => JSON.stringify(evalMsg(ctx, m)));
-    return makeArray2(filtered);
+    return makeArray(filtered);
   }, "Returns all user messages as a JSON array, each .data recursively parsed.");
   register9("charhistory", (ctx) => {
     const filtered = ctx.messages.all().filter((m) => m.role === "assistant").map((m) => JSON.stringify(evalMsg(ctx, m)));
-    return makeArray2(filtered);
+    return makeArray(filtered);
   }, "Returns all character (assistant) messages as a JSON array, each .data recursively parsed.");
   register9("history", (ctx, a) => {
     const msgs = ctx.messages.all();
@@ -5382,7 +5389,7 @@ var init_chat_context = __esm(() => {
         role: "char",
         data: ctx.evaluate ? ctx.evaluate(fm) : fm
       }];
-      return makeArray2([
+      return makeArray([
         ...head,
         ...msgs.map((m) => ({
           ...toSerializableMsg(m),
@@ -5391,7 +5398,7 @@ var init_chat_context = __esm(() => {
       ].map((v) => JSON.stringify(v)));
     }
     const withRole = a.includes("role");
-    return makeArray2(msgs.map((m) => withRole ? `${risuRole(m.role)}: ${m.content}` : m.content));
+    return makeArray(msgs.map((m) => withRole ? `${risuRole(m.role)}: ${m.content}` : m.content));
   }, "No args \u2192 full JSON history with first-greeting at index 0. With 'role' arg \u2192 array of 'role: data' strings.");
   register9("previouschatlog", (ctx, a) => {
     const idx = Number(a[0]);
@@ -5489,12 +5496,12 @@ var init_metadata = __esm(() => {
   init_risu_helpers();
   init_base64();
   register11("emotionlist", (ctx) => {
-    return makeArray2(ctx.character.emotionImages.map((e) => e.name));
+    return makeArray(ctx.character.emotionImages.map((e) => e.name));
   }, "JSON array of emotion image names for the current character.");
   register11("assetlist", (ctx) => {
     if (ctx.character.type === "group")
       return "";
-    return makeArray2(ctx.character.additionalAssets.map((a) => a.name));
+    return makeArray(ctx.character.additionalAssets.map((a) => a.name));
   }, "JSON array of additional asset names. '' for group characters.");
   register11("prefillsupported", (ctx) => {
     return ctx.aiModel.startsWith("claude") ? "1" : "0";
@@ -5512,10 +5519,10 @@ var init_metadata = __esm(() => {
   }, "Shows the filename when visualization is enabled; otherwise decodes base64 content to UTF-8.");
   register11("chardisplayasset", (ctx) => {
     if (!ctx.character.prebuiltAssetCommand)
-      return makeArray2([]);
+      return makeArray([]);
     const excludes = ctx.character.prebuiltAssetExclude;
     const list = ctx.character.additionalAssets.filter((a) => !excludes.includes(a.src)).map((a) => a.name);
-    return makeArray2(list);
+    return makeArray(list);
   }, "JSON array of character display assets, minus the excluded set. Empty array if prebuiltAssetCommand is off.");
 });
 

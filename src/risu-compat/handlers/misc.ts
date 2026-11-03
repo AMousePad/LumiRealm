@@ -1,6 +1,6 @@
 import type { MacroHandler } from "../../core/cbs/index.js";
 import { registry } from "../registry.js";
-import { dateTimeFormat, makeArray } from "../risu-helpers.js";
+import { formatDateTimeArgs, makeArray } from "../risu-helpers.js";
 import { base64ToBytes, bytesToBase64 } from "../../util/base64.js";
 
 // Small utility macros (Risu parity).
@@ -56,8 +56,7 @@ register("date", (ctx, a) => {
     const d = new Date(ctx.clock.now());
     return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
   }
-  const t = a[1] ? Number(a[1]) : 0;
-  return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
+  return formatDateTimeArgs(a, () => ctx.clock.now());
 }, "Formats a date. No args → YYYY-M-D. First arg is format, optional second arg is unix ms.");
 
 register("datetimeformat", (ctx, a) => {
@@ -65,8 +64,7 @@ register("datetimeformat", (ctx, a) => {
     const d = new Date(ctx.clock.now());
     return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
   }
-  const t = a[1] ? Number(a[1]) : 0;
-  return dateTimeFormat(a[0] ?? "", isNaN(t) ? 0 : t);
+  return formatDateTimeArgs(a, () => ctx.clock.now());
 }, "Alias of {{date::fmt}}.");
 
 register("hiddenkey", () => "",

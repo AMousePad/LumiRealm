@@ -1,6 +1,7 @@
 import type { MacroHandler } from "../../core/cbs/index.js";
 import { registry } from "../registry.js";
 import { lumiRoleToRisu } from "../../util/role-coerce.js";
+import { formatDateTimeArgs } from "../risu-helpers.js";
 
 // Context-read macros use RisuAI's runtime names verbatim.
 
@@ -90,7 +91,8 @@ register("unixtime", (ctx) => Math.floor(ctx.clock.now() / 1000).toString(),
   "Returns the current unix timestamp in seconds.");
 
 // cbs.ts. Local time, unpadded.
-register("time", (ctx) => {
+register("time", (ctx, args) => {
+  if (args.length > 0) return formatDateTimeArgs(args, () => ctx.clock.now());
   const d = new Date(ctx.clock.now());
   return `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
 }, "Returns the current local time in H:M:S format (unpadded, matching Risu).");

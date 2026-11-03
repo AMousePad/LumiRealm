@@ -53,21 +53,23 @@ export function pickHashRand(cid: number, word: string): number {
 
 // Risu source: parser.svelte.ts.
 
-export function dateTimeFormat(main: string, time = 0): string {
-  const date = time === 0 ? new Date() : new Date(time);
+export function dateTimeFormat(main: string, time = 0, now: () => number = Date.now): string {
+  const date = new Date(time === 0 ? now() : time);
   if (!main) return "";
   if (main.startsWith(":")) main = main.substring(1);
   if (main.length > 300) return "";
+  // Risu's eager Intl calls reject invalid dates even when the format has no date tokens.
+  if (!Number.isFinite(date.getTime())) throw new RangeError('Invalid time value');
   return main
     .replace(/YYYY/g, date.getFullYear().toString())
     .replace(/YY/g, date.getFullYear().toString().substring(2))
-    .replace(/MMMM/g, new Intl.DateTimeFormat("en", { month: "long" }).format(date))
-    .replace(/MMM/g, new Intl.DateTimeFormat("en", { month: "short" }).format(date))
+    .replace(/MMMM/g, main.includes('MMMM') ? new Intl.DateTimeFormat("en", { month: "long" }).format(date) : '')
+    .replace(/MMM/g, main.includes('MMM') ? new Intl.DateTimeFormat("en", { month: "short" }).format(date) : '')
     .replace(/MM/g, (date.getMonth() + 1).toString().padStart(2, "0"))
     .replace(/DDDD/g, Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24)).toString())
     .replace(/DD/g, date.getDate().toString().padStart(2, "0"))
-    .replace(/dddd/g, new Intl.DateTimeFormat("en", { weekday: "long" }).format(date))
-    .replace(/ddd/g, new Intl.DateTimeFormat("en", { weekday: "short" }).format(date))
+    .replace(/dddd/g, main.includes('dddd') ? new Intl.DateTimeFormat("en", { weekday: "long" }).format(date) : '')
+    .replace(/ddd/g, main.includes('ddd') ? new Intl.DateTimeFormat("en", { weekday: "short" }).format(date) : '')
     .replace(/HH/g, date.getHours().toString().padStart(2, "0"))
     .replace(/hh/g, (date.getHours() % 12 || 12).toString().padStart(2, "0"))
     .replace(/mm/g, date.getMinutes().toString().padStart(2, "0"))
@@ -75,6 +77,11 @@ export function dateTimeFormat(main: string, time = 0): string {
     .replace(/X/g, Math.floor(date.getTime() / 1000).toString())
     .replace(/x/g, date.getTime().toString())
     .replace(/A/g, date.getHours() >= 12 ? "PM" : "AM");
+}
+
+export function formatDateTimeArgs(args: readonly string[], now: () => number): string {
+  const time = args[1] ? Number(args[1]) / 1000 : 0;
+  return dateTimeFormat(args[0] ?? '', Number.isNaN(time) ? 0 : time, now);
 }
 
 // Risu source: process/infunctions.ts (toRPN + calculateRPN + executeRPNCalculation + calcString).
