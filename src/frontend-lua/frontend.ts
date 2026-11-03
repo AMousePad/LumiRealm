@@ -34,8 +34,11 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
   const ui = createFrontendLuaUi(ctx);
   const localCalls = new Set<AbortController>();
   let connected = true;
+  let socketAuthenticated = true;
+  let workerAvailable = true;
   let connectionGeneration = 0;
   let reconnectChat: { chatId: string; characterId: string } | undefined;
+  let sharedPreferences: { version: number; values: RuntimeConfig['togglePreferences'] } | undefined;
 
   function remove(entry: Entry, reason: string): void {
     entry.lifetime.abort(new FrontendLuaUnavailableError(reason));
@@ -57,6 +60,19 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
     const configurationMayChange = !keys || keys.some(key => !['vars', 'global', 'message'].includes(JSON.parse(key)[0]));
     if (configurationMayChange && !sameStateValue(displayConfiguration(previous), displayConfiguration(next))) changed.push('*');
     if (changed.length) invalidate(next.chatId, changed, changed.includes('*'));
+  }
+
+  function updateSharedPreferences(config: RuntimeConfig): RuntimeConfig['togglePreferences'] {
+    const version = config.configVersion ?? 0;
+    if (sharedPreferences && version <= sharedPreferences.version) return sharedPreferences.values;
+    const changed = !sharedPreferences || !sameStateValue(sharedPreferences.values, config.togglePreferences);
+    sharedPreferences = { version, values: config.togglePreferences };
+    if (changed) for (const entry of entries.values()) {
+      if (entry.state.chatId === config.chatId) continue;
+      entry.state.setToggles(sharedPreferences.values, entry.config.presetToggles);
+      publish(entry, []);
+    }
+    return sharedPreferences.values;
   }
 
   function reload(entry: Entry): void {
@@ -123,7 +139,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
         if (entry) publish(entry, keys);
       });
       entry = { config: value.snapshot, settings: value.settings, state, updates: Promise.resolve(), lifetime: new AbortController() };
-      state.setToggles(value.snapshot.togglePreferences, value.snapshot.presetToggles);
+      state.setToggles(updateSharedPreferences(value.snapshot), value.snapshot.presetToggles);
       entries.set(chatId, entry);
       for (const event of events) observe(entry, event);
       publish(entry);
@@ -174,7 +190,8 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
       }, signal);
     } finally { await entry.state.flush(); publish(entry); }
   }
-  let receiver = createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), reply => ctx.sendToBackend(reply));
+  const createReceiver = () => createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), reply => ctx.sendToBackend(reply));
+  let receiver = createReceiver();
   const eventNames = ['CHAT_CHANGED', 'CHAT_DELETED', 'MESSAGE_SENT', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED',
     'CHARACTER_EDITED', 'CHARACTER_DELETED', 'PERSONA_CHANGED', 'SETTINGS_UPDATED', 'WORLD_BOOK_CHANGED', 'WORLD_BOOK_DELETED',
     'WORLD_BOOK_ENTRY_CHANGED', 'WORLD_BOOK_ENTRY_DELETED', 'SPINDLE_BATCH_CHANGED'];
@@ -188,27 +205,51 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
     for (const pending of loading.values()) pending.events.push(value);
     for (const entry of entries.values()) { try { observe(entry, value); } catch (error) { remove(entry, 'The Lua state could not be synchronized'); report(error); } }
   })));
-  cleanups.push(ctx.events.on('__ws_close', () => {
+  function disconnect(): void {
     const { chatId } = ctx.getActiveChat();
     const characterId = chatId ? entries.get(chatId)?.state.characterId ?? loading.get(chatId)?.characterId : undefined;
     if (chatId && characterId) reconnectChat = { chatId, characterId };
     connected = false; receiver.dispose(); services.dispose(); ui.dispose();
+    sharedPreferences = undefined;
     connectionGeneration++; loading.clear();
     for (const controller of localCalls) controller.abort(new FrontendLuaUnavailableError('The frontend Lua connection closed'));
     for (const entry of entries.values()) remove(entry, 'The frontend Lua connection closed');
-  }));
-  cleanups.push(ctx.events.on('__ws_open', () => {
-    connected = true;
-    receiver = createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), reply => ctx.sendToBackend(reply));
-  }));
-  cleanups.push(ctx.events.on('CONNECTED', raw => {
-    const userId = (raw as { userId?: unknown } | null)?.userId;
-    if (!connected || typeof userId !== 'string' || !userId) return;
+  }
+  function reconnect(): void {
+    if (!socketAuthenticated || !workerAvailable) return;
+    if (!connected) {
+      connected = true;
+      receiver = createReceiver();
+    }
     const active = ctx.getActiveChat();
     if (reconnectChat?.chatId === active.chatId && reconnectChat?.characterId === active.characterId) {
       void ensure(reconnectChat.chatId, reconnectChat.characterId).catch(report);
     }
     reconnectChat = undefined;
+  }
+  cleanups.push(ctx.events.on('__ws_close', () => {
+    socketAuthenticated = false;
+    // Worker lifecycle events can be missed offline; authenticate before probing the new connection.
+    workerAvailable = true;
+    disconnect();
+  }));
+  cleanups.push(ctx.events.on('__ws_open', () => { socketAuthenticated = false; }));
+  cleanups.push(ctx.events.on('CONNECTED', raw => {
+    const userId = (raw as { userId?: unknown } | null)?.userId;
+    if (typeof userId !== 'string' || !userId) return;
+    socketAuthenticated = true;
+    reconnect();
+  }));
+  cleanups.push(ctx.events.on('SPINDLE_EXTENSION_UNLOADED', raw => {
+    if ((raw as { extensionId?: string } | null)?.extensionId !== ctx.host.extensionInstallationId) return;
+    workerAvailable = false;
+    disconnect();
+  }));
+  cleanups.push(ctx.events.on('SPINDLE_EXTENSION_LOADED', raw => {
+    if ((raw as { extensionId?: string } | null)?.extensionId !== ctx.host.extensionInstallationId) return;
+    disconnect();
+    workerAvailable = true;
+    reconnect();
   }));
   return {
     receive(raw: unknown): boolean {
@@ -217,12 +258,13 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
       if (message?.type === 'lua_call' || message?.type === 'lua_cancel') {
         void receiver.receive(raw as FrontendLuaCall).catch(report); return true;
       }
+      if (connected && message?.type === 'display_snapshot') updateSharedPreferences((raw as { snapshot: RuntimeConfig }).snapshot);
       return false;
     },
     async snapshot(value: RuntimeConfig): Promise<void> {
       const entry = await ensure(value.chatId, value.characterId);
       if ((value.configVersion ?? 0) < (entry.config.configVersion ?? 0)) return;
-      entry.config = value; entry.state.setToggles(value.togglePreferences, value.presetToggles); publish(entry);
+      entry.config = value; entry.state.setToggles(updateSharedPreferences(value), value.presetToggles); publish(entry);
     },
     settings(value: RuntimeSettings): void { for (const entry of entries.values()) entry.settings = value; },
     writeback(chatId: string, values: Record<string, string>): void {

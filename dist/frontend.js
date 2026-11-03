@@ -23317,8 +23317,11 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
   const ui = createFrontendLuaUi(ctx);
   const localCalls = new Set;
   let connected = true;
+  let socketAuthenticated = true;
+  let workerAvailable = true;
   let connectionGeneration = 0;
   let reconnectChat;
+  let sharedPreferences;
   function remove(entry, reason) {
     entry.lifetime.abort(new FrontendLuaUnavailableError(reason));
     entries.delete(entry.state.chatId);
@@ -23346,6 +23349,21 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       changed.push("*");
     if (changed.length)
       invalidate(next.chatId, changed, changed.includes("*"));
+  }
+  function updateSharedPreferences(config) {
+    const version = config.configVersion ?? 0;
+    if (sharedPreferences && version <= sharedPreferences.version)
+      return sharedPreferences.values;
+    const changed = !sharedPreferences || !sameStateValue(sharedPreferences.values, config.togglePreferences);
+    sharedPreferences = { version, values: config.togglePreferences };
+    if (changed)
+      for (const entry of entries.values()) {
+        if (entry.state.chatId === config.chatId)
+          continue;
+        entry.state.setToggles(sharedPreferences.values, entry.config.presetToggles);
+        publish(entry, []);
+      }
+    return sharedPreferences.values;
   }
   function reload(entry) {
     entry.updates = entry.updates.then(async () => {
@@ -23436,7 +23454,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
           publish(entry, keys);
       });
       entry = { config: value.snapshot, settings: value.settings, state, updates: Promise.resolve(), lifetime: new AbortController };
-      state.setToggles(value.snapshot.togglePreferences, value.snapshot.presetToggles);
+      state.setToggles(updateSharedPreferences(value.snapshot), value.snapshot.presetToggles);
       entries.set(chatId, entry);
       for (const event of events)
         observe(entry, event);
@@ -23514,7 +23532,8 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       publish(entry);
     }
   }
-  let receiver = createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), (reply) => ctx.sendToBackend(reply));
+  const createReceiver = () => createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), (reply) => ctx.sendToBackend(reply));
+  let receiver = createReceiver();
   const eventNames = [
     "CHAT_CHANGED",
     "CHAT_DELETED",
@@ -23557,7 +23576,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
         }
       }
     }));
-  cleanups.push(ctx.events.on("__ws_close", () => {
+  function disconnect() {
     const { chatId } = ctx.getActiveChat();
     const characterId = chatId ? entries.get(chatId)?.state.characterId ?? loading.get(chatId)?.characterId : undefined;
     if (chatId && characterId)
@@ -23566,26 +23585,54 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
     receiver.dispose();
     services.dispose();
     ui.dispose();
+    sharedPreferences = undefined;
     connectionGeneration++;
     loading.clear();
     for (const controller of localCalls)
       controller.abort(new FrontendLuaUnavailableError("The frontend Lua connection closed"));
     for (const entry of entries.values())
       remove(entry, "The frontend Lua connection closed");
-  }));
-  cleanups.push(ctx.events.on("__ws_open", () => {
-    connected = true;
-    receiver = createFrontendLuaReceiver(sessionId, (call, signal) => run(call.chatId, call.characterId, call.operation, signal), (reply) => ctx.sendToBackend(reply));
-  }));
-  cleanups.push(ctx.events.on("CONNECTED", (raw) => {
-    const userId = raw?.userId;
-    if (!connected || typeof userId !== "string" || !userId)
+  }
+  function reconnect() {
+    if (!socketAuthenticated || !workerAvailable)
       return;
+    if (!connected) {
+      connected = true;
+      receiver = createReceiver();
+    }
     const active = ctx.getActiveChat();
     if (reconnectChat?.chatId === active.chatId && reconnectChat?.characterId === active.characterId) {
       ensure(reconnectChat.chatId, reconnectChat.characterId).catch(report);
     }
     reconnectChat = undefined;
+  }
+  cleanups.push(ctx.events.on("__ws_close", () => {
+    socketAuthenticated = false;
+    workerAvailable = true;
+    disconnect();
+  }));
+  cleanups.push(ctx.events.on("__ws_open", () => {
+    socketAuthenticated = false;
+  }));
+  cleanups.push(ctx.events.on("CONNECTED", (raw) => {
+    const userId = raw?.userId;
+    if (typeof userId !== "string" || !userId)
+      return;
+    socketAuthenticated = true;
+    reconnect();
+  }));
+  cleanups.push(ctx.events.on("SPINDLE_EXTENSION_UNLOADED", (raw) => {
+    if (raw?.extensionId !== ctx.host.extensionInstallationId)
+      return;
+    workerAvailable = false;
+    disconnect();
+  }));
+  cleanups.push(ctx.events.on("SPINDLE_EXTENSION_LOADED", (raw) => {
+    if (raw?.extensionId !== ctx.host.extensionInstallationId)
+      return;
+    disconnect();
+    workerAvailable = true;
+    reconnect();
   }));
   return {
     receive(raw) {
@@ -23598,6 +23645,8 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
         receiver.receive(raw).catch(report);
         return true;
       }
+      if (connected && message?.type === "display_snapshot")
+        updateSharedPreferences(raw.snapshot);
       return false;
     },
     async snapshot(value) {
@@ -23605,7 +23654,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       if ((value.configVersion ?? 0) < (entry.config.configVersion ?? 0))
         return;
       entry.config = value;
-      entry.state.setToggles(value.togglePreferences, value.presetToggles);
+      entry.state.setToggles(updateSharedPreferences(value), value.presetToggles);
       publish(entry);
     },
     settings(value) {
