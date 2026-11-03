@@ -13,7 +13,7 @@ const lore = Array.from({ length: 50 }, (_, index) => ({ id: String(index), cont
   chats: { get: async () => { calls++; return { metadata: {} }; } },
   world_books: { entries: { list: async () => { calls++; return { data: lore }; } } },
 };
-const active = { card: { character_id: 'character', asset_index: {}, emotion_index: {},
+const active = { lumirealm: { user_overrides: {} }, card: { character_id: 'character', asset_index: {}, emotion_index: {},
   risuPayload: { triggers: [], lua_scripts: [], at_actions: [], scriptstate_defaults: {} },
 } } as unknown as ActiveCard;
 const deps = { modulesByNamespaceFromCard: () => null, legacyMediaFindings: () => false, getCompiledLibraries: () => [] };

@@ -15,7 +15,7 @@ export interface FrontendHostServices {
   capture?: (event: import('../interpreter/runtime.js').AuxDebugCaptureEvent) => void;
 }
 
-export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => DisplaySnapshot, settings: RuntimeSettings, services: FrontendHostServices) {
+export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => DisplaySnapshot, settings: RuntimeSettings, services: FrontendHostServices, attachedModuleWorldBookIds: readonly string[]) {
   const chatWrites = (optimistic: boolean): Pick<HostApi['chat'], 'sendMessage' | 'editMessage' | 'deleteMessage'> => ({
     async sendMessage(content, options) {
       const role = options?.role ?? 'user';
@@ -107,7 +107,7 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
           varsCache: Object.fromEntries(Object.entries(state.variables()).map(([name, value]) => ['$' + name, value])),
           globalVars: state.globalVariables(), scriptstateDefaults: snap.scriptstateDefaults, messagesRaw: state.hostMessages(),
           lorebook: { entries: withModuleLorebooks(sortLorebookEntriesBySourceOrder(state.lore()), snap.lorebookHost, state.character().worldBookIds),
-            primaryBookId: state.character().worldBookIds?.[0] ?? null },
+            primaryBookId: state.character().worldBookIds?.find(id => !attachedModuleWorldBookIds.includes(id)) ?? null },
           luaState: {
             get character() { return state.character(); }, get persona() { return state.persona(); },
             get authorsNote() { const note = state.metadata('authors_note'); return typeof note === 'string' ? note : (note as { content?: string } | null)?.content ?? ''; },

@@ -22935,7 +22935,7 @@ class FrontendRuntimeState {
 }
 
 // src/frontend-lua/host.ts
-function createFrontendHost(state, snapshot, settings, services) {
+function createFrontendHost(state, snapshot, settings, services, attachedModuleWorldBookIds) {
   const chatWrites = (optimistic) => ({
     async sendMessage(content, options) {
       const role = options?.role ?? "user";
@@ -23063,7 +23063,7 @@ function createFrontendHost(state, snapshot, settings, services) {
           messagesRaw: state.hostMessages(),
           lorebook: {
             entries: withModuleLorebooks(sortLorebookEntriesBySourceOrder(state.lore()), snap.lorebookHost, state.character().worldBookIds),
-            primaryBookId: state.character().worldBookIds?.[0] ?? null
+            primaryBookId: state.character().worldBookIds?.find((id) => !attachedModuleWorldBookIds.includes(id)) ?? null
           },
           luaState: {
             get character() {
@@ -23466,7 +23466,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       invalidate: (source) => invalidate(chatId, ["*"], source !== "reloadChat" && source !== "updateChatAt"),
       synchronize: () => entry.updates,
       ...capture ? { capture: (event) => capture(chatId, event) } : {}
-    });
+    }, entry.config.attachedModuleWorldBookIds);
   }
   setDisplayLuaEnvironment((snapshot) => {
     const entry = entries.get(snapshot.chatId);

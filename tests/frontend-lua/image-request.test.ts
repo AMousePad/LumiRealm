@@ -22,7 +22,7 @@ test('browser Lua forwards image settings and awaits the request service', async
         ? { imageId: 'generated' } : { status: 200, body: 'response' }) as T;
     },
     ui: {}, expression: async () => {}, invalidate() {}, synchronize: async () => {},
-  });
+  }, []);
   const runtime = await makeRisuTriggerRuntime(env.api, {}, makeDispatcherScriptNS(execute), {
     ...env.prepareRuntime(), lowLevelAccess: true, binding: 'start',
   });

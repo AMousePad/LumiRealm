@@ -33217,6 +33217,7 @@ function assembleRuntimeConfig(deps, active, chatId, userId) {
     screenHeight: dims?.height ?? 0,
     legacyMediaFindings: deps.legacyMediaFindings(userId),
     moduleLorebooks: Object.values(active.card.risuPayload.extra?.["runtime_module_lorebooks"] ?? {}).flat(),
+    attachedModuleWorldBookIds: Object.values(active.lumirealm.user_overrides.attached_module_world_books ?? {}),
     modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
     compiledLibraries: deps.getCompiledLibraries(active),
     hasEditDisplayLua,

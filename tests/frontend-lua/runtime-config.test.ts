@@ -11,7 +11,7 @@ afterEach(() => clearScreenDims('config-owner'));
 test('configuration needs no host reads and preserves the display assembled from revisioned state', () => {
   const previous = snapshot('function onStart() end');
   setScreenDims('config-owner', { width: previous.screenWidth, height: previous.screenHeight });
-  const active = { card: {
+  const active = { lumirealm: { user_overrides: {} }, card: {
     character_id: previous.characterId, asset_index: previous.character.additionalAssets,
     emotion_index: previous.character.emotionImages,
     risuPayload: {

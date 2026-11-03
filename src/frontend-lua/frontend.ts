@@ -145,7 +145,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
       expression: async label => { const imageId = entry.config.character.emotionImages[label]?.imageIds[0]; if (imageId) ctx.display!.setExpression({ chatId, characterId, label, imageId }); },
       invalidate: source => invalidate(chatId, ['*'], source !== 'reloadChat' && source !== 'updateChatAt'), synchronize: () => entry.updates,
       ...(capture ? { capture: (event: import('../interpreter/runtime.js').AuxDebugCaptureEvent) => capture(chatId, event) } : {}),
-    });
+    }, entry.config.attachedModuleWorldBookIds);
   }
   setDisplayLuaEnvironment(snapshot => {
     const entry = entries.get(snapshot.chatId);

@@ -73,6 +73,7 @@ export interface DisplaySnapshot {
   readonly luaTriggers: readonly DisplayLuaTrigger[];
   readonly messagesHost: readonly HostMessage[];
   readonly lorebookHost: readonly HostWorldInfoEntry[];
+  readonly attachedModuleWorldBookIds?: readonly string[];
   readonly atActions: readonly RuntimeAtAtAction[];
   readonly compiledLibraries: readonly CompiledTriggerEntry[];
 }

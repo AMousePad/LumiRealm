@@ -13,7 +13,7 @@ import { createDisplayResolver } from '../../src/display/resolver';
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
-async function fixture(characterBook: 'absent' | 'empty' | 'populated', attachedModule = false) {
+async function fixture(characterBook: 'absent' | 'empty' | 'populated', attachedModule: boolean | 'empty' = false) {
   const code = `
     function readModule(id)
       local books = getLoreBooks(id, 'shared-library')
@@ -38,13 +38,15 @@ async function fixture(characterBook: 'absent' | 'empty' | 'populated', attached
       { type: 'v2DeleteLorebookByIndex', index: '0', indexType: 'value', indent: 0 },
     ] },
   ];
-  const card = { card: {
+  const card = { lumirealm: { user_overrides: {
+    attached_module_world_books: attachedModule ? { attached: 'attached-book' } : {},
+  } }, card: {
     character_id: 'character', asset_index: {}, emotion_index: {},
     risuPayload: { triggers, lua_scripts: [code], at_actions: [], scriptstate_defaults: {},
       extra: { runtime_module_lorebooks: { global: [
         { comment: 'shared-library', key: 'library', content: 'module content', worldBookId: 'module-book' },
         { comment: 'second-library', key: 'second', content: 'second content', worldBookId: 'module-book' },
-      ], ...(attachedModule ? { attached: [
+      ], ...(attachedModule ? { attached: attachedModule === 'empty' ? [] : [
         { comment: 'shared-library', key: 'library', content: 'stale attached', worldBookId: 'attached-book' },
       ] } : {}) } },
     },
@@ -55,12 +57,12 @@ async function fixture(characterBook: 'absent' | 'empty' | 'populated', attached
   const state: RuntimeStateDto = {
     revision: { epoch: 'host', sequence: 1 }, chat: { id: config.chatId, metadata: { chat_variables: {} } },
     character: { id: config.characterId, world_book_ids: [
-      ...(characterBook === 'absent' ? [] : ['character-book']), ...(attachedModule ? ['attached-book'] : []),
+      ...(attachedModule ? ['attached-book'] : []), ...(characterBook === 'absent' ? [] : ['character-book']),
     ] },
     persona: null, messages: [], globalVariables: {},
     lore: [...(characterBook === 'populated' ? [
       { id: 'character-entry', world_book_id: 'character-book', key: ['character'], comment: 'Character', content: 'character content' },
-    ] : []), ...(attachedModule ? [
+    ] : []), ...(attachedModule === true ? [
       { id: 'attached-entry', world_book_id: 'attached-book', key: ['library'], comment: 'shared-library', content: 'live attached' },
     ] : [])],
   };
@@ -134,6 +136,30 @@ test.each(['absent', 'empty', 'populated'] as const)('global module lore stays s
   expect(f.failures).toEqual([]);
 });
 
+test('an attached module book never becomes the character lorebook', async () => {
+  const f = await fixture('absent', true);
+  await f.run('readCharacter');
+  expect(f.vars().count).toBe('0');
+  expect(f.vars().entry).toBe('null');
+  await f.run('modifyCharacter');
+  await f.run('deleteCharacter');
+  expect(f.calls.filter(call => call.request.kind === 'state.write' && call.request.command.kind.startsWith('lore.'))).toEqual([]);
+  expect(getDisplaySnapshot(f.config.chatId)!.lorebookHost.map(entry => entry.content))
+    .toEqual(['module content', 'second content', 'live attached']);
+  expect(f.failures).toEqual([]);
+});
+
+test('an empty attached module book cannot hide the character book that follows it', async () => {
+  const f = await fixture('populated', 'empty');
+  await f.run('readCharacter');
+  expect(f.vars().count).toBe('1');
+  expect(f.vars().entry).toBe('character content');
+  await f.run('modifyCharacter');
+  await f.run('readCharacter');
+  expect(f.vars().entry).toBe('updated');
+  expect(f.failures).toEqual([]);
+});
+
 test('Lua follows module library order for matching names across global and attached books', async () => {
   const f = await fixture('populated', true);
   await f.run('readModule');
@@ -147,6 +173,7 @@ test('Lua follows module library order for matching names across global and atta
   expect(f.vars().module).toBe('live attached');
   await f.run('readCharacter');
   expect(f.vars().count).toBe('1');
+  expect(f.vars().entry).toBe('character content');
 });
 
 test('global module lore reaches display Lua and refreshes or detaches without stale rows', async () => {

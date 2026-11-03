@@ -78,6 +78,7 @@ export function assembleRuntimeConfig(deps: RuntimeConfigDeps, active: ActiveCar
     moduleLorebooks: Object.values(
       (active.card.risuPayload.extra?.['runtime_module_lorebooks'] as Record<string, readonly unknown[]> | undefined) ?? {},
     ).flat(),
+    attachedModuleWorldBookIds: Object.values(active.lumirealm.user_overrides.attached_module_world_books ?? {}),
     modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
     compiledLibraries: deps.getCompiledLibraries(active),
     hasEditDisplayLua,

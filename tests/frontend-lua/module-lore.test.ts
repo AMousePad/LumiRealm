@@ -8,7 +8,7 @@ import type { DisplaySnapshot } from '../../src/display/snapshot';
 import type { ActiveCard } from '../../src/interpreter/dispatch';
 
 test('runtime config carries global module lore into the display snapshot lorebook', () => {
-  const active = { card: {
+  const active = { lumirealm: { user_overrides: { attached_module_world_books: { attached: 'attached' } } }, card: {
     character_id: 'character', asset_index: {}, emotion_index: {},
     risuPayload: {
       triggers: [], lua_scripts: [], at_actions: [], scriptstate_defaults: {},
@@ -31,6 +31,7 @@ test('runtime config carries global module lore into the display snapshot lorebo
     .toEqual([['attached-row', 'live attached'], ['prelude', 'global module']]);
   expect(value.lorebook.map(entry => entry.comment)).toEqual(['attached-row']);
   expect(value).not.toHaveProperty('moduleLorebooks');
+  expect(value.attachedModuleWorldBookIds).toEqual(['attached']);
 });
 
 test('browser runtime combines live attached lore and global module lore without duplicates', () => {
@@ -49,7 +50,7 @@ test('browser runtime combines live attached lore and global module lore without
   const runtime = createFrontendHost(state, () => snapshot, DEFAULT_SETTINGS, {
     call: async () => { throw new Error('Unexpected service'); }, ui: {},
     expression: async () => {}, invalidate() {}, synchronize: async () => {},
-  });
+  }, ['attached', 'emptied']);
   expect(runtime.prepareRuntime().preloaded!.lorebook!.entries.map(entry => [entry.content, entry.constant]))
     .toEqual([['live attached', undefined], ['global module', true]]);
 });
