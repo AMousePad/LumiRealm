@@ -16,6 +16,7 @@ import type {
   HostCorsResponse,
 } from './host.js';
 import { readEffectiveGlobals } from '../state/toggle-preferences.js';
+import { createCharacterLoreEntry } from '../state/character-lorebook.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { toStr } from '../util/coerce.js';
 import { expectChatChange } from '../state/own-chat-change.js';
@@ -136,6 +137,10 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     return out;
   };
   const worldInfo: NonNullable<HostApi['worldInfo']> = {
+    createCharacterEntry: async entry => {
+      if (!uid) throw new TypeError('Character lore creation requires a user ID');
+      return dtoToHostEntry(await createCharacterLoreEntry(spindle, characterId, uid, hostPatchToDto(entry)));
+    },
     entries: {
       list: async (bookId: string, opts?: { limit?: number }): Promise<{ data: readonly HostWorldInfoEntry[] }> => {
         const res = await spindle.world_books.entries.list(bookId, { ...opts, ...(uid ? { userId: uid } : {}) });

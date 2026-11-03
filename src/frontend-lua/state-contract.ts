@@ -50,6 +50,7 @@ export type RuntimeConfig = Pick<DisplaySnapshot, 'configVersion' | 'chatId' | '
   };
 export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: RuntimeConfig; settings: RuntimeSettings }
 export type RuntimeService =
+  | { kind: 'lore.createCharacter'; entry: Record<string, unknown> }
   | { kind: 'bootstrap' }
   | { kind: 'state.read' }
   | { kind: 'state.write'; command: RuntimeStateCommand; mutationId: string }

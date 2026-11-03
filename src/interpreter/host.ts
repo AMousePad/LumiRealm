@@ -95,6 +95,7 @@ export interface HostApi {
     setExpression?(name: string): Promise<void>;
   };
   readonly worldInfo?: {
+    createCharacterEntry?: (entry: Partial<HostWorldInfoEntry>) => Promise<HostWorldInfoEntry>;
     entries: {
       list(bookId: string, opts?: { limit?: number }): Promise<{ data: readonly HostWorldInfoEntry[] }>;
       create(bookId: string, entry: Partial<HostWorldInfoEntry>): Promise<HostWorldInfoEntry>;

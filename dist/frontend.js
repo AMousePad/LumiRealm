@@ -17899,17 +17899,17 @@ function makeLorebookApi(api, lorebook) {
       } catch {}
     },
     async createLorebook(name, key, content, order) {
-      if (!lorebook.primaryBookId || !api.worldInfo?.entries)
-        return;
-      try {
-        const created = await api.worldInfo.entries.create(lorebook.primaryBookId, {
-          comment: toStr(name),
-          key: keyToArray(key),
-          content: toStr(content),
-          orderValue: Number.isNaN(Number(order)) ? 100 : Number(order)
-        });
-        lorebook.entries.push({ ...created, worldBookId: lorebook.primaryBookId });
-      } catch {}
+      if (!api.worldInfo)
+        return unsupported("createLorebook", "requires world book writes");
+      const entry = {
+        comment: toStr(name),
+        key: keyToArray(key),
+        content: toStr(content),
+        orderValue: Number.isNaN(Number(order)) ? 100 : Number(order)
+      };
+      const created = lorebook.primaryBookId ? await api.worldInfo.entries.create(lorebook.primaryBookId, entry) : await (api.worldInfo.createCharacterEntry?.(entry) ?? unsupported("createLorebook", "requires character book creation"));
+      lorebook.primaryBookId ??= created.worldBookId ?? null;
+      lorebook.entries.push({ ...created, ...lorebook.primaryBookId ? { worldBookId: lorebook.primaryBookId } : {} });
     },
     async deleteLorebookByIndex(index) {
       const e = characterEntries()[Number(index)];
@@ -19725,7 +19725,11 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       }))),
       upsertLocalLoreBook: (_id, name, content, opts) => {
         const o = opts || {};
-        createLorebook(name, o["key"] || name, content, o["order"] || 0);
+        const pending = createLorebook(name, o["key"] || name, content, o["order"] || 0);
+        pending.catch(() => {
+          return;
+        });
+        identityWrites.push(pending);
       }
     };
   }
@@ -23005,7 +23009,11 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
         } });
       }
     },
-    worldInfo: { entries: {
+    worldInfo: { createCharacterEntry: async (entry) => {
+      const result = await services.call({ kind: "lore.createCharacter", entry: lorePatch(entry) });
+      state.replace(result.state);
+      return runtimeLore(result.entry);
+    }, entries: {
       list: async (bookId) => ({ data: state.lore().filter((entry) => entry.worldBookId === bookId) }),
       async create(bookId, entry) {
         return runtimeLore(await state.write({ kind: "lore.create", bookId, patch: lorePatch(entry) }));

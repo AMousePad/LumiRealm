@@ -17755,6 +17755,17 @@ function detectMacrosInText(c) {
 }
 
 // src/payload/codec.ts
+class RisuCompatUnsupportedError extends Error {
+  feature;
+  reason;
+  name = "RisuCompatUnsupportedError";
+  constructor(feature, reason) {
+    super(`risu-compat: ${feature} is unsupported (${reason})`);
+    this.feature = feature;
+    this.reason = reason;
+  }
+}
+
 class RisuCompatVersionError extends Error {
   missing;
   extensionVersion;
@@ -28157,6 +28168,43 @@ function toRisuFirstMessageIndex(value) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value - 1 : -1;
 }
 
+// src/state/character-lorebook.ts
+var creating = new Map;
+function createCharacterLoreEntry(host, characterId, userId, entry) {
+  const key = JSON.stringify([userId, characterId]);
+  const run = (creating.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    const character = await host.characters.get(characterId, userId);
+    if (!character)
+      throw new RisuCompatUnsupportedError("createLorebook", "current character is unavailable");
+    const data = character.extensions.lumirealm;
+    const modules = new Set(Object.values(data?.user_overrides.attached_module_world_books ?? {}));
+    let bookId = character.world_book_ids.find((id) => !modules.has(id));
+    if (!bookId) {
+      const book = await host.world_books.create({
+        name: `${character.name} lore`,
+        metadata: { source: "character", source_character_id: characterId, auto_managed_by_character: true }
+      }, userId);
+      try {
+        const current = await host.characters.get(characterId, userId);
+        if (!current)
+          throw new RisuCompatUnsupportedError("createLorebook", "current character is unavailable");
+        await host.characters.update(characterId, { world_book_ids: [...current.world_book_ids, book.id] }, userId);
+      } catch (error) {
+        await host.world_books.delete(book.id, userId);
+        throw error;
+      }
+      bookId = book.id;
+    }
+    return host.world_books.entries.create(bookId, entry, userId);
+  });
+  creating.set(key, run);
+  run.finally(() => {
+    if (creating.get(key) === run)
+      creating.delete(key);
+  }).catch(() => {});
+  return run;
+}
+
 // src/interpreter/alert-bridge.ts
 var pending2 = new Map;
 function awaitAlertDismissal(requestId, ownerUserId, timeoutMs = 60000) {
@@ -28312,6 +28360,11 @@ function makeSpindleHost(ctx) {
     return out;
   };
   const worldInfo = {
+    createCharacterEntry: async (entry) => {
+      if (!uid)
+        throw new TypeError("Character lore creation requires a user ID");
+      return dtoToHostEntry(await createCharacterLoreEntry(spindle, characterId, uid, hostPatchToDto(entry)));
+    },
     entries: {
       list: async (bookId, opts) => {
         const res = await spindle.world_books.entries.list(bookId, { ...opts, ...uid ? { userId: uid } : {} });
@@ -30884,6 +30937,12 @@ function createFrontendLuaBackend(host, bootstrap) {
           case "state.read":
             value = await readState(call.chatId, call.characterId, userId);
             break;
+          case "lore.createCharacter": {
+            await host.runtimeState.read(call.chatId, call.characterId, userId);
+            const entry = await createCharacterLoreEntry(host, call.characterId, userId, call.request.entry);
+            value = { entry, state: await readState(call.chatId, call.characterId, userId) };
+            break;
+          }
           case "state.write":
             value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId);
             break;

@@ -6,6 +6,7 @@ import type { RuntimeServiceCall, RuntimeServiceReply } from './services.js';
 import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
+import { createCharacterLoreEntry } from '../state/character-lorebook.js';
 
 export interface FrontendLuaHostContract {
   runtimeState: {
@@ -52,6 +53,12 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
             break;
           }
           case 'state.read': value = await readState(call.chatId, call.characterId, userId); break;
+          case 'lore.createCharacter': {
+            await host.runtimeState.read(call.chatId, call.characterId, userId);
+            const entry = await createCharacterLoreEntry(host, call.characterId, userId, call.request.entry);
+            value = { entry, state: await readState(call.chatId, call.characterId, userId) };
+            break;
+          }
           case 'state.write': value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId); break;
           case 'llm.generate': value = await api().llm!.generate(call.request.request); break;
           case 'connections.list': value = await api().llm!.listConnections!(); break;

@@ -2,6 +2,7 @@
 
 import { toStr } from '../../util/coerce.js';
 import type { HostApi, HostWorldInfoEntry } from '../host.js';
+import { unsupported } from './unsupported.js';
 
 export interface LorebookCache {
   entries: (HostWorldInfoEntry & { worldBookId?: string })[];
@@ -191,16 +192,18 @@ export function makeLorebookApi(api: HostApi, lorebook: LorebookCache): Lorebook
     },
 
     async createLorebook(name: unknown, key: unknown, content: unknown, order: unknown): Promise<void> {
-      if (!lorebook.primaryBookId || !api.worldInfo?.entries) return;
-      try {
-        const created = await api.worldInfo.entries.create(lorebook.primaryBookId, {
+      if (!api.worldInfo) return unsupported('createLorebook', 'requires world book writes');
+      const entry = {
           comment: toStr(name),
           key: keyToArray(key),
           content: toStr(content),
           orderValue: Number.isNaN(Number(order)) ? 100 : Number(order),
-        });
-        lorebook.entries.push({ ...created, worldBookId: lorebook.primaryBookId });
-      } catch { /* */ }
+      };
+      const created = lorebook.primaryBookId
+        ? await api.worldInfo.entries.create(lorebook.primaryBookId, entry)
+        : await (api.worldInfo.createCharacterEntry?.(entry) ?? unsupported('createLorebook', 'requires character book creation'));
+      lorebook.primaryBookId ??= created.worldBookId ?? null;
+      lorebook.entries.push({ ...created, ...(lorebook.primaryBookId ? { worldBookId: lorebook.primaryBookId } : {}) });
     },
 
     async deleteLorebookByIndex(index: unknown): Promise<void> {

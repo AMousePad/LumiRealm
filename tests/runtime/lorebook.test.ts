@@ -189,11 +189,11 @@ describe('lorebook.modify', () => {
 });
 
 describe('lorebook.create / delete', () => {
-  test('createLorebook requires primaryBookId', async () => {
+  test('createLorebook reports a missing character-book creation capability', async () => {
     const cache = newCache({ entries: [], primaryBookId: null });
     const fake = makeFakeApi();
     const api = makeLorebookApi(fake.api, cache);
-    await api.createLorebook('Name', 'key', 'content', 0);
+    await expect(api.createLorebook('Name', 'key', 'content', 0)).rejects.toThrow('requires character book creation');
     expect(fake.creates.length).toBe(0);
   });
 
@@ -259,12 +259,12 @@ describe('lorebook.activation', () => {
 });
 
 describe('lorebook with worldInfo unavailable', () => {
-  test('mutations no-op safely when api.worldInfo missing', async () => {
+  test('unavailable world info leaves existing entries unchanged and rejects creation', async () => {
     const cache = newCache({ entries: [...SAMPLE_ENTRIES], primaryBookId: 'book-1' });
     const apiNoWI = { chat: {}, characters: {} } as unknown as HostApi;
     const api = makeLorebookApi(apiNoWI, cache);
     await api.modifyLorebook('hero', 'x');
-    await api.createLorebook('n', 'k', 'c', 0);
+    await expect(api.createLorebook('n', 'k', 'c', 0)).rejects.toThrow('requires world book writes');
     await api.deleteLorebookByIndex(0);
     await api.setLorebookActivation(0, true);
     // Cache untouched (still 3 entries)

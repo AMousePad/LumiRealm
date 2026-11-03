@@ -1397,7 +1397,9 @@ export async function makeRisuTriggerRuntime(
       ),
       upsertLocalLoreBook: (_id: unknown, name: unknown, content: unknown, opts?: Record<string, unknown>) => {
         const o = opts || {};
-        createLorebook(name, o['key'] || name, content, o['order'] || 0);
+        const pending = createLorebook(name, o['key'] || name, content, o['order'] || 0);
+        pending.catch(() => undefined);
+        identityWrites.push(pending);
       },
     };
   }

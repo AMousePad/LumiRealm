@@ -37,6 +37,10 @@ async function fixture(characterBook: 'absent' | 'empty' | 'populated', attached
     { type: 'manual', comment: 'deleteCharacter', conditions: [], effect: [
       { type: 'v2DeleteLorebookByIndex', index: '0', indexType: 'value', indent: 0 },
     ] },
+    { type: 'manual', comment: 'createCharacter', conditions: [], effect: [
+      { type: 'v2CreateLorebook', name: 'Created', nameType: 'value', key: 'created', keyType: 'value',
+        content: 'created content', contentType: 'value', insertOrder: '100', insertOrderType: 'value', indent: 0 },
+    ] },
   ];
   const card = { lumirealm: { user_overrides: {
     attached_module_world_books: attachedModule ? { attached: 'attached-book' } : {},
@@ -79,6 +83,14 @@ async function fixture(characterBook: 'absent' | 'empty' | 'populated', attached
         try {
           let value: unknown;
           if (call.request.kind === 'bootstrap') value = { snapshot: config, state, settings: DEFAULT_SETTINGS };
+          else if (call.request.kind === 'lore.createCharacter') {
+            const bookId = 'created-character-book';
+            state.character.world_book_ids = [...state.character.world_book_ids as string[], bookId];
+            const entry = { ...call.request.entry, id: 'created-entry', world_book_id: bookId };
+            state.lore.push(entry);
+            state.revision = { ...state.revision, sequence: state.revision.sequence + 1 };
+            value = { entry, state };
+          }
           else if (call.request.kind === 'state.write') {
             const command = call.request.command;
             let patch: RuntimeStatePatch;
@@ -146,6 +158,17 @@ test('an attached module book never becomes the character lorebook', async () =>
   expect(f.calls.filter(call => call.request.kind === 'state.write' && call.request.command.kind.startsWith('lore.'))).toEqual([]);
   expect(getDisplaySnapshot(f.config.chatId)!.lorebookHost.map(entry => entry.content))
     .toEqual(['module content', 'second content', 'live attached']);
+  expect(f.failures).toEqual([]);
+});
+
+test.each([false, true])('a card without its own book can create its first entry: attached module=%s', async attached => {
+  const f = await fixture('absent', attached);
+  await f.run('createCharacter');
+  await f.run('readCharacter');
+  expect(f.vars().count).toBe('1');
+  expect(f.vars().entry).toBe('created content');
+  await f.run('readModule');
+  expect(f.vars().module).toBe('module content');
   expect(f.failures).toEqual([]);
 });
 

@@ -3,7 +3,7 @@ import type { HostApi, HostWorldInfoEntry, TriggerRuntimeOpts } from '../interpr
 import type { DisplaySnapshot } from '../display/snapshot.js';
 import { sortLorebookEntriesBySourceOrder, withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
 import type { FrontendRuntimeState } from './state.js';
-import { runtimeLore, type RuntimeService, type RuntimeSettings } from './state-contract.js';
+import { runtimeLore, type RuntimeService, type RuntimeSettings, type RuntimeStateDto } from './state-contract.js';
 import { createLuaTemplateParser, createTriggerTemplateParser } from '../interpreter/runtime/template.js';
 
 export interface FrontendHostServices {
@@ -69,7 +69,11 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
         } });
       },
     },
-    worldInfo: { entries: {
+    worldInfo: { createCharacterEntry: async entry => {
+      const result = await services.call<{ entry: RuntimeStateDto['lore'][number]; state: RuntimeStateDto }>({ kind: 'lore.createCharacter', entry: lorePatch(entry) });
+      state.replace(result.state);
+      return runtimeLore(result.entry);
+    }, entries: {
       list: async bookId => ({ data: state.lore().filter(entry => entry.worldBookId === bookId) }),
       async create(bookId, entry) { return runtimeLore(await state.write({ kind: 'lore.create', bookId, patch: lorePatch(entry) }) as Parameters<typeof runtimeLore>[0]); },
       async update(id, entry) { return runtimeLore(await state.write({ kind: 'lore.update', id, patch: lorePatch(entry) }) as Parameters<typeof runtimeLore>[0]); },
