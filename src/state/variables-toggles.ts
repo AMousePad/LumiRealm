@@ -457,6 +457,7 @@ export function createVariablesTogglesService(deps: VariablesTogglesDeps): Varia
     }
 
     deps.invalidateUserToggleReaders?.(userId);
+    send({ type: 'toggle_preferences_changed', chatId }, userId);
     invalidateMacroInterceptorForChat(chatId);
     await refreshBgHtml(active, chatId, userId);
     await refreshVariables(active, chatId, userId, { force: true });

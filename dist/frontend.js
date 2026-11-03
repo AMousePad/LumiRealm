@@ -15026,7 +15026,7 @@ async function uploadImageFile(file, name) {
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.12.1",
+  version: "0.12.2",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -15067,7 +15067,7 @@ var spindle_default = {
   interceptorTimeoutMs: 60000,
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.2.0",
+  minimum_lumiverse_version: "1.3.0",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"
@@ -38946,6 +38946,11 @@ function mountTogglesPanel(opts) {
   }
   const unsubTranslate = subscribeTranslateEnabled(() => render());
   function handleBackendMessage(msg) {
+    if (msg.type === "toggle_preferences_changed") {
+      if (activeChatId && activeChatId !== msg.chatId)
+        sendToBackend({ type: "request_variables_snapshot", chatId: activeChatId });
+      return;
+    }
     if (msg.type === "set_toggle_definitions") {
       if (activeChatId !== null && msg.chatId !== activeChatId)
         return;

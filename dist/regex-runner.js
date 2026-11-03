@@ -9548,7 +9548,7 @@ var snapshots = new Map;
 init_scanner();
 // spindle.json
 var spindle_default = {
-  version: "0.12.1",
+  version: "0.12.2",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -9589,7 +9589,7 @@ var spindle_default = {
   interceptorTimeoutMs: 60000,
   entry_backend: "dist/backend.js",
   entry_frontend: "dist/frontend.js",
-  minimum_lumiverse_version: "1.2.0",
+  minimum_lumiverse_version: "1.3.0",
   lumirealm: {
     risu_app_version: "2026.6.215",
     risu_language: "en-US"

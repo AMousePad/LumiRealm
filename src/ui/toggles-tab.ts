@@ -401,6 +401,10 @@ export function mountTogglesPanel(opts: MountTogglesPanelOptions): TogglesTabHan
   const unsubTranslate = subscribeTranslateEnabled(() => render());
 
   function handleBackendMessage(msg: BackendToFrontend): void {
+    if (msg.type === 'toggle_preferences_changed') {
+      if (activeChatId && activeChatId !== msg.chatId) sendToBackend({ type: 'request_variables_snapshot', chatId: activeChatId });
+      return;
+    }
     if (msg.type === 'set_toggle_definitions') {
       // One slot: a background chat's push would blank the panel until the
       // next switch. CHAT_SWITCHED force-pushes, so dropping loses nothing.

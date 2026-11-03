@@ -469,6 +469,7 @@ export type FrontendToBackend =
 
 /** Backend → Frontend. */
 export type BackendToFrontend =
+  | { type: 'toggle_preferences_changed'; chatId: string }
   | { type: 'cards_updated'; cards: readonly CardSummary[] }
   | {
       type: 'import_progress';
