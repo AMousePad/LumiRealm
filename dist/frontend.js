@@ -23191,6 +23191,25 @@ function createFrontendLuaUi(ctx) {
   } };
 }
 
+// src/state/lorebook-fetch.ts
+var joinKeys = (value) => typeof value === "string" ? value : (value ?? []).join(",");
+function lumiEntryToRisuLore(e) {
+  const keyStr = joinKeys(e.key);
+  const secondStr = joinKeys(e.keysecondary ?? e.secondkey ?? e.secondKey);
+  const alwaysActive = e.constant ?? e.alwaysActive ?? false;
+  return {
+    key: keyStr,
+    secondkey: secondStr,
+    secondKey: secondStr,
+    content: e.content ?? "",
+    comment: e.comment ?? "",
+    insertorder: e.orderValue ?? e.order_value ?? e.insertorder ?? 0,
+    alwaysActive,
+    selective: e.selective === true,
+    mode: e.mode ?? (alwaysActive ? "constant" : "normal")
+  };
+}
+
 // src/interpreter/screen-dims-cache.ts
 var byUser = new Map;
 
@@ -23241,23 +23260,6 @@ function imageUrlFromId(imageId) {
   return `/api/v1/images/${imageId}`;
 }
 
-// src/state/lorebook-fetch.ts
-function lumiEntryToRisuLore(e) {
-  const keyStr = (e.key ?? []).join(",");
-  const secondStr = (e.keysecondary ?? []).join(",");
-  return {
-    key: keyStr,
-    secondkey: secondStr,
-    secondKey: secondStr,
-    content: e.content ?? "",
-    comment: e.comment ?? "",
-    insertorder: e.order_value ?? 0,
-    alwaysActive: e.constant === true,
-    selective: e.selective === true,
-    mode: e.constant ? "constant" : "normal"
-  };
-}
-
 // src/frontend-lua/snapshot.ts
 function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferences, presetToggles: _preset, ...config }, state) {
   const character = state.character();
@@ -23265,7 +23267,7 @@ function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferenc
   const messagesHost = state.hostMessages();
   const view = buildRisuChatView({ messages: messagesHost });
   const note = state.metadata("authors_note");
-  const lore = state.lore();
+  const lore = sortLorebookEntriesBySourceOrder(state.lore());
   const lorebookHost = withModuleLorebooks(lore, moduleLorebooks, character.worldBookIds);
   return {
     ...config,
@@ -23295,7 +23297,7 @@ function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferenc
     chat: buildDisplayChatState(messagesHost),
     vars: { local: state.variables(), global: state.globalVariables(), chat: {} },
     lorebookHost,
-    lorebook: lore.map((entry) => lumiEntryToRisuLore(entry))
+    lorebook: lorebookHost.map(lumiEntryToRisuLore)
   };
 }
 

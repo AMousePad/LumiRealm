@@ -7,6 +7,7 @@ import type { HostMessage } from '../interpreter/host.js';
 import type { Message } from '../core/cbs/index.js';
 import type { TriggerScript } from '../core/schemas/triggerscript.js';
 import { coerceAtActions } from '../interpreter/at-actions-runtime.js';
+import { moduleLorebooksForCard } from './lorebook-fetch.js';
 import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { buildRisuChatView, type RisuChatView } from '../interpreter/risu-chat-view.js';
 
@@ -75,9 +76,7 @@ export function assembleRuntimeConfig(deps: RuntimeConfigDeps, active: ActiveCar
     screenHeight: dims?.height ?? 0,
     legacyMediaFindings: deps.legacyMediaFindings(userId),
     // Risu's getModuleLorebooks includes global modules, whose books are not on the character.
-    moduleLorebooks: Object.values(
-      (active.card.risuPayload.extra?.['runtime_module_lorebooks'] as Record<string, readonly unknown[]> | undefined) ?? {},
-    ).flat(),
+    moduleLorebooks: moduleLorebooksForCard(active.card),
     attachedModuleWorldBookIds: Object.values(active.lumirealm.user_overrides.attached_module_world_books ?? {}),
     modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
     compiledLibraries: deps.getCompiledLibraries(active),

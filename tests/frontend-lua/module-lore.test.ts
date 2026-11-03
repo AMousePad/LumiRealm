@@ -29,7 +29,8 @@ test('runtime config carries global module lore into the display snapshot lorebo
   const value = runtimeDisplaySnapshot({ ...config, togglePreferences: null, presetToggles: {} }, state);
   expect(value.lorebookHost.map(entry => [entry.comment, entry.content]))
     .toEqual([['attached-row', 'live attached'], ['prelude', 'global module']]);
-  expect(value.lorebook.map(entry => entry.comment)).toEqual(['attached-row']);
+  expect(value.lorebook.map(entry => entry.comment)).toEqual(['attached-row', 'prelude']);
+  expect(value.lorebook[1]?.key).toBe('prelude, boot');
   expect(value).not.toHaveProperty('moduleLorebooks');
   expect(value.attachedModuleWorldBookIds).toEqual(['attached']);
 });

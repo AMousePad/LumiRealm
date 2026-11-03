@@ -21731,6 +21731,63 @@ async function readChatAuthorsNote(chatId, userId) {
   return value;
 }
 
+// src/interpreter/runtime/lorebook.ts
+function withModuleLorebooks(entries, modules, bookIds = []) {
+  const loadedBooks = new Set([...bookIds, ...entries.map((entry) => entry.worldBookId)]);
+  const rows = modules.filter((raw) => !!raw && typeof raw === "object");
+  const moduleBooks = new Set(rows.map((row) => row.worldBookId).filter((id) => typeof id === "string"));
+  const liveModuleBooks = new Map;
+  const out = [];
+  for (const entry of entries) {
+    if (typeof entry.worldBookId === "string" && moduleBooks.has(entry.worldBookId)) {
+      const live = liveModuleBooks.get(entry.worldBookId) ?? [];
+      live.push(entry);
+      liveModuleBooks.set(entry.worldBookId, live);
+    } else
+      out.push(entry);
+  }
+  const emittedBooks = new Set;
+  for (const row of rows) {
+    if (typeof row.worldBookId === "string" && loadedBooks.has(row.worldBookId)) {
+      if (!emittedBooks.has(row.worldBookId)) {
+        for (const entry of liveModuleBooks.get(row.worldBookId) ?? [])
+          out.push(entry);
+      }
+      emittedBooks.add(row.worldBookId);
+      continue;
+    }
+    out.push({
+      ...row,
+      id: typeof row.id === "string" ? row.id : `module-lore-${out.length}`,
+      key: Array.isArray(row.key) ? row.key : typeof row.key === "string" ? row.key : [],
+      content: typeof row.content === "string" ? row.content : "",
+      comment: typeof row.comment === "string" ? row.comment : "",
+      orderValue: typeof row.orderValue === "number" ? row.orderValue : typeof row.insertorder === "number" ? row.insertorder : 100,
+      disabled: row.disabled === true,
+      constant: typeof row.constant === "boolean" ? row.constant : row.alwaysActive === true
+    });
+  }
+  return out;
+}
+function risuArrayIndex(entry) {
+  const extensions = entry["extensions"];
+  if (!extensions || typeof extensions !== "object")
+    return null;
+  const value = extensions["_risu_array_index"];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function sortLorebookEntriesBySourceOrder(entries) {
+  return entries.map((entry, index) => ({ entry, index, risuIndex: risuArrayIndex(entry) })).sort((a, b) => {
+    if (a.risuIndex !== null && b.risuIndex !== null)
+      return a.risuIndex - b.risuIndex;
+    if (a.risuIndex !== null)
+      return -1;
+    if (b.risuIndex !== null)
+      return 1;
+    return a.index - b.index;
+  }).map(({ entry }) => entry);
+}
+
 // src/interpreter/evaluator/index.ts
 init_scanner();
 init_dispatch();
@@ -22534,24 +22591,27 @@ function clearActiveLorebookForCharacter(characterId) {
 }
 
 // src/state/lorebook-fetch.ts
+function moduleLorebooksForCard(card) {
+  return Object.values(card.risuPayload.extra?.runtime_module_lorebooks ?? {}).flat();
+}
+var joinKeys = (value) => typeof value === "string" ? value : (value ?? []).join(",");
 function lumiEntryToRisuLore(e) {
-  const keyStr = (e.key ?? []).join(",");
-  const secondStr = (e.keysecondary ?? []).join(",");
+  const keyStr = joinKeys(e.key);
+  const secondStr = joinKeys(e.keysecondary ?? e.secondkey ?? e.secondKey);
+  const alwaysActive = e.constant ?? e.alwaysActive ?? false;
   return {
     key: keyStr,
     secondkey: secondStr,
     secondKey: secondStr,
     content: e.content ?? "",
     comment: e.comment ?? "",
-    insertorder: e.order_value ?? 0,
-    alwaysActive: e.constant === true,
+    insertorder: e.orderValue ?? e.order_value ?? e.insertorder ?? 0,
+    alwaysActive,
     selective: e.selective === true,
-    mode: e.constant ? "constant" : "normal"
+    mode: e.mode ?? (alwaysActive ? "constant" : "normal")
   };
 }
-async function fetchLorebookForCharacter(worldBookIds, userId) {
-  if (worldBookIds.length === 0)
-    return [];
+async function fetchLorebookForCharacter(worldBookIds, userId, moduleLorebooks = []) {
   const out = [];
   for (const bid of worldBookIds) {
     let offset = 0;
@@ -22559,13 +22619,13 @@ async function fetchLorebookForCharacter(worldBookIds, userId) {
       const page = await spindle.world_books.entries.list(bid, { limit: 200, offset, userId });
       const rows = page?.data ?? [];
       for (const row of rows)
-        out.push(lumiEntryToRisuLore(row));
+        out.push({ ...row, worldBookId: bid, orderValue: row.order_value });
       if (rows.length < 200)
         break;
       offset += rows.length;
     }
   }
-  return out;
+  return withModuleLorebooks(sortLorebookEntriesBySourceOrder(out), moduleLorebooks, worldBookIds).map(lumiEntryToRisuLore);
 }
 
 // src/interpreter/listenedit-preload.ts
@@ -32486,7 +32546,7 @@ function createActiveCardLoader(deps) {
       if (!hasActiveLorebookForCharacter(hitCharId)) {
         try {
           const wbIds = worldBookIdsByCharacter.get(hitCharId) ?? [];
-          const lore = await fetchLorebookForCharacter(wbIds, userId);
+          const lore = await fetchLorebookForCharacter(wbIds, userId, moduleLorebooksForCard(cached.card));
           setActiveLorebook(chatId, hitCharId, lore);
           log.debug(`ensureActiveCardForChat: lorebook set (hit-fetch) chat=${chatId} char=${hitCharId} books=${wbIds.length} entries=${lore.length}`);
         } catch (err) {
@@ -32572,7 +32632,7 @@ function createActiveCardLoader(deps) {
     const characterOwnedWbIds = allWbIds.filter((id) => !moduleWbIdSet.has(id));
     worldBookIdsByCharacter.set(characterId, characterOwnedWbIds);
     try {
-      const loreEntries = await fetchLorebookForCharacter(allWbIds, userId);
+      const loreEntries = await fetchLorebookForCharacter(allWbIds, userId, moduleLorebooksForCard(card));
       setActiveLorebook(chatId, characterId, loreEntries);
       log.debug(`ensureActiveCardForChat: lorebook set (miss) chat=${chatId} char=${characterId} books=${allWbIds.length} entries=${loreEntries.length}`);
     } catch (err) {
@@ -33216,7 +33276,7 @@ function assembleRuntimeConfig(deps, active, chatId, userId) {
     screenWidth: dims?.width ?? 0,
     screenHeight: dims?.height ?? 0,
     legacyMediaFindings: deps.legacyMediaFindings(userId),
-    moduleLorebooks: Object.values(active.card.risuPayload.extra?.["runtime_module_lorebooks"] ?? {}).flat(),
+    moduleLorebooks: moduleLorebooksForCard(active.card),
     attachedModuleWorldBookIds: Object.values(active.lumirealm.user_overrides.attached_module_world_books ?? {}),
     modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
     compiledLibraries: deps.getCompiledLibraries(active),

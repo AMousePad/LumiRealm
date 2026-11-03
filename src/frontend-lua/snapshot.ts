@@ -6,8 +6,7 @@ import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import { imageUrlFromId } from '../interpreter/image-cache.js';
 import { lumiEntryToRisuLore } from '../state/lorebook-fetch.js';
-import { withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
-import type { WorldBookEntryDTO } from 'lumiverse-spindle-types';
+import { sortLorebookEntriesBySourceOrder, withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
 
 export function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferences, presetToggles: _preset, ...config }: RuntimeConfig, state: FrontendRuntimeState): DisplaySnapshot {
   const character = state.character();
@@ -15,8 +14,7 @@ export function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _pr
   const messagesHost = state.hostMessages();
   const view = buildRisuChatView({ messages: messagesHost });
   const note = state.metadata('authors_note');
-  const lore = state.lore();
-  // Module rows keep Risu's string keys, so only Lua's host lorebook takes them.
+  const lore = sortLorebookEntriesBySourceOrder(state.lore());
   const lorebookHost = withModuleLorebooks(lore, moduleLorebooks, character.worldBookIds);
   return {
     ...config, charName: character.name ?? '', userName: persona?.name ?? '', personaText: persona?.description ?? '',
@@ -34,6 +32,6 @@ export function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _pr
     },
     messagesHost, chat: buildDisplayChatState(messagesHost),
     vars: { local: state.variables(), global: state.globalVariables(), chat: {} },
-    lorebookHost, lorebook: lore.map(entry => lumiEntryToRisuLore(entry as unknown as WorldBookEntryDTO)),
+    lorebookHost, lorebook: lorebookHost.map(lumiEntryToRisuLore),
   };
 }

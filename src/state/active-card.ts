@@ -5,6 +5,7 @@ import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { AttachedModuleForRuntime } from './lumirealm-character.js';
 import { resolveEffectiveModuleIds } from './modules-store.js';
 import { getGlobalModuleIds } from './global-modules-cache.js';
+import { moduleLorebooksForCard } from './lorebook-fetch.js';
 
 export interface ReadLumirealmResult {
   readonly character: { readonly id: string; readonly name?: string; readonly image_id?: string | null; readonly world_book_ids?: readonly string[]; readonly extensions?: Readonly<Record<string, unknown>> };
@@ -56,6 +57,7 @@ export interface ActiveCardLoaderDeps {
   readonly fetchLorebookForCharacter: (
     worldBookIds: readonly string[],
     userId: string,
+    moduleLorebooks?: readonly unknown[],
   ) => Promise<readonly import('../core/cbs/runtime/context.js').LorebookEntry[]>;
   readonly hasActiveLorebookForCharacter: (characterId: string) => boolean;
   readonly getActiveLorebookByCharacter: (
@@ -195,7 +197,7 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
       if (!hasActiveLorebookForCharacter(hitCharId)) {
         try {
           const wbIds = worldBookIdsByCharacter.get(hitCharId) ?? [];
-          const lore = await fetchLorebookForCharacter(wbIds, userId);
+          const lore = await fetchLorebookForCharacter(wbIds, userId, moduleLorebooksForCard(cached.card));
           setActiveLorebook(chatId, hitCharId, lore);
           log.debug(`ensureActiveCardForChat: lorebook set (hit-fetch) chat=${chatId} char=${hitCharId} books=${wbIds.length} entries=${lore.length}`);
         } catch (err) {
@@ -317,7 +319,7 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
     // attached books. Awaited so the cache is warm before the macroInterceptor
     // (which awaits ensureActiveCardForChat) resolves {{lorebook}}.
     try {
-      const loreEntries = await fetchLorebookForCharacter(allWbIds, userId);
+      const loreEntries = await fetchLorebookForCharacter(allWbIds, userId, moduleLorebooksForCard(card));
       setActiveLorebook(chatId, characterId, loreEntries);
       log.debug(`ensureActiveCardForChat: lorebook set (miss) chat=${chatId} char=${characterId} books=${allWbIds.length} entries=${loreEntries.length}`);
     } catch (err) {

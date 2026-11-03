@@ -160,6 +160,18 @@ test('an empty attached module book cannot hide the character book that follows 
   expect(f.failures).toEqual([]);
 });
 
+test('display lorebook macros include global modules once and remain usable inside nested CBS', async () => {
+  const f = await fixture('populated', true);
+  const result = await f.resolver.resolveTemplates({ context: {
+    chatId: f.config.chatId, characterId: f.config.characterId, messageIndex: 0, isUser: false, depth: 0,
+  }, templates: {
+    lore: '{{#each {{lorebook}} as row}}{{element::{{slot::row}}::comment}}={{element::{{slot::row}}::key}};{{/each}}',
+  } });
+  expect(result?.resolved.lore).toBe('Character=character;shared-library=library;second-library=second;shared-library=library;');
+  expect(getDisplaySnapshot(f.config.chatId)!.lorebook.map(entry => entry.content))
+    .toEqual(['character content', 'module content', 'second content', 'live attached']);
+});
+
 test('Lua follows module library order for matching names across global and attached books', async () => {
   const f = await fixture('populated', true);
   await f.run('readModule');
