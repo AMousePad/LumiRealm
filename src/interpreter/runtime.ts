@@ -1107,12 +1107,10 @@ export async function makeRisuTriggerRuntime(
       getCharacterLastMessage: (_id: unknown) => { readMessages(); return getLastCharMessage(luaState!.character?.firstMessage ?? ''); },
       getUserLastMessage: (_id: unknown) => { readMessages(); return getLastUserMessage(''); },
       // Returns {success,result} JSON. Gated on lowLevelAccess.
-      LLMMain: async (_id: unknown, promptStr: unknown, _useMulti: unknown, _optionsStr: unknown): Promise<string> => {
+      LLMMain: async (_id: unknown, promptStr: unknown, _useMulti: unknown, _optionsStr: unknown): Promise<string | undefined> => {
         if (!lowLevelAccess) {
-          return JSON.stringify({
-            success: false,
-            result: 'risu-compat: lua.LLMMain unavailable, trigger lacks lowLevelAccess',
-          });
+          JSON.parse(promptStr as string);
+          return undefined;
         }
         if (!api.llm?.generate) {
           return JSON.stringify({
@@ -1137,12 +1135,10 @@ export async function makeRisuTriggerRuntime(
         }
       },
       // Same shape as LLMMain. Routes through auxConnectionId.
-      axLLMMain: async (_id: unknown, promptStr: unknown, _useMulti: unknown, _optionsStr: unknown): Promise<string> => {
+      axLLMMain: async (_id: unknown, promptStr: unknown, _useMulti: unknown, _optionsStr: unknown): Promise<string | undefined> => {
         if (!lowLevelAccess) {
-          return JSON.stringify({
-            success: false,
-            result: 'risu-compat: lua.axLLMMain unavailable, trigger lacks lowLevelAccess',
-          });
+          JSON.parse(promptStr as string);
+          return undefined;
         }
         if (!api.llm?.generate) {
           return JSON.stringify({
@@ -1218,10 +1214,8 @@ export async function makeRisuTriggerRuntime(
           return JSON.stringify({ success: false, result: 'Error: ' + errMsg });
         }
       },
-      simpleLLM: async (_id: unknown, prompt: unknown): Promise<string | { success: true; result: string }> => {
-        if (!lowLevelAccess) {
-          return '';
-        }
+      simpleLLM: async (_id: unknown, prompt: unknown): Promise<{ success: true; result: string } | undefined> => {
+        if (!lowLevelAccess) return undefined;
         if (!api.llm?.generate) {
           throw new Error('risu-compat: lua.simpleLLM requires api.llm.generate');
         }

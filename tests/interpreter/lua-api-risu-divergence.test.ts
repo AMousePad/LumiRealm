@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { captureLuaRuntime } from '../helpers/lua-risu-divergence.js';
 
-const divergence = process.env.RISU_PARITY_STRICT === '1' ? test : test.failing;
 
 // RisuAI e565563a288ebe4c65b6099a1645ba477d1c84b4, src/ts/process/scriptings.ts: runScripted declareAPI callbacks.
 // Expected failures assert Risu's contract; promote each divergence to test when its adapter is fixed.
@@ -121,12 +120,18 @@ describe('Lua API Risu divergences', () => {
   });
 
   for (const name of ['simpleLLM', 'LLMMain', 'axLLMMain']) {
-    divergence(`${name} host callback returns undefined without low-level access`, async () => {
+    test(`${name} host callback returns undefined without low-level access`, async () => {
       const fixture = await captureLuaRuntime({ lowLevelAccess: false });
       const prompt = name === 'simpleLLM' ? 'Prompt' : '[{"role":"user","content":"Prompt"}]';
       expect(await fixture.call(name, prompt, false, '{}')).toBeUndefined();
     });
   }
+
+  test.each(['LLMMain', 'axLLMMain'])('%s rejects invalid prompt JSON before denied access', async name => {
+    const fixture = await captureLuaRuntime({ lowLevelAccess: false });
+    await expect(fixture.call(name, '[')).rejects.toThrow();
+    expect(fixture.generated).toEqual([]);
+  });
 
   test('control: denied LLM calls never reach the provider', async () => {
     const fixture = await captureLuaRuntime({ lowLevelAccess: false });

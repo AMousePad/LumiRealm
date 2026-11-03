@@ -19511,10 +19511,8 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       },
       LLMMain: async (_id, promptStr, _useMulti, _optionsStr) => {
         if (!lowLevelAccess) {
-          return JSON.stringify({
-            success: false,
-            result: "risu-compat: lua.LLMMain unavailable, trigger lacks lowLevelAccess"
-          });
+          JSON.parse(promptStr);
+          return;
         }
         if (!api.llm?.generate) {
           return JSON.stringify({
@@ -19537,10 +19535,8 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       },
       axLLMMain: async (_id, promptStr, _useMulti, _optionsStr) => {
         if (!lowLevelAccess) {
-          return JSON.stringify({
-            success: false,
-            result: "risu-compat: lua.axLLMMain unavailable, trigger lacks lowLevelAccess"
-          });
+          JSON.parse(promptStr);
+          return;
         }
         if (!api.llm?.generate) {
           return JSON.stringify({
@@ -19607,9 +19603,8 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         }
       },
       simpleLLM: async (_id, prompt) => {
-        if (!lowLevelAccess) {
-          return "";
-        }
+        if (!lowLevelAccess)
+          return;
         if (!api.llm?.generate) {
           throw new Error("risu-compat: lua.simpleLLM requires api.llm.generate");
         }
