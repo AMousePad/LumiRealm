@@ -61,6 +61,12 @@ export interface CharacterModuleAttachDeps {
     userId: string | undefined,
     opts?: { force?: boolean },
   ) => Promise<void>;
+  readonly refreshVariables: (
+    active: ActiveCard,
+    chatId: string,
+    userId: string | undefined,
+    opts?: { force?: boolean },
+  ) => Promise<void>;
   readonly refreshBgHtml: (
     active: ActiveCard,
     chatId: string,
@@ -100,6 +106,7 @@ export function createCharacterModuleAttach(deps: CharacterModuleAttachDeps): Ch
     toggleState,
     ensureActiveCardForChat,
     refreshToggleDefinitions,
+    refreshVariables,
     refreshBgHtml,
     send,
     visibleChatForUser,
@@ -146,6 +153,7 @@ export function createCharacterModuleAttach(deps: CharacterModuleAttachDeps): Ch
         const reactivated = await ensureActiveCardForChat(chatId, null, userId);
         if (reactivated) {
           await refreshToggleDefinitions(reactivated, chatId, userId, { force: true });
+          await refreshVariables(reactivated, chatId, userId, { force: true });
           await refreshBgHtml(reactivated, chatId, userId);
         }
       })();

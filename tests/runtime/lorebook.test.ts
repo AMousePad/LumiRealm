@@ -43,14 +43,14 @@ function makeFakeApi(): FakeWorldInfo {
 function newCache(initial: Partial<LorebookCache> = {}): LorebookCache {
   return {
     entries: initial.entries ?? [],
-    primaryBookId: initial.primaryBookId ?? null,
+    primaryBookId: initial.primaryBookId === undefined ? 'book-1' : initial.primaryBookId,
   };
 }
 
 const SAMPLE_ENTRIES = [
-  { id: 'e1', key: ['hero', 'protagonist'], content: 'main char', comment: 'Hero', orderValue: 5 },
-  { id: 'e2', key: 'villain',                 content: 'bad guy',  comment: 'Villain', orderValue: 3 },
-  { id: 'e3', key: ['ally'],                   content: 'supporting', comment: 'Ally', orderValue: 1 },
+  { id: 'e1', worldBookId: 'book-1', key: ['hero', 'protagonist'], content: 'main char', comment: 'Hero', orderValue: 5 },
+  { id: 'e2', worldBookId: 'book-1', key: 'villain',                 content: 'bad guy',  comment: 'Villain', orderValue: 3 },
+  { id: 'e3', worldBookId: 'book-1', key: ['ally'],                   content: 'supporting', comment: 'Ally', orderValue: 1 },
 ];
 
 describe('lorebook.read accessors', () => {
@@ -81,7 +81,7 @@ describe('lorebook.read accessors', () => {
 
   test('getLorebookByKey case-insensitive matches comma-separated string keys', () => {
     const cache = newCache({
-      entries: [{ id: 'e1', key: 'a, b , c', content: 'multi', comment: 'M', orderValue: 0 }],
+      entries: [{ id: 'e1', worldBookId: 'book-1', key: 'a, b , c', content: 'multi', comment: 'M', orderValue: 0 }],
     });
     const fake = makeFakeApi();
     const api = makeLorebookApi(fake.api, cache);
@@ -199,7 +199,7 @@ describe('lorebook.create / delete', () => {
 
   test('createLorebook appends in Risu array order', async () => {
     const cache = newCache({
-      entries: [{ id: 'e-old', key: 'old', content: 'old', comment: 'Old', orderValue: 1 }],
+      entries: [{ id: 'e-old', worldBookId: 'book-1', key: 'old', content: 'old', comment: 'Old', orderValue: 1 }],
       primaryBookId: 'book-1',
     });
     const fake = makeFakeApi();

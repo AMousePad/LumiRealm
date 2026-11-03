@@ -17711,13 +17711,28 @@ function makeCharacterNoteApi(api, state, vars) {
 // src/interpreter/runtime/lorebook.ts
 function withModuleLorebooks(entries, modules, bookIds = []) {
   const loadedBooks = new Set([...bookIds, ...entries.map((entry) => entry.worldBookId)]);
-  const out = [...entries];
-  for (const raw of modules) {
-    if (!raw || typeof raw !== "object")
+  const rows = modules.filter((raw) => !!raw && typeof raw === "object");
+  const moduleBooks = new Set(rows.map((row) => row.worldBookId).filter((id) => typeof id === "string"));
+  const liveModuleBooks = new Map;
+  const out = [];
+  for (const entry of entries) {
+    if (typeof entry.worldBookId === "string" && moduleBooks.has(entry.worldBookId)) {
+      const live = liveModuleBooks.get(entry.worldBookId) ?? [];
+      live.push(entry);
+      liveModuleBooks.set(entry.worldBookId, live);
+    } else
+      out.push(entry);
+  }
+  const emittedBooks = new Set;
+  for (const row of rows) {
+    if (typeof row.worldBookId === "string" && loadedBooks.has(row.worldBookId)) {
+      if (!emittedBooks.has(row.worldBookId)) {
+        for (const entry of liveModuleBooks.get(row.worldBookId) ?? [])
+          out.push(entry);
+      }
+      emittedBooks.add(row.worldBookId);
       continue;
-    const row = raw;
-    if (typeof row.worldBookId === "string" && loadedBooks.has(row.worldBookId))
-      continue;
+    }
     out.push({
       ...row,
       id: typeof row.id === "string" ? row.id : `module-lore-${out.length}`,
@@ -17756,7 +17771,7 @@ function sortLorebookEntriesBySourceOrder(entries) {
   }).map(({ entry }) => entry);
 }
 function makeLorebookApi(api, lorebook) {
-  const characterEntries = () => lorebook.primaryBookId ? lorebook.entries.filter((entry) => entry.worldBookId === lorebook.primaryBookId) : lorebook.entries;
+  const characterEntries = () => lorebook.primaryBookId ? lorebook.entries.filter((entry) => entry.worldBookId === lorebook.primaryBookId) : [];
   const replaceEntry = (entry, updated) => {
     const index = lorebook.entries.indexOf(entry);
     if (index >= 0)
@@ -23175,13 +23190,14 @@ function lumiEntryToRisuLore(e) {
 }
 
 // src/frontend-lua/snapshot.ts
-function runtimeDisplaySnapshot(config, state) {
+function runtimeDisplaySnapshot({ moduleLorebooks, ...config }, state) {
   const character = state.character();
   const persona = state.persona();
   const messagesHost = state.hostMessages();
   const view = buildRisuChatView({ messages: messagesHost });
   const note = state.metadata("authors_note");
-  const lorebookHost = state.lore();
+  const lore = state.lore();
+  const lorebookHost = withModuleLorebooks(lore, moduleLorebooks, character.worldBookIds);
   return {
     ...config,
     charName: character.name ?? "",
@@ -23210,7 +23226,7 @@ function runtimeDisplaySnapshot(config, state) {
     chat: buildDisplayChatState(messagesHost),
     vars: { local: state.variables(), global: state.globalVariables(), chat: {} },
     lorebookHost,
-    lorebook: lorebookHost.map((entry) => lumiEntryToRisuLore(entry))
+    lorebook: lore.map((entry) => lumiEntryToRisuLore(entry))
   };
 }
 

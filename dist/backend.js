@@ -33216,6 +33216,7 @@ function assembleRuntimeConfig(deps, active, chatId, userId) {
     screenWidth: dims?.width ?? 0,
     screenHeight: dims?.height ?? 0,
     legacyMediaFindings: deps.legacyMediaFindings(userId),
+    moduleLorebooks: Object.values(active.card.risuPayload.extra?.["runtime_module_lorebooks"] ?? {}).flat(),
     modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
     compiledLibraries: deps.getCompiledLibraries(active),
     hasEditDisplayLua,
@@ -33988,6 +33989,7 @@ function createCharacterModuleAttach(deps) {
     toggleState,
     ensureActiveCardForChat,
     refreshToggleDefinitions,
+    refreshVariables,
     refreshBgHtml,
     send,
     visibleChatForUser,
@@ -34027,6 +34029,7 @@ function createCharacterModuleAttach(deps) {
         const reactivated = await ensureActiveCardForChat(chatId, null, userId);
         if (reactivated) {
           await refreshToggleDefinitions(reactivated, chatId, userId, { force: true });
+          await refreshVariables(reactivated, chatId, userId, { force: true });
           await refreshBgHtml(reactivated, chatId, userId);
         }
       })();
@@ -36754,6 +36757,7 @@ var characterModuleAttach = createCharacterModuleAttach({
   toggleState,
   ensureActiveCardForChat,
   refreshToggleDefinitions,
+  refreshVariables,
   refreshBgHtml,
   send,
   visibleChatForUser: (uid) => lastActiveChatByUser.get(uid),
