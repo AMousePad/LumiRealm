@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { frontendRuntime } from '../helpers/frontend-mutation-runtime.js';
-import { clearLuaEngines } from '../helpers/lua-bridge.js';
+import { clearWasmoonEngine } from '../../src/interpreter/lua-wasmoon.js';
 
-afterEach(clearLuaEngines);
+afterEach(async () => { for (const mode of ['editInput', 'input']) await clearWasmoonEngine(mode); });
 
 test.each(['edit', 'binding'])('full replacement clears timestamps through %s and reload without rewriting unchanged content', async mode => {
   const f = frontendRuntime();

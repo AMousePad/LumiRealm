@@ -122,7 +122,7 @@ and its generator have been removed; neither is needed for browser execution.
 
 ## Historical audit of the backend Wasmoon draft
 
-The audit below predates the frontend cutover. Its results describe the old two-executor draft, not the current production route. The expected-failure tests remain useful records of adapter gaps, but their legacy fixtures do not establish current frontend behavior.
+The audit below predates the frontend cutover. Its results describe the old two-executor draft, not the current production route. Current regression coverage is listed in [RISU-PARITY.md](RISU-PARITY.md); obsolete identity-refresh, scenario, timestamp-unit and two-executor fixtures have been replaced by [frontend runtime tests](frontend-lua/runtime-parity.test.ts).
 
 The follow-up combines complete original `runScripted`/`runLuaEditTrigger` bodies
 with the original CBS/parser/chat-variable/arithmetic modules. UI, provider and
