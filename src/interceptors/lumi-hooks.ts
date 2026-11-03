@@ -317,7 +317,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       try {
         resolved = runPipeline({
           template: ctx.template,
-          ...(ownedSource ? { reparseMacroResults: false } : {}),
+          reparseMacroResults: !ownedSource,
           phase: ctx.commit ? 'commit' : 'display',
           chatId,
           ...(ctx.userId !== undefined ? { userId: ctx.userId } : {}),

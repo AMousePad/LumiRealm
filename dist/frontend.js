@@ -9361,7 +9361,7 @@ function dispatchLeaf(payload, ctx, callStack) {
     return null;
   try {
     const result = entry.handler(ctx, args, payload);
-    if (ctx.reparseMacroResults !== false && typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
+    if (ctx.reparseMacroResults === true && typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
       return evaluate(result, ctx, { callStack });
     }
     return result;
@@ -15334,7 +15334,7 @@ function buildEvaluatorContext(input) {
   } } : { now: () => Date.now() };
   return freshParserContext({
     ...input.resolveLeaf ? { resolveLeaf: input.resolveLeaf } : {},
-    ...input.reparseMacroResults === false ? { reparseMacroResults: false } : {},
+    ...input.reparseMacroResults !== undefined ? { reparseMacroResults: input.reparseMacroResults } : {},
     chatId,
     vars,
     identity,
@@ -15409,7 +15409,7 @@ function runPipeline(input, opts) {
   const commit = input.phase === "commit";
   const ctx = buildEvaluatorContext({
     ...opts?.resolveLeaf ? { resolveLeaf: opts.resolveLeaf } : {},
-    ...input.reparseMacroResults === false ? { reparseMacroResults: false } : {},
+    ...input.reparseMacroResults !== undefined ? { reparseMacroResults: input.reparseMacroResults } : {},
     chatId: input.chatId,
     ...opts?.recorder ? { recorder: opts.recorder } : {},
     ...input.userId !== undefined ? { userId: input.userId } : {},
@@ -22056,7 +22056,7 @@ function nativeTemplateResolver(snap, context, recorder, preset = false) {
   let variables;
   return (text) => {
     variables ??= createNativeVariableMacros(snap.vars, recorder.touched, preset ? context.presetContext?.variables : undefined);
-    return runPipeline(buildInput(snap, text, context), { recorder, resolveLeaf: variables });
+    return runPipeline({ ...buildInput(snap, text, context), reparseMacroResults: true }, { recorder, resolveLeaf: variables });
   };
 }
 var DBG_MARKS = ["\uD83D\uDD04", "<CombatChoice", "<ActivityChoice", "<Panel>", "■■■", "intro", "★■", "\uD83E\uDDB6"];

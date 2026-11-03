@@ -58,7 +58,7 @@ function dispatchLeaf(
 
   try {
     const result = entry.handler(ctx, args, payload);
-    if (ctx.reparseMacroResults !== false && typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
+    if (ctx.reparseMacroResults === true && typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
       return evaluate(result, ctx, { callStack });
     }
     return result;

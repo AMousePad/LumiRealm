@@ -377,7 +377,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
 
   return freshParserContext({
     ...(input.resolveLeaf ? { resolveLeaf: input.resolveLeaf } : {}),
-    ...(input.reparseMacroResults === false ? { reparseMacroResults: false } : {}),
+    ...(input.reparseMacroResults !== undefined ? { reparseMacroResults: input.reparseMacroResults } : {}),
     chatId,
     vars,
     identity,

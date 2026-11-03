@@ -7,6 +7,11 @@ const set = (name: string, value: string, kind = 'value', indent = 0): TriggerEf
 } as TriggerEffect);
 
 for (const execution of ['interpreted', 'compiled'] as const) describe(`trigger templates (${execution})`, () => {
+  test('assignment preserves macros returned by a variable read', async () => {
+    const { saved } = await runTriggerEffects([set('copied', '{{getvar::nested2}}')],
+      { nested: '{{char}}', nested2: '{{getvar::nested}}' }, {}, [], execution);
+    expect(saved.copied).toBe('{{getvar::nested}}');
+  });
   test('dynamic variable names read earlier saved writes and defaults', async () => {
     const { saved } = await runTriggerEffects([
       set('i', '2'), set('unit{{getvar::i}}_hp', '{{getvar::hp}}'),

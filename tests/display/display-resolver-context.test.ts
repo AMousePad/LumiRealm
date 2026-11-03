@@ -118,6 +118,10 @@ afterEach(() => {
 });
 
 describe('frontend display resolver message context', () => {
+  test('native replacements retain recursive identity expansion', async () => {
+    setDisplaySnapshot({ ...snapshot(), charName: '{{user}}' });
+    expect((await applyRules([displayRule({ scope: 'global', substitute_macros: 'escaped' })]))?.content).toBe('User');
+  });
   test('selected native rules use captured preset variables while character CBS retains its snapshot', async () => {
     const snap = { ...snapshot(), vars: { local: { mode: 'CHARACTER' }, global: {}, chat: {} } }; setDisplaySnapshot(snap);
     const resolver = createDisplayResolver();

@@ -51,7 +51,7 @@ function nativeTemplateResolver(snap: DisplaySnapshot, context: PresetDisplayCon
   let variables: ReturnType<typeof createNativeVariableMacros> | undefined;
   return (text: string) => {
     variables ??= createNativeVariableMacros(snap.vars, recorder.touched, preset ? context.presetContext?.variables : undefined);
-    return runPipeline(buildInput(snap, text, context), { recorder, resolveLeaf: variables });
+    return runPipeline({ ...buildInput(snap, text, context), reparseMacroResults: true }, { recorder, resolveLeaf: variables });
   };
 }
 

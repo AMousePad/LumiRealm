@@ -9308,7 +9308,7 @@ function dispatchLeaf(payload, ctx, callStack) {
     return null;
   try {
     const result = entry.handler(ctx, args, payload);
-    if (ctx.reparseMacroResults !== false && typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
+    if (ctx.reparseMacroResults === true && typeof result === "string" && result.includes("{{") && result !== `{{${payload}}}`) {
       return evaluate(result, ctx, { callStack });
     }
     return result;
@@ -9856,7 +9856,7 @@ function buildEvaluatorContext(input) {
   } } : { now: () => Date.now() };
   return freshParserContext({
     ...input.resolveLeaf ? { resolveLeaf: input.resolveLeaf } : {},
-    ...input.reparseMacroResults === false ? { reparseMacroResults: false } : {},
+    ...input.reparseMacroResults !== undefined ? { reparseMacroResults: input.reparseMacroResults } : {},
     chatId,
     vars,
     identity,
@@ -9931,7 +9931,7 @@ function runPipeline(input, opts) {
   const commit = input.phase === "commit";
   const ctx = buildEvaluatorContext({
     ...opts?.resolveLeaf ? { resolveLeaf: opts.resolveLeaf } : {},
-    ...input.reparseMacroResults === false ? { reparseMacroResults: false } : {},
+    ...input.reparseMacroResults !== undefined ? { reparseMacroResults: input.reparseMacroResults } : {},
     chatId: input.chatId,
     ...opts?.recorder ? { recorder: opts.recorder } : {},
     ...input.userId !== undefined ? { userId: input.userId } : {},

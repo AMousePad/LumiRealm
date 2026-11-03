@@ -25,7 +25,7 @@ export function runPipeline(input: RunPipelineInput, opts?: RunPipelineOptions):
 
   const ctx = buildEvaluatorContext({
     ...(opts?.resolveLeaf ? { resolveLeaf: opts.resolveLeaf } : {}),
-    ...(input.reparseMacroResults === false ? { reparseMacroResults: false } : {}),
+    ...(input.reparseMacroResults !== undefined ? { reparseMacroResults: input.reparseMacroResults } : {}),
     chatId: input.chatId,
     ...(opts?.recorder ? { recorder: opts.recorder } : {}),
     ...(input.userId !== undefined ? { userId: input.userId } : {}),
