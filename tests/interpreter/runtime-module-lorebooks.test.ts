@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { makeRisuTriggerRuntime } from '../../src/interpreter/runtime.js';
 import { execute as luaExecute } from '../helpers/lua-bridge.js';
 import type { HostApi, ScriptNS } from '../../src/interpreter/host.js';
+import { makeLuaDivergenceHost } from '../helpers/lua-risu-divergence.js';
 
 function scriptNs(): ScriptNS {
   return {
@@ -78,8 +79,10 @@ describe('Runtime Module Lorebooks and getLoreBooks', () => {
     expect(runtime.getVar('result')).toBe('Card.Core.axLLM|NORMAL_PROMPT|IMAGE_PROMPT_CONTENT');
   });
 
-  test('loadLoreBooks returns all entries as objects with name and content', async () => {
+  test('loadLoreBooks returns only resolved native rows using Risu data and roles', async () => {
     const api = makeMockHostApi();
+    Object.assign(api, { worldInfo: { ...makeLuaDivergenceHost().api.worldInfo,
+      resolveForChat: async () => [{ content: 'RESOLVED', role: 'assistant' }] } });
 
     const moduleLorebooks = [
       {
@@ -103,18 +106,23 @@ describe('Runtime Module Lorebooks and getLoreBooks', () => {
     await runtime.runLua(`
       onRun = async(function(triggerId)
         local allBooks = loadLoreBooks(triggerId)
-        local out = #allBooks .. '|' .. allBooks[1].name .. '|' .. allBooks[1].content
+        local out = #allBooks .. '|' .. allBooks[1].role .. '|' .. allBooks[1].data
+        assert(allBooks[1].name == nil and allBooks[1].content == nil)
         setChatVar(triggerId, 'result', out)
       end)
     `);
 
-    expect(runtime.getVar('result')).toBe('2|Card.Core.axLLM|CORE_CONTENT');
+    expect(runtime.getVar('result')).toBe('1|char|RESOLVED');
   });
 
   test('loaded lore data reaches the auxiliary model through awaited prompt assembly', async () => {
     const requests: unknown[] = [];
     const api: HostApi = {
       ...makeMockHostApi(),
+      worldInfo: { ...makeLuaDivergenceHost().api.worldInfo!, resolveForChat: async reserve => {
+        expect(reserve).toBeUndefined();
+        return [{ content: 'Oak User', role: 'user' }];
+      } },
       llm: { generate: async (request) => {
         requests.push(request);
         return { content: 'Synthetic result' };

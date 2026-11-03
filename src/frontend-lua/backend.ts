@@ -8,6 +8,10 @@ import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { createCharacterLoreEntry } from '../state/character-lorebook.js';
 import { persistLocalLore, replaceLocalLore, type LocalLoreHost } from '../state/local-lore.js';
+import { runtimeMessage } from './state-contract.js';
+import { buildDisplayChatState } from '../state/display-snapshot-assembly.js';
+import { setCachedMessages } from '../interpreter/messages-cache.js';
+import { invalidateMacroInterceptorForChat } from '../state/macro-interceptor-cache.js';
 
 export interface FrontendLuaHostContract {
   runtimeState: {
@@ -54,6 +58,13 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
             break;
           }
           case 'state.read': value = await readState(call.chatId, call.characterId, userId); break;
+          case 'lore.resolve': {
+            const state = await host.runtimeState.read(call.chatId, call.characterId, userId);
+            setCachedMessages(call.chatId, buildDisplayChatState(state.messages.map(runtimeMessage)).messages!);
+            invalidateMacroInterceptorForChat(call.chatId);
+            value = await api().worldInfo!.resolveForChat!(call.request.reserveTokens);
+            break;
+          }
           case 'lore.createCharacter': {
             await host.runtimeState.read(call.chatId, call.characterId, userId);
             const entry = await createCharacterLoreEntry(host, call.characterId, userId, call.request.entry);

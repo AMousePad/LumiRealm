@@ -104,14 +104,13 @@ describe('Lua API Risu divergences', () => {
       insertorder: 200, alwaysActive: true, secondkey: 'other', useRegex: true, selective: true, mode: 'normal' }]);
   });
 
-  divergence('loadLoreBooksMain returns role/data records rather than content strings', async () => {
+  test('loadLoreBooksMain returns role/data records rather than content strings', async () => {
     const fixture = await captureLuaRuntime();
     const books: unknown[] = JSON.parse(String(await fixture.call('loadLoreBooksMain', 0)));
-    expect(books.every(book => typeof book === 'object' && book !== null
-      && 'data' in book && typeof book.data === 'string' && 'role' in book)).toBe(true);
+    expect(books).toEqual([{ data: 'Item Character', role: 'char' }]);
   });
 
-  divergence('loadLoreBooksMain returns undefined without low-level access', async () => {
+  test('loadLoreBooksMain returns undefined without low-level access', async () => {
     const fixture = await captureLuaRuntime({ lowLevelAccess: false });
     expect(await fixture.call('loadLoreBooksMain', 0)).toBeUndefined();
   });

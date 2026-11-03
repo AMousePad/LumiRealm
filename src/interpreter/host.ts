@@ -97,6 +97,7 @@ export interface HostApi {
     setExpression?(name: string): Promise<void>;
   };
   readonly worldInfo?: {
+    resolveForChat?: (reserveTokens?: number) => Promise<readonly { content: string; role: 'system' | 'user' | 'assistant' }[]>;
     createCharacterEntry?: (entry: Partial<HostWorldInfoEntry>) => Promise<HostWorldInfoEntry>;
     entries: {
       list(bookId: string, opts?: { limit?: number }): Promise<{ data: readonly HostWorldInfoEntry[] }>;

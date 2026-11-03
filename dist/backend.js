@@ -21951,10 +21951,6 @@ function sortLorebookEntriesBySourceOrder(entries) {
   }).map(({ entry }) => entry);
 }
 
-// src/interpreter/evaluator/index.ts
-init_scanner();
-init_dispatch();
-
 // src/interpreter/runtime/request.ts
 var _logRequest = makeSafeLogger("runtime.lua.request");
 var _clock = Date.now;
@@ -28440,6 +28436,12 @@ function makeSpindleHost(ctx) {
     return out;
   };
   const worldInfo = {
+    resolveForChat: async (reserveTokens) => {
+      const books = spindle.world_books;
+      if (!books.resolveForChat)
+        throw new RisuCompatUnsupportedError("loadLoreBooks", "requires native resolved world info");
+      return books.resolveForChat(chatId, { ...uid ? { userId: uid } : {}, ...reserveTokens !== undefined ? { reserveTokens } : {} });
+    },
     createCharacterEntry: async (entry) => {
       if (!uid)
         throw new TypeError("Character lore creation requires a user ID");
@@ -29903,6 +29905,7 @@ function createLumiInterceptors(deps) {
   function registerWorldInfoInterceptor() {
     log.info(`[decorators] registerWorldInfoInterceptor wired at boot`);
     spindle.registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
+      const isQuery = ctx.purpose === "query";
       const active = activeCardByChat.get(ctx.chatId) ?? (ctx.userId ? await deps.ensureActiveCardForChat(ctx.chatId, null, ctx.userId) : null);
       if (active && ctx.userId && active.ownerUserId !== ctx.userId)
         return;
@@ -30012,7 +30015,7 @@ function createLumiInterceptors(deps) {
           log.warn(`[decorators] sticky_writes failed chat=${ctx.chatId}: ${errMsg(err)}`);
         }
       }
-      if (outcome.injectAt.length > 0 || outcome.positionPt.length > 0) {
+      if (!isQuery && (outcome.injectAt.length > 0 || outcome.positionPt.length > 0)) {
         const positionPt = {};
         for (const p of outcome.positionPt)
           positionPt[p.name] = p.content;
@@ -30021,7 +30024,7 @@ function createLumiInterceptors(deps) {
           positionPt
         });
         log.info(`[decorators] tier3_buffer chat=${ctx.chatId} injectAt=${outcome.injectAt.length} positionPt=${outcome.positionPt.length}`);
-      } else {
+      } else if (!isQuery) {
         clearDecoratorBuffers(ctx.chatId);
       }
       if (outcome.disabled.length > 0 || outcome.forced.length > 0 || outcome.mutated.length > 0) {
@@ -31002,6 +31005,85 @@ function createFrontendLuaRpc(send) {
   };
 }
 
+// src/frontend-lua/state-contract.ts
+function runtimeMessage(message) {
+  return {
+    id: message.id,
+    content: message.content,
+    role: message.role ?? (message.is_user ? "user" : message.extra?.spindle_role === "system" ? "system" : "assistant"),
+    createdAt: hostMessageTime(message),
+    ...message.name ? { speaker: message.name } : {},
+    ...typeof message.extra?.greeting_index === "number" ? { greetingIndex: message.extra.greeting_index } : {}
+  };
+}
+
+// src/state/display-snapshot-assembly.ts
+function buildDisplayChatStateFromView(view) {
+  const messages = view.messages.map((m) => ({
+    role: m.role === "user" ? "user" : "assistant",
+    content: m.content,
+    createdAt: m.createdAt ?? 0,
+    ...m.speaker ? { speaker: m.speaker } : {}
+  }));
+  const risuLen = messages.length;
+  let lastUser = "";
+  let lastChar = "";
+  for (let i = risuLen - 1;i >= 0; i--) {
+    const m = messages[i];
+    if (!lastUser && m.role === "user")
+      lastUser = m.content;
+    if (!lastChar && m.role === "assistant")
+      lastChar = m.content;
+    if (lastUser && lastChar)
+      break;
+  }
+  return {
+    messageCount: risuLen + 1,
+    lastMessage: risuLen > 0 ? messages[risuLen - 1].content : "",
+    lastUserMessage: lastUser,
+    lastCharMessage: lastChar,
+    lastMessageId: risuLen,
+    messages
+  };
+}
+function buildDisplayChatState(messagesHost) {
+  return buildDisplayChatStateFromView(buildRisuChatView({ messages: messagesHost }));
+}
+function assembleRuntimeConfig(deps, active, chatId, userId) {
+  const triggers = active.card.risuPayload.triggers;
+  const luaScripts = active.card.risuPayload.lua_scripts;
+  const hasEditDisplayLua = triggers.some((t) => t.effect?.[0]?.type === "triggerlua");
+  const hasEditAtActions = active.card.risuPayload.at_actions.length > 0;
+  const luaTriggers = triggers.map((t, i) => ({
+    source: t,
+    luaCode: luaScripts[i] ?? ""
+  }));
+  const dims = getScreenDims(userId);
+  return {
+    chatId,
+    characterId: active.card.character_id,
+    character: {
+      jailbreakPrompt: "",
+      globalNote: "",
+      authorsNote: "",
+      additionalAssets: active.card.asset_index,
+      emotionImages: active.card.emotion_index
+    },
+    scriptstateDefaults: active.card.risuPayload.scriptstate_defaults,
+    screenWidth: dims?.width ?? 0,
+    screenHeight: dims?.height ?? 0,
+    legacyMediaFindings: deps.legacyMediaFindings(userId),
+    moduleLorebooks: moduleLorebooksForCard(active.card),
+    attachedModuleWorldBookIds: Object.values(active.lumirealm.user_overrides.attached_module_world_books ?? {}),
+    modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
+    compiledLibraries: deps.getCompiledLibraries(active),
+    hasEditDisplayLua,
+    hasEditAtActions,
+    luaTriggers,
+    atActions: coerceAtActions(active.card.risuPayload.at_actions)
+  };
+}
+
 // src/frontend-lua/backend.ts
 function createFrontendLuaBackend(host, bootstrap) {
   for (const capability of ["frontend-session-routing-v1", "runtime-state-v1", "required-context-handlers-v1", "required-interceptors-v1"]) {
@@ -31048,6 +31130,13 @@ function createFrontendLuaBackend(host, bootstrap) {
           case "state.read":
             value = await readState(call.chatId, call.characterId, userId);
             break;
+          case "lore.resolve": {
+            const state = await host.runtimeState.read(call.chatId, call.characterId, userId);
+            setCachedMessages(call.chatId, buildDisplayChatState(state.messages.map(runtimeMessage)).messages);
+            invalidateMacroInterceptorForChat(call.chatId);
+            value = await api().worldInfo.resolveForChat(call.request.reserveTokens);
+            break;
+          }
           case "lore.createCharacter": {
             await host.runtimeState.read(call.chatId, call.characterId, userId);
             const entry = await createCharacterLoreEntry(host, call.characterId, userId, call.request.entry);
@@ -33430,42 +33519,6 @@ function createVariablesTogglesService(deps) {
     return { ok: true };
   }
   return { refreshVariables, writeLocalVariable, refreshToggleDefinitions, writeToggleValue };
-}
-
-// src/state/display-snapshot-assembly.ts
-function assembleRuntimeConfig(deps, active, chatId, userId) {
-  const triggers = active.card.risuPayload.triggers;
-  const luaScripts = active.card.risuPayload.lua_scripts;
-  const hasEditDisplayLua = triggers.some((t) => t.effect?.[0]?.type === "triggerlua");
-  const hasEditAtActions = active.card.risuPayload.at_actions.length > 0;
-  const luaTriggers = triggers.map((t, i) => ({
-    source: t,
-    luaCode: luaScripts[i] ?? ""
-  }));
-  const dims = getScreenDims(userId);
-  return {
-    chatId,
-    characterId: active.card.character_id,
-    character: {
-      jailbreakPrompt: "",
-      globalNote: "",
-      authorsNote: "",
-      additionalAssets: active.card.asset_index,
-      emotionImages: active.card.emotion_index
-    },
-    scriptstateDefaults: active.card.risuPayload.scriptstate_defaults,
-    screenWidth: dims?.width ?? 0,
-    screenHeight: dims?.height ?? 0,
-    legacyMediaFindings: deps.legacyMediaFindings(userId),
-    moduleLorebooks: moduleLorebooksForCard(active.card),
-    attachedModuleWorldBookIds: Object.values(active.lumirealm.user_overrides.attached_module_world_books ?? {}),
-    modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
-    compiledLibraries: deps.getCompiledLibraries(active),
-    hasEditDisplayLua,
-    hasEditAtActions,
-    luaTriggers,
-    atActions: coerceAtActions(active.card.risuPayload.at_actions)
-  };
 }
 
 // src/state/settings-service.ts

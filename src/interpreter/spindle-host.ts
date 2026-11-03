@@ -15,6 +15,7 @@ import type {
   InjectOpts,
   HostCorsResponse,
 } from './host.js';
+import { RisuCompatUnsupportedError } from './host.js';
 import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { createCharacterLoreEntry } from '../state/character-lorebook.js';
 import { persistLocalLore, replaceLocalLore, type LocalLoreHost } from '../state/local-lore.js';
@@ -138,6 +139,13 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     return out;
   };
   const worldInfo: NonNullable<HostApi['worldInfo']> = {
+    resolveForChat: async reserveTokens => {
+      const books = spindle.world_books as typeof spindle.world_books & {
+        resolveForChat?: (chatId: string, options: { userId?: string; reserveTokens?: number }) => ReturnType<NonNullable<NonNullable<HostApi['worldInfo']>['resolveForChat']>>;
+      };
+      if (!books.resolveForChat) throw new RisuCompatUnsupportedError('loadLoreBooks', 'requires native resolved world info');
+      return books.resolveForChat(chatId, { ...(uid ? { userId: uid } : {}), ...(reserveTokens !== undefined ? { reserveTokens } : {}) });
+    },
     createCharacterEntry: async entry => {
       if (!uid) throw new TypeError('Character lore creation requires a user ID');
       return dtoToHostEntry(await createCharacterLoreEntry(spindle, characterId, uid, hostPatchToDto(entry)));

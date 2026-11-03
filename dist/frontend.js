@@ -17955,10 +17955,6 @@ function makeLorebookApi(api, lorebook, afterCharacterSave) {
   };
 }
 
-// src/interpreter/evaluator/index.ts
-init_scanner();
-init_dispatch();
-
 // src/interpreter/runtime/display-state.ts
 function makeDisplayStateApi(initialDisplayState = "", initialRequestState = []) {
   const displayState = { text: toStr(initialDisplayState) };
@@ -19770,46 +19766,14 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           return "";
         }
       },
-      loadLoreBooksMain: (_id, _reserve) => {
-        const evalCtx = buildEvaluatorContext({
-          chatId: portalChatId ?? "",
-          commit: false,
-          suppressVarPersist: true,
-          userName: "User",
-          charName: "Char",
-          character: { description: "" },
-          chat: {
-            messages: messagesCache.map((m) => ({
-              role: m.role === "user" ? "user" : m.role === "system" ? "system" : "assistant",
-              content: m.content,
-              createdAt: m.createdAt ?? Date.now()
-            }))
-          },
-          variables: {
-            global: { ...globalVarsCache },
-            local: { ...varsCache },
-            chat: { ...varsCache }
-          }
-        });
-        const out = lorebook.entries.map((e) => {
-          let content = toStr(e.content);
-          if (content.includes("{{")) {
-            try {
-              content = evaluate(content, evalCtx);
-            } catch {}
-          }
-          return {
-            ...e,
-            data: content,
-            name: toStr(e.comment || e.id),
-            comment: toStr(e.comment),
-            content,
-            key: Array.isArray(e.key) ? e.key.join(", ") : toStr(e.key),
-            order: e.orderValue ?? 100,
-            alwaysActive: !e.disabled
-          };
-        });
-        return Promise.resolve(JSON.stringify(out));
+      loadLoreBooksMain: async (_id, reserve) => {
+        if (!lowLevelAccess)
+          return;
+        if (!api.worldInfo?.resolveForChat)
+          throw new RisuCompatUnsupportedError("loadLoreBooks", "requires native resolved world info");
+        await flush();
+        const entries = await api.worldInfo.resolveForChat(typeof reserve === "number" ? reserve : undefined);
+        return JSON.stringify(entries.map((entry) => ({ data: entry.content, role: entry.role === "assistant" ? "char" : entry.role })));
       },
       getLoreBooksMain: (_id, search) => JSON.stringify([...localLore.get(), ...lorebook.entries].filter((entry) => entry.comment === search).map((entry) => ({
         ...entry,
@@ -23132,7 +23096,10 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
         } });
       }
     },
-    worldInfo: { createCharacterEntry: async (entry) => {
+    worldInfo: { resolveForChat: async (reserveTokens) => {
+      await state.flush();
+      return services.call({ kind: "lore.resolve", ...reserveTokens !== undefined ? { reserveTokens } : {} });
+    }, createCharacterEntry: async (entry) => {
       const result = await services.call({ kind: "lore.createCharacter", entry: lorePatch(entry) });
       state.replace(result.state);
       return runtimeLore(result.entry);

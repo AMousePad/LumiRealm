@@ -51,7 +51,7 @@ export function makeLuaDivergenceHost() {
       get: async () => structuredClone(character),
       update: async (_id, patch) => { Object.assign(character, patch); },
     },
-    worldInfo: { entries: {
+    worldInfo: { resolveForChat: async () => [{ content: 'Item Character', role: 'assistant' }], entries: {
       list: async () => ({ data: structuredClone(entries) }),
       create: async (bookId, entry) => {
         createdLore.push({ bookId, entry: structuredClone(entry) });

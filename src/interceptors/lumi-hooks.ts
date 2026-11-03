@@ -709,6 +709,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
   function registerWorldInfoInterceptor(): void {
     log.info(`[decorators] registerWorldInfoInterceptor wired at boot`);
     spindle.registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
+      const isQuery = (ctx as typeof ctx & { purpose?: string }).purpose === 'query';
       const active = activeCardByChat.get(ctx.chatId)
         ?? (ctx.userId ? await deps.ensureActiveCardForChat(ctx.chatId, null, ctx.userId) : null);
       if (active && ctx.userId && active.ownerUserId !== ctx.userId) return;
@@ -856,7 +857,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
       }
 
       // Stash Tier 3 cross-hook data for registerInterceptor (injectAt) and the position macro (positionPt). Each generation overwrites with a 60s TTL safety net.
-      if (outcome.injectAt.length > 0 || outcome.positionPt.length > 0) {
+      if (!isQuery && (outcome.injectAt.length > 0 || outcome.positionPt.length > 0)) {
         const positionPt: Record<string, string> = {};
         for (const p of outcome.positionPt) positionPt[p.name] = p.content;
         setDecoratorBuffers(ctx.chatId, {
@@ -868,7 +869,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             `injectAt=${outcome.injectAt.length} ` +
             `positionPt=${outcome.positionPt.length}`,
         );
-      } else {
+      } else if (!isQuery) {
         // No Tier 3 plans this turn. Drop stale buffer so post-assembly doesn't apply ghosts.
         clearDecoratorBuffer(ctx.chatId);
       }

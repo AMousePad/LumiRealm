@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { createLumiInterceptors, type CreateLumiInterceptorsDeps } from '../../src/interceptors/lumi-hooks.js';
 import { LOCAL_LORE_KEY } from '../../src/interpreter/runtime/local-lore.js';
 import { evaluatePreActivationGates } from '../../src/payload/lorebook-decorator-runtime.js';
+import { setDecoratorBuffers, getDecoratorBuffers, clearDecoratorBuffers } from '../../src/interpreter/decorator-buffers.js';
 
 const original = (globalThis as { spindle?: unknown }).spindle;
 afterEach(() => { (globalThis as { spindle?: unknown }).spindle = original; });
@@ -31,6 +32,10 @@ test('chat-local source projects native candidates before the existing decorator
     key: ['item'], keysecondary: ['other'], order_value: 321, role: 'assistant', content: 'Item {{char}}',
     extensions: { _risu_chat_local: true, _risu_array_index: 0 } });
   expect(source).toEqual(before);
+  setDecoratorBuffers('chat', { positionPt: { existing: 'generation content' }, injectAt: [] });
+  await handlers[0]!.run({ ...ctx, purpose: 'query' });
+  expect(getDecoratorBuffers('chat')?.positionPt).toEqual({ existing: 'generation content' });
+  clearDecoratorBuffers('chat');
   const placed = await handlers[0]!.run({ ...ctx, chatMetadata: { [LOCAL_LORE_KEY]: [
     { ...source[0]!, content: '@@reverse_depth 2\n@@role assistant\nPlaced' },
   ] } });

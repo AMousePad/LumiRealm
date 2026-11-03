@@ -1375,46 +1375,13 @@ export async function makeRisuTriggerRuntime(
           return `<div class="risu-inlay-image"><img src="/api/v1/images/${imgId}" /></div>\n\n`;
         } catch { return ''; }
       },
-      loadLoreBooksMain: (_id: unknown, _reserve: unknown) => {
-        void _reserve;
-        const evalCtx = buildEvaluatorContext({
-          chatId: portalChatId ?? '',
-          commit: false,
-          suppressVarPersist: true,
-          userName: 'User',
-          charName: 'Char',
-          character: { description: '' },
-          chat: {
-            messages: messagesCache.map((m) => ({
-              role: m.role === 'user' ? ('user' as const) : m.role === 'system' ? ('system' as const) : ('assistant' as const),
-              content: m.content,
-              createdAt: m.createdAt ?? Date.now(),
-            })),
-          },
-          variables: {
-            global: { ...globalVarsCache },
-            local: { ...varsCache },
-            chat: { ...varsCache },
-          },
-        });
-        const out = lorebook.entries.map((e) => {
-          let content = toStr(e.content);
-          if (content.includes('{{')) {
-            try { content = evaluate(content, evalCtx); } catch { /* skip */ }
-          }
-          return {
-            ...e,
-            // Risu loadLoreBooksMain exposes prompt text as data, not content.
-            data: content,
-            name: toStr(e.comment || e.id),
-            comment: toStr(e.comment),
-            content,
-            key: Array.isArray(e.key) ? e.key.join(', ') : toStr(e.key),
-            order: e.orderValue ?? 100,
-            alwaysActive: !e.disabled,
-          };
-        });
-        return Promise.resolve(JSON.stringify(out));
+      loadLoreBooksMain: async (_id: unknown, reserve: unknown) => {
+        if (!lowLevelAccess) return undefined;
+        if (!api.worldInfo?.resolveForChat) throw new RisuCompatUnsupportedError('loadLoreBooks', 'requires native resolved world info');
+        await flush();
+        // Native activation and the host's configured lore budget remain authoritative.
+        const entries = await api.worldInfo.resolveForChat(typeof reserve === 'number' ? reserve : undefined);
+        return JSON.stringify(entries.map(entry => ({ data: entry.content, role: entry.role === 'assistant' ? 'char' : entry.role })));
       },
       getLoreBooksMain: (_id: unknown, search: unknown) => JSON.stringify(
         [...localLore!.get(), ...lorebook.entries].filter(entry => entry.comment === search).map(entry => ({

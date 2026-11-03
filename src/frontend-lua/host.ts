@@ -70,7 +70,10 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
         } });
       },
     },
-    worldInfo: { createCharacterEntry: async entry => {
+    worldInfo: { resolveForChat: async reserveTokens => {
+      await state.flush();
+      return services.call({ kind: 'lore.resolve', ...(reserveTokens !== undefined ? { reserveTokens } : {}) });
+    }, createCharacterEntry: async entry => {
       const result = await services.call<{ entry: RuntimeStateDto['lore'][number]; state: RuntimeStateDto }>({ kind: 'lore.createCharacter', entry: lorePatch(entry) });
       state.replace(result.state);
       return runtimeLore(result.entry);
