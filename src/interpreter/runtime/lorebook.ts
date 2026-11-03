@@ -12,12 +12,27 @@ export function withModuleLorebooks(
   entries: readonly HostWorldInfoEntry[], modules: readonly unknown[], bookIds: readonly string[] = [],
 ): HostWorldInfoEntry[] {
   const loadedBooks = new Set([...bookIds, ...entries.map(entry => entry.worldBookId)]);
-  const out = [...entries];
-  for (const raw of modules) {
-    if (!raw || typeof raw !== 'object') continue;
-    const row = raw as Record<string, unknown>;
-    // An attached module's installed worldbook is already present in the live host state.
-    if (typeof row.worldBookId === 'string' && loadedBooks.has(row.worldBookId)) continue;
+  const rows = modules.filter((raw): raw is Record<string, unknown> => !!raw && typeof raw === 'object');
+  const moduleBooks = new Set(rows.map(row => row.worldBookId).filter((id): id is string => typeof id === 'string'));
+  const liveModuleBooks = new Map<string, HostWorldInfoEntry[]>();
+  const out: HostWorldInfoEntry[] = [];
+  for (const entry of entries) {
+    if (typeof entry.worldBookId === 'string' && moduleBooks.has(entry.worldBookId)) {
+      const live = liveModuleBooks.get(entry.worldBookId) ?? [];
+      live.push(entry);
+      liveModuleBooks.set(entry.worldBookId, live);
+    } else out.push(entry);
+  }
+  const emittedBooks = new Set<string>();
+  for (const row of rows) {
+    // Risu's getModuleLorebooks preserves library order; live attached books also own deletions.
+    if (typeof row.worldBookId === 'string' && loadedBooks.has(row.worldBookId)) {
+      if (!emittedBooks.has(row.worldBookId)) {
+        for (const entry of liveModuleBooks.get(row.worldBookId) ?? []) out.push(entry);
+      }
+      emittedBooks.add(row.worldBookId);
+      continue;
+    }
     out.push({
       ...row,
       id: typeof row.id === 'string' ? row.id : `module-lore-${out.length}`,
@@ -79,7 +94,7 @@ export function makeLorebookApi(api: HostApi, lorebook: LorebookCache): Lorebook
   const characterEntries = (): (HostWorldInfoEntry & { worldBookId?: string })[] =>
     lorebook.primaryBookId
       ? lorebook.entries.filter((entry) => entry.worldBookId === lorebook.primaryBookId)
-      : lorebook.entries;
+      : [];
 
   const replaceEntry = (
     entry: HostWorldInfoEntry & { worldBookId?: string },

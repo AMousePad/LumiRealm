@@ -122,8 +122,13 @@ export class FrontendRuntimeState {
   }
   variable(name: string, global = false): string | null | undefined {
     if (!global) return this.state.get(key('vars', '', name)) as string | null | undefined;
-    const globals = this.globalVariables();
-    return Object.hasOwn(globals, name) ? globals[name] : undefined;
+    const { preferences, preset } = this.toggles;
+    if (preferences !== null && Object.hasOwn(preferences, name)) return preferences[name];
+    if (preferences === null || !name.startsWith('toggle_')) {
+      const value = this.state.get(key('global', '', name)) as string | null | undefined;
+      if (value !== undefined) return value;
+    }
+    return Object.hasOwn(preset, name) ? preset[name] : undefined;
   }
   stageVariables(values: Record<string, string | null>): void {
     if (!Object.keys(values).length) return;

@@ -74,6 +74,10 @@ export function assembleRuntimeConfig(deps: RuntimeConfigDeps, active: ActiveCar
     screenWidth: dims?.width ?? 0,
     screenHeight: dims?.height ?? 0,
     legacyMediaFindings: deps.legacyMediaFindings(userId),
+    // Risu's getModuleLorebooks includes global modules, whose books are not on the character.
+    moduleLorebooks: Object.values(
+      (active.card.risuPayload.extra?.['runtime_module_lorebooks'] as Record<string, readonly unknown[]> | undefined) ?? {},
+    ).flat(),
     modulesByNamespace: deps.modulesByNamespaceFromCard(active.card) ?? {},
     compiledLibraries: deps.getCompiledLibraries(active),
     hasEditDisplayLua,

@@ -10,6 +10,30 @@ function initial(): RuntimeStateDto {
       { id: 'user', content: 'before', role: 'user', index_in_chat: 1 }], lore: [], globalVariables: {} };
 }
 
+test.each([null, {}, { toggle_mode: 'saved', toggle_empty: '', toggle_zero: '0' }])('single global reads match the effective overlay: %j', preferences => {
+  const data = initial();
+  data.chat.metadata.macro_variables = { global: {
+    toggle_mode: 'legacy', toggle_empty: 'legacy', toggle_zero: 'legacy', toggle_deleted: 'legacy', ordinary: 'kept', nullable: null,
+  } };
+  const state = new FrontendRuntimeState(data, async () => { throw new Error('Unexpected write'); }, () => {});
+  state.setToggles(preferences, { toggle_mode: 'preset', toggle_preset: 'preset', nullable: 'fallback' });
+  const expected = {
+    ...(preferences === null ? { toggle_mode: 'legacy', toggle_empty: 'legacy', toggle_zero: 'legacy', toggle_deleted: 'legacy' }
+      : { toggle_mode: 'preset', ...preferences }),
+    toggle_preset: 'preset', ordinary: 'kept', nullable: null,
+  };
+  expect(state.globalVariables()).toEqual(expected);
+  for (const name of [...Object.keys(expected), 'toggle_deleted', 'constructor', 'toString', '__proto__', 'missing']) {
+    expect(state.variable(name, true)).toBe(Object.hasOwn(expected, name) ? expected[name as keyof typeof expected] : undefined);
+  }
+  expect(state.variable('panel')).toBe('closed');
+  data.chat.metadata.macro_variables = { global: { ordinary: 'changed', toggle_mode: 'echo' } };
+  state.apply(revision(2), { chat: data.chat });
+  expect(state.variable('ordinary', true)).toBe('changed');
+  expect(state.variable('nullable', true)).toBe('fallback');
+  expect(state.variable('toggle_mode', true)).toBe(preferences === null ? 'echo' : preferences.toggle_mode ?? 'preset');
+});
+
 test('snapshot and message patches convert host timestamps once', () => {
   const data = initial();
   data.messages[1]!.send_date = 1700000000.125;
