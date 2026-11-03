@@ -33989,6 +33989,7 @@ function createCharacterModuleAttach(deps) {
     toggleState,
     ensureActiveCardForChat,
     refreshToggleDefinitions,
+    refreshVariables,
     refreshBgHtml,
     send,
     visibleChatForUser,
@@ -34028,6 +34029,7 @@ function createCharacterModuleAttach(deps) {
         const reactivated = await ensureActiveCardForChat(chatId, null, userId);
         if (reactivated) {
           await refreshToggleDefinitions(reactivated, chatId, userId, { force: true });
+          await refreshVariables(reactivated, chatId, userId, { force: true });
           await refreshBgHtml(reactivated, chatId, userId);
         }
       })();
@@ -36755,6 +36757,7 @@ var characterModuleAttach = createCharacterModuleAttach({
   toggleState,
   ensureActiveCardForChat,
   refreshToggleDefinitions,
+  refreshVariables,
   refreshBgHtml,
   send,
   visibleChatForUser: (uid) => lastActiveChatByUser.get(uid),

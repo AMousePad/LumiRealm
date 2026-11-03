@@ -1315,6 +1315,7 @@ const characterModuleAttach = createCharacterModuleAttach({
   toggleState,
   ensureActiveCardForChat,
   refreshToggleDefinitions,
+  refreshVariables,
   refreshBgHtml,
   send,
   visibleChatForUser: (uid) => lastActiveChatByUser.get(uid),
