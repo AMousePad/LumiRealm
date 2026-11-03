@@ -28,14 +28,15 @@ async function run(body: string, staged: boolean) {
         await new Promise(resolve => setTimeout(resolve, 1));
         const id = `new-${++nextId}`;
         calls.push(`send:${id}`);
-        rows.push({ id, content, role: options?.role ?? 'assistant' });
+        const at = options?.beforeId ? rows.findIndex(row => row.id === options.beforeId) : -1;
+        rows.splice(at < 0 ? rows.length : at, 0, { id, content, role: options?.role ?? 'assistant' });
         return { id };
       },
-      editMessage: async (id, content) => {
+      editMessage: async (id, content, options) => {
         calls.push(`edit:${id}`);
         const index = rows.findIndex(row => row.id === id);
         expect(index).toBeGreaterThanOrEqual(0);
-        rows[index] = { ...rows[index]!, content };
+        rows[index] = { ...rows[index]!, content, ...(options?.role ? { role: options.role } : {}) };
       },
       deleteMessage: async id => {
         calls.push(`delete:${id}`);

@@ -18455,15 +18455,15 @@ function initializeInvocation(state, api, beforeEdit) {
     additionalSysPrompt: { start: "", historyend: "", promptend: "" },
     api: { ...api, chat: {
       ...api.chat,
-      editMessage: async (id, content) => {
+      editMessage: async (id, content, options) => {
         beforeEdit?.(id, content);
-        await api.chat.editMessage(id, content);
+        await api.chat.editMessage(id, content, options);
         const messagesCache = state.live.messagesCache;
         if (!messagesCache)
           return;
         const index = messagesCache.findIndex((message) => message.id === id);
         if (index >= 0)
-          messagesCache[index] = { ...messagesCache[index], content };
+          messagesCache[index] = { ...messagesCache[index], content, ...options };
       },
       deleteMessage: async (id) => {
         await api.chat.deleteMessage(id);
@@ -18476,7 +18476,16 @@ function initializeInvocation(state, api, beforeEdit) {
       },
       sendMessage: async (content, options) => {
         const result = await api.chat.sendMessage(content, options);
-        state.live.messagesCache?.push({ id: result.id, content, role: options?.role ?? "assistant" });
+        const rows = state.live.messagesCache;
+        if (rows) {
+          const index = options?.beforeId ? rows.findIndex((message) => message.id === options.beforeId) : -1;
+          rows.splice(index < 0 ? rows.length : index, 0, {
+            id: result.id,
+            content,
+            role: options?.role ?? "assistant",
+            ...options?.createdAt !== undefined ? { createdAt: options.createdAt } : {}
+          });
+        }
         return result;
       }
     } }
@@ -18553,13 +18562,24 @@ async function commitInvocation(state, chatId, injectPrompts = false, adoptLocal
     if (!retainedIds.has(previous.id))
       await live.api.chat.deleteMessage(previous.id);
   }
-  for (const message of desired) {
+  const anchors = new Array(desired.length);
+  let anchor;
+  for (let i = desired.length - 1;i >= 0; i--) {
+    anchors[i] = anchor;
+    if (previousById.has(desired[i].id))
+      anchor = desired[i].id;
+  }
+  for (const [index, message] of desired.entries()) {
     const previous = previousById.get(message.id);
     if (!previous) {
-      const result = await live.api.chat.sendMessage(message.content, { role: message.role });
+      const result = await live.api.chat.sendMessage(message.content, {
+        role: message.role,
+        createdAt: message.createdAt ?? 0,
+        ...anchors[index] ? { beforeId: anchors[index] } : {}
+      });
       message.id = result.id;
-    } else if (previous.content !== message.content) {
-      await live.api.chat.editMessage(message.id, message.content);
+    } else if (previous.content !== message.content || previous.role !== message.role) {
+      await live.api.chat.editMessage(message.id, message.content, previous.role !== message.role ? { role: message.role } : undefined);
     }
   }
   if (injectPrompts && !state.stopSending) {
@@ -18872,9 +18892,15 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   async function resolveHostMessageId(entry) {
     return pendingSendIds.get(entry) ?? entry.id;
   }
-  async function persistChatSend(entry) {
+  async function persistChatSend(entry, before) {
     try {
-      const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, { role: entry.role, ...opts.luaChat?.enqueue ? { messageId: entry.id } : {} });
+      const beforeId = before ? await resolveHostMessageId(before) : undefined;
+      const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, {
+        role: entry.role,
+        createdAt: entry.createdAt ?? 0,
+        ...beforeId ? { beforeId } : {},
+        ...opts.luaChat?.enqueue ? { messageId: entry.id } : {}
+      });
       const id = result && typeof result.id === "string" ? result.id : "";
       if (id)
         entry.id = id;
@@ -18901,7 +18927,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           rememberOurWrite(portalChatId, id, next.content);
         } catch {}
       }
-      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content, previous.role !== next.role ? { role: next.role } : undefined);
     } catch (err) {
       _logSetFullChat.warn(`edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -19388,15 +19414,14 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         const n = rawIndex < 0 ? messagesCache.length + Math.trunc(rawIndex) : Math.trunc(rawIndex);
         if (!messagesCache[n])
           return;
-        const desired = messagesCache.map((message) => ({
-          role: lumiRoleToRisu(message.role),
-          data: message.content
-        }));
-        desired[n] = {
-          ...desired[n],
-          role: lumiRoleToRisu(risuRoleToLumi(toStr(value)))
-        };
-        reconcileFullChat(JSON.stringify(desired));
+        const previous = messagesCache[n];
+        const role = value === "user" ? "user" : "assistant";
+        if (previous.role === role)
+          return;
+        const next = { ...previous, role };
+        messagesCache[n] = next;
+        inheritPendingSend(previous, next);
+        enqueueChatMutation("setChatRole", () => persistChatEdit(previous, next));
       },
       cutChat: (_id, start, end) => {
         const previous = [...messagesCache];
@@ -19435,15 +19460,12 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         trackPendingSend(entry, enqueueChatMutation("addChat", () => persistChatSend(entry)));
       },
       insertChat: (_id, index, role, value) => {
-        const desired = messagesCache.map((message) => ({
-          role: lumiRoleToRisu(message.role),
-          data: message.content
-        }));
-        desired.splice(Number(index), 0, {
-          role: lumiRoleToRisu(risuRoleToLumi(toStr(role))),
-          data: toStr(value)
-        });
-        reconcileFullChat(JSON.stringify(desired));
+        const n = Math.trunc(Number(index)) || 0;
+        const at = n < 0 ? Math.max(0, messagesCache.length + n) : Math.min(n, messagesCache.length);
+        const before = messagesCache[at];
+        const entry = { id: "", role: role === "user" ? "user" : "assistant", content: toStr(value), createdAt: 0 };
+        messagesCache.splice(at, 0, entry);
+        trackPendingSend(entry, enqueueChatMutation("insertChat", () => persistChatSend(entry, before)));
       },
       getChatData: (_id, index) => readMessages().at(index)?.content ?? "",
       getChatRole: (_id, index) => {
@@ -22648,6 +22670,10 @@ class OrderedRuntimeState {
 
 // src/util/message-time.ts
 function hostMessageTime(message) {
+  const own = message.ownMetadata ?? message.metadata?.lumirealm ?? message.extra?.spindle_metadata?.lumirealm;
+  const override = own?.luaMessageTime;
+  if (typeof override === "number" && Number.isFinite(override))
+    return override;
   const seconds = typeof message.send_date === "number" ? message.send_date : typeof message.created_at === "number" ? message.created_at : 0;
   return seconds * 1000;
 }
@@ -22800,11 +22826,14 @@ class FrontendRuntimeState {
     }
     this.changed(keys);
   }
-  apply(revision, patch, mutationId) {
+  apply(revision, patch, mutationId, final = false) {
     const pending = mutationId ? this.mutations.get(mutationId) : undefined;
     if (pending) {
-      this.state.settleMany(pending.ids, revision, this.patch(patch), pending.partial);
-      this.mutations.delete(mutationId);
+      this.state.settleMany(final && pending.partialOwned ? [...pending.ids, pending.partial] : pending.ids, revision, this.patch(patch), pending.partial);
+      if (pending.partial && !final)
+        pending.ids = [];
+      else
+        this.mutations.delete(mutationId);
     } else
       this.state.apply(revision, this.patch(patch));
   }
@@ -22813,6 +22842,21 @@ class FrontendRuntimeState {
   }
   hostMessages() {
     return [...this.messageIds].map((id) => this.object("message", id)).filter((value) => value.present).sort((a, b) => Number(a.index) - Number(b.index)).map(({ index: _index, present: _present, ...value }) => value);
+  }
+  insertionContext(excludeId) {
+    let firstIndex = Infinity, lastContentIndex = -Infinity;
+    const empty = [];
+    for (const id of this.messageIds) {
+      if (id === excludeId || !this.state.get(key("message", id, "present")))
+        continue;
+      const index = Number(this.state.get(key("message", id, "index")));
+      firstIndex = Math.min(firstIndex, index);
+      if (this.state.get(key("message", id, "role")) === "assistant" && this.state.get(key("message", id, "content")) === "")
+        empty.push({ id, index });
+      else
+        lastContentIndex = Math.max(lastContentIndex, index);
+    }
+    return { firstIndex, trailing: empty.filter((message) => message.index > lastContentIndex).sort((a, b) => a.index - b.index) };
   }
   character() {
     return runtimeCharacter(this.object("character"));
@@ -22880,15 +22924,34 @@ class FrontendRuntimeState {
         this.record(patch, "persona", "", command.patch);
         break;
       case "message.edit":
-        this.record(patch, "message", command.id, { content: command.content });
+        this.record(patch, "message", command.id, {
+          ...command.content !== undefined ? { content: command.content } : {},
+          ...command.role !== undefined ? { role: command.role } : {}
+        });
         break;
       case "message.delete":
         this.record(patch, "message", command.id, { present: false });
         break;
       case "message.create": {
         this.messageIds.add(command.id);
-        const index = Math.max(-1, ...[...this.messageIds].map((id) => Number(this.object("message", id).index ?? -1))) + 1;
-        this.record(patch, "message", command.id, { id: command.id, content: command.content, role: command.role, index, present: true });
+        const index = command.beforeId ? Number(this.object("message", command.beforeId).index) : Math.max(-1, ...[...this.messageIds].map((id) => Number(this.object("message", id).index ?? -1))) + 1;
+        if (!Number.isFinite(index))
+          throw new Error("Insertion target unavailable");
+        if (command.beforeId)
+          for (const id of this.messageIds) {
+            const current = this.object("message", id);
+            if (id !== command.id && current.present && Number(current.index) >= index)
+              this.record(patch, "message", id, { index: Number(current.index) + 1 });
+          }
+        const time = command.ownMetadata?.luaMessageTime;
+        this.record(patch, "message", command.id, {
+          id: command.id,
+          content: command.content,
+          role: command.role,
+          index,
+          present: true,
+          ...time !== undefined ? { createdAt: time } : {}
+        });
         break;
       }
       case "lore.update":
@@ -22905,8 +22968,10 @@ class FrontendRuntimeState {
   write(command, optimistic = true, staged = []) {
     const id = this.state.begin(optimistic ? this.optimistic(command) : new Map);
     const mutationId = v4_default();
+    const partialOwned = optimistic && command.kind === "message.create" && command.beforeId !== undefined;
     this.mutations.set(mutationId, {
-      ids: [id, ...staged],
+      ids: partialOwned ? staged : [id, ...staged],
+      ...partialOwned ? { partial: id, partialOwned: true } : {},
       ...!optimistic && this.activeChatMutation && command.kind.startsWith("message.") ? { partial: this.activeChatMutation } : {}
     });
     const persist = () => this.persist(command, mutationId);
@@ -22915,11 +22980,14 @@ class FrontendRuntimeState {
     if (localLore)
       this.localLoreWrites = write;
     const operation = write.then((result) => {
-      this.apply(result.revision, result.patch, mutationId);
+      this.apply(result.revision, result.patch, mutationId, true);
       return result.value;
     }).catch((error) => {
-      for (const token of this.mutations.get(mutationId)?.ids ?? [])
+      const pending = this.mutations.get(mutationId);
+      for (const token of pending?.ids ?? [])
         this.state.discard(token);
+      if (pending?.partialOwned)
+        this.state.discard(pending.partial);
       this.mutations.delete(mutationId);
       this.failures.push(error);
       throw error;
@@ -22933,6 +23001,7 @@ class FrontendRuntimeState {
     const view = buildRisuChatView({ messages: rows });
     let greeting = view.greeting;
     const chat = this.chatAdapter(view.messages, () => greeting, persistence);
+    const lastCanonical = new Map(this.hostMessages().map((message) => [message.id, message]));
     const observe = (ids) => {
       const current = new Map(this.hostMessages().map((message) => [message.id, message]));
       for (let i = rows.length - 1;i >= 0; i--) {
@@ -22941,13 +23010,22 @@ class FrontendRuntimeState {
           continue;
         const next = current.get(id);
         if (next)
-          rows[i] = { ...next };
+          rows[i] = { ...next, content: next.content === lastCanonical.get(id)?.content ? rows[i].content : next.content };
         else
           rows.splice(i, 1);
       }
       for (const id of ids)
         if (current.has(id) && !rows.some((message) => message.id === id))
           rows.push({ ...current.get(id) });
+      const order = new Map([...current.keys()].map((id, index) => [id, index]));
+      rows.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+      for (const id of ids) {
+        const message = current.get(id);
+        if (message)
+          lastCanonical.set(id, message);
+        else
+          lastCanonical.delete(id);
+      }
       const next = buildRisuChatView({ messages: rows });
       greeting = next.greeting;
       view.messages.splice(0, view.messages.length, ...next.messages);
@@ -22971,17 +23049,50 @@ class FrontendRuntimeState {
       enqueue: (operation) => {
         const patch = new Map;
         const previous = new Map((messages === owner.messages ? this.observedMessages : observed).map((message) => [message.id, message]));
-        const present = new Set;
-        for (const [index, message] of messages.entries()) {
+        let inserted = false;
+        for (const message of messages) {
           if (!message.id)
             message.id = v4_default();
+          if (!previous.has(message.id))
+            inserted = true;
+        }
+        const indices = new Map;
+        if (inserted) {
+          const physical = owner.insertionContext();
+          const visibleIds = new Set(messages.map((message) => message.id));
+          const ordered = [...messages, ...physical.trailing.filter((message) => !visibleIds.has(message.id))];
+          const next = new Array(ordered.length);
+          let right;
+          for (let i = ordered.length - 1;i >= 0; i--) {
+            const value = this.state.get(key("message", ordered[i].id, "index"));
+            if (typeof value === "number")
+              right = value;
+            next[i] = right;
+          }
+          let additions = 0, last = greeting() === undefined ? -1 : physical.firstIndex;
+          for (let i = 0;i < ordered.length; i++) {
+            const message = ordered[i];
+            const value = this.state.get(key("message", message.id, "index"));
+            if (typeof value === "number")
+              last = value;
+            const index = typeof value === "number" ? value + additions : (next[i] ?? last + 1) + additions++;
+            indices.set(message.id, index);
+            if (!visibleIds.has(message.id) && index !== value)
+              this.record(patch, "message", message.id, { index });
+          }
+        }
+        const present = new Set;
+        for (const [index, message] of messages.entries()) {
           present.add(message.id);
           const before = previous.get(message.id);
           if (!before) {
             this.messageIds.add(message.id);
-            this.record(patch, "message", message.id, { ...message, index: index + (greeting() === undefined ? 0 : 1), present: true });
+            this.record(patch, "message", message.id, { ...message, index: indices.get(message.id) ?? index + (greeting() === undefined ? 0 : 1), present: true });
           } else {
             this.record(patch, "message", message.id, Object.fromEntries(Object.entries(message).filter(([name, value]) => value !== before[name])));
+            const nextIndex = indices.get(message.id);
+            if (nextIndex !== undefined && nextIndex !== this.state.get(key("message", message.id, "index")))
+              this.record(patch, "message", message.id, { index: nextIndex });
           }
         }
         for (const id of previous.keys())
@@ -23033,16 +23144,25 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
     async sendMessage(content, options) {
       const role = options?.role ?? "user";
       const id = options?.messageId || v4_default();
+      const beforeId = options?.beforeId ?? state.insertionContext(id).trailing[0]?.id;
       await state.write({
         kind: "message.create",
         id,
         content,
+        ...beforeId ? { beforeId } : {},
+        ...options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {},
         role: role === "sys" || role === "system" ? "system" : ["char", "bot", "assistant"].includes(role) ? "assistant" : "user"
       }, optimistic);
       return { id };
     },
-    async editMessage(id, content) {
-      await state.write({ kind: "message.edit", id, content }, optimistic);
+    async editMessage(id, content, options) {
+      await state.write({
+        kind: "message.edit",
+        id,
+        content,
+        ...options?.role !== undefined ? { role: options.role } : {},
+        ...options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}
+      }, optimistic);
     },
     async deleteMessage(id) {
       await state.write({ kind: "message.delete", id }, optimistic);

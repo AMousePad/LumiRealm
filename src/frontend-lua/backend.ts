@@ -72,6 +72,12 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
             break;
           }
           case 'state.write': {
+            const command = call.request.command;
+            if ((command.kind === 'message.create' || command.kind === 'message.edit') &&
+              (command.ownMetadata !== undefined || (command.kind === 'message.edit' && command.role !== undefined) ||
+                (command.kind === 'message.create' && command.beforeId !== undefined)) && !host.contracts?.runtimeMessageMutations) {
+              throw new FrontendLuaUnavailableError('Lua message changes require native runtime message mutations');
+            }
             if (call.request.command.kind === 'lore.upsertLocal' || call.request.command.kind === 'lore.replaceLocal') {
               await host.runtimeState.read(call.chatId, call.characterId, userId);
               if (call.request.command.kind === 'lore.upsertLocal') await persistLocalLore(host as typeof host & LocalLoreHost, call.chatId, userId, call.request.command.entry);

@@ -11424,6 +11424,10 @@ function toStr(v) {
 
 // src/util/message-time.ts
 function hostMessageTime(message) {
+  const own = message.ownMetadata ?? message.metadata?.lumirealm ?? message.extra?.spindle_metadata?.lumirealm;
+  const override = own?.luaMessageTime;
+  if (typeof override === "number" && Number.isFinite(override))
+    return override;
   const seconds = typeof message.send_date === "number" ? message.send_date : typeof message.created_at === "number" ? message.created_at : 0;
   return seconds * 1000;
 }
@@ -28354,13 +28358,41 @@ function makeSpindleHost(ctx) {
       createdAt: hostMessageTime(m)
     }));
   }
+  async function writeMessage(command) {
+    const runtime = spindle.runtimeState;
+    if (!runtime || !uid || !spindle.contracts?.runtimeMessageMutations)
+      throw new RisuCompatUnsupportedError("Lua message mutation", "requires native runtime message mutations");
+    return runtime.write(chatId, command, uid);
+  }
   async function sendMessage(content, opts) {
     const roleRaw = opts?.role ?? "user";
     const role = roleRaw === "system" || roleRaw === "sys" ? "system" : roleRaw === "assistant" || roleRaw === "char" || roleRaw === "bot" ? "assistant" : "user";
+    if (opts?.beforeId !== undefined || opts?.createdAt !== undefined) {
+      const id = opts.messageId ?? crypto.randomUUID();
+      await writeMessage({
+        kind: "message.create",
+        id,
+        content,
+        role,
+        ...opts.beforeId ? { beforeId: opts.beforeId } : {},
+        ...opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}
+      });
+      return { id };
+    }
     const created = await spindle.chat.appendMessage(chatId, { role, content });
     return { id: created.id };
   }
-  async function editMessage(id, content) {
+  async function editMessage(id, content, opts) {
+    if (opts?.role !== undefined || opts?.createdAt !== undefined) {
+      await writeMessage({
+        kind: "message.edit",
+        id,
+        content,
+        ...opts.role !== undefined ? { role: opts.role } : {},
+        ...opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}
+      });
+      return;
+    }
     await spindle.chat.updateMessage(chatId, id, { content });
   }
   async function deleteMessage(id) {
@@ -31151,6 +31183,10 @@ function createFrontendLuaBackend(host, bootstrap) {
             break;
           }
           case "state.write": {
+            const command = call.request.command;
+            if ((command.kind === "message.create" || command.kind === "message.edit") && (command.ownMetadata !== undefined || command.kind === "message.edit" && command.role !== undefined || command.kind === "message.create" && command.beforeId !== undefined) && !host.contracts?.runtimeMessageMutations) {
+              throw new FrontendLuaUnavailableError("Lua message changes require native runtime message mutations");
+            }
             if (call.request.command.kind === "lore.upsertLocal" || call.request.command.kind === "lore.replaceLocal") {
               await host.runtimeState.read(call.chatId, call.characterId, userId);
               if (call.request.command.kind === "lore.upsertLocal")

@@ -81,8 +81,8 @@ export interface HostApi {
   readonly chat: {
     getChatId?: () => string | null;
     getMessages(): Promise<readonly HostMessage[]>;
-    sendMessage(content: string, opts?: { role?: string; messageId?: string }): Promise<{ id: string }>;
-    editMessage(id: string, content: string): Promise<void>;
+    sendMessage(content: string, opts?: { role?: string; messageId?: string; beforeId?: string; createdAt?: number }): Promise<{ id: string }>;
+    editMessage(id: string, content: string, opts?: { role?: string; createdAt?: number }): Promise<void>;
     deleteMessage(id: string): Promise<void>;
     getMetadata(key: string): Promise<unknown>;
     setMetadata(key: string, value: unknown): Promise<void>;

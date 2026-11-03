@@ -11,9 +11,9 @@ import type { HostApi, ScriptNS, DispatchData, HostMessage } from '../../src/int
 // able to delete the row it created (real Lumi id, negative index resolved).
 
 interface MockChat {
-  sends: { content: string; role: string; id: string }[];
+  sends: { content: string; role: string; id: string; beforeId?: string }[];
   deletes: string[];
-  edits?: { id: string; content: string }[];
+  edits?: { id: string; content: string; role?: string }[];
   metadata?: Map<string, unknown>;
 }
 
@@ -22,12 +22,12 @@ function makeMockHostApi(initial: HostMessage[], chat: MockChat): HostApi {
   return {
     chat: {
       getMessages: async () => initial,
-      sendMessage: async (content: string, opts?: { role?: string }) => {
+      sendMessage: async (content: string, opts?: Parameters<HostApi['chat']['sendMessage']>[1]) => {
         const id = `real-${++n}`;
-        chat.sends.push({ content, role: opts?.role ?? 'user', id });
+        chat.sends.push({ content, role: opts?.role ?? 'user', id, ...(opts?.beforeId ? { beforeId: opts.beforeId } : {}) });
         return { id };
       },
-      editMessage: async (id: string, content: string) => { (chat.edits ??= []).push({ id, content }); },
+      editMessage: async (id: string, content: string, opts?: Parameters<HostApi['chat']['editMessage']>[2]) => { (chat.edits ??= []).push({ id, content, ...(opts?.role ? { role: opts.role } : {}) }); },
       deleteMessage: async (id: string) => { chat.deletes.push(id); },
       getMetadata: async (key: string) => chat.metadata?.get(key),
       setMetadata: async (key: string, value: unknown) => { chat.metadata?.set(key, value); },
@@ -153,11 +153,9 @@ describe('runtime setFullChat persistence', () => {
     await runLuaCallback(runtime, 'setChatRole(id, 0, "char")');
     await runtime.flush();
 
-    expect(chat.deletes).toEqual(['m-user', 'm-asst']);
-    expect(chat.sends).toEqual([
-      { id: 'real-1', role: 'assistant', content: 'hello' },
-      { id: 'real-2', role: 'assistant', content: 'reply' },
-    ]);
+    expect(chat.deletes).toEqual([]);
+    expect(chat.sends).toEqual([]);
+    expect(chat.edits).toEqual([{ id: 'm-user', role: 'assistant', content: 'hello' }]);
   });
 
   test('insertChat persists the inserted row at the requested position', async () => {
@@ -175,10 +173,9 @@ describe('runtime setFullChat persistence', () => {
     await runLuaCallback(runtime, 'insertChat(id, 1, "user", "inserted")');
     await runtime.flush();
 
-    expect(chat.deletes).toEqual(['m-asst']);
+    expect(chat.deletes).toEqual([]);
     expect(chat.sends).toEqual([
-      { id: 'real-1', role: 'user', content: 'inserted' },
-      { id: 'real-2', role: 'assistant', content: 'reply' },
+      { id: 'real-1', role: 'user', content: 'inserted', beforeId: 'm-asst' },
     ]);
     expect(runtime.getMessageCount()).toBe(3);
     expect(runtime.getMessageAtIndex(1)).toBe('inserted');

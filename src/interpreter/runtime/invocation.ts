@@ -33,13 +33,13 @@ export function initializeInvocation(
     additionalSysPrompt: { start: '', historyend: '', promptend: '' },
     api: { ...api, chat: {
       ...api.chat,
-      editMessage: async (id, content) => {
+      editMessage: async (id, content, options) => {
         beforeEdit?.(id, content);
-        await api.chat.editMessage(id, content);
+        await api.chat.editMessage(id, content, options);
         const messagesCache = state.live!.messagesCache;
         if (!messagesCache) return;
         const index = messagesCache.findIndex(message => message.id === id);
-        if (index >= 0) messagesCache[index] = { ...messagesCache[index]!, content };
+        if (index >= 0) messagesCache[index] = { ...messagesCache[index]!, content, ...options };
       },
       deleteMessage: async id => {
         await api.chat.deleteMessage(id);
@@ -50,7 +50,12 @@ export function initializeInvocation(
       },
       sendMessage: async (content, options) => {
         const result = await api.chat.sendMessage(content, options);
-        state.live!.messagesCache?.push({ id: result.id, content, role: options?.role ?? 'assistant' });
+        const rows = state.live!.messagesCache;
+        if (rows) {
+          const index = options?.beforeId ? rows.findIndex(message => message.id === options.beforeId) : -1;
+          rows.splice(index < 0 ? rows.length : index, 0, { id: result.id, content, role: options?.role ?? 'assistant',
+            ...(options?.createdAt !== undefined ? { createdAt: options.createdAt } : {}) });
+        }
         return result;
       },
     } },
@@ -128,13 +133,18 @@ export async function commitInvocation(state: TriggerInvocationState, chatId?: s
   for (const previous of [...baseline]) {
     if (!retainedIds.has(previous.id)) await live.api.chat.deleteMessage(previous.id);
   }
-  for (const message of desired) {
+  const anchors = new Array<string | undefined>(desired.length);
+  let anchor: string | undefined;
+  for (let i = desired.length - 1; i >= 0; i--) { anchors[i] = anchor; if (previousById.has(desired[i]!.id)) anchor = desired[i]!.id; }
+  for (const [index, message] of desired.entries()) {
     const previous = previousById.get(message.id);
     if (!previous) {
-      const result = await live.api.chat.sendMessage(message.content, { role: message.role });
+      const result = await live.api.chat.sendMessage(message.content, { role: message.role, createdAt: message.createdAt ?? 0,
+        ...(anchors[index] ? { beforeId: anchors[index] } : {}) });
       (message as { id: string }).id = result.id;
-    } else if (previous.content !== message.content) {
-      await live.api.chat.editMessage(message.id, message.content);
+    } else if (previous.content !== message.content || previous.role !== message.role) {
+      await live.api.chat.editMessage(message.id, message.content,
+        previous.role !== message.role ? { role: message.role } : undefined);
     }
   }
   if (injectPrompts && !state.stopSending) {

@@ -460,9 +460,11 @@ export async function makeRisuTriggerRuntime(
     return pendingSendIds.get(entry) ?? entry.id;
   }
 
-  async function persistChatSend(entry: HostMessage): Promise<void> {
+  async function persistChatSend(entry: HostMessage, before?: HostMessage): Promise<void> {
     try {
-      const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, { role: entry.role, ...(opts.luaChat?.enqueue ? { messageId: entry.id } : {}) });
+      const beforeId = before ? await resolveHostMessageId(before) : undefined;
+      const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, { role: entry.role, createdAt: entry.createdAt ?? 0,
+        ...(beforeId ? { beforeId } : {}), ...(opts.luaChat?.enqueue ? { messageId: entry.id } : {}) });
       const id = result && typeof result.id === 'string' ? result.id : '';
       if (id) (entry as { id: string }).id = id;
     } catch (err) {
@@ -488,7 +490,8 @@ export async function makeRisuTriggerRuntime(
       if (rememberOurWrite && portalChatId) {
         try { rememberOurWrite(portalChatId, id, next.content); } catch { /* */ }
       }
-      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content,
+        previous.role !== next.role ? { role: next.role } : undefined);
     } catch (err) {
       _logSetFullChat.warn(
         `edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`,
@@ -995,15 +998,13 @@ export async function makeRisuTriggerRuntime(
         const rawIndex = Math.trunc(Number(index)) || 0;
         const n = rawIndex < 0 ? messagesCache.length + Math.trunc(rawIndex) : Math.trunc(rawIndex);
         if (!messagesCache[n]) return;
-        const desired = messagesCache.map((message) => ({
-          role: lumiRoleToRisu(message.role),
-          data: message.content,
-        }));
-        desired[n] = {
-          ...desired[n]!,
-          role: lumiRoleToRisu(risuRoleToLumi(toStr(value))),
-        };
-        reconcileFullChat(JSON.stringify(desired));
+        const previous = messagesCache[n]!;
+        const role = value === 'user' ? 'user' : 'assistant';
+        if (previous.role === role) return;
+        const next = { ...previous, role };
+        messagesCache[n] = next;
+        inheritPendingSend(previous, next);
+        enqueueChatMutation('setChatRole', () => persistChatEdit(previous, next));
       },
       cutChat: (_id: unknown, start: unknown, end: unknown) => {
         const previous = [...messagesCache];
@@ -1043,15 +1044,12 @@ export async function makeRisuTriggerRuntime(
         );
       },
       insertChat: (_id: unknown, index: unknown, role: unknown, value: unknown) => {
-        const desired = messagesCache.map((message) => ({
-          role: lumiRoleToRisu(message.role),
-          data: message.content,
-        }));
-        desired.splice(Number(index), 0, {
-          role: lumiRoleToRisu(risuRoleToLumi(toStr(role))),
-          data: toStr(value),
-        });
-        reconcileFullChat(JSON.stringify(desired));
+        const n = Math.trunc(Number(index)) || 0;
+        const at = n < 0 ? Math.max(0, messagesCache.length + n) : Math.min(n, messagesCache.length);
+        const before = messagesCache[at];
+        const entry: HostMessage = { id: '', role: role === 'user' ? 'user' : 'assistant', content: toStr(value), createdAt: 0 };
+        messagesCache.splice(at, 0, entry);
+        trackPendingSend(entry, enqueueChatMutation('insertChat', () => persistChatSend(entry, before)));
       },
       getChatData: (_id: unknown, index: number) => readMessages().at(index)?.content ?? '',
       getChatRole: (_id: unknown, index: number) => { const message = readMessages().at(index); return message ? lumiRoleToRisu(message.role) : ''; },

@@ -21,11 +21,17 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
     async sendMessage(content, options) {
       const role = options?.role ?? 'user';
       const id = options?.messageId || v4();
+      const beforeId = options?.beforeId ?? state.insertionContext(id).trailing[0]?.id;
       await state.write({ kind: 'message.create', id, content,
+        ...(beforeId ? { beforeId } : {}),
+        ...(options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}),
         role: role === 'sys' || role === 'system' ? 'system' : ['char', 'bot', 'assistant'].includes(role) ? 'assistant' : 'user' }, optimistic);
       return { id };
     },
-    async editMessage(id, content) { await state.write({ kind: 'message.edit', id, content }, optimistic); },
+    async editMessage(id, content, options) { await state.write({ kind: 'message.edit', id, content,
+      ...(options?.role !== undefined ? { role: options.role } : {}),
+      ...(options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}),
+    }, optimistic); },
     async deleteMessage(id) { await state.write({ kind: 'message.delete', id }, optimistic); },
   });
   const lorePatch = (value: Partial<HostWorldInfoEntry>): Record<string, unknown> => ({

@@ -52,7 +52,12 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     }));
   }
 
-  async function sendMessage(content: string, opts?: { role?: string }): Promise<{ id: string }> {
+  async function writeMessage(command: import('../frontend-lua/state-contract.js').RuntimeStateCommand) {
+    const runtime = (spindle as typeof spindle & { runtimeState?: { write(chatId: string, command: unknown, userId: string): Promise<{ value: unknown }> } }).runtimeState;
+    if (!runtime || !uid || !spindle.contracts?.runtimeMessageMutations) throw new RisuCompatUnsupportedError('Lua message mutation', 'requires native runtime message mutations');
+    return runtime.write(chatId, command, uid);
+  }
+  async function sendMessage(content: string, opts?: Parameters<HostApi['chat']['sendMessage']>[1]): Promise<{ id: string }> {
     // Defensive: accept Risu aliases ('char'/'bot' → assistant, 'sys' → system)
     // alongside Lumi shape so internal callers can't silently land on the wrong role.
     const roleRaw = opts?.role ?? 'user';
@@ -60,11 +65,23 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       roleRaw === 'system' || roleRaw === 'sys' ? 'system'
       : roleRaw === 'assistant' || roleRaw === 'char' || roleRaw === 'bot' ? 'assistant'
       : 'user';
+    if (opts?.beforeId !== undefined || opts?.createdAt !== undefined) {
+      const id = opts.messageId ?? crypto.randomUUID();
+      await writeMessage({ kind: 'message.create', id, content, role,
+        ...(opts.beforeId ? { beforeId: opts.beforeId } : {}),
+        ...(opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}) });
+      return { id };
+    }
     const created = await spindle.chat.appendMessage(chatId, { role, content });
     return { id: created.id };
   }
 
-  async function editMessage(id: string, content: string): Promise<void> {
+  async function editMessage(id: string, content: string, opts?: Parameters<HostApi['chat']['editMessage']>[2]): Promise<void> {
+    if (opts?.role !== undefined || opts?.createdAt !== undefined) {
+      await writeMessage({ kind: 'message.edit', id, content, ...(opts.role !== undefined ? { role: opts.role } : {}),
+        ...(opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}) });
+      return;
+    }
     await spindle.chat.updateMessage(chatId, id, { content });
   }
 

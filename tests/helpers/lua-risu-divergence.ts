@@ -32,13 +32,15 @@ export function makeLuaDivergenceHost() {
       replaceLocalLore: async entries => { metadata.lumirealm_local_lore = structuredClone(entries); },
       sendMessage: async (content, options) => {
         const id = `sent-${messages.length}`;
-        messages.push({ id, role: options?.role ?? 'assistant', content });
+        const at = options?.beforeId ? messages.findIndex(row => row.id === options.beforeId) : -1;
+        messages.splice(at < 0 ? messages.length : at, 0, { id, role: options?.role ?? 'assistant', content,
+          ...(options?.createdAt !== undefined ? { createdAt: options.createdAt } : {}) });
         return { id };
       },
-      editMessage: async (id, content) => {
+      editMessage: async (id, content, options) => {
         const index = messages.findIndex(message => message.id === id);
         if (index < 0) throw new Error('Message does not exist');
-        messages[index] = { ...messages[index]!, content };
+        messages[index] = { ...messages[index]!, content, ...options };
       },
       deleteMessage: async id => {
         const index = messages.findIndex(message => message.id === id);
