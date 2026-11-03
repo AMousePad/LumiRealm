@@ -6,11 +6,11 @@ test.each([false, true])('Lua flush owns delayed lore creation and its failure: 
   const fixture = makeLuaDivergenceHost();
   const gate = Promise.withResolvers<void>();
   let complete = false;
-  fixture.api.worldInfo!.createCharacterEntry = async entry => {
+  fixture.api.chat.upsertLocalLore = async entry => {
     await gate.promise;
     if (reject) throw new Error('Lore write failed');
     complete = true;
-    return { ...entry, id: 'created', worldBookId: 'new-book' };
+    fixture.metadata.lumirealm_local_lore = [entry];
   };
   const runtime = await makeRisuTriggerRuntime(fixture.api, {}, divergenceLuaScriptNS, {
     characterId: fixture.character.id, binding: 'start',

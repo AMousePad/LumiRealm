@@ -17,6 +17,7 @@ import type {
 } from './host.js';
 import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { createCharacterLoreEntry } from '../state/character-lorebook.js';
+import { persistLocalLore, replaceLocalLore, type LocalLoreHost } from '../state/local-lore.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { toStr } from '../util/coerce.js';
 import { expectChatChange } from '../state/own-chat-change.js';
@@ -180,6 +181,14 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       return readEffectiveGlobals(uid, legacy, presetToggleValues(chatId, uid));
     },
     chat: {
+      upsertLocalLore: async entry => {
+        if (!uid) throw new TypeError('Local lore persistence requires a user ID');
+        await persistLocalLore(spindle as typeof spindle & LocalLoreHost, chatId, uid, entry);
+      },
+      replaceLocalLore: async entries => {
+        if (!uid) throw new TypeError('Local lore persistence requires a user ID');
+        await replaceLocalLore(spindle as typeof spindle & LocalLoreHost, chatId, uid, entries);
+      },
       getChatId: () => chatId,
       getMessages,
       sendMessage,

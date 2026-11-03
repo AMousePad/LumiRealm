@@ -1,6 +1,9 @@
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
 import { readEffectiveGlobals, TogglePreferencesError } from '../state/toggle-preferences.js';
+import { getActiveLorebook } from './lorebook-cache.js';
+import { lumiEntryToRisuLore } from './lorebook-fetch.js';
+import { readLocalLore } from '../interpreter/runtime/local-lore.js';
 import { presetToggleValues } from './preset-toggle-values.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
@@ -127,6 +130,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       activeGreetingIndex?: number;
     };
     const mv = metadata.macro_variables ?? {};
+    const lorebook = getActiveLorebook(chatId, readLocalLore(chat?.metadata ?? {}).map(lumiEntryToRisuLore));
     const chatVars = metadata.chat_variables;
 
     const view = buildRisuChatView({ messages });
@@ -200,6 +204,7 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         ...(chatVars ? { chat: chatVars } : {}),
       },
       legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
+      lorebook,
       ...(activeCard && deps.modulesByNamespaceFromCard(activeCard) ? { modulesByNamespace: deps.modulesByNamespaceFromCard(activeCard)! } : {}),
       ...(readDecoratorBuffers(chatId)?.positionPt
         ? { positionPt: readDecoratorBuffers(chatId)!.positionPt }

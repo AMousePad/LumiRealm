@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createLumiInterceptors } from '../../src/interceptors/lumi-hooks.js';
+import { invalidateLocalLore } from '../../src/state/local-lore.js';
 
 describe('macro interceptor system context', () => {
   afterEach(() => {
+    invalidateLocalLore();
     delete (globalThis as { spindle?: unknown }).spindle;
   });
 
@@ -10,6 +12,7 @@ describe('macro interceptor system context', () => {
     let macroInterceptor: ((ctx: any) => Promise<any>) | undefined;
     (globalThis as { spindle?: unknown }).spindle = {
       userStorage: { getJson: async () => null },
+      chats: { get: async () => ({ metadata: {} }) },
       registerMacroInterceptor(handler: typeof macroInterceptor) {
         macroInterceptor = handler;
       },

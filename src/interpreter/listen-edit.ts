@@ -38,6 +38,7 @@ export interface ListenEditOpts {
   readonly onMessageRead?: () => void;
   readonly luaVariables?: TriggerRuntimeOpts['luaVariables'];
   readonly luaChat?: TriggerRuntimeOpts['luaChat'];
+  readonly localLore?: TriggerRuntimeOpts['localLore'];
   /**
    * Diagnostics only: wall-clock thresholds (ms) at which the chain reports
    * its slow-path breakdown without trace level being on. Defaults are the
@@ -240,6 +241,7 @@ export async function runListenEditChain<T>(
           ...(opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {}),
           ...(opts.onMessageRead ? { onMessageRead: opts.onMessageRead } : {}),
           ...(opts.luaVariables !== undefined ? { luaVariables: opts.luaVariables } : {}),
+          ...(opts.localLore !== undefined ? { localLore: opts.localLore } : {}),
           ...(opts.moduleLorebooks !== undefined ? { moduleLorebooks: opts.moduleLorebooks } : {}),
           // Hand the per-chain snapshot to the runtime so it skips its own
           // repeated state fetches (local/global vars, messages, character/lorebook).

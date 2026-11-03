@@ -43,6 +43,8 @@ const SYSTEM_MANAGED_EXTENSION_KEYS: readonly string[] = [
   '_risu_source_hash',
   '_risu_module_id',
   '_risu_array_index',
+  '_risu_chat_local',
+  '_risu_state_id',
 ];
 
 // Excludes id/uid/world_book_id (auto-generated), timestamps/vector_*

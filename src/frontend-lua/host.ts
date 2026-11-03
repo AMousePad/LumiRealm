@@ -5,6 +5,7 @@ import { sortLorebookEntriesBySourceOrder, withModuleLorebooks } from '../interp
 import type { FrontendRuntimeState } from './state.js';
 import { runtimeLore, type RuntimeService, type RuntimeSettings, type RuntimeStateDto } from './state-contract.js';
 import { createLuaTemplateParser, createTriggerTemplateParser } from '../interpreter/runtime/template.js';
+import { LOCAL_LORE_KEY, readLocalLore } from '../interpreter/runtime/local-lore.js';
 
 export interface FrontendHostServices {
   call<T>(request: RuntimeService): Promise<T>;
@@ -98,6 +99,12 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
           if (event.kind === 'request' ? settings.auxDebugCaptureRequest : settings.auxDebugCaptureResponse) services.capture!(event);
         } } : {}),
         luaChat: state.luaChat(chatWrites(false)),
+        localLore: {
+          selection: state.localLoreSelection,
+          get: () => readLocalLore({ [LOCAL_LORE_KEY]: state.metadata(LOCAL_LORE_KEY) }),
+          async upsert(entry) { await state.write({ kind: 'lore.upsertLocal', entry }); },
+          async replace(entries) { await state.write({ kind: 'lore.replaceLocal', entries }); },
+        },
         luaVariables: {
           get: (name, scope) => read(scope, name),
           set(name, value) { if (state.variable(name) === value) return; state.stageVariables({ [name]: value }); return true; },

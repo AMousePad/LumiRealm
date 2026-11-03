@@ -79,6 +79,7 @@ describe("MacroInterceptor asset resolution without MacroRegistry registration",
     let macroInterceptor: MacroInterceptorHandler | null = null;
     (globalThis as { spindle?: unknown }).spindle = {
       userStorage: { getJson: async () => null },
+      chats: { get: async () => ({ metadata: {} }) },
       registerMacroInterceptor(handler: MacroInterceptorHandler) {
         macroInterceptor = handler;
       },

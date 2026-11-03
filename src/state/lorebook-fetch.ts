@@ -4,7 +4,8 @@ import type { WorldBookEntryDTO } from "lumiverse-spindle-types";
 import type { LorebookEntry } from "../core/cbs/runtime/context.js";
 import type { StoredRisuCard } from '../payload/types.js';
 import type { HostWorldInfoEntry } from '../interpreter/host.js';
-import { sortLorebookEntriesBySourceOrder, withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
+import { sortLorebookEntriesBySourceOrder, moduleLorebookSources } from '../interpreter/runtime/lorebook.js';
+import type { CachedLorebook } from './lorebook-cache.js';
 
 export function moduleLorebooksForCard(card: StoredRisuCard): readonly unknown[] {
   return Object.values((card.risuPayload.extra?.runtime_module_lorebooks as Record<string, readonly unknown[]> | undefined) ?? {}).flat();
@@ -57,7 +58,7 @@ export async function fetchLorebookForCharacter(
   worldBookIds: readonly string[],
   userId: string,
   moduleLorebooks: readonly unknown[] = [],
-): Promise<readonly LorebookEntry[]> {
+): Promise<CachedLorebook> {
   const out: HostWorldInfoEntry[] = [];
   for (const bid of worldBookIds) {
     let offset = 0;
@@ -69,5 +70,6 @@ export async function fetchLorebookForCharacter(
       offset += rows.length;
     }
   }
-  return withModuleLorebooks(sortLorebookEntriesBySourceOrder(out), moduleLorebooks, worldBookIds).map(lumiEntryToRisuLore);
+  const sources = moduleLorebookSources(sortLorebookEntriesBySourceOrder(out), moduleLorebooks, worldBookIds);
+  return { character: sources.character.map(lumiEntryToRisuLore), modules: sources.modules.map(lumiEntryToRisuLore) };
 }

@@ -9,6 +9,7 @@ import { assembleRuntimeConfig } from '../../src/state/display-snapshot-assembly
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store';
 import { getDisplaySnapshot } from '../../src/display/snapshot';
 import { createDisplayResolver } from '../../src/display/resolver';
+import { LOCAL_LORE_KEY, readLocalLore, upsertLocalLore } from '../../src/interpreter/runtime/local-lore';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
@@ -19,6 +20,13 @@ async function fixture(characterBook: 'absent' | 'empty' | 'populated', attached
       local books = getLoreBooks(id, 'shared-library')
       setChatVar(id, 'module', #books > 0 and books[1].content or 'missing')
     end
+    function writeLocal(id)
+      upsertLocalLoreBook(id, 'shared-library', 'old local', {})
+      upsertLocalLoreBook(id, 'shared-library', 'local content', {key='local', insertOrder=321, alwaysActive=true, secondKey='other', regex=true})
+      local rows = getLoreBooks(id, 'shared-library')
+      setChatVar(id, 'localRead', rows[1].content .. '|' .. rows[2].content)
+    end
+    function onButtonClick(id) writeLocal(id) end
     listenEdit('editDisplay', function(id, text)
       local books = getLoreBooks(id, 'shared-library')
       return text .. ':' .. (#books > 0 and books[1].content or 'missing')
@@ -97,6 +105,12 @@ async function fixture(characterBook: 'absent' | 'empty' | 'populated', attached
             if (command.kind === 'chat.variables') {
               state.chat.metadata.chat_variables = { ...state.chat.metadata.chat_variables as object, ...command.values };
               patch = { chat: state.chat };
+            } else if (command.kind === 'lore.upsertLocal') {
+              state.chat.metadata[LOCAL_LORE_KEY] = upsertLocalLore(readLocalLore(state.chat.metadata), command.entry);
+              patch = { chat: state.chat };
+            } else if (command.kind === 'lore.replaceLocal') {
+              state.chat.metadata[LOCAL_LORE_KEY] = command.entries;
+              patch = { chat: state.chat };
             } else if (command.kind === 'lore.update' || command.kind === 'lore.delete') {
               const index = state.lore.findIndex(entry => entry.id === command.id);
               if (index < 0) throw new Error('Runtime lore entry not found');
@@ -158,6 +172,26 @@ test('an attached module book never becomes the character lorebook', async () =>
   expect(f.calls.filter(call => call.request.kind === 'state.write' && call.request.command.kind.startsWith('lore.'))).toEqual([]);
   expect(getDisplaySnapshot(f.config.chatId)!.lorebookHost.map(entry => entry.content))
     .toEqual(['module content', 'second content', 'live attached']);
+  expect(f.failures).toEqual([]);
+});
+
+test('local upsert is visible synchronously to Lua and follows character lore in CBS', async () => {
+  const f = await fixture('populated');
+  await f.runtime.manual(f.config.chatId, { kind: 'button', value: 'writeLocal' });
+  expect(f.vars().localRead).toBe('local content|module content');
+  expect(f.calls.filter(call => call.request.kind === 'lore.createCharacter' ||
+    (call.request.kind === 'state.write' && call.request.command.kind === 'lore.create'))).toEqual([]);
+  await f.run('readCharacter');
+  expect(f.vars().count).toBe('1');
+  expect(getDisplaySnapshot(f.config.chatId)!.lorebook.map(row => row.content))
+    .toEqual(['character content', 'local content', 'module content', 'second content']);
+  expect(getDisplaySnapshot(f.config.chatId)!.lorebook[1]).toMatchObject({
+    key: 'local', secondkey: 'other', insertorder: 321, alwaysActive: true, selective: true,
+  });
+  const rendered = await f.resolver.resolveBody({ content: 'panel', context: {
+    chatId: f.config.chatId, characterId: f.config.characterId, messageIndex: 0, isUser: false, depth: 0,
+  } });
+  expect(rendered?.content).toBe('panel:local content');
   expect(f.failures).toEqual([]);
 });
 

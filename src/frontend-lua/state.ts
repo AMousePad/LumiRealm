@@ -1,4 +1,5 @@
 import { v4 } from 'uuid';
+import { LOCAL_LORE_KEY, readLocalLore, upsertLocalLore } from '../interpreter/runtime/local-lore.js';
 import type { HostMessage, HostCharacter, HostPersona, HostWorldInfoEntry, TriggerRuntimeOpts } from '../interpreter/host.js';
 import { OrderedRuntimeState, type StatePatch, type StateRevision } from './ordered-state.js';
 import { runtimeMessage, runtimeCharacter, runtimePersona, runtimeLore, type RuntimeStateDto, type RuntimeStatePatch, type RuntimeStateCommand, type RuntimeStateWrite } from './state-contract.js';
@@ -10,6 +11,7 @@ type Fields = Record<string, unknown>;
 const key = (group: string, id: string, field: string) => JSON.stringify([group, id, field]);
 
 export class FrontendRuntimeState {
+  readonly localLoreSelection: import('../interpreter/runtime/local-lore.js').LocalLoreSelection = { current: null };
   readonly chatId: string;
   readonly characterId: string;
   readonly messages: HostMessage[] = [];
@@ -24,6 +26,7 @@ export class FrontendRuntimeState {
   private stagedVariables = new Map<symbol, readonly string[]>();
   private readonly mutations = new Map<string, { ids: readonly symbol[]; partial?: symbol }>();
   private activeChatMutation: symbol | undefined;
+  private localLoreWrites: Promise<unknown> = Promise.resolve();
   private greeting: string | undefined;
   private readonly messageObservers = new Set<(ids: ReadonlySet<string>) => void>();
   private toggles: { preferences: Record<string, string> | null; preset: Readonly<Record<string, string>> } = { preferences: null, preset: {} };
@@ -141,6 +144,10 @@ export class FrontendRuntimeState {
   private optimistic(command: RuntimeStateCommand): StatePatch {
     const patch = new Map<string, unknown>();
     switch (command.kind) {
+      case 'lore.upsertLocal':
+        this.record(patch, 'metadata', '', { [LOCAL_LORE_KEY]: upsertLocalLore(readLocalLore({ [LOCAL_LORE_KEY]: this.metadata(LOCAL_LORE_KEY) }), command.entry) });
+        break;
+      case 'lore.replaceLocal': this.record(patch, 'metadata', '', { [LOCAL_LORE_KEY]: command.entries }); break;
       case 'chat.metadata':
         this.record(patch, 'metadata', '', { [command.key]: command.value });
         if (command.key === 'macro_variables') this.record(patch, 'global', '', parseGlobalVars(command.value), true);
@@ -168,7 +175,11 @@ export class FrontendRuntimeState {
     const mutationId = v4();
     this.mutations.set(mutationId, { ids: [id, ...staged],
       ...(!optimistic && this.activeChatMutation && command.kind.startsWith('message.') ? { partial: this.activeChatMutation } : {}) });
-    const operation = this.persist(command, mutationId).then(result => {
+    const persist = () => this.persist(command, mutationId);
+    const localLore = command.kind === 'lore.upsertLocal' || command.kind === 'lore.replaceLocal';
+    const write = localLore ? this.localLoreWrites.then(persist, persist) : persist();
+    if (localLore) this.localLoreWrites = write;
+    const operation = write.then(result => {
       this.apply(result.revision, result.patch, mutationId);
       return result.value;
     }).catch(error => {

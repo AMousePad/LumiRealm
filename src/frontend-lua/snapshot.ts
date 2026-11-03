@@ -6,7 +6,8 @@ import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import { toRisuFirstMessageIndex } from '../interpreter/greeting-index.js';
 import { imageUrlFromId } from '../interpreter/image-cache.js';
 import { lumiEntryToRisuLore } from '../state/lorebook-fetch.js';
-import { sortLorebookEntriesBySourceOrder, withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
+import { sortLorebookEntriesBySourceOrder, moduleLorebookSources } from '../interpreter/runtime/lorebook.js';
+import { LOCAL_LORE_KEY, readLocalLore } from '../interpreter/runtime/local-lore.js';
 
 export function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferences, presetToggles: _preset, ...config }: RuntimeConfig, state: FrontendRuntimeState): DisplaySnapshot {
   const character = state.character();
@@ -15,7 +16,8 @@ export function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _pr
   const view = buildRisuChatView({ messages: messagesHost });
   const note = state.metadata('authors_note');
   const lore = sortLorebookEntriesBySourceOrder(state.lore());
-  const lorebookHost = withModuleLorebooks(lore, moduleLorebooks, character.worldBookIds);
+  const sources = moduleLorebookSources(lore, moduleLorebooks, character.worldBookIds);
+  const lorebookHost = [...sources.character, ...sources.modules];
   return {
     ...config, charName: character.name ?? '', userName: persona?.name ?? '', personaText: persona?.description ?? '',
     personaImageId: persona?.imageId ?? null, personaImage: imageUrlFromId(persona?.imageId) ?? '',
@@ -32,6 +34,7 @@ export function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _pr
     },
     messagesHost, chat: buildDisplayChatState(messagesHost),
     vars: { local: state.variables(), global: state.globalVariables(), chat: {} },
-    lorebookHost, lorebook: lorebookHost.map(lumiEntryToRisuLore),
+    lorebookHost, lorebook: [...sources.character.map(lumiEntryToRisuLore),
+      ...readLocalLore({ [LOCAL_LORE_KEY]: state.metadata(LOCAL_LORE_KEY) }).map(lumiEntryToRisuLore), ...sources.modules.map(lumiEntryToRisuLore)],
   };
 }

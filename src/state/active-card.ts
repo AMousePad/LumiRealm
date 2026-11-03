@@ -52,17 +52,17 @@ export interface ActiveCardLoaderDeps {
   readonly setActiveLorebook: (
     chatId: string,
     characterId: string,
-    entries: readonly import('../core/cbs/runtime/context.js').LorebookEntry[],
+    entries: import('./lorebook-cache.js').CachedLorebook,
   ) => void;
   readonly fetchLorebookForCharacter: (
     worldBookIds: readonly string[],
     userId: string,
     moduleLorebooks?: readonly unknown[],
-  ) => Promise<readonly import('../core/cbs/runtime/context.js').LorebookEntry[]>;
+  ) => Promise<import('./lorebook-cache.js').CachedLorebook>;
   readonly hasActiveLorebookForCharacter: (characterId: string) => boolean;
   readonly getActiveLorebookByCharacter: (
     characterId: string,
-  ) => readonly import('../core/cbs/runtime/context.js').LorebookEntry[];
+  ) => import('./lorebook-cache.js').CachedLorebook;
   readonly setActiveCharacterImage: (chatId: string, url: string | null) => void;
   readonly imageUrlFromId: (id: string | null | undefined) => string | null;
   readonly backfillImageJournalIfMissing: (
@@ -199,15 +199,15 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
           const wbIds = worldBookIdsByCharacter.get(hitCharId) ?? [];
           const lore = await fetchLorebookForCharacter(wbIds, userId, moduleLorebooksForCard(cached.card));
           setActiveLorebook(chatId, hitCharId, lore);
-          log.debug(`ensureActiveCardForChat: lorebook set (hit-fetch) chat=${chatId} char=${hitCharId} books=${wbIds.length} entries=${lore.length}`);
+          log.debug(`ensureActiveCardForChat: lorebook set (hit-fetch) chat=${chatId} char=${hitCharId} books=${wbIds.length} entries=${lore.character.length + lore.modules.length}`);
         } catch (err) {
           log.warn(`ensureActiveCardForChat: lorebook fetch (cache-hit) failed char=${hitCharId}: ${errMsg(err)}`);
-          setActiveLorebook(chatId, hitCharId, []);
+          setActiveLorebook(chatId, hitCharId, { character: [], modules: [] });
         }
       } else {
         const reuse = getActiveLorebookByCharacter(hitCharId);
         setActiveLorebook(chatId, hitCharId, reuse);
-        log.debug(`ensureActiveCardForChat: lorebook set (hit-reuse) chat=${chatId} char=${hitCharId} entries=${reuse.length}`);
+        log.debug(`ensureActiveCardForChat: lorebook set (hit-reuse) chat=${chatId} char=${hitCharId} entries=${reuse.character.length + reuse.modules.length}`);
       }
       log.debug(`ensureActiveCardForChat: cache hit chatId=${chatId} characterId=${cached.card.character_id}`);
       return cached;
@@ -321,10 +321,10 @@ export function createActiveCardLoader(deps: ActiveCardLoaderDeps): ActiveCardLo
     try {
       const loreEntries = await fetchLorebookForCharacter(allWbIds, userId, moduleLorebooksForCard(card));
       setActiveLorebook(chatId, characterId, loreEntries);
-      log.debug(`ensureActiveCardForChat: lorebook set (miss) chat=${chatId} char=${characterId} books=${allWbIds.length} entries=${loreEntries.length}`);
+      log.debug(`ensureActiveCardForChat: lorebook set (miss) chat=${chatId} char=${characterId} books=${allWbIds.length} entries=${loreEntries.character.length + loreEntries.modules.length}`);
     } catch (err) {
       log.warn(`ensureActiveCardForChat: lorebook fetch failed char=${characterId}: ${errMsg(err)}`);
-      setActiveLorebook(chatId, characterId, []);
+      setActiveLorebook(chatId, characterId, { character: [], modules: [] });
     }
     // The character's OWN indexes, not `card`: the synthetic card folds attached
     // modules' asset_index in, which would journal module-owned image ids against

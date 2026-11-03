@@ -44,7 +44,7 @@ function host(): HostApi {
       sendMessage: async () => ({ id: 'message' }),
       editMessage: async () => {},
       deleteMessage: async () => {},
-      getMetadata: async () => ({}),
+      getMetadata: async key => key === 'lumirealm_local_lore' ? [] : {},
       setMetadata: async () => {},
       inject: async () => {},
     },

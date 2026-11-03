@@ -96,8 +96,7 @@ end)
     const trigger = warns('slow trigger[0]');
     expect(trigger.length).toBe(1);
     expect(trigger[0]).toContain('mode=editRequest');
-    // Only the runtime's character-state read is counted; the hook makes no API call.
-    expect(trigger[0]).toMatch(/api=\d+ms\/1calls/);
+    expect(trigger[0]).toMatch(/api=\d+ms\/2calls/);
     expect(trigger[0]).toContain('cbs=0ms/0calls');
     expect(warns('slow chain').length).toBe(1);
   });
@@ -135,13 +134,12 @@ end)
     // that method with its call count instead of blaming the whole chain.
     expect(state.calls).toBe(3);
     expect(trigger[0]).toContain('api=');
-    // 3 ui.prompt calls from the hook + 1 characters.get from the runtime factory.
-    expect(trigger[0]).toContain('/4calls');
+    expect(trigger[0]).toContain('/5calls');
     expect(trigger[0]).toMatch(/top=\[[^\]]*ui\.prompt=3calls\/\d+ms/);
     const chain = warns('slow chain');
     expect(chain.length).toBe(1);
     expect(chain[0]).toContain('api_sum=');
-    expect(chain[0]).toContain('/4calls');
+    expect(chain[0]).toContain('/5calls');
   });
 
   test('stays quiet below the thresholds', async () => {

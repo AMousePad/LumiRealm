@@ -107,7 +107,7 @@ test.each(['manual', 'output'] as const)('%s dispatch shares locals between sibl
   let saved: unknown = { value: 'saved' };
   const api = {
     chat: {
-      getMetadata: async (key: string) => key === 'chat_variables' ? saved : {},
+      getMetadata: async (key: string) => key === 'chat_variables' ? saved : key === 'lumirealm_local_lore' ? [] : {},
       setMetadata: async (_key: string, value: unknown) => { saved = value; },
       getMessages: async () => [],
     },

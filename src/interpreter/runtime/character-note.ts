@@ -27,6 +27,7 @@ export function makeCharacterNoteApi(
   api: HostApi,
   state: CharacterNoteState,
   vars: VarsApi,
+  afterCharacterSave?: () => Promise<void>,
 ): CharacterNoteApi {
   return {
     async getCharacterDesc(): Promise<string> {
@@ -38,11 +39,10 @@ export function makeCharacterNoteApi(
       } catch { return ''; }
     },
     async setCharacterDesc(value: unknown): Promise<void> {
-      try {
         const cid = state.characterId || state.data.characterId;
         if (!cid) return;
         await api.characters.update(cid, { description: toStr(value) });
-      } catch { /* */ }
+        await afterCharacterSave?.();
     },
     async getPersonaDesc(): Promise<string> {
       try {
@@ -62,7 +62,7 @@ export function makeCharacterNoteApi(
       } catch { /* */ }
     },
     async getReplaceGlobalNote(): Promise<string> { return toStr(vars.getVar('__risu_global_note__')); },
-    async setReplaceGlobalNote(value: unknown): Promise<void> { vars.setVar('__risu_global_note__', toStr(value)); },
+    async setReplaceGlobalNote(value: unknown): Promise<void> { vars.setVar('__risu_global_note__', toStr(value)); await afterCharacterSave?.(); },
     async getAuthorNote(): Promise<string> {
       try {
         const an = (await api.chat.getMetadata('authors_note')) as

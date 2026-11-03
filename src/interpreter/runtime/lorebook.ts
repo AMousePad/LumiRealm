@@ -9,9 +9,9 @@ export interface LorebookCache {
   primaryBookId: string | null;
 }
 
-export function withModuleLorebooks(
+export function moduleLorebookSources(
   entries: readonly HostWorldInfoEntry[], modules: readonly unknown[], bookIds: readonly string[] = [],
-): HostWorldInfoEntry[] {
+) {
   const loadedBooks = new Set([...bookIds, ...entries.map(entry => entry.worldBookId)]);
   const rows = modules.filter((raw): raw is Record<string, unknown> => !!raw && typeof raw === 'object');
   const moduleBooks = new Set(rows.map(row => row.worldBookId).filter((id): id is string => typeof id === 'string'));
@@ -25,18 +25,19 @@ export function withModuleLorebooks(
     } else out.push(entry);
   }
   const emittedBooks = new Set<string>();
+  const moduleEntries: HostWorldInfoEntry[] = [];
   for (const row of rows) {
     // Risu's getModuleLorebooks preserves library order; live attached books also own deletions.
     if (typeof row.worldBookId === 'string' && loadedBooks.has(row.worldBookId)) {
       if (!emittedBooks.has(row.worldBookId)) {
-        for (const entry of liveModuleBooks.get(row.worldBookId) ?? []) out.push(entry);
+        for (const entry of liveModuleBooks.get(row.worldBookId) ?? []) moduleEntries.push(entry);
       }
       emittedBooks.add(row.worldBookId);
       continue;
     }
-    out.push({
+    moduleEntries.push({
       ...row,
-      id: typeof row.id === 'string' ? row.id : `module-lore-${out.length}`,
+      id: typeof row.id === 'string' ? row.id : `module-lore-${out.length + moduleEntries.length}`,
       key: Array.isArray(row.key) ? row.key : typeof row.key === 'string' ? row.key : [],
       content: typeof row.content === 'string' ? row.content : '',
       comment: typeof row.comment === 'string' ? row.comment : '',
@@ -45,7 +46,12 @@ export function withModuleLorebooks(
       constant: typeof row.constant === 'boolean' ? row.constant : row.alwaysActive === true,
     });
   }
-  return out;
+  return { character: out, modules: moduleEntries };
+}
+
+export function withModuleLorebooks(entries: readonly HostWorldInfoEntry[], modules: readonly unknown[], bookIds: readonly string[] = []): HostWorldInfoEntry[] {
+  const sources = moduleLorebookSources(entries, modules, bookIds);
+  return [...sources.character, ...sources.modules];
 }
 
 export interface LorebookApi {
@@ -91,7 +97,7 @@ export function sortLorebookEntriesBySourceOrder<T extends HostWorldInfoEntry>(
     .map(({ entry }) => entry);
 }
 
-export function makeLorebookApi(api: HostApi, lorebook: LorebookCache): LorebookApi {
+export function makeLorebookApi(api: HostApi, lorebook: LorebookCache, afterCharacterSave?: () => Promise<void>): LorebookApi {
   const characterEntries = (): (HostWorldInfoEntry & { worldBookId?: string })[] =>
     lorebook.primaryBookId
       ? lorebook.entries.filter((entry) => entry.worldBookId === lorebook.primaryBookId)
@@ -174,7 +180,6 @@ export function makeLorebookApi(api: HostApi, lorebook: LorebookCache): Lorebook
     async modifyLorebookByIndex(index: unknown, name: unknown, key: unknown, content: unknown, order: unknown): Promise<void> {
       const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries) return;
-      try {
         const oldOrder = Number(e.orderValue);
         const replacedOrder = toStr(order).replace(
           /{{slot}}/g,
@@ -188,7 +193,7 @@ export function makeLorebookApi(api: HostApi, lorebook: LorebookCache): Lorebook
           ...(Number.isNaN(nextOrder) ? {} : { orderValue: nextOrder }),
         });
         replaceEntry(e, updated);
-      } catch { /* */ }
+        await afterCharacterSave?.();
     },
 
     async createLorebook(name: unknown, key: unknown, content: unknown, order: unknown): Promise<void> {
@@ -204,38 +209,36 @@ export function makeLorebookApi(api: HostApi, lorebook: LorebookCache): Lorebook
         : await (api.worldInfo.createCharacterEntry?.(entry) ?? unsupported('createLorebook', 'requires character book creation'));
       lorebook.primaryBookId ??= created.worldBookId ?? null;
       lorebook.entries.push({ ...created, ...(lorebook.primaryBookId ? { worldBookId: lorebook.primaryBookId } : {}) });
+      await afterCharacterSave?.();
     },
 
     async deleteLorebookByIndex(index: unknown): Promise<void> {
       const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries) return;
-      try {
         await api.worldInfo.entries.delete(e.id);
         const actualIndex = lorebook.entries.indexOf(e);
         if (actualIndex >= 0) lorebook.entries.splice(actualIndex, 1);
-      } catch { /* */ }
+        await afterCharacterSave?.();
     },
 
     async setLorebookActivation(index: unknown, value: boolean): Promise<void> {
       const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries) return;
-      try {
         const updated = await api.worldInfo.entries.update(e.id, {
           key: keyToArray(e.key), content: toStr(e.content), comment: toStr(e.comment), disabled: !value,
         });
         replaceEntry(e, updated);
-      } catch { /* */ }
+        await afterCharacterSave?.();
     },
 
     async setLorebookAlwaysActive(index: unknown, value: boolean): Promise<void> {
       const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries) return;
-      try {
         const updated = await api.worldInfo.entries.update(e.id, {
           key: keyToArray(e.key), content: toStr(e.content), comment: toStr(e.comment), constant: !!value,
         });
         replaceEntry(e, updated);
-      } catch { /* */ }
+        await afterCharacterSave?.();
     },
   };
 }

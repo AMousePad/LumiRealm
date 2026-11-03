@@ -25,6 +25,11 @@ export function makeLuaDivergenceHost() {
       getMessages: async () => structuredClone(messages),
       getMetadata: async key => structuredClone(metadata[key]),
       setMetadata: async (key, value) => { metadata[key] = structuredClone(value); },
+      upsertLocalLore: async entry => {
+        const rows = metadata.lumirealm_local_lore as { comment: string }[] | undefined;
+        metadata.lumirealm_local_lore = [...(rows ?? []).filter(row => row.comment !== entry.comment), structuredClone(entry)];
+      },
+      replaceLocalLore: async entries => { metadata.lumirealm_local_lore = structuredClone(entries); },
       sendMessage: async (content, options) => {
         const id = `sent-${messages.length}`;
         messages.push({ id, role: options?.role ?? 'assistant', content });

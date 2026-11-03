@@ -86,6 +86,8 @@ export interface HostApi {
     deleteMessage(id: string): Promise<void>;
     getMetadata(key: string): Promise<unknown>;
     setMetadata(key: string, value: unknown): Promise<void>;
+    upsertLocalLore?(entry: import('../core/schemas/lorebook.js').LoreBook): Promise<void>;
+    replaceLocalLore?(entries: readonly import('../core/schemas/lorebook.js').LoreBook[]): Promise<void>;
     inject(id: string, content: string, opts?: InjectOpts): Promise<void>;
     setExpression?(name: string): Promise<void>;
   };
@@ -204,6 +206,8 @@ export interface TriggerRuntimePreloaded {
 }
 
 export interface TriggerRuntimeOpts {
+  readonly localLore?: import('./runtime/local-lore.js').LocalLoreAccess;
+  readonly copyCharacter?: boolean;
   readonly luaSignal?: AbortSignal;
   /** runScripted shares its chat across modes; runTrigger supplies a copied invocation instead. */
   readonly luaChat?: {

@@ -92,7 +92,7 @@ describe('Lua API Risu divergences', () => {
     expect(JSON.parse(String(await fixture.call('getLoreBooksMain', 'Missing')))).toEqual([]);
   });
 
-  divergence('upsertLocalLoreBook leaves the character world book unchanged', async () => {
+  test('upsertLocalLoreBook leaves the character world book unchanged', async () => {
     const fixture = await captureLuaRuntime();
     const original = structuredClone(fixture.entries);
     await fixture.call('upsertLocalLoreBook', 'Inventory', 'New inventory', {
@@ -100,6 +100,8 @@ describe('Lua API Risu divergences', () => {
     });
     await fixture.runtime.flush();
     expect(fixture.entries).toEqual(original);
+    expect(fixture.metadata.lumirealm_local_lore).toEqual([{ comment: 'Inventory', content: 'New inventory', key: 'item',
+      insertorder: 200, alwaysActive: true, secondkey: 'other', useRegex: true, selective: true, mode: 'normal' }]);
   });
 
   divergence('loadLoreBooksMain returns role/data records rather than content strings', async () => {

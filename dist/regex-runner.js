@@ -10208,6 +10208,17 @@ var buffersByChat = new Map;
 var byCharacter = new Map;
 var chatToCharacter = new Map;
 
+// src/payload/codec.ts
+var SUPPORTED_HOST_FEATURES = new Set([
+  "alertSelect"
+]);
+var DEGRADED_HOST_FEATURES = new Set([
+  "utilityBot",
+  "displayTriggerSemantics"
+]);
+// src/interpreter/runtime/local-lore.ts
+var selections = new WeakMap;
+
 // src/interpreter/messages-cache.ts
 var cache = new Map;
 

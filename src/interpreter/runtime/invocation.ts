@@ -1,9 +1,12 @@
 import type { HostApi, HostMessage } from '../host.js';
 import { saveVars } from './chat-state.js';
+import { createLocalLoreFrame, characterLocalLore, publishLocalLoreFrame, type LocalLoreAccess, type LocalLoreFrame } from './local-lore.js';
 
 type Variables = Record<string, string | null>;
 
 export interface TriggerInvocationState {
+  localLoreAccess?: LocalLoreAccess;
+  localLore?: LocalLoreFrame;
   varsCache?: Variables;
   messagesCache?: HostMessage[];
   firstMessage?: string;
@@ -78,6 +81,9 @@ export function invocationHostApi(state: TriggerInvocationState): HostApi {
 export function cloneInvocation(state: TriggerInvocationState): TriggerInvocationState {
   messageBaseline(state);
   return {
+    ...(state.localLore ? { localLore: { character: structuredClone(characterLocalLore(state.localLore)), chat: structuredClone(state.localLore.chat), access: state.localLore.access, selection: state.localLore.selection } }
+      : state.localLoreAccess ? { localLore: createLocalLoreFrame(state.localLoreAccess) } : {}),
+    ...(state.localLoreAccess ? { localLoreAccess: state.localLoreAccess } : {}),
     varsCache: { ...state.varsCache },
     messagesCache: state.messagesCache!.map(message => ({ ...message })),
     ...(state.firstMessage !== undefined ? { firstMessage: state.firstMessage } : {}),
@@ -87,6 +93,10 @@ export function cloneInvocation(state: TriggerInvocationState): TriggerInvocatio
 }
 
 export function adoptInvocation(parent: TriggerInvocationState, child: TriggerInvocationState): void {
+  if (child.localLore) {
+    parent.localLore ??= createLocalLoreFrame(child.localLore.access);
+    parent.localLore.chat = child.localLore.chat;
+  }
   for (const key of Object.keys(parent.varsCache!)) delete parent.varsCache![key];
   Object.assign(parent.varsCache!, child.varsCache);
   parent.messagesCache!.splice(0, parent.messagesCache!.length, ...child.messagesCache!);
@@ -94,9 +104,10 @@ export function adoptInvocation(parent: TriggerInvocationState, child: TriggerIn
   if (parent.live!.varsCache === child.varsCache) parent.live!.varsCache = parent.varsCache!;
 }
 
-export async function commitInvocation(state: TriggerInvocationState, chatId?: string, injectPrompts = false): Promise<void> {
+export async function commitInvocation(state: TriggerInvocationState, chatId?: string, injectPrompts = false, adoptLocalChat = true): Promise<void> {
   const live = state.live;
   if (!live) return;
+  if (adoptLocalChat && state.localLore) await publishLocalLoreFrame(state.localLore, 'chat');
   const variables = state.varsCache!;
   if (live.varsCache !== variables) {
     const keys = Object.keys(variables);

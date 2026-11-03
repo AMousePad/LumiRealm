@@ -12,6 +12,8 @@ import { getScreenDims } from '../interpreter/screen-dims-cache.js';
 import { imageUrlFromId } from '../interpreter/image-cache.js';
 import { getDecoratorBuffers as readDecoratorBuffers } from '../interpreter/decorator-buffers.js';
 import { getActiveLorebook } from '../state/lorebook-cache.js';
+import { readLocalLore } from '../interpreter/runtime/local-lore.js';
+import { lumiEntryToRisuLore } from '../state/lorebook-fetch.js';
 import { getCachedMessages } from '../interpreter/messages-cache.js';
 import type { LlmMessage } from '../adapters/spindle-extras.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
@@ -100,7 +102,7 @@ export async function buildBackendPipelineInput(
   const scriptstateDefaults = activeCard?.risuPayload.scriptstate_defaults;
   const screenDims = getScreenDims(userId);
   const cachedMessages = getCachedMessages(chatId);
-  const activeLore = getActiveLorebook(chatId);
+  const activeLore = getActiveLorebook(chatId, readLocalLore(chat?.metadata ?? {}).map(lumiEntryToRisuLore));
   const selectedGreeting =
     messages.length > 0 && messages[0]!.role !== 'user'
       ? messages[0]!.content

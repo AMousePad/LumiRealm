@@ -87,6 +87,7 @@ export { applyMatchTemplate } from './runtime/match-template.js';
 import { calculate } from './runtime/calc.js';
 import { compareValues, compareTriggerCondition } from './runtime/compare.js';
 import { unsupported } from './runtime/unsupported.js';
+import { LOCAL_LORE_KEY, readLocalLore, upsertLocalLore, createLocalLoreFrame, publishLocalLoreFrame, upsertFrameLocalLore } from './runtime/local-lore.js';
 
 
 export type RisuBinding =
@@ -731,8 +732,37 @@ export async function makeRisuTriggerRuntime(
   let luaState: LuaHostState | undefined = preloaded?.luaState;
   let parseLuaTemplate = opts.luaTemplate;
   const identityWrites: Promise<void>[] = [];
+  let localLore = opts.localLore ?? invocation.localLoreAccess;
+  async function prepareLocalLore(): Promise<void> {
+    if (!localLore) {
+      let entries = readLocalLore({ [LOCAL_LORE_KEY]: await api.chat.getMetadata(LOCAL_LORE_KEY) });
+      let tail = Promise.resolve();
+      localLore = {
+        get: () => entries,
+        upsert: entry => {
+          entries = upsertLocalLore(entries, entry);
+          const write = tail.then(() => api.chat.upsertLocalLore?.(entry) ?? unsupported('upsertLocalLoreBook', 'requires chat-local lore persistence'));
+          tail = write.catch(() => {});
+          return write;
+        },
+        replace: value => {
+          entries = value;
+          const write = tail.then(() => api.chat.replaceLocalLore?.(value) ?? unsupported('localLore', 'requires copied chat adoption'));
+          tail = write.catch(() => {});
+          return write;
+        },
+      };
+    }
+    invocation.localLoreAccess = localLore;
+    if (opts.copyCharacter) invocation.localLore ??= createLocalLoreFrame(localLore);
+  }
+  if (opts.copyCharacter) await prepareLocalLore();
+  async function adoptCharacterLocalLore(): Promise<void> {
+    if (invocation.localLore) await publishLocalLoreFrame(invocation.localLore, 'character');
+  }
   async function prepareLua(): Promise<void> {
     luaState ??= await prepareLuaHostState(api, characterId ?? data.characterId);
+    await prepareLocalLore();
     if (parseLuaTemplate) return;
     const prepare = opts.templateContext ?? dispatchCtx.templateContext;
     if (!prepare) return;
@@ -1387,7 +1417,7 @@ export async function makeRisuTriggerRuntime(
         return Promise.resolve(JSON.stringify(out));
       },
       getLoreBooksMain: (_id: unknown, search: unknown) => JSON.stringify(
-        lorebook.entries.filter(entry => entry.comment === search).map(entry => ({
+        [...localLore!.get(), ...lorebook.entries].filter(entry => entry.comment === search).map(entry => ({
           ...entry,
           content: toStr(entry.content).includes('{{') ? luaCbs(entry.content) : toStr(entry.content),
           key: Array.isArray(entry.key) ? entry.key.join(', ') : toStr(entry.key),
@@ -1395,9 +1425,12 @@ export async function makeRisuTriggerRuntime(
           alwaysActive: entry.constant ?? entry.alwaysActive ?? false,
         })),
       ),
-      upsertLocalLoreBook: (_id: unknown, name: unknown, content: unknown, opts?: Record<string, unknown>) => {
-        const o = opts || {};
-        const pending = createLorebook(name, o['key'] || name, content, o['order'] || 0);
+      upsertLocalLoreBook: (_id: unknown, name: string, content: string, options: Record<string, unknown>) => {
+        const { alwaysActive = false, insertOrder = 100, key = '', regex = false, secondKey = '' } = options;
+        const entry = { comment: name, content, alwaysActive, insertorder: insertOrder,
+          key, secondkey: secondKey, selective: !!secondKey, useRegex: regex, mode: 'normal' } as import('../core/schemas/lorebook.js').LoreBook;
+        const pending = opts.copyCharacter ? upsertFrameLocalLore(invocation.localLore!, entry) : localLore!.upsert(entry);
+        if (!pending) return;
         pending.catch(() => undefined);
         identityWrites.push(pending);
       },
@@ -1405,7 +1438,7 @@ export async function makeRisuTriggerRuntime(
   }
 
 
-  const _charNote = makeCharacterNoteApi(api, { characterId, data: data as { characterId?: string } & Record<string, unknown> }, _vars);
+  const _charNote = makeCharacterNoteApi(api, { characterId, data: data as { characterId?: string } & Record<string, unknown> }, _vars, adoptCharacterLocalLore);
   const {
     getCharacterDesc, setCharacterDesc,
     getPersonaDesc, setPersonaDesc,
@@ -1413,7 +1446,7 @@ export async function makeRisuTriggerRuntime(
     getAuthorNote, setAuthorNote,
   } = _charNote;
 
-  const _lore = makeLorebookApi(api, lorebook);
+  const _lore = makeLorebookApi(api, lorebook, adoptCharacterLocalLore);
   const {
     getLorebookCount, getLorebookEntry, getLorebookByIndex, getLorebookByKey,
     getLorebookIndexViaName, getAllLorebooks, getLorebookByName,

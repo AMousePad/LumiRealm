@@ -17674,7 +17674,7 @@ function invalidateAuthorsNoteCache(chatId) {
 }
 
 // src/interpreter/runtime/character-note.ts
-function makeCharacterNoteApi(api, state, vars) {
+function makeCharacterNoteApi(api, state, vars, afterCharacterSave) {
   return {
     async getCharacterDesc() {
       try {
@@ -17688,12 +17688,11 @@ function makeCharacterNoteApi(api, state, vars) {
       }
     },
     async setCharacterDesc(value) {
-      try {
-        const cid = state.characterId || state.data.characterId;
-        if (!cid)
-          return;
-        await api.characters.update(cid, { description: toStr(value) });
-      } catch {}
+      const cid = state.characterId || state.data.characterId;
+      if (!cid)
+        return;
+      await api.characters.update(cid, { description: toStr(value) });
+      await afterCharacterSave?.();
     },
     async getPersonaDesc() {
       try {
@@ -17718,6 +17717,7 @@ function makeCharacterNoteApi(api, state, vars) {
     },
     async setReplaceGlobalNote(value) {
       vars.setVar("__risu_global_note__", toStr(value));
+      await afterCharacterSave?.();
     },
     async getAuthorNote() {
       try {
@@ -17745,7 +17745,7 @@ function makeCharacterNoteApi(api, state, vars) {
 }
 
 // src/interpreter/runtime/lorebook.ts
-function withModuleLorebooks(entries, modules, bookIds = []) {
+function moduleLorebookSources(entries, modules, bookIds = []) {
   const loadedBooks = new Set([...bookIds, ...entries.map((entry) => entry.worldBookId)]);
   const rows = modules.filter((raw) => !!raw && typeof raw === "object");
   const moduleBooks = new Set(rows.map((row) => row.worldBookId).filter((id) => typeof id === "string"));
@@ -17760,18 +17760,19 @@ function withModuleLorebooks(entries, modules, bookIds = []) {
       out.push(entry);
   }
   const emittedBooks = new Set;
+  const moduleEntries = [];
   for (const row of rows) {
     if (typeof row.worldBookId === "string" && loadedBooks.has(row.worldBookId)) {
       if (!emittedBooks.has(row.worldBookId)) {
         for (const entry of liveModuleBooks.get(row.worldBookId) ?? [])
-          out.push(entry);
+          moduleEntries.push(entry);
       }
       emittedBooks.add(row.worldBookId);
       continue;
     }
-    out.push({
+    moduleEntries.push({
       ...row,
-      id: typeof row.id === "string" ? row.id : `module-lore-${out.length}`,
+      id: typeof row.id === "string" ? row.id : `module-lore-${out.length + moduleEntries.length}`,
       key: Array.isArray(row.key) ? row.key : typeof row.key === "string" ? row.key : [],
       content: typeof row.content === "string" ? row.content : "",
       comment: typeof row.comment === "string" ? row.comment : "",
@@ -17780,7 +17781,11 @@ function withModuleLorebooks(entries, modules, bookIds = []) {
       constant: typeof row.constant === "boolean" ? row.constant : row.alwaysActive === true
     });
   }
-  return out;
+  return { character: out, modules: moduleEntries };
+}
+function withModuleLorebooks(entries, modules, bookIds = []) {
+  const sources = moduleLorebookSources(entries, modules, bookIds);
+  return [...sources.character, ...sources.modules];
 }
 function keyToArray(k) {
   if (Array.isArray(k))
@@ -17806,7 +17811,7 @@ function sortLorebookEntriesBySourceOrder(entries) {
     return a.index - b.index;
   }).map(({ entry }) => entry);
 }
-function makeLorebookApi(api, lorebook) {
+function makeLorebookApi(api, lorebook, afterCharacterSave) {
   const characterEntries = () => lorebook.primaryBookId ? lorebook.entries.filter((entry) => entry.worldBookId === lorebook.primaryBookId) : [];
   const replaceEntry = (entry, updated) => {
     const index = lorebook.entries.indexOf(entry);
@@ -17885,18 +17890,17 @@ function makeLorebookApi(api, lorebook) {
       const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries)
         return;
-      try {
-        const oldOrder = Number(e.orderValue);
-        const replacedOrder = toStr(order).replace(/{{slot}}/g, Number.isFinite(oldOrder) ? String(oldOrder) : "100");
-        const nextOrder = Number(replacedOrder);
-        const updated = await api.worldInfo.entries.update(e.id, {
-          comment: toStr(name).replace(/{{slot}}/g, toStr(e.comment)),
-          key: keyToArray(toStr(key).replace(/{{slot}}/g, keyToArray(e.key).join(","))),
-          content: toStr(content).replace(/{{slot}}/g, toStr(e.content)),
-          ...Number.isNaN(nextOrder) ? {} : { orderValue: nextOrder }
-        });
-        replaceEntry(e, updated);
-      } catch {}
+      const oldOrder = Number(e.orderValue);
+      const replacedOrder = toStr(order).replace(/{{slot}}/g, Number.isFinite(oldOrder) ? String(oldOrder) : "100");
+      const nextOrder = Number(replacedOrder);
+      const updated = await api.worldInfo.entries.update(e.id, {
+        comment: toStr(name).replace(/{{slot}}/g, toStr(e.comment)),
+        key: keyToArray(toStr(key).replace(/{{slot}}/g, keyToArray(e.key).join(","))),
+        content: toStr(content).replace(/{{slot}}/g, toStr(e.content)),
+        ...Number.isNaN(nextOrder) ? {} : { orderValue: nextOrder }
+      });
+      replaceEntry(e, updated);
+      await afterCharacterSave?.();
     },
     async createLorebook(name, key, content, order) {
       if (!api.worldInfo)
@@ -17910,45 +17914,43 @@ function makeLorebookApi(api, lorebook) {
       const created = lorebook.primaryBookId ? await api.worldInfo.entries.create(lorebook.primaryBookId, entry) : await (api.worldInfo.createCharacterEntry?.(entry) ?? unsupported("createLorebook", "requires character book creation"));
       lorebook.primaryBookId ??= created.worldBookId ?? null;
       lorebook.entries.push({ ...created, ...lorebook.primaryBookId ? { worldBookId: lorebook.primaryBookId } : {} });
+      await afterCharacterSave?.();
     },
     async deleteLorebookByIndex(index) {
       const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries)
         return;
-      try {
-        await api.worldInfo.entries.delete(e.id);
-        const actualIndex = lorebook.entries.indexOf(e);
-        if (actualIndex >= 0)
-          lorebook.entries.splice(actualIndex, 1);
-      } catch {}
+      await api.worldInfo.entries.delete(e.id);
+      const actualIndex = lorebook.entries.indexOf(e);
+      if (actualIndex >= 0)
+        lorebook.entries.splice(actualIndex, 1);
+      await afterCharacterSave?.();
     },
     async setLorebookActivation(index, value) {
       const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries)
         return;
-      try {
-        const updated = await api.worldInfo.entries.update(e.id, {
-          key: keyToArray(e.key),
-          content: toStr(e.content),
-          comment: toStr(e.comment),
-          disabled: !value
-        });
-        replaceEntry(e, updated);
-      } catch {}
+      const updated = await api.worldInfo.entries.update(e.id, {
+        key: keyToArray(e.key),
+        content: toStr(e.content),
+        comment: toStr(e.comment),
+        disabled: !value
+      });
+      replaceEntry(e, updated);
+      await afterCharacterSave?.();
     },
     async setLorebookAlwaysActive(index, value) {
       const e = characterEntries()[Number(index)];
       if (!e || !api.worldInfo?.entries)
         return;
-      try {
-        const updated = await api.worldInfo.entries.update(e.id, {
-          key: keyToArray(e.key),
-          content: toStr(e.content),
-          comment: toStr(e.comment),
-          constant: !!value
-        });
-        replaceEntry(e, updated);
-      } catch {}
+      const updated = await api.worldInfo.entries.update(e.id, {
+        key: keyToArray(e.key),
+        content: toStr(e.content),
+        comment: toStr(e.comment),
+        constant: !!value
+      });
+      replaceEntry(e, updated);
+      await afterCharacterSave?.();
     }
   };
 }
@@ -18385,6 +18387,59 @@ async function saveVars(api, vars, chatId) {
   }
 }
 
+// src/interpreter/runtime/local-lore.ts
+var LOCAL_LORE_KEY = "lumirealm_local_lore";
+var selections = new WeakMap;
+function createLocalLoreFrame(access) {
+  let selection = access.selection ?? selections.get(access);
+  if (!selection) {
+    selection = { current: null };
+    selections.set(access, selection);
+  }
+  return { character: structuredClone(access.get()), chat: structuredClone(access.get()), access, selection };
+}
+function characterLocalLore(frame) {
+  return frame.selection.current === frame ? frame.access.get() : frame.character;
+}
+function upsertFrameLocalLore(frame, entry) {
+  frame.character = upsertLocalLore(characterLocalLore(frame), entry);
+  if (frame.selection.current === frame)
+    return frame.access.upsert(entry);
+}
+async function publishLocalLoreFrame(frame, source) {
+  const previous = frame.selection.current;
+  if (previous)
+    previous.character = structuredClone(frame.access.get());
+  if (source === "character")
+    frame.selection.current = frame;
+  const entries = frame[source];
+  if (frame.selection.current)
+    frame.selection.current.character = entries;
+  if (JSON.stringify(frame.access.get()) === JSON.stringify(entries))
+    return;
+  try {
+    if (!frame.access.replace)
+      throw new RisuCompatUnsupportedError("localLore", "requires copied chat adoption");
+    await frame.access.replace(entries);
+  } catch (error) {
+    if (source === "character" && frame.selection.current === frame)
+      frame.selection.current = previous;
+    throw error;
+  }
+}
+function readLocalLore(metadata) {
+  const value = metadata[LOCAL_LORE_KEY];
+  if (value == null)
+    return [];
+  if (!Array.isArray(value) || value.some((entry) => !entry || typeof entry !== "object")) {
+    throw new RisuCompatUnsupportedError("localLore", "invalid saved chat lore");
+  }
+  return value;
+}
+function upsertLocalLore(entries, entry) {
+  return [...entries.filter((previous) => previous.comment !== entry.comment), entry];
+}
+
 // src/interpreter/runtime/invocation.ts
 function initializeInvocation(state, api, beforeEdit) {
   if (state.live)
@@ -18446,6 +18501,8 @@ function invocationHostApi(state) {
 function cloneInvocation(state) {
   messageBaseline(state);
   return {
+    ...state.localLore ? { localLore: { character: structuredClone(characterLocalLore(state.localLore)), chat: structuredClone(state.localLore.chat), access: state.localLore.access, selection: state.localLore.selection } } : state.localLoreAccess ? { localLore: createLocalLoreFrame(state.localLoreAccess) } : {},
+    ...state.localLoreAccess ? { localLoreAccess: state.localLoreAccess } : {},
     varsCache: { ...state.varsCache },
     messagesCache: state.messagesCache.map((message) => ({ ...message })),
     ...state.firstMessage !== undefined ? { firstMessage: state.firstMessage } : {},
@@ -18454,6 +18511,10 @@ function cloneInvocation(state) {
   };
 }
 function adoptInvocation(parent, child) {
+  if (child.localLore) {
+    parent.localLore ??= createLocalLoreFrame(child.localLore.access);
+    parent.localLore.chat = child.localLore.chat;
+  }
   for (const key of Object.keys(parent.varsCache))
     delete parent.varsCache[key];
   Object.assign(parent.varsCache, child.varsCache);
@@ -18462,10 +18523,12 @@ function adoptInvocation(parent, child) {
   if (parent.live.varsCache === child.varsCache)
     parent.live.varsCache = parent.varsCache;
 }
-async function commitInvocation(state, chatId, injectPrompts = false) {
+async function commitInvocation(state, chatId, injectPrompts = false, adoptLocalChat = true) {
   const live = state.live;
   if (!live)
     return;
+  if (adoptLocalChat && state.localLore)
+    await publishLocalLoreFrame(state.localLore, "chat");
   const variables = state.varsCache;
   if (live.varsCache !== variables) {
     const keys = Object.keys(variables);
@@ -19063,8 +19126,40 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   let luaState = preloaded?.luaState;
   let parseLuaTemplate = opts.luaTemplate;
   const identityWrites = [];
+  let localLore = opts.localLore ?? invocation.localLoreAccess;
+  async function prepareLocalLore() {
+    if (!localLore) {
+      let entries = readLocalLore({ [LOCAL_LORE_KEY]: await api.chat.getMetadata(LOCAL_LORE_KEY) });
+      let tail = Promise.resolve();
+      localLore = {
+        get: () => entries,
+        upsert: (entry) => {
+          entries = upsertLocalLore(entries, entry);
+          const write = tail.then(() => api.chat.upsertLocalLore?.(entry) ?? unsupported("upsertLocalLoreBook", "requires chat-local lore persistence"));
+          tail = write.catch(() => {});
+          return write;
+        },
+        replace: (value) => {
+          entries = value;
+          const write = tail.then(() => api.chat.replaceLocalLore?.(value) ?? unsupported("localLore", "requires copied chat adoption"));
+          tail = write.catch(() => {});
+          return write;
+        }
+      };
+    }
+    invocation.localLoreAccess = localLore;
+    if (opts.copyCharacter)
+      invocation.localLore ??= createLocalLoreFrame(localLore);
+  }
+  if (opts.copyCharacter)
+    await prepareLocalLore();
+  async function adoptCharacterLocalLore() {
+    if (invocation.localLore)
+      await publishLocalLoreFrame(invocation.localLore, "character");
+  }
   async function prepareLua() {
     luaState ??= await prepareLuaHostState(api, characterId ?? data.characterId);
+    await prepareLocalLore();
     if (parseLuaTemplate)
       return;
     const prepare = opts.templateContext ?? dispatchCtx.templateContext;
@@ -19716,16 +19811,29 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         });
         return Promise.resolve(JSON.stringify(out));
       },
-      getLoreBooksMain: (_id, search) => JSON.stringify(lorebook.entries.filter((entry) => entry.comment === search).map((entry) => ({
+      getLoreBooksMain: (_id, search) => JSON.stringify([...localLore.get(), ...lorebook.entries].filter((entry) => entry.comment === search).map((entry) => ({
         ...entry,
         content: toStr(entry.content).includes("{{") ? luaCbs(entry.content) : toStr(entry.content),
         key: Array.isArray(entry.key) ? entry.key.join(", ") : toStr(entry.key),
         insertorder: entry.orderValue ?? entry.insertorder ?? 100,
         alwaysActive: entry.constant ?? entry.alwaysActive ?? false
       }))),
-      upsertLocalLoreBook: (_id, name, content, opts) => {
-        const o = opts || {};
-        const pending = createLorebook(name, o["key"] || name, content, o["order"] || 0);
+      upsertLocalLoreBook: (_id, name, content, options) => {
+        const { alwaysActive = false, insertOrder = 100, key = "", regex = false, secondKey = "" } = options;
+        const entry = {
+          comment: name,
+          content,
+          alwaysActive,
+          insertorder: insertOrder,
+          key,
+          secondkey: secondKey,
+          selective: !!secondKey,
+          useRegex: regex,
+          mode: "normal"
+        };
+        const pending = opts.copyCharacter ? upsertFrameLocalLore(invocation.localLore, entry) : localLore.upsert(entry);
+        if (!pending)
+          return;
         pending.catch(() => {
           return;
         });
@@ -19733,7 +19841,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       }
     };
   }
-  const _charNote = makeCharacterNoteApi(api, { characterId, data }, _vars);
+  const _charNote = makeCharacterNoteApi(api, { characterId, data }, _vars, adoptCharacterLocalLore);
   const {
     getCharacterDesc,
     setCharacterDesc,
@@ -19744,7 +19852,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     getAuthorNote,
     setAuthorNote
   } = _charNote;
-  const _lore = makeLorebookApi(api, lorebook);
+  const _lore = makeLorebookApi(api, lorebook, adoptCharacterLocalLore);
   const {
     getLorebookCount,
     getLorebookEntry,
@@ -20096,6 +20204,7 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
         ...opts.onVarRead !== undefined ? { onVarRead: opts.onVarRead } : {},
         ...opts.onMessageRead ? { onMessageRead: opts.onMessageRead } : {},
         ...opts.luaVariables !== undefined ? { luaVariables: opts.luaVariables } : {},
+        ...opts.localLore !== undefined ? { localLore: opts.localLore } : {},
         ...opts.moduleLorebooks !== undefined ? { moduleLorebooks: opts.moduleLorebooks } : {},
         preloaded,
         ...opts.luaChat ? { luaChat: opts.luaChat } : { invocationState },
@@ -20852,7 +20961,7 @@ async function dispatchBinding(ctx, binding, onError) {
     }
   }
   if (!aborted && !ctx.opts.invocationState)
-    await commitInvocation(invocationState, ctx.opts.chatId, binding === "start");
+    await commitInvocation(invocationState, ctx.opts.chatId, binding === "start", binding !== "input");
   if (!aborted && varsFlushed)
     ctx.opts.stateChanged?.("variables");
   return { stopSending: !aborted && stopSending };
@@ -20880,6 +20989,7 @@ async function runInterpretedTrigger(entry, api, data, scriptNS, invocation, out
     const rt = await makeRisuTriggerRuntime(api, data, scriptNS, {
       ...invocation,
       displayMode: invocation.displayMode,
+      copyCharacter: !invocation.displayMode,
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
       binding: invocation.binding,
       characterId: entry.rtOpts.characterId,
@@ -22622,6 +22732,7 @@ var key = (group, id, field) => JSON.stringify([group, id, field]);
 class FrontendRuntimeState {
   persist;
   changed;
+  localLoreSelection = { current: null };
   chatId;
   characterId;
   messages = [];
@@ -22636,6 +22747,7 @@ class FrontendRuntimeState {
   stagedVariables = new Map;
   mutations = new Map;
   activeChatMutation;
+  localLoreWrites = Promise.resolve();
   greeting;
   messageObservers = new Set;
   toggles = { preferences: null, preset: {} };
@@ -22781,6 +22893,12 @@ class FrontendRuntimeState {
   optimistic(command) {
     const patch = new Map;
     switch (command.kind) {
+      case "lore.upsertLocal":
+        this.record(patch, "metadata", "", { [LOCAL_LORE_KEY]: upsertLocalLore(readLocalLore({ [LOCAL_LORE_KEY]: this.metadata(LOCAL_LORE_KEY) }), command.entry) });
+        break;
+      case "lore.replaceLocal":
+        this.record(patch, "metadata", "", { [LOCAL_LORE_KEY]: command.entries });
+        break;
       case "chat.metadata":
         this.record(patch, "metadata", "", { [command.key]: command.value });
         if (command.key === "macro_variables")
@@ -22825,7 +22943,12 @@ class FrontendRuntimeState {
       ids: [id, ...staged],
       ...!optimistic && this.activeChatMutation && command.kind.startsWith("message.") ? { partial: this.activeChatMutation } : {}
     });
-    const operation = this.persist(command, mutationId).then((result) => {
+    const persist = () => this.persist(command, mutationId);
+    const localLore = command.kind === "lore.upsertLocal" || command.kind === "lore.replaceLocal";
+    const write = localLore ? this.localLoreWrites.then(persist, persist) : persist();
+    if (localLore)
+      this.localLoreWrites = write;
+    const operation = write.then((result) => {
       this.apply(result.revision, result.patch, mutationId);
       return result.value;
     }).catch((error) => {
@@ -23050,6 +23173,16 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
             services.capture(event);
         } } : {},
         luaChat: state.luaChat(chatWrites(false)),
+        localLore: {
+          selection: state.localLoreSelection,
+          get: () => readLocalLore({ [LOCAL_LORE_KEY]: state.metadata(LOCAL_LORE_KEY) }),
+          async upsert(entry) {
+            await state.write({ kind: "lore.upsertLocal", entry });
+          },
+          async replace(entries) {
+            await state.write({ kind: "lore.replaceLocal", entries });
+          }
+        },
         luaVariables: {
           get: (name, scope) => read2(scope, name),
           set(name, value) {
@@ -23276,7 +23409,8 @@ function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferenc
   const view = buildRisuChatView({ messages: messagesHost });
   const note = state.metadata("authors_note");
   const lore = sortLorebookEntriesBySourceOrder(state.lore());
-  const lorebookHost = withModuleLorebooks(lore, moduleLorebooks, character.worldBookIds);
+  const sources = moduleLorebookSources(lore, moduleLorebooks, character.worldBookIds);
+  const lorebookHost = [...sources.character, ...sources.modules];
   return {
     ...config,
     charName: character.name ?? "",
@@ -23305,7 +23439,11 @@ function runtimeDisplaySnapshot({ moduleLorebooks, togglePreferences: _preferenc
     chat: buildDisplayChatState(messagesHost),
     vars: { local: state.variables(), global: state.globalVariables(), chat: {} },
     lorebookHost,
-    lorebook: lorebookHost.map(lumiEntryToRisuLore)
+    lorebook: [
+      ...sources.character.map(lumiEntryToRisuLore),
+      ...readLocalLore({ [LOCAL_LORE_KEY]: state.metadata(LOCAL_LORE_KEY) }).map(lumiEntryToRisuLore),
+      ...sources.modules.map(lumiEntryToRisuLore)
+    ]
   };
 }
 

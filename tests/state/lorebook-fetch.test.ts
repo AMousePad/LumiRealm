@@ -22,7 +22,8 @@ function host() {
 
 test('lorebook fetch combines character and live attached rows with global module lore', async () => {
   host();
-  const rows = await fetchLorebookForCharacter(['character', 'attached'], 'owner', modules);
+  const source = await fetchLorebookForCharacter(['character', 'attached'], 'owner', modules);
+  const rows = [...source.character, ...source.modules];
   expect(rows.map(row => row.content)).toEqual(['live character', 'global content', 'live attached']);
   expect(rows[1]).toMatchObject({ key: 'one, two', secondkey: 'secondary', content: 'global content', insertorder: 17, alwaysActive: true, selective: true });
   expect(rows.every(row => Object.values(row).every(value => value === null || typeof value !== 'object'))).toBe(true);

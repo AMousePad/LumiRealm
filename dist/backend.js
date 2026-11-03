@@ -10449,6 +10449,10 @@ function entryMatchedScanWindow(entry, ctx) {
   const win = buildScanWindow(ctx.messages, ctx.defaultScanDepth);
   return scanKeysMatch(win, allKeys, false);
 }
+function stickyIdentity(entry) {
+  const sourceId = entry.extensions?._risu_state_id;
+  return entry.extensions?._risu_chat_local === true && typeof sourceId === "string" ? sourceId : entry.id;
+}
 function evaluatePreActivationGates(entry, ctx, verbose) {
   const decorators = readDecorators(entry);
   if (decorators.length === 0)
@@ -10469,10 +10473,10 @@ function evaluatePreActivationGates(entry, ctx, verbose) {
         result = activateOnlyEveryPredicate(dec.args, ctx);
         break;
       case "dont_activate_after_match":
-        result = dontActivateAfterMatchPredicate(dec.args, ctx, entry.id);
+        result = dontActivateAfterMatchPredicate(dec.args, ctx, stickyIdentity(entry));
         break;
       case "keep_activate_after_match":
-        result = keepActivateAfterMatchPredicate(dec.args, ctx, entry.id);
+        result = keepActivateAfterMatchPredicate(dec.args, ctx, stickyIdentity(entry));
         break;
       case "exclude_keys":
         result = excludeKeysPredicate(dec.args, ctx);
@@ -10501,8 +10505,9 @@ function computeStickyWrites(entry, ctx) {
   const wantsDa = decorators.some((d) => d.name === "dont_activate_after_match");
   if (!wantsKa && !wantsDa)
     return [];
-  const kaSet = wantsKa ? getStickyState(ctx.chatMetadata, "ka", entry.id) : true;
-  const daSet = wantsDa ? getStickyState(ctx.chatMetadata, "da", entry.id) : true;
+  const stateId = stickyIdentity(entry);
+  const kaSet = wantsKa ? getStickyState(ctx.chatMetadata, "ka", stateId) : true;
+  const daSet = wantsDa ? getStickyState(ctx.chatMetadata, "da", stateId) : true;
   if (kaSet && daSet)
     return [];
   const matched = entryMatchedScanWindow(entry, ctx);
@@ -10510,10 +10515,10 @@ function computeStickyWrites(entry, ctx) {
     return [];
   const out = [];
   if (wantsKa && !kaSet) {
-    out.push({ entryId: entry.id, varName: `__internal_ka_${entry.id}`, value: "1" });
+    out.push({ entryId: entry.id, varName: `__internal_ka_${stateId}`, value: "1" });
   }
   if (wantsDa && !daSet) {
-    out.push({ entryId: entry.id, varName: `__internal_da_${entry.id}`, value: "1" });
+    out.push({ entryId: entry.id, varName: `__internal_da_${stateId}`, value: "1" });
   }
   return out;
 }
@@ -10811,6 +10816,478 @@ var init_lorebook_decorator_runtime = __esm(() => {
   ]);
   RISU_SLOT_TOKENS = new Set(["{{slot}}", "{{original}}", ""]);
 });
+
+// src/payload/codec.ts
+class RisuCompatUnsupportedError extends Error {
+  feature;
+  reason;
+  name = "RisuCompatUnsupportedError";
+  constructor(feature, reason) {
+    super(`risu-compat: ${feature} is unsupported (${reason})`);
+    this.feature = feature;
+    this.reason = reason;
+  }
+}
+
+class RisuCompatVersionError extends Error {
+  missing;
+  extensionVersion;
+  name = "RisuCompatVersionError";
+  constructor(missing, extensionVersion) {
+    super(`risu-compat v${extensionVersion} is missing required capabilities: ${missing.join(", ")}. Please update the extension.`);
+    this.missing = missing;
+    this.extensionVersion = extensionVersion;
+  }
+}
+
+class RisuConsentDeclinedError extends Error {
+  characterName;
+  name = "RisuConsentDeclinedError";
+  constructor(characterName) {
+    super(`risu-compat: import of "${characterName}" cancelled \u2014 low-level access consent declined.`);
+    this.characterName = characterName;
+  }
+}
+
+class RisuConsentRequiredError extends Error {
+  name = "RisuConsentRequiredError";
+  constructor(characterName) {
+    super(`Low-level access consent is required for "${characterName}". Open this card to review and grant access.`);
+  }
+}
+var SUPPORTED_HOST_FEATURES = new Set([
+  "alertSelect"
+]);
+var DEGRADED_HOST_FEATURES = new Set([
+  "utilityBot",
+  "displayTriggerSemantics"
+]);
+function preValidateRequires(requires) {
+  const missing = [];
+  const degraded = [];
+  for (const feature of requires.hostFeatures) {
+    if (SUPPORTED_HOST_FEATURES.has(feature))
+      continue;
+    if (DEGRADED_HOST_FEATURES.has(feature)) {
+      degraded.push(feature);
+      continue;
+    }
+    missing.push(feature);
+  }
+  return { ok: missing.length === 0, missing, degraded };
+}
+function buildLumirealmData(payload, extensionVersion, regexScripts = [], assetIndex = {}, emotionIndex = {}, importedAt = Date.now(), userOverrides = {}, source, translatorSchemaVersion) {
+  return {
+    schema_version: 1,
+    imported_at: importedAt,
+    extension_version: extensionVersion,
+    translator_version: payload.translator_version,
+    ...translatorSchemaVersion !== undefined ? { translator_schema_version: translatorSchemaVersion } : {},
+    ...source ? { source } : {},
+    payload: {
+      triggers: payload.triggers,
+      lua_scripts: payload.lua_scripts,
+      at_actions: payload.at_actions,
+      additional_assets: payload.additional_assets,
+      emotion_images: payload.emotion_images,
+      background_html: payload.background_html,
+      ...typeof payload.background_html_source === "string" ? { background_html_source: payload.background_html_source } : {},
+      utility_bot: payload.utility_bot,
+      scriptstate_defaults: payload.scriptstate_defaults,
+      requires: payload.requires,
+      ...payload.untranslated ? { untranslated: payload.untranslated } : {}
+    },
+    asset_index: assetIndex,
+    emotion_index: emotionIndex,
+    regex_scripts: regexScripts,
+    user_overrides: userOverrides
+  };
+}
+function isLumirealmData(value) {
+  if (value === null || typeof value !== "object")
+    return false;
+  const v = value;
+  return v.schema_version === 1;
+}
+function makeLowLevelAccessConsentMessage(characterName) {
+  return `"${characterName}" requests low-level access. With this granted the card may:
+
+` + `  \u2022 Make additional LLM API calls (uses your tokens / billing)
+` + `  \u2022 Run helper / classifier prompts in the background
+` + `  \u2022 Trigger image generation (if your provider supports it)
+` + `  \u2022 Inspect message similarity / embeddings
+
+` + `Only grant access for cards from sources you trust.`;
+}
+// src/interpreter/runtime/local-lore.ts
+var LOCAL_LORE_KEY = "lumirealm_local_lore";
+var selections = new WeakMap;
+function readLocalLore(metadata) {
+  const value = metadata[LOCAL_LORE_KEY];
+  if (value == null)
+    return [];
+  if (!Array.isArray(value) || value.some((entry) => !entry || typeof entry !== "object")) {
+    throw new RisuCompatUnsupportedError("localLore", "invalid saved chat lore");
+  }
+  return value;
+}
+function upsertLocalLore(entries, entry) {
+  return [...entries.filter((previous) => previous.comment !== entry.comment), entry];
+}
+
+// src/log/store.ts
+var LEVEL_RANK = {
+  silent: 0,
+  error: 1,
+  warn: 2,
+  info: 3,
+  debug: 4,
+  trace: 5
+};
+var DEFAULT_LOG_LEVEL = "info";
+var LOG_LEVEL_VALUES = [
+  "silent",
+  "error",
+  "warn",
+  "info",
+  "debug",
+  "trace"
+];
+function isLogThreshold(v) {
+  return typeof v === "string" && LOG_LEVEL_VALUES.includes(v);
+}
+function meetsThreshold(call, threshold) {
+  return LEVEL_RANK[call] <= LEVEL_RANK[threshold];
+}
+var STATE_STORAGE_KEY = "lumirealm/log-state.json";
+var DEFAULT_STATE = { enabled: false, includeChatData: false, level: DEFAULT_LOG_LEVEL };
+var SYSTEM_KEY = "__SYSTEM__";
+
+class LogStore {
+  events = [];
+  bytes = 0;
+  statesByUser = new Map;
+  keyOf(userId) {
+    return typeof userId === "string" && userId.length > 0 ? userId : SYSTEM_KEY;
+  }
+  stateFor(userId) {
+    return this.statesByUser.get(this.keyOf(userId)) ?? DEFAULT_STATE;
+  }
+  isEnabled(userId) {
+    return this.stateFor(userId).enabled;
+  }
+  shouldRedact(userId) {
+    return !this.stateFor(userId).includeChatData;
+  }
+  getLevel(userId) {
+    return this.stateFor(userId).level;
+  }
+  shouldEmit(level, userId) {
+    if (userId !== undefined && userId !== null) {
+      const s = this.stateFor(userId);
+      return s.enabled && meetsThreshold(level, s.level);
+    }
+    for (const s of this.statesByUser.values()) {
+      if (s.enabled && meetsThreshold(level, s.level))
+        return true;
+    }
+    return false;
+  }
+  push(level, category, message, userId) {
+    if (!this.shouldEmit(level, userId))
+      return;
+    let redactNow;
+    if (userId !== undefined) {
+      redactNow = !this.stateFor(userId).includeChatData;
+    } else {
+      redactNow = false;
+      for (const s of this.statesByUser.values()) {
+        if (s.enabled && !s.includeChatData) {
+          redactNow = true;
+          break;
+        }
+      }
+    }
+    const text = redactNow ? redact(message) : message;
+    const tagged = typeof userId === "string" && userId.length > 0 ? userId : null;
+    const ev = { ts: Date.now(), level, category, message: text, userId: tagged };
+    const size = approxBytes(ev);
+    this.events.push(ev);
+    this.bytes += size;
+  }
+  snapshot(userId) {
+    if (userId === undefined)
+      return { events: this.events.slice() };
+    const target = typeof userId === "string" && userId.length > 0 ? userId : null;
+    return { events: this.events.filter((e) => e.userId === target || e.userId === null) };
+  }
+  clear(userId) {
+    if (userId === undefined) {
+      this.events = [];
+      this.bytes = 0;
+      return;
+    }
+    const target = typeof userId === "string" && userId.length > 0 ? userId : null;
+    this.events = this.events.filter((e) => e.userId !== target && e.userId !== null);
+    this.bytes = this.events.reduce((a, e) => a + approxBytes(e), 0);
+  }
+  getState(userId) {
+    const s = this.stateFor(userId);
+    let eventCount = 0;
+    let bufferBytes = 0;
+    if (userId === undefined) {
+      eventCount = this.events.length;
+      bufferBytes = this.bytes;
+    } else {
+      const target = typeof userId === "string" && userId.length > 0 ? userId : null;
+      for (const e of this.events) {
+        if (e.userId === target || e.userId === null) {
+          eventCount += 1;
+          bufferBytes += approxBytes(e);
+        }
+      }
+    }
+    return { ...s, eventCount, bufferBytes };
+  }
+  setState(next, userId) {
+    const key = this.keyOf(userId);
+    const prior = this.statesByUser.get(key) ?? DEFAULT_STATE;
+    const merged = {
+      enabled: next.enabled ?? prior.enabled,
+      includeChatData: next.includeChatData ?? prior.includeChatData,
+      level: isLogThreshold(next.level) ? next.level : prior.level
+    };
+    this.statesByUser.set(key, merged);
+    if (!merged.enabled && prior.enabled)
+      this.clear(userId);
+    return this.getState(userId);
+  }
+}
+var logStore = new LogStore;
+function approxBytes(ev) {
+  return ev.message.length + ev.category.length + 32;
+}
+var REDACT_PATTERNS = [
+  { re: /Bearer\s+[A-Za-z0-9\-_.~+/]+=*/gi, to: "Bearer [REDACTED]" },
+  { re: /\bsk-[A-Za-z0-9_-]{20,}/g, to: "sk-[REDACTED]" },
+  { re: /\b(api[_-]?key|secret|password|token)\s*[=:]\s*[^\s,;}]+/gi, to: "$1=[REDACTED]" },
+  { re: /\b(content|content_preview|message|message_preview|text|text_preview|raw|raw_preview|template|prompt|response|reply)\s*=\s*"[^"]*"/gi, to: '$1="[REDACTED]"' },
+  { re: /\b(content|content_preview|message|message_preview|text|text_preview|raw|raw_preview|template|prompt|response|reply)\s*=\s*'[^']*'/gi, to: "$1='[REDACTED]'" },
+  { re: /"[^"\n]{80,}"/g, to: '"[CONTENT_REDACTED]"' },
+  { re: /'[^'\n]{80,}'/g, to: "'[CONTENT_REDACTED]'" }
+];
+function redact(input) {
+  let out = input;
+  for (const { re, to } of REDACT_PATTERNS)
+    out = out.replace(re, to);
+  return out;
+}
+async function loadPersistedLogState(storage, userId) {
+  try {
+    const fallback = { enabled: false, includeChatData: false, level: DEFAULT_LOG_LEVEL };
+    const got = await storage.getJson(STATE_STORAGE_KEY, { fallback, userId });
+    logStore.setState({
+      enabled: got.enabled === true,
+      includeChatData: got.includeChatData === true,
+      level: isLogThreshold(got.level) ? got.level : DEFAULT_LOG_LEVEL
+    }, userId);
+  } catch {}
+}
+async function persistLogState(storage, userId) {
+  try {
+    const s = logStore.getState(userId);
+    const payload = { enabled: s.enabled, includeChatData: s.includeChatData, level: s.level };
+    await storage.setJson(STATE_STORAGE_KEY, payload, { userId });
+  } catch {}
+}
+
+// src/util/safe-log.ts
+function getSpindle() {
+  try {
+    return globalThis.spindle;
+  } catch {
+    return;
+  }
+}
+function consoleFor(level) {
+  if (level === "error")
+    return (m) => {
+      try {
+        console.error(m);
+      } catch {}
+    };
+  if (level === "warn")
+    return (m) => {
+      try {
+        console.warn(m);
+      } catch {}
+    };
+  return (m) => {
+    try {
+      console.log(m);
+    } catch {}
+  };
+}
+function spindleChannel(level) {
+  if (level === "error")
+    return "error";
+  if (level === "warn")
+    return "warn";
+  return "info";
+}
+function makeSafeLogger(prefix) {
+  function emit(level, msg) {
+    const line = `[lumirealm] ${prefix}: ${msg}`;
+    const consoleEmit = level === "error" || logStore.shouldEmit(level);
+    if (consoleEmit) {
+      const ch = spindleChannel(level);
+      const sp = getSpindle();
+      const fn = sp?.log?.[ch];
+      if (fn) {
+        try {
+          fn(line);
+        } catch {
+          consoleFor(ch)(line);
+        }
+      } else {
+        consoleFor(ch)(line);
+      }
+    }
+    logStore.push(level, prefix, msg);
+  }
+  return {
+    error: (m) => emit("error", m),
+    warn: (m) => emit("warn", m),
+    info: (m) => emit("info", m),
+    debug: (m) => emit("debug", m),
+    trace: (m) => emit("trace", m)
+  };
+}
+
+// src/state/macro-interceptor-cache.ts
+var log = makeSafeLogger("macro-interceptor-cache");
+var TTL_MS = 5000;
+var MAX_ENTRIES = 500;
+var cache = new Map;
+var hitCount = 0;
+var missCount = 0;
+function fnv1a(s) {
+  let h = 2166136261;
+  for (let i = 0;i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+  }
+  return h >>> 0;
+}
+function key(chatId, template, commit, ctxKey) {
+  return `${chatId}::${commit ? "c" : "d"}::${ctxKey}::${template.length}::${fnv1a(template)}`;
+}
+function evictIfNeeded(now) {
+  if (cache.size < MAX_ENTRIES)
+    return;
+  for (const [k, v] of cache) {
+    if (now - v.ts > TTL_MS)
+      cache.delete(k);
+  }
+  if (cache.size < MAX_ENTRIES)
+    return;
+  let oldestKey = null;
+  let oldestTs = Infinity;
+  for (const [k, v] of cache) {
+    if (v.ts < oldestTs) {
+      oldestTs = v.ts;
+      oldestKey = k;
+    }
+  }
+  if (oldestKey)
+    cache.delete(oldestKey);
+}
+function lookupMacroInterceptor(chatId, template, commit, ctxKey) {
+  const k = key(chatId, template, commit, ctxKey);
+  const entry = cache.get(k);
+  if (!entry) {
+    missCount += 1;
+    return null;
+  }
+  const now = Date.now();
+  if (now - entry.ts > TTL_MS) {
+    cache.delete(k);
+    missCount += 1;
+    return null;
+  }
+  hitCount += 1;
+  return { result: entry.result, touchedVars: entry.touchedVars, volatile: entry.volatile };
+}
+function cacheMacroInterceptor(chatId, template, commit, ctxKey, result, touchedVars, volatile) {
+  const now = Date.now();
+  evictIfNeeded(now);
+  cache.set(key(chatId, template, commit, ctxKey), { result, touchedVars, volatile, ts: now });
+}
+function invalidateMacroInterceptorForChat(chatId) {
+  const prefix = `${chatId}::`;
+  let removed = 0;
+  for (const k of cache.keys()) {
+    if (k.startsWith(prefix)) {
+      cache.delete(k);
+      removed += 1;
+    }
+  }
+  if (removed > 0)
+    log.debug(`invalidate chat=${chatId} entries=${removed}`);
+}
+function macroInterceptorCacheStats() {
+  return { size: cache.size, hits: hitCount, misses: missCount };
+}
+
+// src/state/local-lore.ts
+var cached = new Map;
+function invalidateLocalLore(chatId) {
+  if (chatId === undefined)
+    cached.clear();
+  else
+    cached.delete(chatId);
+}
+function readCachedLocalLore(host, chatId, userId) {
+  const hit = cached.get(chatId);
+  if (hit?.userId === userId)
+    return hit.promise;
+  const promise = host.chats.get(chatId, userId).then((chat) => {
+    if (!chat)
+      throw new RisuCompatUnsupportedError("localLore", "current chat is unavailable");
+    return readLocalLore(chat.metadata ?? {});
+  });
+  cached.set(chatId, { userId, promise });
+  promise.catch(() => {
+    if (cached.get(chatId)?.promise === promise)
+      cached.delete(chatId);
+  });
+  return promise;
+}
+function persistLocalLore(host, chatId, userId, entry) {
+  return writeLocalLore(host, chatId, userId, (entries) => upsertLocalLore(entries, entry));
+}
+function replaceLocalLore(host, chatId, userId, entries) {
+  return writeLocalLore(host, chatId, userId, () => entries);
+}
+async function writeLocalLore(host, chatId, userId, apply) {
+  if (!host.contracts?.worldInfoAdditionalEntries)
+    throw new RisuCompatUnsupportedError("upsertLocalLoreBook", "host lacks prompt-local world info entries");
+  for (let attempt = 0;attempt < 16; attempt++) {
+    const chat = await host.chats.get(chatId, userId);
+    if (!chat)
+      throw new RisuCompatUnsupportedError("upsertLocalLoreBook", "current chat is unavailable");
+    const updated = await host.chats.compareAndSetMetadata(chatId, {
+      expected_metadata: chat.metadata,
+      metadata: { ...chat.metadata, [LOCAL_LORE_KEY]: apply(readLocalLore(chat.metadata)) }
+    }, userId);
+    if (updated) {
+      invalidateLocalLore(chatId);
+      invalidateMacroInterceptorForChat(chatId);
+      return updated;
+    }
+  }
+  throw new RisuCompatUnsupportedError("upsertLocalLoreBook", "chat changed repeatedly during lore persistence");
+}
 
 // src/host-services/protocol.ts
 class HostServiceError extends Error {
@@ -16143,7 +16620,9 @@ function stableStringify(value) {
 var SYSTEM_MANAGED_EXTENSION_KEYS = [
   "_risu_source_hash",
   "_risu_module_id",
-  "_risu_array_index"
+  "_risu_array_index",
+  "_risu_chat_local",
+  "_risu_state_id"
 ];
 function computeEntrySourceHashWithFields(entry, hashFields) {
   const fields = {};
@@ -16233,6 +16712,9 @@ function rebuildContentWithStashedDecorators(rawContent, decorators, applied) {
 `) : keptLines.join(`
 `) + `
 ` + remaining;
+}
+function mapLoreBookEntry(entry, worldBookId, folders, now, uuid, idx = 0) {
+  return mapLoreBookEntryWithStats(entry, worldBookId, folders, now, uuid, idx).entry;
 }
 function mapLoreBookEntryWithStats(entry, worldBookId, folders, now, uuid, idx = 0) {
   const { constant, disabled, position } = mapMode(entry);
@@ -17754,109 +18236,6 @@ function detectMacrosInText(c) {
   return false;
 }
 
-// src/payload/codec.ts
-class RisuCompatUnsupportedError extends Error {
-  feature;
-  reason;
-  name = "RisuCompatUnsupportedError";
-  constructor(feature, reason) {
-    super(`risu-compat: ${feature} is unsupported (${reason})`);
-    this.feature = feature;
-    this.reason = reason;
-  }
-}
-
-class RisuCompatVersionError extends Error {
-  missing;
-  extensionVersion;
-  name = "RisuCompatVersionError";
-  constructor(missing, extensionVersion) {
-    super(`risu-compat v${extensionVersion} is missing required capabilities: ${missing.join(", ")}. Please update the extension.`);
-    this.missing = missing;
-    this.extensionVersion = extensionVersion;
-  }
-}
-
-class RisuConsentDeclinedError extends Error {
-  characterName;
-  name = "RisuConsentDeclinedError";
-  constructor(characterName) {
-    super(`risu-compat: import of "${characterName}" cancelled \u2014 low-level access consent declined.`);
-    this.characterName = characterName;
-  }
-}
-
-class RisuConsentRequiredError extends Error {
-  name = "RisuConsentRequiredError";
-  constructor(characterName) {
-    super(`Low-level access consent is required for "${characterName}". Open this card to review and grant access.`);
-  }
-}
-var SUPPORTED_HOST_FEATURES = new Set([
-  "alertSelect"
-]);
-var DEGRADED_HOST_FEATURES = new Set([
-  "utilityBot",
-  "displayTriggerSemantics"
-]);
-function preValidateRequires(requires) {
-  const missing = [];
-  const degraded = [];
-  for (const feature of requires.hostFeatures) {
-    if (SUPPORTED_HOST_FEATURES.has(feature))
-      continue;
-    if (DEGRADED_HOST_FEATURES.has(feature)) {
-      degraded.push(feature);
-      continue;
-    }
-    missing.push(feature);
-  }
-  return { ok: missing.length === 0, missing, degraded };
-}
-function buildLumirealmData(payload, extensionVersion, regexScripts = [], assetIndex = {}, emotionIndex = {}, importedAt = Date.now(), userOverrides = {}, source, translatorSchemaVersion) {
-  return {
-    schema_version: 1,
-    imported_at: importedAt,
-    extension_version: extensionVersion,
-    translator_version: payload.translator_version,
-    ...translatorSchemaVersion !== undefined ? { translator_schema_version: translatorSchemaVersion } : {},
-    ...source ? { source } : {},
-    payload: {
-      triggers: payload.triggers,
-      lua_scripts: payload.lua_scripts,
-      at_actions: payload.at_actions,
-      additional_assets: payload.additional_assets,
-      emotion_images: payload.emotion_images,
-      background_html: payload.background_html,
-      ...typeof payload.background_html_source === "string" ? { background_html_source: payload.background_html_source } : {},
-      utility_bot: payload.utility_bot,
-      scriptstate_defaults: payload.scriptstate_defaults,
-      requires: payload.requires,
-      ...payload.untranslated ? { untranslated: payload.untranslated } : {}
-    },
-    asset_index: assetIndex,
-    emotion_index: emotionIndex,
-    regex_scripts: regexScripts,
-    user_overrides: userOverrides
-  };
-}
-function isLumirealmData(value) {
-  if (value === null || typeof value !== "object")
-    return false;
-  const v = value;
-  return v.schema_version === 1;
-}
-function makeLowLevelAccessConsentMessage(characterName) {
-  return `"${characterName}" requests low-level access. With this granted the card may:
-
-` + `  \u2022 Make additional LLM API calls (uses your tokens / billing)
-` + `  \u2022 Run helper / classifier prompts in the background
-` + `  \u2022 Trigger image generation (if your provider supports it)
-` + `  \u2022 Inspect message similarity / embeddings
-
-` + `Only grant access for cards from sources you trust.`;
-}
-
 // src/core/mappers/island-merge.ts
 var ISLAND_TRIGGER_PREFIX = `<style data-risu-island-trigger></style>`;
 var ISLAND_MERGE_OPEN = `<div data-risu-island-merge style="display:contents">`;
@@ -18111,235 +18490,6 @@ var readImageJournalFile = journal.read;
 var appendImageIdsToJournal = journal.append;
 var clearImageJournal = journal.clear;
 var listImageJournalCharacterIds = journal.list;
-
-// src/log/store.ts
-var LEVEL_RANK = {
-  silent: 0,
-  error: 1,
-  warn: 2,
-  info: 3,
-  debug: 4,
-  trace: 5
-};
-var DEFAULT_LOG_LEVEL = "info";
-var LOG_LEVEL_VALUES = [
-  "silent",
-  "error",
-  "warn",
-  "info",
-  "debug",
-  "trace"
-];
-function isLogThreshold(v) {
-  return typeof v === "string" && LOG_LEVEL_VALUES.includes(v);
-}
-function meetsThreshold(call, threshold) {
-  return LEVEL_RANK[call] <= LEVEL_RANK[threshold];
-}
-var STATE_STORAGE_KEY = "lumirealm/log-state.json";
-var DEFAULT_STATE = { enabled: false, includeChatData: false, level: DEFAULT_LOG_LEVEL };
-var SYSTEM_KEY = "__SYSTEM__";
-
-class LogStore {
-  events = [];
-  bytes = 0;
-  statesByUser = new Map;
-  keyOf(userId) {
-    return typeof userId === "string" && userId.length > 0 ? userId : SYSTEM_KEY;
-  }
-  stateFor(userId) {
-    return this.statesByUser.get(this.keyOf(userId)) ?? DEFAULT_STATE;
-  }
-  isEnabled(userId) {
-    return this.stateFor(userId).enabled;
-  }
-  shouldRedact(userId) {
-    return !this.stateFor(userId).includeChatData;
-  }
-  getLevel(userId) {
-    return this.stateFor(userId).level;
-  }
-  shouldEmit(level, userId) {
-    if (userId !== undefined && userId !== null) {
-      const s = this.stateFor(userId);
-      return s.enabled && meetsThreshold(level, s.level);
-    }
-    for (const s of this.statesByUser.values()) {
-      if (s.enabled && meetsThreshold(level, s.level))
-        return true;
-    }
-    return false;
-  }
-  push(level, category, message, userId) {
-    if (!this.shouldEmit(level, userId))
-      return;
-    let redactNow;
-    if (userId !== undefined) {
-      redactNow = !this.stateFor(userId).includeChatData;
-    } else {
-      redactNow = false;
-      for (const s of this.statesByUser.values()) {
-        if (s.enabled && !s.includeChatData) {
-          redactNow = true;
-          break;
-        }
-      }
-    }
-    const text = redactNow ? redact(message) : message;
-    const tagged = typeof userId === "string" && userId.length > 0 ? userId : null;
-    const ev = { ts: Date.now(), level, category, message: text, userId: tagged };
-    const size = approxBytes(ev);
-    this.events.push(ev);
-    this.bytes += size;
-  }
-  snapshot(userId) {
-    if (userId === undefined)
-      return { events: this.events.slice() };
-    const target = typeof userId === "string" && userId.length > 0 ? userId : null;
-    return { events: this.events.filter((e) => e.userId === target || e.userId === null) };
-  }
-  clear(userId) {
-    if (userId === undefined) {
-      this.events = [];
-      this.bytes = 0;
-      return;
-    }
-    const target = typeof userId === "string" && userId.length > 0 ? userId : null;
-    this.events = this.events.filter((e) => e.userId !== target && e.userId !== null);
-    this.bytes = this.events.reduce((a, e) => a + approxBytes(e), 0);
-  }
-  getState(userId) {
-    const s = this.stateFor(userId);
-    let eventCount = 0;
-    let bufferBytes = 0;
-    if (userId === undefined) {
-      eventCount = this.events.length;
-      bufferBytes = this.bytes;
-    } else {
-      const target = typeof userId === "string" && userId.length > 0 ? userId : null;
-      for (const e of this.events) {
-        if (e.userId === target || e.userId === null) {
-          eventCount += 1;
-          bufferBytes += approxBytes(e);
-        }
-      }
-    }
-    return { ...s, eventCount, bufferBytes };
-  }
-  setState(next, userId) {
-    const key = this.keyOf(userId);
-    const prior = this.statesByUser.get(key) ?? DEFAULT_STATE;
-    const merged = {
-      enabled: next.enabled ?? prior.enabled,
-      includeChatData: next.includeChatData ?? prior.includeChatData,
-      level: isLogThreshold(next.level) ? next.level : prior.level
-    };
-    this.statesByUser.set(key, merged);
-    if (!merged.enabled && prior.enabled)
-      this.clear(userId);
-    return this.getState(userId);
-  }
-}
-var logStore = new LogStore;
-function approxBytes(ev) {
-  return ev.message.length + ev.category.length + 32;
-}
-var REDACT_PATTERNS = [
-  { re: /Bearer\s+[A-Za-z0-9\-_.~+/]+=*/gi, to: "Bearer [REDACTED]" },
-  { re: /\bsk-[A-Za-z0-9_-]{20,}/g, to: "sk-[REDACTED]" },
-  { re: /\b(api[_-]?key|secret|password|token)\s*[=:]\s*[^\s,;}]+/gi, to: "$1=[REDACTED]" },
-  { re: /\b(content|content_preview|message|message_preview|text|text_preview|raw|raw_preview|template|prompt|response|reply)\s*=\s*"[^"]*"/gi, to: '$1="[REDACTED]"' },
-  { re: /\b(content|content_preview|message|message_preview|text|text_preview|raw|raw_preview|template|prompt|response|reply)\s*=\s*'[^']*'/gi, to: "$1='[REDACTED]'" },
-  { re: /"[^"\n]{80,}"/g, to: '"[CONTENT_REDACTED]"' },
-  { re: /'[^'\n]{80,}'/g, to: "'[CONTENT_REDACTED]'" }
-];
-function redact(input) {
-  let out = input;
-  for (const { re, to } of REDACT_PATTERNS)
-    out = out.replace(re, to);
-  return out;
-}
-async function loadPersistedLogState(storage, userId) {
-  try {
-    const fallback = { enabled: false, includeChatData: false, level: DEFAULT_LOG_LEVEL };
-    const got = await storage.getJson(STATE_STORAGE_KEY, { fallback, userId });
-    logStore.setState({
-      enabled: got.enabled === true,
-      includeChatData: got.includeChatData === true,
-      level: isLogThreshold(got.level) ? got.level : DEFAULT_LOG_LEVEL
-    }, userId);
-  } catch {}
-}
-async function persistLogState(storage, userId) {
-  try {
-    const s = logStore.getState(userId);
-    const payload = { enabled: s.enabled, includeChatData: s.includeChatData, level: s.level };
-    await storage.setJson(STATE_STORAGE_KEY, payload, { userId });
-  } catch {}
-}
-
-// src/util/safe-log.ts
-function getSpindle() {
-  try {
-    return globalThis.spindle;
-  } catch {
-    return;
-  }
-}
-function consoleFor(level) {
-  if (level === "error")
-    return (m) => {
-      try {
-        console.error(m);
-      } catch {}
-    };
-  if (level === "warn")
-    return (m) => {
-      try {
-        console.warn(m);
-      } catch {}
-    };
-  return (m) => {
-    try {
-      console.log(m);
-    } catch {}
-  };
-}
-function spindleChannel(level) {
-  if (level === "error")
-    return "error";
-  if (level === "warn")
-    return "warn";
-  return "info";
-}
-function makeSafeLogger(prefix) {
-  function emit(level, msg) {
-    const line = `[lumirealm] ${prefix}: ${msg}`;
-    const consoleEmit = level === "error" || logStore.shouldEmit(level);
-    if (consoleEmit) {
-      const ch = spindleChannel(level);
-      const sp = getSpindle();
-      const fn = sp?.log?.[ch];
-      if (fn) {
-        try {
-          fn(line);
-        } catch {
-          consoleFor(ch)(line);
-        }
-      } else {
-        consoleFor(ch)(line);
-      }
-    }
-    logStore.push(level, prefix, msg);
-  }
-  return {
-    error: (m) => emit("error", m),
-    warn: (m) => emit("warn", m),
-    info: (m) => emit("info", m),
-    debug: (m) => emit("debug", m),
-    trace: (m) => emit("trace", m)
-  };
-}
 
 // src/payload/character-regex-projection.ts
 var INVALID_SOURCE_REGEX_KEY = "_lr_invalid_source_regex";
@@ -21166,6 +21316,7 @@ async function buildLiveImageIdSet(deps) {
 var GENERATION_ENDED_BINDINGS = [
   "output"
 ];
+
 // src/interpreter/risu-chat-view.ts
 function buildRisuChatView(input) {
   const messages = input.messages.map((m) => ({ ...m }));
@@ -21743,7 +21894,7 @@ async function readChatAuthorsNote(chatId, userId) {
 }
 
 // src/interpreter/runtime/lorebook.ts
-function withModuleLorebooks(entries, modules, bookIds = []) {
+function moduleLorebookSources(entries, modules, bookIds = []) {
   const loadedBooks = new Set([...bookIds, ...entries.map((entry) => entry.worldBookId)]);
   const rows = modules.filter((raw) => !!raw && typeof raw === "object");
   const moduleBooks = new Set(rows.map((row) => row.worldBookId).filter((id) => typeof id === "string"));
@@ -21758,18 +21909,19 @@ function withModuleLorebooks(entries, modules, bookIds = []) {
       out.push(entry);
   }
   const emittedBooks = new Set;
+  const moduleEntries = [];
   for (const row of rows) {
     if (typeof row.worldBookId === "string" && loadedBooks.has(row.worldBookId)) {
       if (!emittedBooks.has(row.worldBookId)) {
         for (const entry of liveModuleBooks.get(row.worldBookId) ?? [])
-          out.push(entry);
+          moduleEntries.push(entry);
       }
       emittedBooks.add(row.worldBookId);
       continue;
     }
-    out.push({
+    moduleEntries.push({
       ...row,
-      id: typeof row.id === "string" ? row.id : `module-lore-${out.length}`,
+      id: typeof row.id === "string" ? row.id : `module-lore-${out.length + moduleEntries.length}`,
       key: Array.isArray(row.key) ? row.key : typeof row.key === "string" ? row.key : [],
       content: typeof row.content === "string" ? row.content : "",
       comment: typeof row.comment === "string" ? row.comment : "",
@@ -21778,7 +21930,7 @@ function withModuleLorebooks(entries, modules, bookIds = []) {
       constant: typeof row.constant === "boolean" ? row.constant : row.alwaysActive === true
     });
   }
-  return out;
+  return { character: out, modules: moduleEntries };
 }
 function risuArrayIndex(entry) {
   const extensions = entry["extensions"];
@@ -22142,27 +22294,27 @@ function filterSamplerParamsForProvider(parameters, provider) {
 var dispatchAls = createAls();
 // src/state/recent-flush-cache.ts
 var MAX_CHATS = 100;
-var cache = new Map;
+var cache2 = new Map;
 function rememberRecentFlush(chatId, vars) {
-  if (cache.has(chatId))
-    cache.delete(chatId);
-  cache.set(chatId, { ...vars });
-  if (cache.size > MAX_CHATS) {
-    const oldest = cache.keys().next().value;
+  if (cache2.has(chatId))
+    cache2.delete(chatId);
+  cache2.set(chatId, { ...vars });
+  if (cache2.size > MAX_CHATS) {
+    const oldest = cache2.keys().next().value;
     if (oldest !== undefined)
-      cache.delete(oldest);
+      cache2.delete(oldest);
   }
 }
 function getRecentFlush(chatId) {
-  const entry = cache.get(chatId);
+  const entry = cache2.get(chatId);
   if (!entry)
     return null;
-  cache.delete(chatId);
-  cache.set(chatId, entry);
+  cache2.delete(chatId);
+  cache2.set(chatId, entry);
   return entry;
 }
 function invalidateRecentFlush(chatId) {
-  cache.delete(chatId);
+  cache2.delete(chatId);
 }
 
 // src/state/chat-metadata-queue.ts
@@ -22575,21 +22727,20 @@ function getActivePersonaImage(userId) {
 var byCharacter2 = new Map;
 var chatToCharacter2 = new Map;
 function setActiveLorebook(chatId, characterId, entries) {
-  byCharacter2.set(characterId, entries);
+  byCharacter2.set(characterId, { ...entries, combined: [...entries.character, ...entries.modules] });
   chatToCharacter2.set(chatId, characterId);
 }
-function getActiveLorebook(chatId) {
+function getActiveLorebook(chatId, local = []) {
   if (!chatId)
     return [];
   const characterId = chatToCharacter2.get(chatId);
   if (!characterId)
     return [];
-  return byCharacter2.get(characterId) ?? [];
+  const cached = byCharacter2.get(characterId);
+  return cached ? local.length ? [...cached.character, ...local, ...cached.modules] : cached.combined : local;
 }
 function getActiveLorebookByCharacter(characterId) {
-  if (!characterId)
-    return [];
-  return byCharacter2.get(characterId) ?? [];
+  return characterId && byCharacter2.get(characterId) || { character: [], modules: [] };
 }
 function hasActiveLorebookForCharacter(characterId) {
   return byCharacter2.has(characterId);
@@ -22636,53 +22787,54 @@ async function fetchLorebookForCharacter(worldBookIds, userId, moduleLorebooks =
       offset += rows.length;
     }
   }
-  return withModuleLorebooks(sortLorebookEntriesBySourceOrder(out), moduleLorebooks, worldBookIds).map(lumiEntryToRisuLore);
+  const sources = moduleLorebookSources(sortLorebookEntriesBySourceOrder(out), moduleLorebooks, worldBookIds);
+  return { character: sources.character.map(lumiEntryToRisuLore), modules: sources.modules.map(lumiEntryToRisuLore) };
 }
 
 // src/interpreter/listenedit-preload.ts
-var log = makeSafeLogger("listenEdit.preload");
-var cache2 = new Map;
+var log2 = makeSafeLogger("listenEdit.preload");
+var cache3 = new Map;
 function invalidateListenEditPreload(chatId) {
-  if (cache2.delete(chatId)) {
-    log.debug(`invalidate chat=${chatId}`);
+  if (cache3.delete(chatId)) {
+    log2.debug(`invalidate chat=${chatId}`);
   }
 }
 
 // src/interpreter/messages-cache.ts
-var cache3 = new Map;
+var cache4 = new Map;
 function getCachedMessages(chatId) {
   if (!chatId)
     return null;
-  return cache3.get(chatId) ?? null;
+  return cache4.get(chatId) ?? null;
 }
 function setCachedMessages(chatId, messages) {
   if (!chatId)
     return;
-  cache3.set(chatId, messages);
+  cache4.set(chatId, messages);
 }
 function invalidateCachedMessages(chatId) {
   if (!chatId)
     return;
-  cache3.delete(chatId);
+  cache4.delete(chatId);
 }
 
 // src/state/global-modules-cache.ts
-var cache4 = new Map;
+var cache5 = new Map;
 function getGlobalModuleIds(userId) {
   if (!userId)
     return [];
-  return cache4.get(userId) ?? [];
+  return cache5.get(userId) ?? [];
 }
 function setGlobalModuleIdsCache(userId, ids) {
   if (!userId)
     return;
-  cache4.set(userId, [...ids]);
+  cache5.set(userId, [...ids]);
 }
 
 // src/state/character-recency.ts
 var PATH = "lumirealm/character-recency.json";
 var SCHEMA_VERSION = 1;
-var MAX_ENTRIES = 500;
+var MAX_ENTRIES2 = 500;
 var EMPTY = { schema_version: SCHEMA_VERSION, seen: {} };
 async function readCharacterRecency(storage, userId) {
   try {
@@ -22704,8 +22856,8 @@ async function readCharacterRecency(storage, userId) {
 function touchRecency(current, characterId, now) {
   const seen = { ...current.seen, [characterId]: now };
   const keys = Object.keys(seen);
-  if (keys.length > MAX_ENTRIES) {
-    const trimmed = keys.sort((a, b) => (seen[b] ?? 0) - (seen[a] ?? 0)).slice(0, MAX_ENTRIES);
+  if (keys.length > MAX_ENTRIES2) {
+    const trimmed = keys.sort((a, b) => (seen[b] ?? 0) - (seen[a] ?? 0)).slice(0, MAX_ENTRIES2);
     const next = {};
     for (const k of trimmed)
       next[k] = seen[k];
@@ -27468,7 +27620,7 @@ function stripSetvarSpans(text, execSpan) {
 }
 
 // src/interpreter/at-actions-runtime.ts
-var log2 = makeSafeLogger("atActions.runForPhase");
+var log3 = makeSafeLogger("atActions.runForPhase");
 function isRowlessAtAction(action) {
   return (action.sourceOrigin ?? "character") === "character";
 }
@@ -27479,14 +27631,14 @@ async function runAtActionsForPhase(actions, phase, data, ctx) {
   }
   if (eligible.length === 0)
     return data;
-  log2.info(`phase=${phase} eligible=${eligible.length} data_len=${data.length} chatIndex=${ctx.chatIndex}`);
+  log3.info(`phase=${phase} eligible=${eligible.length} data_len=${data.length} chatIndex=${ctx.chatIndex}`);
   let current = data;
   for (let i = 0;i < eligible.length; i++) {
     const action = eligible[i];
     try {
       current = await applyOne2(action, current, ctx);
     } catch (err) {
-      log2.warn(`action[${i}] kind=${action.action} phase=${phase} THREW \u2014 ${errMsg(err)}; keeping prior data`);
+      log3.warn(`action[${i}] kind=${action.action} phase=${phase} THREW \u2014 ${errMsg(err)}; keeping prior data`);
     }
   }
   return current;
@@ -27882,81 +28034,6 @@ ${lines.join(`
 `)}`);
 }
 
-// src/state/macro-interceptor-cache.ts
-var log3 = makeSafeLogger("macro-interceptor-cache");
-var TTL_MS = 5000;
-var MAX_ENTRIES2 = 500;
-var cache5 = new Map;
-var hitCount = 0;
-var missCount = 0;
-function fnv1a(s) {
-  let h = 2166136261;
-  for (let i = 0;i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
-  }
-  return h >>> 0;
-}
-function key(chatId, template, commit, ctxKey) {
-  return `${chatId}::${commit ? "c" : "d"}::${ctxKey}::${template.length}::${fnv1a(template)}`;
-}
-function evictIfNeeded(now) {
-  if (cache5.size < MAX_ENTRIES2)
-    return;
-  for (const [k, v] of cache5) {
-    if (now - v.ts > TTL_MS)
-      cache5.delete(k);
-  }
-  if (cache5.size < MAX_ENTRIES2)
-    return;
-  let oldestKey = null;
-  let oldestTs = Infinity;
-  for (const [k, v] of cache5) {
-    if (v.ts < oldestTs) {
-      oldestTs = v.ts;
-      oldestKey = k;
-    }
-  }
-  if (oldestKey)
-    cache5.delete(oldestKey);
-}
-function lookupMacroInterceptor(chatId, template, commit, ctxKey) {
-  const k = key(chatId, template, commit, ctxKey);
-  const entry = cache5.get(k);
-  if (!entry) {
-    missCount += 1;
-    return null;
-  }
-  const now = Date.now();
-  if (now - entry.ts > TTL_MS) {
-    cache5.delete(k);
-    missCount += 1;
-    return null;
-  }
-  hitCount += 1;
-  return { result: entry.result, touchedVars: entry.touchedVars, volatile: entry.volatile };
-}
-function cacheMacroInterceptor(chatId, template, commit, ctxKey, result, touchedVars, volatile) {
-  const now = Date.now();
-  evictIfNeeded(now);
-  cache5.set(key(chatId, template, commit, ctxKey), { result, touchedVars, volatile, ts: now });
-}
-function invalidateMacroInterceptorForChat(chatId) {
-  const prefix = `${chatId}::`;
-  let removed = 0;
-  for (const k of cache5.keys()) {
-    if (k.startsWith(prefix)) {
-      cache5.delete(k);
-      removed += 1;
-    }
-  }
-  if (removed > 0)
-    log3.debug(`invalidate chat=${chatId} entries=${removed}`);
-}
-function macroInterceptorCacheStats() {
-  return { size: cache5.size, hits: hitCount, misses: missCount };
-}
-
 // src/state/toggle-preferences.ts
 var PATH2 = "lumirealm/toggle-preferences.json";
 var chains3 = new Map;
@@ -28142,6 +28219,9 @@ function consumeIfOurWrite(chatId, msgId, content) {
   }
   return true;
 }
+
+// src/interceptors/lumi-hooks.ts
+init_risu_helpers();
 
 // src/interpreter/decorator-buffers.ts
 var TTL_MS3 = 60000;
@@ -28401,6 +28481,16 @@ function makeSpindleHost(ctx) {
       return readEffectiveGlobals(uid, legacy, presetToggleValues(chatId, uid));
     },
     chat: {
+      upsertLocalLore: async (entry) => {
+        if (!uid)
+          throw new TypeError("Local lore persistence requires a user ID");
+        await persistLocalLore(spindle, chatId, uid, entry);
+      },
+      replaceLocalLore: async (entries) => {
+        if (!uid)
+          throw new TypeError("Local lore persistence requires a user ID");
+        await replaceLocalLore(spindle, chatId, uid, entries);
+      },
       getChatId: () => chatId,
       getMessages,
       sendMessage,
@@ -29217,18 +29307,22 @@ function resolveModuleRows(plan, moduleId, worldBookId) {
     return null;
   return plan.moduleRows.get(matches[0].resolvedId) ?? null;
 }
-function buildRisuWorldInfoChatPlacements(active, entries) {
+function buildRisuWorldInfoChatPlacements(active, entries, localLore = []) {
   const plan = sourcePlan(active);
   const placements = new Map;
+  const localRows = buildModuleRows(localLore, false);
   for (const entry of entries) {
-    if (entry.book_source !== "character")
+    const local = entry.book_source === "chat" && entry.extensions?._risu_chat_local === true;
+    if (entry.book_source !== "character" && !local)
       continue;
     const index = arrayIndexOf(entry);
     if (index === null)
       continue;
     const moduleId = moduleIdOf(entry);
     let sourceRow;
-    if (moduleId !== null) {
+    if (local) {
+      sourceRow = localRows.get(index);
+    } else if (moduleId !== null) {
       sourceRow = resolveModuleRows(plan, moduleId, entry.world_book_id)?.get(index);
     } else if (!plan.attachedWorldBookIds.has(entry.world_book_id)) {
       sourceRow = plan.baseRows.get(index);
@@ -29276,7 +29370,7 @@ async function buildBackendPipelineInput(chatId, characterId, userId, deps, pers
   const scriptstateDefaults = activeCard?.risuPayload.scriptstate_defaults;
   const screenDims = getScreenDims(userId);
   const cachedMessages = getCachedMessages(chatId);
-  const activeLore = getActiveLorebook(chatId);
+  const activeLore = getActiveLorebook(chatId, readLocalLore(chat?.metadata ?? {}).map(lumiEntryToRisuLore));
   const selectedGreeting = messages.length > 0 && messages[0].role !== "user" ? messages[0].content : undefined;
   const charImageUrl = imageUrlFromId(character?.image_id);
   const personaImageUrl = imageUrlFromId(persona?.image_id);
@@ -29504,7 +29598,7 @@ function createLumiInterceptors(deps) {
       const dynChatIndexNum = typeof dynChatIndex === "string" && /^-?\d+$/.test(dynChatIndex) ? parseInt(dynChatIndex, 10) - 1 : undefined;
       const dynRole = typeof dynamicMacros?.role === "string" ? dynamicMacros.role : undefined;
       const cachedMessages = getCachedMessages(chatId);
-      const activeLore = getActiveLorebook(chatId);
+      const activeLore = getActiveLorebook(chatId, (await readCachedLocalLore(spindle, chatId, ownerUserId)).map(lumiEntryToRisuLore));
       if (ctx.template.includes("lorebook") || ctx.template.includes("{{#each")) {
         log.trace(`macroInterceptor #${callId}: lorebook entries=${activeLore.length} for chat=${chatId} (tmpl mentions lorebook/each)`);
       }
@@ -29809,18 +29903,31 @@ function createLumiInterceptors(deps) {
   function registerWorldInfoInterceptor() {
     log.info(`[decorators] registerWorldInfoInterceptor wired at boot`);
     spindle.registerWorldInfoInterceptor((ctx) => withMaybeUser(ctx.userId, async () => {
+      const active = activeCardByChat.get(ctx.chatId) ?? (ctx.userId ? await deps.ensureActiveCardForChat(ctx.chatId, null, ctx.userId) : null);
+      if (active && ctx.userId && active.ownerUserId !== ctx.userId)
+        return;
+      const additionalEntries = active && active.card.character_id === ctx.characterId ? readLocalLore(ctx.chatMetadata).map((entry, index) => {
+        const parsed = loreBookSchema.parse(entry);
+        const stateId = parsed.id ?? String(pickHashRand(5555, parsed.content));
+        const mapped = mapLoreBookEntry(parsed, "chat-local", new Map, 0, () => JSON.stringify([stateId, index]), index);
+        return {
+          ...mapped,
+          book_source: "chat",
+          extensions: { ...mapped.extensions, _risu_chat_local: true, _risu_state_id: stateId }
+        };
+      }) : [];
+      ctx = { ...ctx, entries: [...ctx.entries, ...additionalEntries] };
       const hasDecoratorEntries = ctx.entries.some((e) => {
         const stash = e.extensions?.["_risu_decorators"];
         return Array.isArray(stash) && stash.length > 0;
       });
       const selectionEntries = ctx.entries.filter((e) => typeof e.extensions?.["_risu_source_hash"] === "string");
-      const active = activeCardByChat.get(ctx.chatId) ?? (ctx.userId ? await deps.ensureActiveCardForChat(ctx.chatId, null, ctx.userId) : null);
       if (!hasDecoratorEntries && selectionEntries.length === 0 && !active) {
         log.trace(`[decorators] worldInfoInterceptor skip chat=${ctx.chatId}: not a Risu chat, no stamped entries`);
         return;
       }
       const activationOverrides = active && cardDisablesRecursiveWorldInfo(active) ? { disableRecursion: true } : undefined;
-      const runtimePlacements = active ? buildRisuWorldInfoChatPlacements(active, ctx.entries) : new Map;
+      const runtimePlacements = active ? buildRisuWorldInfoChatPlacements(active, ctx.entries, readLocalLore(ctx.chatMetadata)) : new Map;
       log.info(`[decorators] worldInfoInterceptor ENTER chat=${ctx.chatId} entries=${ctx.entries.length}`);
       const verbose = (() => {
         try {
@@ -29921,9 +30028,11 @@ function createLumiInterceptors(deps) {
         const reasons = Object.entries(outcome.reasons).map(([n, c]) => `${n}:${c}`).join(",");
         log.info(`[decorators] chat=${ctx.chatId} entries=${ctx.entries.length} disabled=${outcome.disabled.length} forced=${outcome.forced.length} mutated=${outcome.mutated.length} sticky_writes=${outcome.stickyWrites.length} reasons=[${reasons}]`);
       }
-      if (outcome.disabled.length === 0 && outcome.forced.length === 0 && outcome.mutated.length === 0 && selectionMutations.size === 0 && runtimePlacements.size === 0 && selectionEntries.length === 0 && activationOverrides === undefined)
+      if (outcome.disabled.length === 0 && outcome.forced.length === 0 && outcome.mutated.length === 0 && selectionMutations.size === 0 && runtimePlacements.size === 0 && selectionEntries.length === 0 && activationOverrides === undefined && additionalEntries.length === 0)
         return;
       const result = {};
+      if (additionalEntries.length)
+        result.additionalEntries = additionalEntries;
       if (outcome.disabled.length > 0)
         result.disabled = outcome.disabled;
       if (outcome.forced.length > 0)
@@ -30535,6 +30644,7 @@ function createReadonlyResolver(deps) {
     ]);
     const metadata = chat?.metadata ?? {};
     const mv = metadata.macro_variables ?? {};
+    const lorebook = getActiveLorebook(chatId, readLocalLore(chat?.metadata ?? {}).map(lumiEntryToRisuLore));
     const chatVars = metadata.chat_variables;
     const view = buildRisuChatView({ messages });
     const risuMessages = view.messages.map((m) => ({
@@ -30593,6 +30703,7 @@ function createReadonlyResolver(deps) {
         ...chatVars ? { chat: chatVars } : {}
       },
       legacyMediaFindings: deps.getCachedSettingsSync(userId).legacyMediaFindings,
+      lorebook,
       ...activeCard && deps.modulesByNamespaceFromCard(activeCard) ? { modulesByNamespace: deps.modulesByNamespaceFromCard(activeCard) } : {},
       ...getDecoratorBuffers(chatId)?.positionPt ? { positionPt: getDecoratorBuffers(chatId).positionPt } : {}
     };
@@ -30943,9 +31054,19 @@ function createFrontendLuaBackend(host, bootstrap) {
             value = { entry, state: await readState(call.chatId, call.characterId, userId) };
             break;
           }
-          case "state.write":
-            value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId);
+          case "state.write": {
+            if (call.request.command.kind === "lore.upsertLocal" || call.request.command.kind === "lore.replaceLocal") {
+              await host.runtimeState.read(call.chatId, call.characterId, userId);
+              if (call.request.command.kind === "lore.upsertLocal")
+                await persistLocalLore(host, call.chatId, userId, call.request.command.entry);
+              else
+                await replaceLocalLore(host, call.chatId, userId, call.request.command.entries);
+              const state = await host.runtimeState.read(call.chatId, call.characterId, userId);
+              value = { revision: state.revision, patch: { chat: state.chat }, value: undefined };
+            } else
+              value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId);
             break;
+          }
           case "llm.generate":
             value = await api().llm.generate(call.request.request);
             break;
@@ -32607,15 +32728,15 @@ function createActiveCardLoader(deps) {
           const wbIds = worldBookIdsByCharacter.get(hitCharId) ?? [];
           const lore = await fetchLorebookForCharacter(wbIds, userId, moduleLorebooksForCard(cached.card));
           setActiveLorebook(chatId, hitCharId, lore);
-          log.debug(`ensureActiveCardForChat: lorebook set (hit-fetch) chat=${chatId} char=${hitCharId} books=${wbIds.length} entries=${lore.length}`);
+          log.debug(`ensureActiveCardForChat: lorebook set (hit-fetch) chat=${chatId} char=${hitCharId} books=${wbIds.length} entries=${lore.character.length + lore.modules.length}`);
         } catch (err) {
           log.warn(`ensureActiveCardForChat: lorebook fetch (cache-hit) failed char=${hitCharId}: ${errMsg(err)}`);
-          setActiveLorebook(chatId, hitCharId, []);
+          setActiveLorebook(chatId, hitCharId, { character: [], modules: [] });
         }
       } else {
         const reuse = getActiveLorebookByCharacter(hitCharId);
         setActiveLorebook(chatId, hitCharId, reuse);
-        log.debug(`ensureActiveCardForChat: lorebook set (hit-reuse) chat=${chatId} char=${hitCharId} entries=${reuse.length}`);
+        log.debug(`ensureActiveCardForChat: lorebook set (hit-reuse) chat=${chatId} char=${hitCharId} entries=${reuse.character.length + reuse.modules.length}`);
       }
       log.debug(`ensureActiveCardForChat: cache hit chatId=${chatId} characterId=${cached.card.character_id}`);
       return cached;
@@ -32693,10 +32814,10 @@ function createActiveCardLoader(deps) {
     try {
       const loreEntries = await fetchLorebookForCharacter(allWbIds, userId, moduleLorebooksForCard(card));
       setActiveLorebook(chatId, characterId, loreEntries);
-      log.debug(`ensureActiveCardForChat: lorebook set (miss) chat=${chatId} char=${characterId} books=${allWbIds.length} entries=${loreEntries.length}`);
+      log.debug(`ensureActiveCardForChat: lorebook set (miss) chat=${chatId} char=${characterId} books=${allWbIds.length} entries=${loreEntries.character.length + loreEntries.modules.length}`);
     } catch (err) {
       log.warn(`ensureActiveCardForChat: lorebook fetch failed char=${characterId}: ${errMsg(err)}`);
-      setActiveLorebook(chatId, characterId, []);
+      setActiveLorebook(chatId, characterId, { character: [], modules: [] });
     }
     backfillImageJournalIfMissing(characterId, fetched.character.image_id ?? null, { asset_index: fetched.data.asset_index, emotion_index: fetched.data.emotion_index }, userId);
     setActiveAssetIndexes(chatId, {
@@ -36694,7 +36815,13 @@ var lifecycleHandlers = createLifecycleEventHandlers({
 spindle.on("SETTINGS_UPDATED", userScoped(lifecycleHandlers.SETTINGS_UPDATED));
 spindle.on("CHAT_SWITCHED", userScoped(lifecycleHandlers.CHAT_SWITCHED));
 spindle.on("PERSONA_CHANGED", userScoped(lifecycleHandlers.PERSONA_CHANGED));
-spindle.on("CHAT_CHANGED", userScoped(lifecycleHandlers.CHAT_CHANGED));
+spindle.on("CHAT_CHANGED", userScoped(async (raw, userId) => {
+  const payload = raw;
+  const chatId = payload.chatId ?? payload.chat?.id;
+  if (chatId)
+    invalidateLocalLore(chatId);
+  await lifecycleHandlers.CHAT_CHANGED(raw, userId);
+}));
 spindle.on("MESSAGE_SENT", userScoped(lifecycleHandlers.MESSAGE_SENT));
 spindle.on("GENERATION_STARTED", userScoped(lifecycleHandlers.GENERATION_STARTED));
 spindle.on("GENERATION_ENDED", userScoped(lifecycleHandlers.GENERATION_ENDED));
@@ -36702,7 +36829,13 @@ spindle.on("GENERATION_STOPPED", userScoped(lifecycleHandlers.GENERATION_STOPPED
 spindle.on("MESSAGE_SWIPED", userScoped(lifecycleHandlers.MESSAGE_SWIPED));
 spindle.on("MESSAGE_EDITED", userScoped(lifecycleHandlers.MESSAGE_EDITED));
 spindle.on("MESSAGE_DELETED", userScoped(lifecycleHandlers.MESSAGE_DELETED));
-spindle.on("CHAT_DELETED", userScoped(lifecycleHandlers.CHAT_DELETED));
+spindle.on("CHAT_DELETED", userScoped(async (raw, userId) => {
+  const payload = raw;
+  const chatId = payload.chatId ?? payload.id;
+  if (chatId)
+    invalidateLocalLore(chatId);
+  await lifecycleHandlers.CHAT_DELETED(raw, userId);
+}));
 spindle.on("CHARACTER_DELETED", userScoped(lifecycleHandlers.CHARACTER_DELETED));
 spindle.on("CHARACTER_CREATED", userScoped(lifecycleHandlers.CHARACTER_CREATED));
 spindle.on("CHARACTER_EDITED", userScoped(lifecycleHandlers.CHARACTER_EDITED));

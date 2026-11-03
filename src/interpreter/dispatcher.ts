@@ -143,7 +143,7 @@ export async function dispatchBinding(
       if (flags.varsFlushed) varsFlushed = true;
     }
   }
-  if (!aborted && !ctx.opts.invocationState) await commitInvocation(invocationState, ctx.opts.chatId, binding === 'start');
+  if (!aborted && !ctx.opts.invocationState) await commitInvocation(invocationState, ctx.opts.chatId, binding === 'start', binding !== 'input');
   if (!aborted && varsFlushed) ctx.opts.stateChanged?.('variables');
   return { stopSending: !aborted && stopSending };
 }
@@ -188,6 +188,7 @@ async function runInterpretedTrigger(
     const rt = await makeRisuTriggerRuntime(api, data, scriptNS, {
       ...invocation,
       displayMode: invocation.displayMode,
+      copyCharacter: !invocation.displayMode,
       lowLevelAccess: entry.rtOpts.lowLevelAccess,
       binding: invocation.binding,
       characterId: entry.rtOpts.characterId,

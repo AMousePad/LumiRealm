@@ -380,6 +380,11 @@ export function entryMatchedScanWindow(
   return scanKeysMatch(win, allKeys, /* all */ false);
 }
 
+function stickyIdentity(entry: WorldInfoEntryView): string {
+  const sourceId = entry.extensions?._risu_state_id;
+  return entry.extensions?._risu_chat_local === true && typeof sourceId === 'string' ? sourceId : entry.id;
+}
+
 export function evaluatePreActivationGates(
   entry: WorldInfoEntryView,
   ctx: WorldInfoCtx,
@@ -403,10 +408,10 @@ export function evaluatePreActivationGates(
         result = activateOnlyEveryPredicate(dec.args, ctx);
         break;
       case 'dont_activate_after_match':
-        result = dontActivateAfterMatchPredicate(dec.args, ctx, entry.id);
+        result = dontActivateAfterMatchPredicate(dec.args, ctx, stickyIdentity(entry));
         break;
       case 'keep_activate_after_match':
-        result = keepActivateAfterMatchPredicate(dec.args, ctx, entry.id);
+        result = keepActivateAfterMatchPredicate(dec.args, ctx, stickyIdentity(entry));
         break;
       case 'exclude_keys':
         result = excludeKeysPredicate(dec.args, ctx);
@@ -441,8 +446,9 @@ function computeStickyWrites(
   const wantsDa = decorators.some((d) => d.name === 'dont_activate_after_match');
   if (!wantsKa && !wantsDa) return [];
 
-  const kaSet = wantsKa ? getStickyState(ctx.chatMetadata, 'ka', entry.id) : true;
-  const daSet = wantsDa ? getStickyState(ctx.chatMetadata, 'da', entry.id) : true;
+  const stateId = stickyIdentity(entry);
+  const kaSet = wantsKa ? getStickyState(ctx.chatMetadata, 'ka', stateId) : true;
+  const daSet = wantsDa ? getStickyState(ctx.chatMetadata, 'da', stateId) : true;
   if (kaSet && daSet) return [];
 
   const matched = entryMatchedScanWindow(entry, ctx);
@@ -450,10 +456,10 @@ function computeStickyWrites(
 
   const out: StickyWrite[] = [];
   if (wantsKa && !kaSet) {
-    out.push({ entryId: entry.id, varName: `__internal_ka_${entry.id}`, value: '1' });
+    out.push({ entryId: entry.id, varName: `__internal_ka_${stateId}`, value: '1' });
   }
   if (wantsDa && !daSet) {
-    out.push({ entryId: entry.id, varName: `__internal_da_${entry.id}`, value: '1' });
+    out.push({ entryId: entry.id, varName: `__internal_da_${stateId}`, value: '1' });
   }
   return out;
 }

@@ -425,17 +425,22 @@ function resolveModuleRows(
 export function buildRisuWorldInfoChatPlacements(
   active: ActiveCard,
   entries: readonly WorldInfoInterceptorEntryDTO[],
+  localLore: readonly unknown[] = [],
 ): ReadonlyMap<string, WorldInfoInterceptorPlacementDTO> {
   const plan = sourcePlan(active);
   const placements = new Map<string, WorldInfoInterceptorPlacementDTO>();
+  const localRows = buildModuleRows(localLore, false);
 
   for (const entry of entries) {
-    if (entry.book_source !== 'character') continue;
+    const local = entry.book_source === 'chat' && entry.extensions?._risu_chat_local === true;
+    if (entry.book_source !== 'character' && !local) continue;
     const index = arrayIndexOf(entry);
     if (index === null) continue;
     const moduleId = moduleIdOf(entry);
     let sourceRow: RuntimeSourceRow | undefined;
-    if (moduleId !== null) {
+    if (local) {
+      sourceRow = localRows.get(index);
+    } else if (moduleId !== null) {
       sourceRow = resolveModuleRows(
         plan,
         moduleId,

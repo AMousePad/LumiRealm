@@ -10,6 +10,7 @@ import type { StoredRisuCard } from '../../src/payload/types.js';
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store.js';
 import { resetMacroInterceptorCache } from '../../src/state/macro-interceptor-cache.js';
 import { resetListenEditPreloadCache } from '../../src/interpreter/listenedit-preload.js';
+import { invalidateLocalLore } from '../../src/state/local-lore.js';
 
 interface CapturedHandlers {
   macroInterceptor: ((ctx: unknown) => Promise<unknown>) | null;
@@ -34,6 +35,7 @@ interface SpindleStub {
 }
 
 function setupSpindle(stub: SpindleStub, captured: CapturedHandlers): void {
+  invalidateLocalLore();
   (globalThis as unknown as { spindle: unknown }).spindle = {
     userStorage: { getJson: async () => null },
     registerMacroInterceptor(handler: typeof captured.macroInterceptor, priority?: number, options?: Readonly<Record<string, unknown>>) {
@@ -66,7 +68,7 @@ function setupSpindle(stub: SpindleStub, captured: CapturedHandlers): void {
     chats: {
       get: async (chatId: string, userId: string) => {
         stub.chatsGetCalls.push({ chatId, userId });
-        return stub.chatsGetReturn ? stub.chatsGetReturn(chatId, userId) : null;
+        return stub.chatsGetReturn ? stub.chatsGetReturn(chatId, userId) : { id: chatId, metadata: {} };
       },
       update: async (chatId: string, input: { metadata?: unknown }, userId: string) => {
         stub.chatsUpdateCalls.push({ chatId, metadata: input.metadata, userId });

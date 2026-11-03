@@ -226,7 +226,7 @@ test('standalone real writes before and between child calls keep the host baseli
   const api: HostApi = {
     chat: {
       getMessages: async () => structuredClone(messages),
-      getMetadata: async () => ({}),
+      getMetadata: async key => key === 'lumirealm_local_lore' ? [] : {},
       setMetadata: async () => {},
       editMessage: async (_id, content) => {
         edits.push(content);

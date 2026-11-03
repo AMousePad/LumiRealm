@@ -1,3 +1,4 @@
+import { invalidateLocalLore } from './state/local-lore.js';
 import { createHostServices } from './host-services/backend.js';
 declare const spindle: import('lumiverse-spindle-types').SpindleAPI;
 
@@ -1100,7 +1101,12 @@ const lifecycleHandlers = createLifecycleEventHandlers({
 spindle.on('SETTINGS_UPDATED', userScoped(lifecycleHandlers.SETTINGS_UPDATED));
 spindle.on('CHAT_SWITCHED', userScoped(lifecycleHandlers.CHAT_SWITCHED));
 spindle.on('PERSONA_CHANGED', userScoped(lifecycleHandlers.PERSONA_CHANGED));
-spindle.on('CHAT_CHANGED', userScoped(lifecycleHandlers.CHAT_CHANGED));
+spindle.on('CHAT_CHANGED', userScoped(async (raw, userId) => {
+  const payload = raw as { chatId?: string; chat?: { id?: string } };
+  const chatId = payload.chatId ?? payload.chat?.id;
+  if (chatId) invalidateLocalLore(chatId);
+  await lifecycleHandlers.CHAT_CHANGED(raw, userId);
+}));
 spindle.on('MESSAGE_SENT', userScoped(lifecycleHandlers.MESSAGE_SENT));
 spindle.on('GENERATION_STARTED', userScoped(lifecycleHandlers.GENERATION_STARTED));
 spindle.on('GENERATION_ENDED', userScoped(lifecycleHandlers.GENERATION_ENDED));
@@ -1108,7 +1114,12 @@ spindle.on('GENERATION_STOPPED', userScoped(lifecycleHandlers.GENERATION_STOPPED
 spindle.on('MESSAGE_SWIPED', userScoped(lifecycleHandlers.MESSAGE_SWIPED));
 spindle.on('MESSAGE_EDITED', userScoped(lifecycleHandlers.MESSAGE_EDITED));
 spindle.on('MESSAGE_DELETED', userScoped(lifecycleHandlers.MESSAGE_DELETED));
-spindle.on('CHAT_DELETED', userScoped(lifecycleHandlers.CHAT_DELETED));
+spindle.on('CHAT_DELETED', userScoped(async (raw, userId) => {
+  const payload = raw as { chatId?: string; id?: string };
+  const chatId = payload.chatId ?? payload.id;
+  if (chatId) invalidateLocalLore(chatId);
+  await lifecycleHandlers.CHAT_DELETED(raw, userId);
+}));
 spindle.on('CHARACTER_DELETED', userScoped(lifecycleHandlers.CHARACTER_DELETED));
 spindle.on('CHARACTER_CREATED', userScoped(lifecycleHandlers.CHARACTER_CREATED));
 spindle.on('CHARACTER_EDITED', userScoped(lifecycleHandlers.CHARACTER_EDITED));

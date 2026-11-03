@@ -25,6 +25,8 @@ export interface RuntimeStatePatch {
 }
 export interface RuntimeStateWrite { revision: StateRevision; value: unknown; patch: RuntimeStatePatch }
 export type RuntimeStateCommand =
+  | { kind: 'lore.upsertLocal'; entry: import('../core/schemas/lorebook.js').LoreBook }
+  | { kind: 'lore.replaceLocal'; entries: readonly import('../core/schemas/lorebook.js').LoreBook[] }
   | { kind: 'chat.metadata'; key: string; value: unknown }
   | { kind: 'chat.variables'; values: Record<string, string | null> }
   | { kind: 'message.edit'; id: string; content: string }

@@ -7,6 +7,7 @@ import { makeSpindleHost } from '../interpreter/spindle-host.js';
 import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { createCharacterLoreEntry } from '../state/character-lorebook.js';
+import { persistLocalLore, replaceLocalLore, type LocalLoreHost } from '../state/local-lore.js';
 
 export interface FrontendLuaHostContract {
   runtimeState: {
@@ -59,7 +60,16 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
             value = { entry, state: await readState(call.chatId, call.characterId, userId) };
             break;
           }
-          case 'state.write': value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId); break;
+          case 'state.write': {
+            if (call.request.command.kind === 'lore.upsertLocal' || call.request.command.kind === 'lore.replaceLocal') {
+              await host.runtimeState.read(call.chatId, call.characterId, userId);
+              if (call.request.command.kind === 'lore.upsertLocal') await persistLocalLore(host as typeof host & LocalLoreHost, call.chatId, userId, call.request.command.entry);
+              else await replaceLocalLore(host as typeof host & LocalLoreHost, call.chatId, userId, call.request.command.entries);
+              const state = await host.runtimeState.read(call.chatId, call.characterId, userId);
+              value = { revision: state.revision, patch: { chat: state.chat }, value: undefined };
+            } else value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId);
+            break;
+          }
           case 'llm.generate': value = await api().llm!.generate(call.request.request); break;
           case 'connections.list': value = await api().llm!.listConnections!(); break;
           case 'tokens.count': value = await api().tokens!.count(call.request.text); break;

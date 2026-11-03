@@ -18,6 +18,7 @@ test('explicit frontend context reaches binding, manual, and nested triggers wit
     characters: { get: unexpected, update: unexpected },
   };
   const opts: TriggerRuntimeOpts = {
+    localLore: { get: () => [], upsert: unexpected },
     chatId: 'chat', characterId: 'character',
     preloaded: { varsCache: {}, globalVars: {}, scriptstateDefaults: {}, messagesRaw: [], lorebook: { entries: [], primaryBookId: null },
       luaState: { character: { id: 'character', name: 'Local' }, persona: null, authorsNote: '' } },

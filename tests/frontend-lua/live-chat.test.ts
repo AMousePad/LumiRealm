@@ -18,6 +18,7 @@ function fixture() {
     characters: { get: forbidden, update: forbidden },
   };
   const opts = {
+    localLore: { get: () => [], upsert: forbidden },
     chatId: 'chat', characterId: 'character', binding: 'manual',
     luaChat: { messages, firstMessage: 'greeting' },
     preloaded: { varsCache: {}, globalVars: {}, messagesRaw: messages, lorebook: { entries: [], primaryBookId: null },
