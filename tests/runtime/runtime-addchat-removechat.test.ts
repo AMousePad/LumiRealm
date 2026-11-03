@@ -13,7 +13,7 @@ import type { HostApi, ScriptNS, DispatchData, HostMessage } from '../../src/int
 interface MockChat {
   sends: { content: string; role: string; id: string; beforeId?: string }[];
   deletes: string[];
-  edits?: { id: string; content: string; role?: string }[];
+  edits?: { id: string; content: string | undefined; role?: string }[];
   metadata?: Map<string, unknown>;
 }
 
@@ -27,7 +27,7 @@ function makeMockHostApi(initial: HostMessage[], chat: MockChat): HostApi {
         chat.sends.push({ content, role: opts?.role ?? 'user', id, ...(opts?.beforeId ? { beforeId: opts.beforeId } : {}) });
         return { id };
       },
-      editMessage: async (id: string, content: string, opts?: Parameters<HostApi['chat']['editMessage']>[2]) => { (chat.edits ??= []).push({ id, content, ...(opts?.role ? { role: opts.role } : {}) }); },
+      editMessage: async (id: string, content: string | undefined, opts?: Parameters<HostApi['chat']['editMessage']>[2]) => { (chat.edits ??= []).push({ id, content, ...(opts?.role ? { role: opts.role } : {}) }); },
       deleteMessage: async (id: string) => { chat.deletes.push(id); },
       getMetadata: async (key: string) => chat.metadata?.get(key),
       setMetadata: async (key: string, value: unknown) => { chat.metadata?.set(key, value); },
@@ -155,7 +155,7 @@ describe('runtime setFullChat persistence', () => {
 
     expect(chat.deletes).toEqual([]);
     expect(chat.sends).toEqual([]);
-    expect(chat.edits).toEqual([{ id: 'm-user', role: 'assistant', content: 'hello' }]);
+    expect(chat.edits).toEqual([{ id: 'm-user', role: 'assistant', content: undefined }]);
   });
 
   test('insertChat persists the inserted row at the requested position', async () => {

@@ -76,13 +76,13 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     return { id: created.id };
   }
 
-  async function editMessage(id: string, content: string, opts?: Parameters<HostApi['chat']['editMessage']>[2]): Promise<void> {
+  async function editMessage(id: string, content: string | undefined, opts?: Parameters<HostApi['chat']['editMessage']>[2]): Promise<void> {
     if (opts?.role !== undefined || opts?.createdAt !== undefined) {
-      await writeMessage({ kind: 'message.edit', id, content, ...(opts.role !== undefined ? { role: opts.role } : {}),
+      await writeMessage({ kind: 'message.edit', id, ...(content !== undefined ? { content } : {}), ...(opts.role !== undefined ? { role: opts.role } : {}),
         ...(opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}) });
       return;
     }
-    await spindle.chat.updateMessage(chatId, id, { content });
+    await spindle.chat.updateMessage(chatId, id, content !== undefined ? { content } : {});
   }
 
   async function deleteMessage(id: string): Promise<void> {

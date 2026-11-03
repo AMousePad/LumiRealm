@@ -25,10 +25,10 @@ async function run(sources: TriggerScript[], initial: Record<string, string> = {
       getMessages: async () => structuredClone(messages),
       getMetadata: async key => structuredClone(metadata[key]),
       setMetadata: async (key, value) => { metadata[key] = structuredClone(value); },
-      editMessage: async (id, content) => {
+      editMessage: async (id, content, options) => {
         mutations.push('edit');
         const index = messages.findIndex(message => message.id === id);
-        messages[index] = { ...messages[index]!, content };
+        messages[index] = { ...messages[index]!, ...(content !== undefined ? { content } : {}), ...options };
       },
       deleteMessage: async id => { mutations.push('delete'); messages.splice(messages.findIndex(message => message.id === id), 1); },
       sendMessage: async (content, options) => {
@@ -229,8 +229,7 @@ test('standalone real writes before and between child calls keep the host baseli
       getMetadata: async key => key === 'lumirealm_local_lore' ? [] : {},
       setMetadata: async () => {},
       editMessage: async (_id, content) => {
-        edits.push(content);
-        messages[0] = { ...messages[0]!, content };
+        if (content !== undefined) { edits.push(content); messages[0] = { ...messages[0]!, content }; }
       },
       deleteMessage: async () => { throw new Error('Unexpected deletion'); },
       sendMessage: async () => { throw new Error('Unexpected send'); },

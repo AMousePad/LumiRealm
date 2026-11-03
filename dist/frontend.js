@@ -18456,14 +18456,15 @@ function initializeInvocation(state, api, beforeEdit) {
     api: { ...api, chat: {
       ...api.chat,
       editMessage: async (id, content, options) => {
-        beforeEdit?.(id, content);
+        if (content !== undefined)
+          beforeEdit?.(id, content);
         await api.chat.editMessage(id, content, options);
         const messagesCache = state.live.messagesCache;
         if (!messagesCache)
           return;
         const index = messagesCache.findIndex((message) => message.id === id);
         if (index >= 0)
-          messagesCache[index] = { ...messagesCache[index], content, ...options };
+          messagesCache[index] = { ...messagesCache[index], ...content !== undefined ? { content } : {}, ...options };
       },
       deleteMessage: async (id) => {
         await api.chat.deleteMessage(id);
@@ -18578,8 +18579,11 @@ async function commitInvocation(state, chatId, injectPrompts = false, adoptLocal
         ...anchors[index] ? { beforeId: anchors[index] } : {}
       });
       message.id = result.id;
-    } else if (previous.content !== message.content || previous.role !== message.role) {
-      await live.api.chat.editMessage(message.id, message.content, previous.role !== message.role ? { role: message.role } : undefined);
+    } else if (previous.content !== message.content || previous.role !== message.role || (previous.createdAt ?? 0) !== (message.createdAt ?? 0)) {
+      await live.api.chat.editMessage(message.id, previous.content !== message.content ? message.content : undefined, {
+        ...previous.role !== message.role ? { role: message.role } : {},
+        ...(previous.createdAt ?? 0) !== (message.createdAt ?? 0) ? { createdAt: message.createdAt ?? 0 } : {}
+      });
     }
   }
   if (injectPrompts && !state.stopSending) {
@@ -18927,7 +18931,10 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           rememberOurWrite(portalChatId, id, next.content);
         } catch {}
       }
-      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content, previous.role !== next.role ? { role: next.role } : undefined);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, previous.content !== next.content ? next.content : undefined, {
+        ...previous.role !== next.role ? { role: next.role } : {},
+        ...(previous.createdAt ?? 0) !== (next.createdAt ?? 0) ? { createdAt: next.createdAt ?? 0 } : {}
+      });
     } catch (err) {
       _logSetFullChat.warn(`edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -18951,11 +18958,11 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     for (let i = 0;i < stablePrefixLength; i++) {
       const oldEntry = previous[i];
       const wanted = desired[i];
-      if (oldEntry.content === wanted.content) {
+      if (oldEntry.content === wanted.content && (oldEntry.createdAt ?? 0) === 0) {
         next.push(oldEntry);
         continue;
       }
-      const replacement = { ...oldEntry, content: wanted.content };
+      const replacement = { ...oldEntry, content: wanted.content, createdAt: 0 };
       inheritPendingSend(oldEntry, replacement);
       edits.push({ previous: oldEntry, next: replacement });
       next.push(replacement);
@@ -22926,7 +22933,8 @@ class FrontendRuntimeState {
       case "message.edit":
         this.record(patch, "message", command.id, {
           ...command.content !== undefined ? { content: command.content } : {},
-          ...command.role !== undefined ? { role: command.role } : {}
+          ...command.role !== undefined ? { role: command.role } : {},
+          ...command.ownMetadata?.luaMessageTime !== undefined ? { createdAt: command.ownMetadata.luaMessageTime } : {}
         });
         break;
       case "message.delete":
@@ -23159,7 +23167,7 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
       await state.write({
         kind: "message.edit",
         id,
-        content,
+        ...content !== undefined ? { content } : {},
         ...options?.role !== undefined ? { role: options.role } : {},
         ...options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}
       }, optimistic);

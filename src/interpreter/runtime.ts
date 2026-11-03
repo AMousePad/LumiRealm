@@ -490,8 +490,10 @@ export async function makeRisuTriggerRuntime(
       if (rememberOurWrite && portalChatId) {
         try { rememberOurWrite(portalChatId, id, next.content); } catch { /* */ }
       }
-      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, next.content,
-        previous.role !== next.role ? { role: next.role } : undefined);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, previous.content !== next.content ? next.content : undefined, {
+        ...(previous.role !== next.role ? { role: next.role } : {}),
+        ...((previous.createdAt ?? 0) !== (next.createdAt ?? 0) ? { createdAt: next.createdAt ?? 0 } : {}),
+      });
     } catch (err) {
       _logSetFullChat.warn(
         `edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`,
@@ -522,11 +524,11 @@ export async function makeRisuTriggerRuntime(
     for (let i = 0; i < stablePrefixLength; i++) {
       const oldEntry = previous[i]!;
       const wanted = desired[i]!;
-      if (oldEntry.content === wanted.content) {
+      if (oldEntry.content === wanted.content && (oldEntry.createdAt ?? 0) === 0) {
         next.push(oldEntry);
         continue;
       }
-      const replacement: HostMessage = { ...oldEntry, content: wanted.content };
+      const replacement: HostMessage = { ...oldEntry, content: wanted.content, createdAt: 0 };
       inheritPendingSend(oldEntry, replacement);
       edits.push({ previous: oldEntry, next: replacement });
       next.push(replacement);

@@ -36,7 +36,7 @@ async function run(body: string, staged: boolean) {
         calls.push(`edit:${id}`);
         const index = rows.findIndex(row => row.id === id);
         expect(index).toBeGreaterThanOrEqual(0);
-        rows[index] = { ...rows[index]!, content, ...(options?.role ? { role: options.role } : {}) };
+        rows[index] = { ...rows[index]!, ...(content !== undefined ? { content } : {}), ...options };
       },
       deleteMessage: async id => {
         calls.push(`delete:${id}`);

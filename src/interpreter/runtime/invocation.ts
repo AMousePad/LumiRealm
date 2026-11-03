@@ -34,12 +34,12 @@ export function initializeInvocation(
     api: { ...api, chat: {
       ...api.chat,
       editMessage: async (id, content, options) => {
-        beforeEdit?.(id, content);
+        if (content !== undefined) beforeEdit?.(id, content);
         await api.chat.editMessage(id, content, options);
         const messagesCache = state.live!.messagesCache;
         if (!messagesCache) return;
         const index = messagesCache.findIndex(message => message.id === id);
-        if (index >= 0) messagesCache[index] = { ...messagesCache[index]!, content, ...options };
+        if (index >= 0) messagesCache[index] = { ...messagesCache[index]!, ...(content !== undefined ? { content } : {}), ...options };
       },
       deleteMessage: async id => {
         await api.chat.deleteMessage(id);
@@ -142,9 +142,11 @@ export async function commitInvocation(state: TriggerInvocationState, chatId?: s
       const result = await live.api.chat.sendMessage(message.content, { role: message.role, createdAt: message.createdAt ?? 0,
         ...(anchors[index] ? { beforeId: anchors[index] } : {}) });
       (message as { id: string }).id = result.id;
-    } else if (previous.content !== message.content || previous.role !== message.role) {
-      await live.api.chat.editMessage(message.id, message.content,
-        previous.role !== message.role ? { role: message.role } : undefined);
+    } else if (previous.content !== message.content || previous.role !== message.role || (previous.createdAt ?? 0) !== (message.createdAt ?? 0)) {
+      await live.api.chat.editMessage(message.id, previous.content !== message.content ? message.content : undefined, {
+        ...(previous.role !== message.role ? { role: message.role } : {}),
+        ...((previous.createdAt ?? 0) !== (message.createdAt ?? 0) ? { createdAt: message.createdAt ?? 0 } : {}),
+      });
     }
   }
   if (injectPrompts && !state.stopSending) {

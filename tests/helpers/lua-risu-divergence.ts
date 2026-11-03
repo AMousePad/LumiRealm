@@ -40,7 +40,7 @@ export function makeLuaDivergenceHost() {
       editMessage: async (id, content, options) => {
         const index = messages.findIndex(message => message.id === id);
         if (index < 0) throw new Error('Message does not exist');
-        messages[index] = { ...messages[index]!, content, ...options };
+        messages[index] = { ...messages[index]!, ...(content !== undefined ? { content } : {}), ...options };
       },
       deleteMessage: async id => {
         const index = messages.findIndex(message => message.id === id);

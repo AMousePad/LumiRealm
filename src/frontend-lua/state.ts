@@ -171,6 +171,8 @@ export class FrontendRuntimeState {
       case 'persona.update': this.record(patch, 'persona', '', command.patch); break;
       case 'message.edit': this.record(patch, 'message', command.id, {
         ...(command.content !== undefined ? { content: command.content } : {}), ...(command.role !== undefined ? { role: command.role } : {}),
+        ...((command.ownMetadata as { luaMessageTime?: number } | undefined)?.luaMessageTime !== undefined
+          ? { createdAt: (command.ownMetadata as { luaMessageTime: number }).luaMessageTime } : {}),
       }); break;
       case 'message.delete': this.record(patch, 'message', command.id, { present: false }); break;
       case 'message.create': {

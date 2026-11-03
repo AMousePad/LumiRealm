@@ -127,7 +127,7 @@ test('a failed replacement does not hide an earlier frontend persistence failure
     characterId: 'test-character', chatId: 'test-chat', binding: 'start',
     preloaded: f.host.preloaded, templateContext: basicTriggerContext,
     luaChat: state.luaChat({ ...f.host.api.chat, async editMessage(id, content) {
-      await state.write({ kind: 'message.edit', id, content }, false);
+      await state.write({ kind: 'message.edit', id, ...(content !== undefined ? { content } : {}) }, false);
     } }),
   });
   expect(await runtime.runLua(`function onStart(id)

@@ -23,7 +23,7 @@ function makeMockApi(messages: HostMessage[] = []): { api: HostApi; state: MockA
       getMessages: async () => state.messages,
       sendMessage: async () => ({ id: 'm' }),
       editMessage: async (id, content) => {
-        state.edits.push({ id, content });
+        if (content !== undefined) state.edits.push({ id, content });
       },
       deleteMessage: async () => {},
       getMetadata: async () => null,

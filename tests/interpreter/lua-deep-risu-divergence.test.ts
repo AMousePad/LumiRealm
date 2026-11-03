@@ -29,7 +29,7 @@ for (const [name, body, expected] of [
   ['role edits preserve timestamps', "setChatRole(id,0,'char');return getChat(id,0).time..'|'..getChat(id,1).time", '1700000000000|1700000005000'],
   ['insertion preserves shifted timestamps', "insertChat(id,0,'user','Inserted');return getChat(id,1).time", 1700000000000],
 ] as const) {
-  (name === 'full replacement removes timestamps' ? divergence : test)(name, async () => {
+  test(name, async () => {
     const rt = await runtime();
     const result = await rt.runLua(`function onStart(id) ${body} end`);
     await rt.flush();

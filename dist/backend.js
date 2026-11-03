@@ -28387,13 +28387,13 @@ function makeSpindleHost(ctx) {
       await writeMessage({
         kind: "message.edit",
         id,
-        content,
+        ...content !== undefined ? { content } : {},
         ...opts.role !== undefined ? { role: opts.role } : {},
         ...opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}
       });
       return;
     }
-    await spindle.chat.updateMessage(chatId, id, { content });
+    await spindle.chat.updateMessage(chatId, id, content !== undefined ? { content } : {});
   }
   async function deleteMessage(id) {
     await spindle.chat.deleteMessage(chatId, id);

@@ -14,7 +14,7 @@ function fixture() {
   const api: HostApi = {
     chat: { getMessages: forbidden, getMetadata: forbidden, setMetadata: forbidden,
       sendMessage: forbidden, deleteMessage: forbidden, inject: forbidden,
-      editMessage: async (_id, text) => { edits.push(text); } },
+      editMessage: async (_id, text) => { if (text !== undefined) edits.push(text); } },
     characters: { get: forbidden, update: forbidden },
   };
   const opts = {
@@ -51,7 +51,7 @@ test('a button mutation is visible to another runtime before persistence complet
   const { messages, edits, api, opts } = fixture();
   const entered = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
-  api.chat.editMessage = async (_id, text) => { entered.resolve(); await released.promise; edits.push(text); };
+  api.chat.editMessage = async (_id, text) => { entered.resolve(); await released.promise; if (text !== undefined) edits.push(text); };
   const script = makeDispatcherScriptNS(execute);
   const runtime = await makeRisuTriggerRuntime(api, {}, script, opts);
   const pending = runtime.runLua('function onButtonClick(id) setChat(id,0,"local") end');
