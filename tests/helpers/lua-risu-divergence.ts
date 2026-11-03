@@ -34,13 +34,14 @@ export function makeLuaDivergenceHost() {
         const id = `sent-${messages.length}`;
         const at = options?.beforeId ? messages.findIndex(row => row.id === options.beforeId) : -1;
         messages.splice(at < 0 ? messages.length : at, 0, { id, role: options?.role ?? 'assistant', content,
+          ...(options?.luaData ? { luaData: options.luaData } : {}),
           ...(options?.createdAt !== undefined ? { createdAt: options.createdAt } : {}) });
         return { id };
       },
       editMessage: async (id, content, options) => {
         const index = messages.findIndex(message => message.id === id);
         if (index < 0) throw new Error('Message does not exist');
-        messages[index] = { ...messages[index]!, ...(content !== undefined ? { content } : {}), ...options };
+        messages[index] = { ...messages[index]!, ...(content !== undefined ? { content, luaData: null } : {}), ...options };
       },
       deleteMessage: async id => {
         const index = messages.findIndex(message => message.id === id);

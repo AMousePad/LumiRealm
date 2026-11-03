@@ -3,12 +3,14 @@ import type { HostApi, HostMessage, HostCharacter, HostPersona, HostWorldInfoEnt
 import type { DisplaySnapshot } from '../display/snapshot.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 import { hostMessageTime } from '../util/message-time.js';
+import { hostLuaMessageData } from '../util/lua-message-data.js';
 
 export interface RuntimeMessageDto {
   id: string; content: string; role?: string; is_user?: boolean; name?: string;
   index_in_chat: number; created_at?: number; send_date?: number;
   ownMetadata?: unknown;
-  extra?: { greeting_index?: number; spindle_role?: string; spindle_metadata?: Record<string, unknown> };
+  ownContentMetadata?: unknown;
+  extra?: { greeting_index?: number; spindle_role?: string; spindle_metadata?: Record<string, unknown>; spindle_content_metadata?: Record<string, unknown> };
 }
 export interface RuntimeStateDto {
   revision: StateRevision;
@@ -30,9 +32,9 @@ export type RuntimeStateCommand =
   | { kind: 'lore.replaceLocal'; entries: readonly import('../core/schemas/lorebook.js').LoreBook[] }
   | { kind: 'chat.metadata'; key: string; value: unknown }
   | { kind: 'chat.variables'; values: Record<string, string | null> }
-  | { kind: 'message.edit'; id: string; content?: string; role?: string; ownMetadata?: unknown }
+  | { kind: 'message.edit'; id: string; content?: string; role?: string; ownMetadata?: unknown; ownContentMetadata?: unknown }
   | { kind: 'message.delete'; id: string }
-  | { kind: 'message.create'; id: string; content: string; role: string; beforeId?: string; ownMetadata?: unknown }
+  | { kind: 'message.create'; id: string; content: string; role: string; beforeId?: string; ownMetadata?: unknown; ownContentMetadata?: unknown }
   | { kind: 'character.update'; id: string; patch: { name?: string; description?: string; first_mes?: string } }
   | { kind: 'persona.update'; id: string; patch: { name?: string; description?: string } }
   | { kind: 'lore.create'; bookId: string; patch: Record<string, unknown> }
@@ -67,7 +69,8 @@ export type RuntimeService =
   | { kind: 'chat.inject'; id: string; content: string; options?: Parameters<HostApi['chat']['inject']>[2] };
 
 export function runtimeMessage(message: RuntimeMessageDto): HostMessage {
-  return { id: message.id, content: message.content,
+  const luaData = hostLuaMessageData(message);
+  return { id: message.id, content: message.content, ...(luaData ? { luaData } : {}),
     role: message.role ?? (message.is_user ? 'user' : message.extra?.spindle_role === 'system' ? 'system' : 'assistant'),
     createdAt: hostMessageTime(message),
     ...(message.name ? { speaker: message.name } : {}),

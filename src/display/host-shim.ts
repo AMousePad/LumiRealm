@@ -95,6 +95,7 @@ export function withCurrentDisplayMessage(
     id: context.messageId ?? current?.id ?? '',
     role: context.role ?? current?.role ?? (context.isUser ? 'user' : 'assistant'),
     content,
+    ...(current?.luaData && current.content !== content ? { luaData: null } : {}),
   };
   if (
     current?.id === next.id &&

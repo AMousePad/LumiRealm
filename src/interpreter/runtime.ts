@@ -39,6 +39,7 @@ import {
   splitString,
 } from './runtime/strings-regex.js';
 import { toStr } from '../util/coerce.js';
+import { luaMessageData, luaMessageFields } from '../util/lua-message-data.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import { samplersToWire } from '../util/samplers-wire.js';
 import { risuRoleToLumi, lumiRoleToRisu } from '../util/role-coerce.js';
@@ -464,6 +465,7 @@ export async function makeRisuTriggerRuntime(
     try {
       const beforeId = before ? await resolveHostMessageId(before) : undefined;
       const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, { role: entry.role, createdAt: entry.createdAt ?? 0,
+        ...(entry.luaData ? { luaData: entry.luaData } : {}),
         ...(beforeId ? { beforeId } : {}), ...(opts.luaChat?.enqueue ? { messageId: entry.id } : {}) });
       const id = result && typeof result.id === 'string' ? result.id : '';
       if (id) (entry as { id: string }).id = id;
@@ -490,7 +492,9 @@ export async function makeRisuTriggerRuntime(
       if (rememberOurWrite && portalChatId) {
         try { rememberOurWrite(portalChatId, id, next.content); } catch { /* */ }
       }
-      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, previous.content !== next.content ? next.content : undefined, {
+      const dataChanged = luaMessageData(previous) !== luaMessageData(next);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, dataChanged ? next.content : undefined, {
+        ...(dataChanged && next.luaData ? { luaData: next.luaData } : {}),
         ...(previous.role !== next.role ? { role: next.role } : {}),
         ...((previous.createdAt ?? 0) !== (next.createdAt ?? 0) ? { createdAt: next.createdAt ?? 0 } : {}),
       });
@@ -508,7 +512,7 @@ export async function makeRisuTriggerRuntime(
     const desired = parsed.map((raw: { role?: unknown; data?: unknown }) => {
       return {
         role: risuRoleToLumi(toStr(raw.role)),
-        content: toStr(raw.data),
+        ...luaMessageFields(raw.data),
       };
     });
     const overlap = Math.min(previous.length, desired.length);
@@ -524,11 +528,11 @@ export async function makeRisuTriggerRuntime(
     for (let i = 0; i < stablePrefixLength; i++) {
       const oldEntry = previous[i]!;
       const wanted = desired[i]!;
-      if (oldEntry.content === wanted.content && (oldEntry.createdAt ?? 0) === 0) {
+      if (luaMessageData(oldEntry) === luaMessageData(wanted) && (oldEntry.createdAt ?? 0) === 0) {
         next.push(oldEntry);
         continue;
       }
-      const replacement: HostMessage = { ...oldEntry, content: wanted.content, createdAt: 0 };
+      const replacement: HostMessage = { ...oldEntry, ...wanted, createdAt: 0 };
       inheritPendingSend(oldEntry, replacement);
       edits.push({ previous: oldEntry, next: replacement });
       next.push(replacement);
@@ -537,7 +541,7 @@ export async function makeRisuTriggerRuntime(
     const desiredTailStart = roleChange >= 0 ? roleChange : overlap;
     for (let i = desiredTailStart; i < desired.length; i++) {
       const wanted = desired[i]!;
-      const added: HostMessage = { id: '', role: wanted.role, content: wanted.content };
+      const added: HostMessage = { id: '', ...wanted };
       sends.push(added);
       next.push(added);
     }
@@ -940,7 +944,7 @@ export async function makeRisuTriggerRuntime(
         const m = readMessages().at(Number(index));
         // Risu chat.message[i].role is 'user' | 'char' (scriptings.ts:154-165,182).
         // Cards branch on `msg.role == "char"`; surface Lumi roles in Risu shape.
-        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }) : JSON.stringify(null);
+        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }) : JSON.stringify(null);
       },
       setChat: (_id: unknown, index: unknown, value: unknown) => {
         const n = Math.trunc(Number(index)) || 0;
@@ -955,9 +959,10 @@ export async function makeRisuTriggerRuntime(
         }
         // Persist verbatim, Risu parity. Normalizing here stripped card
         // pseudo-markup like <title> and baked the style wrap into storage.
-        const raw = toStr(value);
+        const fields = luaMessageFields(value ?? '');
+        const raw = fields.content;
         const msgId = messagesCache[real]!.id;
-        const prevContent = messagesCache[real]!.content;
+        const prevContent = luaMessageData(messagesCache[real]!);
 
         // No-op write: Lua read the message via `getChat(N)`, did some logic
         // that didn't actually mutate the body, then wrote the same string
@@ -971,7 +976,7 @@ export async function makeRisuTriggerRuntime(
         // intent ("nudge a re-render") is satisfied by the
         // `notifyStateChanged` calls earlier in the same trigger body
         // (reloadDisplay / v2UpdateGUI). The chat row stays unchanged.
-        if (raw === prevContent) {
+        if ((value ?? '') === prevContent) {
           _logSetChat.info(
             `index=${index} (real=${real}) msgId=${msgId} len=${raw.length} ` +
               `chatId=${portalChatId ?? '<none>'} no-op (raw === prev) — ` +
@@ -981,7 +986,7 @@ export async function makeRisuTriggerRuntime(
         }
 
         const oldEntry = messagesCache[real]!;
-        const newEntry = { ...oldEntry, content: raw };
+        const newEntry = { ...oldEntry, ...fields };
         messagesCache[real] = newEntry;
 
         _logSetChat.info(
@@ -1033,9 +1038,10 @@ export async function makeRisuTriggerRuntime(
         if (m) enqueueChatMutation('removeChat', () => persistChatDelete(m));
       },
       addChat: (_id: unknown, role: unknown, value: unknown) => {
-        const raw = toStr(value);
+        const fields = luaMessageFields(value ?? '');
+        const raw = fields.content;
         const lumiRole = risuRoleToLumi(toStr(role));
-        const entry: HostMessage = { id: '', role: lumiRole, content: raw };
+        const entry: HostMessage = { id: '', role: lumiRole, ...fields };
         messagesCache.push(entry);
         _logAddChat.info(
           `role=${toStr(role)} len=${raw.length} chatId=${portalChatId ?? '<none>'}`,
@@ -1049,15 +1055,15 @@ export async function makeRisuTriggerRuntime(
         const n = Math.trunc(Number(index)) || 0;
         const at = n < 0 ? Math.max(0, messagesCache.length + n) : Math.min(n, messagesCache.length);
         const before = messagesCache[at];
-        const entry: HostMessage = { id: '', role: role === 'user' ? 'user' : 'assistant', content: toStr(value), createdAt: 0 };
+        const entry: HostMessage = { id: '', role: role === 'user' ? 'user' : 'assistant', ...luaMessageFields(value ?? ''), createdAt: 0 };
         messagesCache.splice(at, 0, entry);
         trackPendingSend(entry, enqueueChatMutation('insertChat', () => persistChatSend(entry, before)));
       },
-      getChatData: (_id: unknown, index: number) => readMessages().at(index)?.content ?? '',
+      getChatData: (_id: unknown, index: number) => { const message = readMessages().at(index); return message ? luaMessageData(message) ?? '' : ''; },
       getChatRole: (_id: unknown, index: number) => { const message = readMessages().at(index); return message ? lumiRoleToRisu(message.role) : ''; },
-      getRecentChatsMain: (_id: unknown, count: number) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map(m => ({ role: lumiRoleToRisu(m.role), data: m.content, time: m.createdAt ?? 0 }))),
+      getRecentChatsMain: (_id: unknown, count: number) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map(m => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
       getChatLength: (_id: unknown) => readMessages().length,
-      getFullChatMain: (_id: unknown) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }))),
+      getFullChatMain: (_id: unknown) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
       setFullChatMain: (_id: unknown, value: unknown) => { reconcileFullChat(value); },
       sleep: (_id: unknown, ms: number) => new Promise<boolean>(resolve => setTimeout(() => resolve(true), ms)),
       cbs: luaCbs,

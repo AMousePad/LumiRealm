@@ -25,12 +25,14 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
       await state.write({ kind: 'message.create', id, content,
         ...(beforeId ? { beforeId } : {}),
         ...(options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}),
+        ...(options?.luaData ? { ownContentMetadata: options.luaData } : {}),
         role: role === 'sys' || role === 'system' ? 'system' : ['char', 'bot', 'assistant'].includes(role) ? 'assistant' : 'user' }, optimistic);
       return { id };
     },
     async editMessage(id, content, options) { await state.write({ kind: 'message.edit', id, ...(content !== undefined ? { content } : {}),
       ...(options?.role !== undefined ? { role: options.role } : {}),
       ...(options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}),
+      ...(options?.luaData ? { ownContentMetadata: options.luaData } : {}),
     }, optimistic); },
     async deleteMessage(id) { await state.write({ kind: 'message.delete', id }, optimistic); },
   });

@@ -4,6 +4,7 @@ import type { HostMessage, HostWorldInfoEntry } from '../interpreter/host.js';
 import type { RuntimeAtAtAction } from '../interpreter/at-actions-runtime.js';
 import type { CompiledTriggerEntry } from '../interpreter/dispatcher.js';
 import type { TriggerScript } from '../core/schemas/triggerscript.js';
+import { luaMessageData } from '../util/lua-message-data.js';
 
 export interface DisplayLuaTrigger {
   readonly source: TriggerScript;
@@ -143,7 +144,8 @@ export function diffSnapshotVars(prev: DisplaySnapshot, next: DisplaySnapshot): 
 export function snapshotMessagesChanged(prev: DisplaySnapshot, next: DisplaySnapshot): boolean {
   return prev.messagesHost.length !== next.messagesHost.length || prev.messagesHost.some((message, index) => {
     const other = next.messagesHost[index]!;
-    return message.content !== other.content || message.role !== other.role || message.createdAt !== other.createdAt;
+    return message.content !== other.content || message.role !== other.role || message.createdAt !== other.createdAt
+      || luaMessageData(message) !== luaMessageData(other);
   });
 }
 

@@ -21969,6 +21969,12 @@ var _clock = Date.now;
 // src/interpreter/runtime/llm.ts
 var _log2 = makeSafeLogger("runtime.runLLM");
 
+// src/util/lua-message-data.ts
+function hostLuaMessageData(message) {
+  const own = message.ownContentMetadata ?? message.extra?.spindle_content_metadata?.lumirealm;
+  return own && typeof own === "object" && !Array.isArray(own) ? own : null;
+}
+
 // src/state/settings-store.ts
 var SAMPLER_KEYS = [
   "temperature",
@@ -28351,29 +28357,36 @@ function makeSpindleHost(ctx) {
   const uid = userId ?? undefined;
   async function getMessages() {
     const msgs = await spindle.chat.getMessages(chatId);
-    return msgs.map((m) => ({
-      id: m.id,
-      content: typeof m.content === "string" ? m.content : "",
-      role: m.role,
-      createdAt: hostMessageTime(m)
-    }));
+    return msgs.map((m) => {
+      const luaData = hostLuaMessageData(m);
+      return {
+        id: m.id,
+        content: typeof m.content === "string" ? m.content : "",
+        role: m.role,
+        createdAt: hostMessageTime(m),
+        ...luaData ? { luaData } : {}
+      };
+    });
   }
   async function writeMessage(command) {
     const runtime = spindle.runtimeState;
     if (!runtime || !uid || !spindle.contracts?.runtimeMessageMutations)
       throw new RisuCompatUnsupportedError("Lua message mutation", "requires native runtime message mutations");
+    if ("ownContentMetadata" in command && command.ownContentMetadata !== undefined && !spindle.contracts?.runtimeMessageContentMetadata)
+      throw new RisuCompatUnsupportedError("Lua message data", "requires native content metadata");
     return runtime.write(chatId, command, uid);
   }
   async function sendMessage(content, opts) {
     const roleRaw = opts?.role ?? "user";
     const role = roleRaw === "system" || roleRaw === "sys" ? "system" : roleRaw === "assistant" || roleRaw === "char" || roleRaw === "bot" ? "assistant" : "user";
-    if (opts?.beforeId !== undefined || opts?.createdAt !== undefined) {
+    if (opts?.beforeId !== undefined || opts?.createdAt !== undefined || opts?.luaData) {
       const id = opts.messageId ?? crypto.randomUUID();
       await writeMessage({
         kind: "message.create",
         id,
         content,
         role,
+        ...opts.luaData ? { ownContentMetadata: opts.luaData } : {},
         ...opts.beforeId ? { beforeId: opts.beforeId } : {},
         ...opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}
       });
@@ -28383,12 +28396,13 @@ function makeSpindleHost(ctx) {
     return { id: created.id };
   }
   async function editMessage(id, content, opts) {
-    if (opts?.role !== undefined || opts?.createdAt !== undefined) {
+    if (opts?.role !== undefined || opts?.createdAt !== undefined || opts?.luaData) {
       await writeMessage({
         kind: "message.edit",
         id,
         ...content !== undefined ? { content } : {},
         ...opts.role !== undefined ? { role: opts.role } : {},
+        ...opts.luaData ? { ownContentMetadata: opts.luaData } : {},
         ...opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}
       });
       return;
@@ -31046,9 +31060,11 @@ function createFrontendLuaRpc(send) {
 
 // src/frontend-lua/state-contract.ts
 function runtimeMessage(message) {
+  const luaData = hostLuaMessageData(message);
   return {
     id: message.id,
     content: message.content,
+    ...luaData ? { luaData } : {},
     role: message.role ?? (message.is_user ? "user" : message.extra?.spindle_role === "system" ? "system" : "assistant"),
     createdAt: hostMessageTime(message),
     ...message.name ? { speaker: message.name } : {},
@@ -31184,6 +31200,9 @@ function createFrontendLuaBackend(host, bootstrap) {
           }
           case "state.write": {
             const command = call.request.command;
+            if ((command.kind === "message.create" || command.kind === "message.edit") && command.ownContentMetadata !== undefined && !host.contracts?.runtimeMessageContentMetadata) {
+              throw new FrontendLuaUnavailableError("Lua message data requires native content metadata");
+            }
             if ((command.kind === "message.create" || command.kind === "message.edit") && (command.ownMetadata !== undefined || command.kind === "message.edit" && command.role !== undefined || command.kind === "message.create" && command.beforeId !== undefined) && !host.contracts?.runtimeMessageMutations) {
               throw new FrontendLuaUnavailableError("Lua message changes require native runtime message mutations");
             }

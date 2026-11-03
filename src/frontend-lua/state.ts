@@ -170,7 +170,8 @@ export class FrontendRuntimeState {
       case 'character.update': this.record(patch, 'character', '', command.patch); break;
       case 'persona.update': this.record(patch, 'persona', '', command.patch); break;
       case 'message.edit': this.record(patch, 'message', command.id, {
-        ...(command.content !== undefined ? { content: command.content } : {}), ...(command.role !== undefined ? { role: command.role } : {}),
+        ...(command.content !== undefined ? { content: command.content, luaData: undefined } : {}), ...(command.role !== undefined ? { role: command.role } : {}),
+        ...(command.ownContentMetadata !== undefined ? { luaData: command.ownContentMetadata } : {}),
         ...((command.ownMetadata as { luaMessageTime?: number } | undefined)?.luaMessageTime !== undefined
           ? { createdAt: (command.ownMetadata as { luaMessageTime: number }).luaMessageTime } : {}),
       }); break;
@@ -186,6 +187,7 @@ export class FrontendRuntimeState {
         }
         const time = (command.ownMetadata as { luaMessageTime?: number } | undefined)?.luaMessageTime;
         this.record(patch, 'message', command.id, { id: command.id, content: command.content, role: command.role, index, present: true,
+          ...(command.ownContentMetadata !== undefined ? { luaData: command.ownContentMetadata } : {}),
           ...(time !== undefined ? { createdAt: time } : {}) });
         break;
       }
@@ -233,7 +235,10 @@ export class FrontendRuntimeState {
         const id = rows[i]!.id;
         if (!ids.has(id)) continue;
         const next = current.get(id);
-        if (next) rows[i] = { ...next, content: next.content === lastCanonical.get(id)?.content ? rows[i]!.content : next.content };
+        if (next) {
+          const preserveDisplayText = next.content === lastCanonical.get(id)?.content && rows[i]!.content !== next.content;
+          rows[i] = { ...next, ...(preserveDisplayText ? { content: rows[i]!.content, luaData: rows[i]!.luaData ?? null } : {}) };
+        }
         else rows.splice(i, 1);
       }
       for (const id of ids) if (current.has(id) && !rows.some(message => message.id === id)) rows.push({ ...current.get(id)! });

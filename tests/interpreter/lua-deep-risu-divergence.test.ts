@@ -42,7 +42,7 @@ test('invalid full-chat JSON aborts the callback', async () => {
   expect(await rt.runLua(`function onStart(id) setFullChatMain(id,'invalid');return 'continued' end`)).toBeUndefined();
 });
 
-divergence('setChat retains the supplied scalar type in Lua reads', async () => {
+test('setChat retains the supplied scalar type in Lua reads', async () => {
   const rt = await runtime();
   const result = await rt.runLua(`function onStart(id) setChat(id,0,42);return type(getChat(id,0).data) end`);
   await rt.flush();

@@ -15919,6 +15919,18 @@ function primaryFlagAction(actions) {
   return;
 }
 
+// src/util/lua-message-data.ts
+function luaMessageData(message) {
+  return message.luaData ? message.luaData.value : message.content;
+}
+function luaMessageFields(value) {
+  return { content: toStr(value), luaData: typeof value === "string" ? undefined : { value } };
+}
+function hostLuaMessageData(message) {
+  const own = message.ownContentMetadata ?? message.extra?.spindle_content_metadata?.lumirealm;
+  return own && typeof own === "object" && !Array.isArray(own) ? own : null;
+}
+
 // src/display/snapshot.ts
 var snapshots = new Map;
 var snapshotWaiters = new Map;
@@ -15979,7 +15991,7 @@ function diffSnapshotVars(prev, next) {
 function snapshotMessagesChanged(prev, next) {
   return prev.messagesHost.length !== next.messagesHost.length || prev.messagesHost.some((message, index) => {
     const other = next.messagesHost[index];
-    return message.content !== other.content || message.role !== other.role || message.createdAt !== other.createdAt;
+    return message.content !== other.content || message.role !== other.role || message.createdAt !== other.createdAt || luaMessageData(message) !== luaMessageData(other);
   });
 }
 function isDisplayResolutionReady(chatId) {
@@ -17624,7 +17636,7 @@ function makeChatApi(api, state, notifyStateChanged) {
       const pick = state.messagesCache[realIdx];
       if (pick) {
         await api.chat.editMessage(pick.id, toStr(value));
-        state.messagesCache[realIdx] = { ...pick, content: toStr(value) };
+        state.messagesCache[realIdx] = { ...pick, content: toStr(value), luaData: undefined };
       }
     } catch {}
   }
@@ -18464,7 +18476,7 @@ function initializeInvocation(state, api, beforeEdit) {
           return;
         const index = messagesCache.findIndex((message) => message.id === id);
         if (index >= 0)
-          messagesCache[index] = { ...messagesCache[index], ...content !== undefined ? { content } : {}, ...options };
+          messagesCache[index] = { ...messagesCache[index], ...content !== undefined ? { content, luaData: undefined } : {}, ...options };
       },
       deleteMessage: async (id) => {
         await api.chat.deleteMessage(id);
@@ -18484,6 +18496,7 @@ function initializeInvocation(state, api, beforeEdit) {
             id: result.id,
             content,
             role: options?.role ?? "assistant",
+            ...options?.luaData ? { luaData: options.luaData } : {},
             ...options?.createdAt !== undefined ? { createdAt: options.createdAt } : {}
           });
         }
@@ -18576,11 +18589,14 @@ async function commitInvocation(state, chatId, injectPrompts = false, adoptLocal
       const result = await live.api.chat.sendMessage(message.content, {
         role: message.role,
         createdAt: message.createdAt ?? 0,
+        ...message.luaData ? { luaData: message.luaData } : {},
         ...anchors[index] ? { beforeId: anchors[index] } : {}
       });
       message.id = result.id;
-    } else if (previous.content !== message.content || previous.role !== message.role || (previous.createdAt ?? 0) !== (message.createdAt ?? 0)) {
-      await live.api.chat.editMessage(message.id, previous.content !== message.content ? message.content : undefined, {
+    } else if (luaMessageData(previous) !== luaMessageData(message) || previous.role !== message.role || (previous.createdAt ?? 0) !== (message.createdAt ?? 0)) {
+      const dataChanged = luaMessageData(previous) !== luaMessageData(message);
+      await live.api.chat.editMessage(message.id, dataChanged ? message.content : undefined, {
+        ...dataChanged && message.luaData ? { luaData: message.luaData } : {},
         ...previous.role !== message.role ? { role: message.role } : {},
         ...(previous.createdAt ?? 0) !== (message.createdAt ?? 0) ? { createdAt: message.createdAt ?? 0 } : {}
       });
@@ -18902,6 +18918,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, {
         role: entry.role,
         createdAt: entry.createdAt ?? 0,
+        ...entry.luaData ? { luaData: entry.luaData } : {},
         ...beforeId ? { beforeId } : {},
         ...opts.luaChat?.enqueue ? { messageId: entry.id } : {}
       });
@@ -18931,7 +18948,9 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           rememberOurWrite(portalChatId, id, next.content);
         } catch {}
       }
-      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, previous.content !== next.content ? next.content : undefined, {
+      const dataChanged = luaMessageData(previous) !== luaMessageData(next);
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, dataChanged ? next.content : undefined, {
+        ...dataChanged && next.luaData ? { luaData: next.luaData } : {},
         ...previous.role !== next.role ? { role: next.role } : {},
         ...(previous.createdAt ?? 0) !== (next.createdAt ?? 0) ? { createdAt: next.createdAt ?? 0 } : {}
       });
@@ -18945,7 +18964,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     const desired = parsed.map((raw) => {
       return {
         role: risuRoleToLumi(toStr(raw.role)),
-        content: toStr(raw.data)
+        ...luaMessageFields(raw.data)
       };
     });
     const overlap = Math.min(previous.length, desired.length);
@@ -18958,11 +18977,11 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     for (let i = 0;i < stablePrefixLength; i++) {
       const oldEntry = previous[i];
       const wanted = desired[i];
-      if (oldEntry.content === wanted.content && (oldEntry.createdAt ?? 0) === 0) {
+      if (luaMessageData(oldEntry) === luaMessageData(wanted) && (oldEntry.createdAt ?? 0) === 0) {
         next.push(oldEntry);
         continue;
       }
-      const replacement = { ...oldEntry, content: wanted.content, createdAt: 0 };
+      const replacement = { ...oldEntry, ...wanted, createdAt: 0 };
       inheritPendingSend(oldEntry, replacement);
       edits.push({ previous: oldEntry, next: replacement });
       next.push(replacement);
@@ -18970,7 +18989,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     const desiredTailStart = roleChange >= 0 ? roleChange : overlap;
     for (let i = desiredTailStart;i < desired.length; i++) {
       const wanted = desired[i];
-      const added = { id: "", role: wanted.role, content: wanted.content };
+      const added = { id: "", ...wanted };
       sends.push(added);
       next.push(added);
     }
@@ -19393,7 +19412,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       },
       getChatMain: (_id, index) => {
         const m = readMessages().at(Number(index));
-        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }) : JSON.stringify(null);
+        return m ? JSON.stringify({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }) : JSON.stringify(null);
       },
       setChat: (_id, index, value) => {
         const n = Math.trunc(Number(index)) || 0;
@@ -19402,15 +19421,16 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           _logSetChat.warn(`out-of-range index=${index} ` + `(real=${real}, messagesCache.length=${messagesCache.length}): ignored`);
           return;
         }
-        const raw = toStr(value);
+        const fields = luaMessageFields(value ?? "");
+        const raw = fields.content;
         const msgId = messagesCache[real].id;
-        const prevContent = messagesCache[real].content;
-        if (raw === prevContent) {
+        const prevContent = luaMessageData(messagesCache[real]);
+        if ((value ?? "") === prevContent) {
           _logSetChat.info(`index=${index} (real=${real}) msgId=${msgId} len=${raw.length} ` + `chatId=${portalChatId ?? "<none>"} no-op (raw === prev) — ` + `skipped editMessage`);
           return;
         }
         const oldEntry = messagesCache[real];
-        const newEntry = { ...oldEntry, content: raw };
+        const newEntry = { ...oldEntry, ...fields };
         messagesCache[real] = newEntry;
         _logSetChat.info(`index=${index} (real=${real}) msgId=${msgId} ` + `len=${raw.length} chatId=${portalChatId ?? "<none>"}`);
         inheritPendingSend(oldEntry, newEntry);
@@ -19459,9 +19479,10 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
           enqueueChatMutation("removeChat", () => persistChatDelete(m));
       },
       addChat: (_id, role, value) => {
-        const raw = toStr(value);
+        const fields = luaMessageFields(value ?? "");
+        const raw = fields.content;
         const lumiRole = risuRoleToLumi(toStr(role));
-        const entry = { id: "", role: lumiRole, content: raw };
+        const entry = { id: "", role: lumiRole, ...fields };
         messagesCache.push(entry);
         _logAddChat.info(`role=${toStr(role)} len=${raw.length} chatId=${portalChatId ?? "<none>"}`);
         trackPendingSend(entry, enqueueChatMutation("addChat", () => persistChatSend(entry)));
@@ -19470,18 +19491,21 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         const n = Math.trunc(Number(index)) || 0;
         const at = n < 0 ? Math.max(0, messagesCache.length + n) : Math.min(n, messagesCache.length);
         const before = messagesCache[at];
-        const entry = { id: "", role: role === "user" ? "user" : "assistant", content: toStr(value), createdAt: 0 };
+        const entry = { id: "", role: role === "user" ? "user" : "assistant", ...luaMessageFields(value ?? ""), createdAt: 0 };
         messagesCache.splice(at, 0, entry);
         trackPendingSend(entry, enqueueChatMutation("insertChat", () => persistChatSend(entry, before)));
       },
-      getChatData: (_id, index) => readMessages().at(index)?.content ?? "",
+      getChatData: (_id, index) => {
+        const message = readMessages().at(index);
+        return message ? luaMessageData(message) ?? "" : "";
+      },
       getChatRole: (_id, index) => {
         const message = readMessages().at(index);
         return message ? lumiRoleToRisu(message.role) : "";
       },
-      getRecentChatsMain: (_id, count) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map((m) => ({ role: lumiRoleToRisu(m.role), data: m.content, time: m.createdAt ?? 0 }))),
+      getRecentChatsMain: (_id, count) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map((m) => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
       getChatLength: (_id) => readMessages().length,
-      getFullChatMain: (_id) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: toStr(m.content), time: m.createdAt ?? 0 }))),
+      getFullChatMain: (_id) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
       setFullChatMain: (_id, value) => {
         reconcileFullChat(value);
       },
@@ -20299,7 +20323,8 @@ function withCurrentDisplayMessage(snap, context, content) {
     ...current,
     id: context.messageId ?? current?.id ?? "",
     role: context.role ?? current?.role ?? (context.isUser ? "user" : "assistant"),
-    content
+    content,
+    ...current?.luaData && current.content !== content ? { luaData: null } : {}
   };
   if (current?.id === next.id && current.role === next.role && current.content === next.content)
     return snap;
@@ -22687,9 +22712,11 @@ function hostMessageTime(message) {
 
 // src/frontend-lua/state-contract.ts
 function runtimeMessage(message) {
+  const luaData = hostLuaMessageData(message);
   return {
     id: message.id,
     content: message.content,
+    ...luaData ? { luaData } : {},
     role: message.role ?? (message.is_user ? "user" : message.extra?.spindle_role === "system" ? "system" : "assistant"),
     createdAt: hostMessageTime(message),
     ...message.name ? { speaker: message.name } : {},
@@ -22932,8 +22959,9 @@ class FrontendRuntimeState {
         break;
       case "message.edit":
         this.record(patch, "message", command.id, {
-          ...command.content !== undefined ? { content: command.content } : {},
+          ...command.content !== undefined ? { content: command.content, luaData: undefined } : {},
           ...command.role !== undefined ? { role: command.role } : {},
+          ...command.ownContentMetadata !== undefined ? { luaData: command.ownContentMetadata } : {},
           ...command.ownMetadata?.luaMessageTime !== undefined ? { createdAt: command.ownMetadata.luaMessageTime } : {}
         });
         break;
@@ -22958,6 +22986,7 @@ class FrontendRuntimeState {
           role: command.role,
           index,
           present: true,
+          ...command.ownContentMetadata !== undefined ? { luaData: command.ownContentMetadata } : {},
           ...time !== undefined ? { createdAt: time } : {}
         });
         break;
@@ -23017,9 +23046,10 @@ class FrontendRuntimeState {
         if (!ids.has(id))
           continue;
         const next = current.get(id);
-        if (next)
-          rows[i] = { ...next, content: next.content === lastCanonical.get(id)?.content ? rows[i].content : next.content };
-        else
+        if (next) {
+          const preserveDisplayText = next.content === lastCanonical.get(id)?.content && rows[i].content !== next.content;
+          rows[i] = { ...next, ...preserveDisplayText ? { content: rows[i].content, luaData: rows[i].luaData ?? null } : {} };
+        } else
           rows.splice(i, 1);
       }
       for (const id of ids)
@@ -23159,6 +23189,7 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
         content,
         ...beforeId ? { beforeId } : {},
         ...options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {},
+        ...options?.luaData ? { ownContentMetadata: options.luaData } : {},
         role: role === "sys" || role === "system" ? "system" : ["char", "bot", "assistant"].includes(role) ? "assistant" : "user"
       }, optimistic);
       return { id };
@@ -23169,7 +23200,8 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
         id,
         ...content !== undefined ? { content } : {},
         ...options?.role !== undefined ? { role: options.role } : {},
-        ...options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}
+        ...options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {},
+        ...options?.luaData ? { ownContentMetadata: options.luaData } : {}
       }, optimistic);
     },
     async deleteMessage(id) {

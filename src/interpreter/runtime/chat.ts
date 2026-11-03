@@ -154,7 +154,7 @@ export function makeChatApi(
       const pick = state.messagesCache[realIdx];
       if (pick) {
         await api.chat.editMessage(pick.id, toStr(value));
-        state.messagesCache[realIdx] = { ...pick, content: toStr(value) };
+        state.messagesCache[realIdx] = { ...pick, content: toStr(value), luaData: undefined };
       }
     } catch { /* */ }
   }

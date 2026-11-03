@@ -73,6 +73,9 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
           }
           case 'state.write': {
             const command = call.request.command;
+              if ((command.kind === 'message.create' || command.kind === 'message.edit') && command.ownContentMetadata !== undefined && !host.contracts?.runtimeMessageContentMetadata) {
+                throw new FrontendLuaUnavailableError('Lua message data requires native content metadata');
+              }
             if ((command.kind === 'message.create' || command.kind === 'message.edit') &&
               (command.ownMetadata !== undefined || (command.kind === 'message.edit' && command.role !== undefined) ||
                 (command.kind === 'message.create' && command.beforeId !== undefined)) && !host.contracts?.runtimeMessageMutations) {

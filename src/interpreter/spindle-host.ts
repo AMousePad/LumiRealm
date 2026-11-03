@@ -29,6 +29,7 @@ import { awaitAlertDismissal } from './alert-bridge.js';
 import { awaitPickResolution } from './pick-bridge.js';
 import { backendLuaStateScope, hostCharacterState } from './runtime/lua-state.js';
 import { hostMessageTime } from '../util/message-time.js';
+import { hostLuaMessageData } from '../util/lua-message-data.js';
 
 const log = makeSafeLogger('spindle-host.llm.generate');
 
@@ -44,17 +45,21 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
 
   async function getMessages(): Promise<readonly HostMessage[]> {
     const msgs = await spindle.chat.getMessages(chatId);
-    return msgs.map((m) => ({
+    return msgs.map((m) => {
+      const luaData = hostLuaMessageData(m);
+      return {
       id: m.id,
       content: typeof m.content === 'string' ? m.content : '',
       role: m.role,
       createdAt: hostMessageTime(m),
-    }));
+      ...(luaData ? { luaData } : {}),
+    }; });
   }
 
   async function writeMessage(command: import('../frontend-lua/state-contract.js').RuntimeStateCommand) {
     const runtime = (spindle as typeof spindle & { runtimeState?: { write(chatId: string, command: unknown, userId: string): Promise<{ value: unknown }> } }).runtimeState;
     if (!runtime || !uid || !spindle.contracts?.runtimeMessageMutations) throw new RisuCompatUnsupportedError('Lua message mutation', 'requires native runtime message mutations');
+    if ('ownContentMetadata' in command && command.ownContentMetadata !== undefined && !spindle.contracts?.runtimeMessageContentMetadata) throw new RisuCompatUnsupportedError('Lua message data', 'requires native content metadata');
     return runtime.write(chatId, command, uid);
   }
   async function sendMessage(content: string, opts?: Parameters<HostApi['chat']['sendMessage']>[1]): Promise<{ id: string }> {
@@ -65,9 +70,10 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
       roleRaw === 'system' || roleRaw === 'sys' ? 'system'
       : roleRaw === 'assistant' || roleRaw === 'char' || roleRaw === 'bot' ? 'assistant'
       : 'user';
-    if (opts?.beforeId !== undefined || opts?.createdAt !== undefined) {
+    if (opts?.beforeId !== undefined || opts?.createdAt !== undefined || opts?.luaData) {
       const id = opts.messageId ?? crypto.randomUUID();
       await writeMessage({ kind: 'message.create', id, content, role,
+        ...(opts.luaData ? { ownContentMetadata: opts.luaData } : {}),
         ...(opts.beforeId ? { beforeId: opts.beforeId } : {}),
         ...(opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}) });
       return { id };
@@ -77,8 +83,9 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   }
 
   async function editMessage(id: string, content: string | undefined, opts?: Parameters<HostApi['chat']['editMessage']>[2]): Promise<void> {
-    if (opts?.role !== undefined || opts?.createdAt !== undefined) {
+    if (opts?.role !== undefined || opts?.createdAt !== undefined || opts?.luaData) {
       await writeMessage({ kind: 'message.edit', id, ...(content !== undefined ? { content } : {}), ...(opts.role !== undefined ? { role: opts.role } : {}),
+        ...(opts.luaData ? { ownContentMetadata: opts.luaData } : {}),
         ...(opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}) });
       return;
     }

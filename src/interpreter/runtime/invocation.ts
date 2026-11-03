@@ -1,4 +1,5 @@
 import type { HostApi, HostMessage } from '../host.js';
+import { luaMessageData } from '../../util/lua-message-data.js';
 import { saveVars } from './chat-state.js';
 import { createLocalLoreFrame, characterLocalLore, publishLocalLoreFrame, type LocalLoreAccess, type LocalLoreFrame } from './local-lore.js';
 
@@ -39,7 +40,7 @@ export function initializeInvocation(
         const messagesCache = state.live!.messagesCache;
         if (!messagesCache) return;
         const index = messagesCache.findIndex(message => message.id === id);
-        if (index >= 0) messagesCache[index] = { ...messagesCache[index]!, ...(content !== undefined ? { content } : {}), ...options };
+        if (index >= 0) messagesCache[index] = { ...messagesCache[index]!, ...(content !== undefined ? { content, luaData: undefined } : {}), ...options };
       },
       deleteMessage: async id => {
         await api.chat.deleteMessage(id);
@@ -54,6 +55,7 @@ export function initializeInvocation(
         if (rows) {
           const index = options?.beforeId ? rows.findIndex(message => message.id === options.beforeId) : -1;
           rows.splice(index < 0 ? rows.length : index, 0, { id: result.id, content, role: options?.role ?? 'assistant',
+            ...(options?.luaData ? { luaData: options.luaData } : {}),
             ...(options?.createdAt !== undefined ? { createdAt: options.createdAt } : {}) });
         }
         return result;
@@ -140,10 +142,13 @@ export async function commitInvocation(state: TriggerInvocationState, chatId?: s
     const previous = previousById.get(message.id);
     if (!previous) {
       const result = await live.api.chat.sendMessage(message.content, { role: message.role, createdAt: message.createdAt ?? 0,
+        ...(message.luaData ? { luaData: message.luaData } : {}),
         ...(anchors[index] ? { beforeId: anchors[index] } : {}) });
       (message as { id: string }).id = result.id;
-    } else if (previous.content !== message.content || previous.role !== message.role || (previous.createdAt ?? 0) !== (message.createdAt ?? 0)) {
-      await live.api.chat.editMessage(message.id, previous.content !== message.content ? message.content : undefined, {
+    } else if (luaMessageData(previous) !== luaMessageData(message) || previous.role !== message.role || (previous.createdAt ?? 0) !== (message.createdAt ?? 0)) {
+      const dataChanged = luaMessageData(previous) !== luaMessageData(message);
+      await live.api.chat.editMessage(message.id, dataChanged ? message.content : undefined, {
+        ...(dataChanged && message.luaData ? { luaData: message.luaData } : {}),
         ...(previous.role !== message.role ? { role: message.role } : {}),
         ...((previous.createdAt ?? 0) !== (message.createdAt ?? 0) ? { createdAt: message.createdAt ?? 0 } : {}),
       });

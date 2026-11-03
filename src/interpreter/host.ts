@@ -5,6 +5,8 @@
 export interface HostMessage {
   readonly id: string;
   readonly content: string;
+  /** Native text stays a string; Lua can retain a different data type. */
+  readonly luaData?: { readonly value?: unknown } | null | undefined;
   readonly role: 'user' | 'assistant' | 'system' | string;
   /** Milliseconds since the Unix epoch, matching Risu chat.message.time. */
   readonly createdAt?: number;
@@ -81,8 +83,8 @@ export interface HostApi {
   readonly chat: {
     getChatId?: () => string | null;
     getMessages(): Promise<readonly HostMessage[]>;
-    sendMessage(content: string, opts?: { role?: string; messageId?: string; beforeId?: string; createdAt?: number }): Promise<{ id: string }>;
-    editMessage(id: string, content: string | undefined, opts?: { role?: string; createdAt?: number }): Promise<void>;
+    sendMessage(content: string, opts?: { role?: string; messageId?: string; beforeId?: string; createdAt?: number; luaData?: NonNullable<HostMessage['luaData']> | null }): Promise<{ id: string }>;
+    editMessage(id: string, content: string | undefined, opts?: { role?: string; createdAt?: number; luaData?: NonNullable<HostMessage['luaData']> | null }): Promise<void>;
     deleteMessage(id: string): Promise<void>;
     getMetadata(key: string): Promise<unknown>;
     setMetadata(key: string, value: unknown): Promise<void>;

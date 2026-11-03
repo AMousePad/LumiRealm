@@ -17,7 +17,7 @@ export function frontendRuntime(initial?: RuntimeStateDto) {
       { id: 'user', role: 'user', content: 'Hello', index_in_chat: 1, send_date: 1700000000 },
       { id: 'reply', role: 'assistant', content: 'Welcome', index_in_chat: 2, send_date: 1700000005 }], lore: [], globalVariables: {} });
   const writes: RuntimeStateCommand[] = [];
-  let serviceCalls = 0, personaReads = 0;
+  let serviceCalls = 0, personaReads = 0, notifications = 0;
   const event = (patch: RuntimeStatePatch, mutationId?: string) => {
     dto.revision = { ...dto.revision, sequence: dto.revision.sequence + 1 };
     state.apply(dto.revision, structuredClone(patch), mutationId);
@@ -26,9 +26,10 @@ export function frontendRuntime(initial?: RuntimeStateDto) {
     writes.push(structuredClone(command)); let patch: RuntimeStatePatch;
     if (command.kind === 'message.edit') {
       const message = dto.messages.find(row => row.id === command.id)!;
-      if (command.content !== undefined) message.content = command.content;
+      if (command.content !== undefined) { message.content = command.content; if (message.extra) delete message.extra.spindle_content_metadata; }
       if (command.role !== undefined) message.role = command.role;
       if (command.ownMetadata !== undefined) message.extra = { ...message.extra, spindle_metadata: { lumirealm: command.ownMetadata } };
+      if (command.ownContentMetadata !== undefined) message.extra = { ...message.extra, spindle_content_metadata: { lumirealm: command.ownContentMetadata } };
       patch = { message };
     } else if (command.kind === 'message.create') {
       const before = command.beforeId ? dto.messages.find(row => row.id === command.beforeId) : undefined;
@@ -36,7 +37,7 @@ export function frontendRuntime(initial?: RuntimeStateDto) {
       const index = before?.index_in_chat ?? Math.max(-1, ...dto.messages.map(row => row.index_in_chat)) + 1;
       if (before) for (const row of dto.messages.filter(row => row.index_in_chat >= index)) { row.index_in_chat++; event({ message: row }, mutationId); }
       const message = { id: command.id, role: command.role, content: command.content, index_in_chat: index, send_date: 1900000000,
-        extra: { spindle_metadata: { lumirealm: command.ownMetadata } } };
+        extra: { spindle_metadata: { lumirealm: command.ownMetadata }, spindle_content_metadata: { lumirealm: command.ownContentMetadata } } };
       dto.messages.push(message); dto.messages.sort((a, b) => a.index_in_chat - b.index_in_chat); patch = { message };
     } else if (command.kind === 'message.delete') {
       dto.messages = dto.messages.filter(row => row.id !== command.id); patch = { deletedMessageId: command.id };
@@ -45,7 +46,7 @@ export function frontendRuntime(initial?: RuntimeStateDto) {
     } else throw new Error(`Unexpected command: ${command.kind}`);
     event(patch, mutationId);
     return structuredClone({ revision: dto.revision, patch, value: patch.message });
-  }, () => {});
+  }, () => { notifications++; });
   const config = { ...snapshot(''), chatId: 'chat' };
   const entered = Promise.withResolvers<void>(), resume = Promise.withResolvers<string>();
   const host = createFrontendHost(state, () => runtimeDisplaySnapshot(config, state), DEFAULT_SETTINGS, {
@@ -53,7 +54,7 @@ export function frontendRuntime(initial?: RuntimeStateDto) {
     ui: { prompt: async () => { entered.resolve(); return resume.promise; } }, expression: async () => {}, invalidate() {}, synchronize: async () => {},
   }, []);
   host.api.personas!.getActive = async () => { personaReads++; throw new Error('Unrelated persona unavailable'); };
-  return { state, dto, writes, entered, resume, event, counts: () => ({ serviceCalls, personaReads }),
+  return { state, dto, writes, entered, resume, event, counts: () => ({ serviceCalls, personaReads }), notifications: () => notifications,
     async run(code: string, operation: FrontendLuaOperation = { kind: 'edit', mode: 'editInput', value: 'input' }) {
       const source: TriggerScript = { type: 'manual', comment: '', conditions: [], effect: [{ type: 'triggerlua', code }] };
       const result = await runFrontendLuaOperation(operation, { ...host, data: { characterId: 'character' }, compiled: prepareTriggerSources([source], 'character'),
