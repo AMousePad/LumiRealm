@@ -41260,6 +41260,25 @@ function setupSvgRasterizer(opts) {
   };
 }
 
+// src/ui/modal-press-guard.ts
+function guardModalPressRelease(root) {
+  let pressTarget = null;
+  const onPress = (event) => {
+    pressTarget = event.composedPath()[0] ?? null;
+  };
+  const onClick = (event) => {
+    const target = event.target;
+    if (target !== pressTarget && target instanceof Node && target !== root && target.contains(root))
+      event.stopPropagation();
+  };
+  window.addEventListener("pointerdown", onPress, true);
+  window.addEventListener("click", onClick, true);
+  return () => {
+    window.removeEventListener("pointerdown", onPress, true);
+    window.removeEventListener("click", onClick, true);
+  };
+}
+
 // src/realm/messages.ts
 var REALM_HUB_API_URL = "https://sv.risuai.xyz";
 var REALM_DOWNLOAD_URL = "https://realm.risuai.net";
@@ -42189,6 +42208,7 @@ function setupRealmModal(deps) {
       log.error("realm: showModal failed:", err);
       return;
     }
+    const removePressGuard = guardModalPressRelease(modalHandle.root);
     const root = document.createElement("div");
     root.className = "lr-realm-root";
     modalHandle.root.classList.add("lr-realm-modal-root");
@@ -42343,6 +42363,7 @@ function setupRealmModal(deps) {
     };
     modalHandle.onDismiss(() => {
       log.info("realm: modal dismissed");
+      removePressGuard();
       surface = null;
       state.selected = null;
       state.promptOpen = false;

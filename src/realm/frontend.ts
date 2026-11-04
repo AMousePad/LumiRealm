@@ -1,3 +1,4 @@
+import { guardModalPressRelease } from '../ui/modal-press-guard.js';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type {
   RealmCard,
@@ -174,6 +175,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
       return;
     }
 
+    const removePressGuard = guardModalPressRelease(modalHandle.root);
     const root = document.createElement('div');
     root.className = 'lr-realm-root';
     modalHandle.root.classList.add('lr-realm-modal-root');
@@ -331,6 +333,7 @@ export function setupRealmModal(deps: RealmFrontendDeps): RealmFrontendHandle {
 
     modalHandle.onDismiss(() => {
       log.info('realm: modal dismissed');
+      removePressGuard();
       surface = null;
       state.selected = null;
       state.promptOpen = false;
