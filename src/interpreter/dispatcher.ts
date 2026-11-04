@@ -14,6 +14,7 @@ import { interpretTrigger, type InterpConsole } from './trigger-interpreter.js';
 import { withTriggerDepth } from './runtime/als.js';
 import { createTriggerLocalState, type TriggerLocalState } from './runtime/vars.js';
 import { commitInvocation, type TriggerInvocationState } from './runtime/invocation.js';
+import { setCurrentTriggerId } from './current-trigger-id.js';
 
 type ManualRunner = (name: string, ctx: { api: HostApi; data: DispatchData; invocationState?: TriggerInvocationState }) => Promise<{ aborted?: boolean } | void>;
 
@@ -273,6 +274,8 @@ export function registerManualTriggers(
 ): void {
   // Risu also resolves Lua function names that are absent from trigger comments.
   scriptNS.registerManual(async (name, ctx) => {
+    // Risu clears the id when any manual trigger starts and doesn't restore it for the caller.
+    setCurrentTriggerId(null);
     const flags = { stopSending: false, aborted: false };
     await dispatchByManualName(
       { compiledTriggers: compiled, api: ctx.api ?? api, data: ctx.data, scriptNS, opts: { ...opts, binding: 'manual', ...(ctx.invocationState ? { invocationState: ctx.invocationState } : {}) } },
