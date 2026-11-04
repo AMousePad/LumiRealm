@@ -2,7 +2,7 @@ import { setupHostServices } from './host-services/client.js';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
-import { createNativeResetScheduler, createRisuButtonClickHandler, manualActionWillRun, messageReloadDepKey } from './display/risu-button-click.js';
+import { createNativeResetScheduler, createRisuButtonClickHandler, isStreamingMessage, manualActionWillRun, messageReloadDepKey } from './display/risu-button-click.js';
 import { setupFrontendLua } from './frontend-lua/frontend.js';
 import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
@@ -128,6 +128,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       frontendLua.writeback(chatId, vars);
     },
     activationPatterns,
+    // Risu rebuilds a row whose output changed. Resetting before the host patch leaves controls following their new attributes, and a streaming row skips it because each flush would force layout.
+    (messageId) => {
+      if (!isStreamingMessage(document, messageId)) scheduleNativeReset(messageId);
+    },
   );
   cleanups.push(display.registerResolver(displayResolver));
   cleanups.push(setupHostServices(ctx));

@@ -18,6 +18,7 @@ import {
   isRowlessAtAction,
 } from '../interpreter/at-actions-runtime.js';
 import { makeSafeLogger } from '../util/safe-log.js';
+import { fnv1a } from '../state/macro-interceptor-cache.js';
 import {
   getDisplaySnapshot,
   isDisplayResolutionReady,
@@ -337,8 +338,18 @@ async function runApply(
 export function createDisplayResolver(
   writeback?: DisplayWritebackSink,
   activationPatterns: ActivationPatternCache = createActivationPatternCache(),
+  onOutputChanged?: (messageId: string) => void,
 ): SpindleDisplayResolver & { resetScriptCache(): void } {
   const scriptCache = new Map<string, SpindleDisplayResolveResult>();
+  // Signatures, since a retained copy of every message's rendered HTML would outgrow the host's budgeted cache.
+  const outputSignatures = new Map<string, string>();
+  const noteOutput = (messageId: string | undefined, output: string): void => {
+    if (!messageId) return;
+    const signature = `${output.length}:${fnv1a(output)}`;
+    const previous = outputSignatures.get(messageId);
+    outputSignatures.set(messageId, signature);
+    if (previous !== undefined && previous !== signature) onOutputChanged?.(messageId);
+  };
   return {
     finalizeWithoutScripts: true,
     skipFormattingHealing: true,
@@ -483,8 +494,10 @@ export function createDisplayResolver(
 
       log.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? '?'} placement=${args.context.isUser ? 'user' : 'ai'} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
 
+      const content = stripDisplayStyleImports(feContent);
+      noteOutput(args.context.messageId, content);
       return {
-        content: stripDisplayStyleImports(feContent),
+        content,
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile,
       };

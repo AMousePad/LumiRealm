@@ -1,6 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mapRegex } from '../../src/core/mappers/regex.js';
 import { createDisplayResolver } from '../helpers/snapshot-display.js';
+import { createDisplayResolver as baseCreateDisplayResolver } from '../../src/display/resolver.js';
 import { clearDisplaySnapshot, setDisplaySnapshot } from '../../src/display/snapshot.js';
 import type { FeRegexScript } from '../../src/display/regex-apply.js';
 import { snapshot, context } from '../helpers/display-lua-fixture.js';
@@ -263,4 +264,18 @@ test('aborted triggers preserve their writes without issuing a completion GUI re
 
 test('the resolver opts into finalization without display scripts', () => {
   expect(createDisplayResolver().finalizeWithoutScripts).toBe(true);
+});
+
+test('reports a message only when its rendered output changes', async () => {
+  const changed: string[] = [];
+  const resolver = baseCreateDisplayResolver(undefined, undefined, id => changed.push(id));
+  const first = { ...context, messageId: 'first' };
+  const second = { ...context, messageId: 'second' };
+  setDisplaySnapshot(state);
+  await apply(resolver, [], 'one', first);
+  await apply(resolver, [], 'one', first);
+  await apply(resolver, [], 'other', second);
+  expect(changed).toEqual([]);
+  await apply(resolver, [], 'two', first);
+  expect(changed).toEqual(['first']);
 });

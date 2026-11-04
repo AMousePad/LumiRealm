@@ -78,6 +78,13 @@ export function createNativeResetScheduler(root: ParentNode, resetBackground: ()
   };
 }
 
+export function isStreamingMessage(root: ParentNode, messageId: string): boolean {
+  const chat = root.querySelector('[data-component="ChatView"][data-streaming]');
+  if (!chat) return false;
+  const rows = chat.querySelectorAll<HTMLElement>('[data-message-id]');
+  return rows[rows.length - 1]?.dataset['messageId'] === messageId;
+}
+
 function findInPath(path: readonly EventTarget[], selector: string): HTMLElement | null {
   for (const node of path) {
     if (typeof (node as Element).matches === 'function' && (node as Element).matches(selector)) return node as HTMLElement;

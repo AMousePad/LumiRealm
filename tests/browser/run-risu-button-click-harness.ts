@@ -173,6 +173,24 @@ assert.deepEqual([await rowState('a'), await rowState('b')], [[false, false], [f
 assert.equal(await page.evaluate('window.backgroundResets'), 1, 'repeated reloads in one task reset once');
 assert.equal(await checked('#host-a'), true, 'a full reload leaves host controls in the row');
 
+await page.setContent(`<div data-message-id="c"><div data-component="MessageContent"><input type="text" id="patched" value="old"></div></div>`);
+await page.evaluate(`
+  ${handlerSource}
+  window.schedule = createNativeResetScheduler(document, () => {});
+`);
+await page.fill('#patched', 'typed');
+await page.evaluate(`window.schedule('c')`);
+await settle();
+await page.evaluate(`document.getElementById('patched').setAttribute('value', 'new')`);
+assert.equal(await page.evaluate(`document.getElementById('patched').value`), 'new', 'a host patch after the reset reaches a control the user typed in');
+
+await page.setContent(`<div data-component="ChatView"><div data-message-id="old"></div><div data-message-id="new"></div></div>`);
+await page.evaluate(handlerSource);
+assert.equal(await page.evaluate(`isStreamingMessage(document, 'new')`), false, 'no row streams while the chat is idle');
+await page.evaluate(`document.querySelector('[data-component="ChatView"]').setAttribute('data-streaming', 'true')`);
+assert.equal(await page.evaluate(`isStreamingMessage(document, 'new')`), true, 'the newest row streams');
+assert.equal(await page.evaluate(`isStreamingMessage(document, 'old')`), false, 'older rows do not stream');
+
 const mountBuild = await Bun.build({ entrypoints: ['src/bghtml/mount.ts'], target: 'browser', format: 'esm' });
 assert.equal(mountBuild.success, true);
 const mountSource = (await mountBuild.outputs[0]!.text()).replace(/export\s*\{[^}]*\};?/, '');

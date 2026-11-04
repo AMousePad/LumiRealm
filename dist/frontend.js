@@ -15954,6 +15954,18 @@ function primaryFlagAction(actions) {
   return;
 }
 
+// src/state/macro-interceptor-cache.ts
+var log2 = makeSafeLogger("macro-interceptor-cache");
+var cache = new Map;
+function fnv1a(s) {
+  let h = 2166136261;
+  for (let i = 0;i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+  }
+  return h >>> 0;
+}
+
 // src/util/lua-message-data.ts
 function luaMessageData(message) {
   return message.luaData ? message.luaData.value : message.content;
@@ -16323,6 +16335,13 @@ function createNativeResetScheduler(root, resetBackground) {
     else
       ids.add(messageId);
   };
+}
+function isStreamingMessage(root, messageId) {
+  const chat = root.querySelector('[data-component="ChatView"][data-streaming]');
+  if (!chat)
+    return false;
+  const rows = chat.querySelectorAll("[data-message-id]");
+  return rows[rows.length - 1]?.dataset["messageId"] === messageId;
 }
 function findInPath(path, selector) {
   for (const node of path) {
@@ -18478,23 +18497,23 @@ function getDispatchContext() {
 }
 // src/state/recent-flush-cache.ts
 var MAX_CHATS = 100;
-var cache = new Map;
+var cache2 = new Map;
 function rememberRecentFlush(chatId, vars) {
-  if (cache.has(chatId))
-    cache.delete(chatId);
-  cache.set(chatId, { ...vars });
-  if (cache.size > MAX_CHATS) {
-    const oldest = cache.keys().next().value;
+  if (cache2.has(chatId))
+    cache2.delete(chatId);
+  cache2.set(chatId, { ...vars });
+  if (cache2.size > MAX_CHATS) {
+    const oldest = cache2.keys().next().value;
     if (oldest !== undefined)
-      cache.delete(oldest);
+      cache2.delete(oldest);
   }
 }
 function getRecentFlush(chatId) {
-  const entry = cache.get(chatId);
+  const entry = cache2.get(chatId);
   if (!entry)
     return null;
-  cache.delete(chatId);
-  cache.set(chatId, entry);
+  cache2.delete(chatId);
+  cache2.set(chatId, entry);
   return entry;
 }
 
@@ -20217,14 +20236,14 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
 }
 
 // src/interpreter/listenedit-preload.ts
-var log2 = makeSafeLogger("listenEdit.preload");
+var log3 = makeSafeLogger("listenEdit.preload");
 var CACHE_TTL_MS = 150;
-var cache2 = new Map;
+var cache3 = new Map;
 async function preloadForListenEditChain(api, chatId, characterId) {
   if (chatId) {
-    const cached = cache2.get(chatId);
+    const cached = cache3.get(chatId);
     if (cached && Date.now() - cached.ts < CACHE_TTL_MS && cached.characterId === (characterId ?? null) && cached.userId === api.userId) {
-      log2.trace(`cache.hit chat=${chatId} age=${Date.now() - cached.ts}ms ` + `entries=${cached.snapshot.lorebook?.entries.length ?? 0} msgs=${cached.snapshot.messagesRaw?.length ?? 0}`);
+      log3.trace(`cache.hit chat=${chatId} age=${Date.now() - cached.ts}ms ` + `entries=${cached.snapshot.lorebook?.entries.length ?? 0} msgs=${cached.snapshot.messagesRaw?.length ?? 0}`);
       return { ...cached.snapshot, globalVars: await loadGlobalVars(api) };
     }
   }
@@ -20240,19 +20259,19 @@ async function preloadForListenEditChain(api, chatId, characterId) {
   if (varsResult.status === "fulfilled")
     varsCache = varsResult.value;
   else
-    log2.warn(`loadVars failed — ${varsResult.reason?.message ?? varsResult.reason}`);
+    log3.warn(`loadVars failed — ${varsResult.reason?.message ?? varsResult.reason}`);
   let globalVars;
   if (globalVarsResult.status === "rejected" && api.getGlobalVariables)
     throw globalVarsResult.reason;
   if (globalVarsResult.status === "fulfilled")
     globalVars = globalVarsResult.value;
   else
-    log2.warn(`loadGlobalVars failed — ${globalVarsResult.reason?.message ?? globalVarsResult.reason}`);
+    log3.warn(`loadGlobalVars failed — ${globalVarsResult.reason?.message ?? globalVarsResult.reason}`);
   let messagesRaw;
   if (msgsResult.status === "fulfilled")
     messagesRaw = msgsResult.value;
   else
-    log2.warn(`getMessages failed — ${msgsResult.reason?.message ?? msgsResult.reason}`);
+    log3.warn(`getMessages failed — ${msgsResult.reason?.message ?? msgsResult.reason}`);
   let lorebook;
   if (charResult.status === "fulfilled" && charResult.value) {
     const char = charResult.value;
@@ -20270,12 +20289,12 @@ async function preloadForListenEditChain(api, chatId, characterId) {
         }))));
       }
       lorebook = { entries, primaryBookId: bookIds[0] ?? null };
-      log2.debug(`lorebook fetched chat=${chatId ?? "<none>"} books=${bookIds.length} entries=${entries.length} elapsed=${Date.now() - tLore}ms`);
+      log3.debug(`lorebook fetched chat=${chatId ?? "<none>"} books=${bookIds.length} entries=${entries.length} elapsed=${Date.now() - tLore}ms`);
     } else {
       lorebook = { entries: [], primaryBookId: bookIds[0] ?? null };
     }
   } else if (charResult.status === "rejected") {
-    log2.warn(`characters.get failed — ${charResult.reason?.message ?? charResult.reason}`);
+    log3.warn(`characters.get failed — ${charResult.reason?.message ?? charResult.reason}`);
   }
   const snapshot = {
     ...varsCache !== undefined ? { varsCache } : {},
@@ -20284,14 +20303,14 @@ async function preloadForListenEditChain(api, chatId, characterId) {
     ...lorebook !== undefined ? { lorebook } : {}
   };
   if (chatId) {
-    cache2.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null, userId: api.userId });
+    cache3.set(chatId, { snapshot, ts: Date.now(), characterId: characterId ?? null, userId: api.userId });
   }
-  log2.trace(`preload.done chat=${chatId ?? "<none>"} parallel_fetch=${tParallel}ms ` + `total=${Date.now() - t0}ms ` + `vars=${varsCache ? Object.keys(varsCache).length : "<failed>"} ` + `globalVars=${globalVars ? Object.keys(globalVars).length : "<failed>"} ` + `msgs=${messagesRaw?.length ?? "<failed>"} ` + `lore_entries=${lorebook?.entries.length ?? "<failed>"} ` + `cached=${chatId ? "yes" : "no"}`);
+  log3.trace(`preload.done chat=${chatId ?? "<none>"} parallel_fetch=${tParallel}ms ` + `total=${Date.now() - t0}ms ` + `vars=${varsCache ? Object.keys(varsCache).length : "<failed>"} ` + `globalVars=${globalVars ? Object.keys(globalVars).length : "<failed>"} ` + `msgs=${messagesRaw?.length ?? "<failed>"} ` + `lore_entries=${lorebook?.entries.length ?? "<failed>"} ` + `cached=${chatId ? "yes" : "no"}`);
   return snapshot;
 }
 
 // src/interpreter/listen-edit.ts
-var log3 = makeSafeLogger("listenEdit.runChain");
+var log4 = makeSafeLogger("listenEdit.runChain");
 var SLOW_TRIGGER_WARN_MS = 2500;
 var SLOW_CHAIN_WARN_MS = 6000;
 function isPlainRecord(v) {
@@ -20377,7 +20396,7 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
     effApi = rest;
   }
   const chainStart = Date.now();
-  log3.trace(`chain.start mode=${mode} eligible=${eligible.length}/${triggers.length} ` + `value_len=${typeof value === "string" ? value.length : Array.isArray(value) ? value.length : -1} ` + `chatId=${opts.chatId ?? "<none>"} characterId=${opts.characterId ?? "<none>"}`);
+  log4.trace(`chain.start mode=${mode} eligible=${eligible.length}/${triggers.length} ` + `value_len=${typeof value === "string" ? value.length : Array.isArray(value) ? value.length : -1} ` + `chatId=${opts.chatId ?? "<none>"} characterId=${opts.characterId ?? "<none>"}`);
   const tPreload = Date.now();
   const snapshot = opts.preloaded ?? await preloadForListenEditChain(api, opts.chatId, opts.characterId ?? null);
   const preloaded = { ...snapshot, luaState: snapshot.luaState ?? await prepareLuaHostState(api, opts.characterId) };
@@ -20453,22 +20472,22 @@ async function runListenEditChain(triggers, mode, value, meta, api, data, script
       totalApiCalls += apiCalls;
       totalCbsCalls += cbsCalls;
       totalCbsMs += cbsMs;
-      log3.trace(`trigger[${i}] mode=${mode} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `api=${apiMs}ms/${apiCalls} cbs=${cbsMs}ms/${cbsCalls} ` + `other=${otherMs}ms (lua_len=${t.luaCode.length})`);
+      log4.trace(`trigger[${i}] mode=${mode} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `api=${apiMs}ms/${apiCalls} cbs=${cbsMs}ms/${cbsCalls} ` + `other=${otherMs}ms (lua_len=${t.luaCode.length})`);
       if (triggerTotal >= (opts.slowTriggerWarnMs ?? SLOW_TRIGGER_WARN_MS)) {
-        log3.warn(`slow trigger[${i}] mode=${mode} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `api=${apiMs}ms/${apiCalls}calls lua_only=${runLuaMs - apiMs}ms ` + `cbs=${cbsMs}ms/${cbsCalls}calls other=${otherMs}ms ` + `lua_len=${t.luaCode.length} top=[${probe.topApi(3)}] ` + `chatId=${opts.chatId ?? "<none>"}`);
+        log4.warn(`slow trigger[${i}] mode=${mode} elapsed=${triggerTotal}ms ` + `factory=${factoryMs}ms serde=${serdeMs}ms runLua=${runLuaMs}ms ` + `api=${apiMs}ms/${apiCalls}calls lua_only=${runLuaMs - apiMs}ms ` + `cbs=${cbsMs}ms/${cbsCalls}calls other=${otherMs}ms ` + `lua_len=${t.luaCode.length} top=[${probe.topApi(3)}] ` + `chatId=${opts.chatId ?? "<none>"}`);
       }
     } catch (err) {
       if (!(err instanceof LuaChunkError))
         throw err;
-      log3.error(`trigger[${i}] mode=${mode} chunk failed: ${errMsg(err)}; restoring original input`);
+      log4.error(`trigger[${i}] mode=${mode} chunk failed: ${errMsg(err)}; restoring original input`);
       return value;
     }
   }
   const chainTotal = Date.now() - chainStart;
   const chainOtherMs = chainTotal - preloadMs - totalFactoryMs - totalRunLuaMs - totalSerdeMs;
-  log3.trace(`chain.done mode=${mode} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms ` + `factory_sum=${totalFactoryMs}ms runLua_sum=${totalRunLuaMs}ms ` + `api_sum=${totalApiMs}ms/${totalApiCalls} cbs_sum=${totalCbsMs}ms/${totalCbsCalls} ` + `serde_sum=${totalSerdeMs}ms ` + `other=${chainOtherMs}ms ` + `chatId=${opts.chatId ?? "<none>"}`);
+  log4.trace(`chain.done mode=${mode} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms ` + `factory_sum=${totalFactoryMs}ms runLua_sum=${totalRunLuaMs}ms ` + `api_sum=${totalApiMs}ms/${totalApiCalls} cbs_sum=${totalCbsMs}ms/${totalCbsCalls} ` + `serde_sum=${totalSerdeMs}ms ` + `other=${chainOtherMs}ms ` + `chatId=${opts.chatId ?? "<none>"}`);
   if (chainTotal >= (opts.slowChainWarnMs ?? SLOW_CHAIN_WARN_MS)) {
-    log3.warn(`slow chain mode=${mode} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms factory_sum=${totalFactoryMs}ms ` + `runLua_sum=${totalRunLuaMs}ms api_sum=${totalApiMs}ms/${totalApiCalls}calls ` + `cbs_sum=${totalCbsMs}ms/${totalCbsCalls}calls serde_sum=${totalSerdeMs}ms ` + `other=${chainOtherMs}ms chatId=${opts.chatId ?? "<none>"}`);
+    log4.warn(`slow chain mode=${mode} elapsed=${chainTotal}ms eligible=${eligible.length} ` + `preload=${preloadMs}ms factory_sum=${totalFactoryMs}ms ` + `runLua_sum=${totalRunLuaMs}ms api_sum=${totalApiMs}ms/${totalApiCalls}calls ` + `cbs_sum=${totalCbsMs}ms/${totalCbsCalls}calls serde_sum=${totalSerdeMs}ms ` + `other=${chainOtherMs}ms chatId=${opts.chatId ?? "<none>"}`);
   }
   return current;
 }
@@ -21276,6 +21295,7 @@ async function dispatchByManualName(ctx, manualName, onError, outFlags) {
 }
 function registerManualTriggers(scriptNS, compiled, api, opts = {}) {
   scriptNS.registerManual(async (name, ctx) => {
+    setCurrentTriggerId(null);
     const flags = { stopSending: false, aborted: false };
     await dispatchByManualName({ compiledTriggers: compiled, api: ctx.api ?? api, data: ctx.data, scriptNS, opts: { ...opts, binding: "manual", ...ctx.invocationState ? { invocationState: ctx.invocationState } : {} } }, name, (err) => {
       throw err;
@@ -22040,7 +22060,7 @@ async function runEditDisplayAtActions(snap, content, context, actions = snap.at
 }
 
 // src/display/trigger-runner.ts
-var log4 = makeSafeLogger("display-trigger");
+var log5 = makeSafeLogger("display-trigger");
 function formatConsoleArgs(args) {
   return args.map((value) => {
     try {
@@ -22051,10 +22071,10 @@ function formatConsoleArgs(args) {
   }).join(" ").slice(0, 600);
 }
 var triggerConsole = {
-  log: (...args) => log4.info(`console.log: ${formatConsoleArgs(args)}`),
-  warn: (...args) => log4.warn(`console.warn: ${formatConsoleArgs(args)}`),
-  error: (...args) => log4.error(`console.error: ${formatConsoleArgs(args)}`),
-  info: (...args) => log4.info(`console.info: ${formatConsoleArgs(args)}`)
+  log: (...args) => log5.info(`console.log: ${formatConsoleArgs(args)}`),
+  warn: (...args) => log5.warn(`console.warn: ${formatConsoleArgs(args)}`),
+  error: (...args) => log5.error(`console.error: ${formatConsoleArgs(args)}`),
+  info: (...args) => log5.info(`console.info: ${formatConsoleArgs(args)}`)
 };
 async function runDisplayTriggerChain(snap, content) {
   const triggers = selectRestrictedTriggers(snap.luaTriggers.map((entry) => entry.source), "display");
@@ -22094,13 +22114,13 @@ async function runDisplayTriggerChain(snap, content) {
       }
       return { content: runtime.getDisplayState(), ran: true };
     } catch (err) {
-      log4.warn(`display trigger chain failed: ${String(err)}`);
+      log5.warn(`display trigger chain failed: ${String(err)}`);
       return { content, ran: true };
     } finally {
       await runtime.flush();
     }
   } catch (err) {
-    log4.warn(`display trigger runtime failed: ${String(err)}`);
+    log5.warn(`display trigger runtime failed: ${String(err)}`);
     return { content, ran: true };
   } finally {
     await local.flush();
@@ -22310,7 +22330,7 @@ function stripDisplayStyleImports(content) {
 }
 
 // src/display/resolver.ts
-var log5 = makeSafeLogger("display-resolver");
+var log6 = makeSafeLogger("display-resolver");
 function nativeTemplateResolver(snap, context, recorder, preset = false) {
   let variables;
   return (text) => {
@@ -22330,7 +22350,7 @@ async function getSnapshotOrWait(chatId) {
   const ok = await waitForSnapshot(chatId, SNAPSHOT_WAIT_MS);
   if (ok)
     return getDisplaySnapshot(chatId);
-  log5.error(`[FE-DISPLAY] snapshot did not arrive for owned chat=${chatId} within ${SNAPSHOT_WAIT_MS}ms — ` + `failing LOUD (raw content shown). The host must NOT fall back to backend resolution for an owned chat.`);
+  log6.error(`[FE-DISPLAY] snapshot did not arrive for owned chat=${chatId} within ${SNAPSHOT_WAIT_MS}ms — ` + `failing LOUD (raw content shown). The host must NOT fall back to backend resolution for an owned chat.`);
   return;
 }
 function buildInput(snap, content, context) {
@@ -22374,7 +22394,7 @@ function warnActionBinding(scriptId, reason) {
   if (warnedActionBindings.size >= 256)
     warnedActionBindings.clear();
   warnedActionBindings.add(key);
-  log5.warn(`applyScripts: skipped module row=${scriptId}: ${reason}`);
+  log6.warn(`applyScripts: skipped module row=${scriptId}: ${reason}`);
 }
 function scriptApplies(script, context) {
   if (script.disabled === true)
@@ -22452,7 +22472,7 @@ async function runApply(snap, args, recorder, activationPatterns, cache) {
     const result = prepared.get(script.id);
     if (!(result instanceof ActivationPatternError))
       return true;
-    log5.error(`applyScripts: activation input failed for rule=${script.id}: ${String(result)}`);
+    log6.error(`applyScripts: activation input failed for rule=${script.id}: ${String(result)}`);
     return false;
   }), snap.atActions);
   const hasRepeatBack = plan.some((step) => step.kind === "script" && readRegexMatchActions(step.script.metadata).includes("repeat_back"));
@@ -22550,11 +22570,21 @@ async function runApply(snap, args, recorder, activationPatterns, cache) {
     start = end;
   }
   if (ruleMs?.size)
-    log5.debug(`applyScripts.rules chat=${snap.chatId} msg=${args.context.messageId ?? "?"} top=[${formatRuleTimings(ruleMs, 5)}]`);
+    log6.debug(`applyScripts.rules chat=${snap.chatId} msg=${args.context.messageId ?? "?"} top=[${formatRuleTimings(ruleMs, 5)}]`);
   return content;
 }
-function createDisplayResolver(writeback, activationPatterns = createActivationPatternCache()) {
+function createDisplayResolver(writeback, activationPatterns = createActivationPatternCache(), onOutputChanged) {
   const scriptCache = new Map;
+  const outputSignatures = new Map;
+  const noteOutput = (messageId, output) => {
+    if (!messageId)
+      return;
+    const signature = `${output.length}:${fnv1a(output)}`;
+    const previous = outputSignatures.get(messageId);
+    outputSignatures.set(messageId, signature);
+    if (previous !== undefined && previous !== signature)
+      onOutputChanged?.(messageId);
+  };
   return {
     finalizeWithoutScripts: true,
     skipFormattingHealing: true,
@@ -22630,10 +22660,10 @@ function createDisplayResolver(writeback, activationPatterns = createActivationP
         }
         feContent = body;
       } catch (err) {
-        log5.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
+        log6.warn(`resolveBody: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
-      log5.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
+      log6.info(`resolveBody.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} lua=${snap.luaTriggers.length} at=${snap.atActions.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile} touched=${recorder.touched.size}`);
       return {
         content: feContent,
         ...processingState !== undefined ? { processingState } : {},
@@ -22661,7 +22691,7 @@ function createDisplayResolver(writeback, activationPatterns = createActivationP
           cacheable[key] = !recorder.volatile;
         }
       } catch (err) {
-        log5.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Showing raw content.`);
+        log6.warn(`resolveTemplates: runPipeline threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
       return { resolved, touchedVars, cacheable };
@@ -22683,12 +22713,14 @@ function createDisplayResolver(writeback, activationPatterns = createActivationP
           feContent = finalizeDisplayAssets(buildInput(snap, feContent, args.context), recorder);
         }
       } catch (err) {
-        log5.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
+        log6.warn(`applyScripts: threw chat=${chatId}: ${String(err)}. Showing raw content.`);
         return null;
       }
-      log5.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} placement=${args.context.isUser ? "user" : "ai"} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
+      log6.info(`applyScripts.dbg chat=${chatId} msg=${args.context.messageId ?? "?"} placement=${args.context.isUser ? "user" : "ai"} rules=${args.scripts.length} inMarks=[${dbgMarks(args.content)}] outMarks=[${dbgMarks(feContent)}] cacheable=${!recorder.volatile}`);
+      const content = stripDisplayStyleImports(feContent);
+      noteOutput(args.context.messageId, content);
       return {
-        content: stripDisplayStyleImports(feContent),
+        content,
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile
       };
@@ -25269,6 +25301,24 @@ var styles_default = `.risu-compat-drawer {\r
 }\r
 .risu-settings-drawer .rs-btn-primary:hover {\r
   background: var(--lumiverse-primary, rgba(120, 160, 255, 0.4));\r
+}\r
+\r
+.lr-compat-warnings {\r
+  display: flex;\r
+  flex-direction: column;\r
+  gap: 4px;\r
+  margin-bottom: 6px;\r
+}\r
+.lr-compat-warnings[hidden] {\r
+  display: none;\r
+}\r
+.lr-compat-warning {\r
+  font-size: 12px;\r
+  line-height: 1.35;\r
+  padding: 5px 8px;\r
+  border: 1px solid var(--lumiverse-warning, rgba(255, 200, 100, 0.5));\r
+  border-radius: 4px;\r
+  color: var(--lumiverse-warning, rgba(255, 200, 100, 0.9));\r
 }\r
 \r
 .risu-settings-drawer .rs-status {\r
@@ -28298,7 +28348,7 @@ var error_default = DetailedError;
 
 // node_modules/tus-js-client/lib.esm/logger.js
 var isEnabled = false;
-function log6(msg) {
+function log7(msg) {
   if (!isEnabled)
     return;
   console.log(msg);
@@ -29134,9 +29184,9 @@ var BaseUpload = /* @__PURE__ */ function() {
       }
       this.options.fingerprint(file, this.options).then(function(fingerprint) {
         if (fingerprint == null) {
-          log6("No fingerprint was calculated meaning that the upload cannot be stored in the URL storage.");
+          log7("No fingerprint was calculated meaning that the upload cannot be stored in the URL storage.");
         } else {
-          log6("Calculated fingerprint: ".concat(fingerprint));
+          log7("Calculated fingerprint: ".concat(fingerprint));
         }
         _this2._fingerprint = fingerprint;
         if (_this2._source) {
@@ -29241,7 +29291,7 @@ var BaseUpload = /* @__PURE__ */ function() {
           return;
         }
         _this3.url = resolveUrl(_this3.options.endpoint, location2);
-        log6("Created upload at ".concat(_this3.url));
+        log7("Created upload at ".concat(_this3.url));
         _this3._emitSuccess(res);
       })["catch"](function(err) {
         _this3._emitError(err);
@@ -29252,17 +29302,17 @@ var BaseUpload = /* @__PURE__ */ function() {
     value: function _startSingleUpload() {
       this._aborted = false;
       if (this.url != null) {
-        log6("Resuming upload from previous URL: ".concat(this.url));
+        log7("Resuming upload from previous URL: ".concat(this.url));
         this._resumeUpload();
         return;
       }
       if (this.options.uploadUrl != null) {
-        log6("Resuming upload from provided URL: ".concat(this.options.uploadUrl));
+        log7("Resuming upload from provided URL: ".concat(this.options.uploadUrl));
         this.url = this.options.uploadUrl;
         this._resumeUpload();
         return;
       }
-      log6("Creating a new upload");
+      log7("Creating a new upload");
       this._createUpload();
     }
   }, {
@@ -29393,7 +29443,7 @@ var BaseUpload = /* @__PURE__ */ function() {
           return;
         }
         _this6.url = resolveUrl(_this6.options.endpoint, location2);
-        log6("Created upload at ".concat(_this6.url));
+        log7("Created upload at ".concat(_this6.url));
         if (typeof _this6.options.onUploadUrlAvailable === "function") {
           _this6.options.onUploadUrlAvailable();
         }
@@ -39550,6 +39600,54 @@ function groupFlat(flat) {
   return out;
 }
 
+// src/ui/compat-warnings.ts
+var FONT_SCALE_VAR = "--lumiverse-font-scale";
+function isGeckoBrowser(userAgent) {
+  return /\bGecko\/\d/.test(userAgent);
+}
+function compatWarnings(fontScale, userAgent) {
+  const warnings = [];
+  const scale = Number.parseFloat(fontScale);
+  if (Number.isFinite(scale) && Math.abs(scale - 1) > 0.001) {
+    warnings.push("You have changed your font scale. Changing font scale can cause RisuAI text to render wrongly! Be aware.");
+  }
+  if (isGeckoBrowser(userAgent)) {
+    warnings.push("Firefox runs LumiRealm ~100x slower than Chromium based browsers. Please switch.");
+  }
+  return warnings;
+}
+function mountCompatWarnings(parent, before) {
+  const list = document.createElement("div");
+  list.className = "lr-compat-warnings";
+  list.setAttribute("role", "status");
+  parent.insertBefore(list, before);
+  let shown = "";
+  const refresh = () => {
+    const fontScale = getComputedStyle(document.documentElement).getPropertyValue(FONT_SCALE_VAR);
+    const warnings = compatWarnings(fontScale, navigator.userAgent);
+    const next = warnings.join(`
+`);
+    if (next === shown)
+      return;
+    shown = next;
+    list.replaceChildren(...warnings.map((text) => {
+      const item = document.createElement("div");
+      item.className = "lr-compat-warning";
+      item.textContent = text;
+      return item;
+    }));
+    list.hidden = warnings.length === 0;
+  };
+  list.hidden = true;
+  refresh();
+  const observer = new MutationObserver(refresh);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] });
+  return () => {
+    observer.disconnect();
+    list.remove();
+  };
+}
+
 // src/ui/icons/sidebar.svg
 var sidebar_default = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-pyramid-icon lucide-pyramid"><path d="M2.5 16.88a1 1 0 0 1-.32-1.43l9-13.02a1 1 0 0 1 1.64 0l9 13.01a1 1 0 0 1-.32 1.44l-8.51 4.86a2 2 0 0 1-1.98 0Z"/><path d="M12 2v20"/></svg>';
 
@@ -39606,6 +39704,7 @@ function createSidebar(opts) {
   navEl.className = "lr-sidebar-nav";
   navEl.setAttribute("role", "tablist");
   root.appendChild(navEl);
+  const unmountCompatWarnings = mountCompatWarnings(root, navEl);
   const navButtons = new Map;
   for (const sub of SUB_TABS2) {
     const btn = document.createElement("button");
@@ -39870,6 +39969,7 @@ function createSidebar(opts) {
       } catch {}
     }
     panels.clear();
+    unmountCompatWarnings();
     try {
       tab.destroy();
     } catch {}
@@ -40194,7 +40294,7 @@ function changesStyle(record) {
 }
 function rescopeRisuEnvironment(css) {
   return css.replace(/--risu-font-family:\s*Arial,\s*sans-serif,\s*serif;?/g, "").replace(/\.prose-invert\b/g, ":host").replace(/\.prose\b(?!-)/g, ":host").replace(/\.chattext\b/g, ":host").replace(/\.chat-width\b/g, ":host").replace(/:root\b(?!,)/g, ":root,:host").replace(/--FontColorQuote2:\s*(#[0-9a-fA-F]{3,8})/g, "--FontColorQuote2:var(--lumiverse-prose-dialogue,$1)") + `
-:host{font-family:inherit;font-size:inherit;line-height:inherit;overflow:visible !important}
+:host{font-family:inherit;font-size:inherit;line-height:calc(20px * var(--lumiverse-font-scale,1));overflow:visible !important}
 `;
 }
 function setupIslandStyles() {
@@ -43699,7 +43799,10 @@ function setup(ctx) {
   cleanups.push(() => frontendLua.dispose());
   const displayResolver = createDisplayResolver((chatId, vars) => {
     frontendLua.writeback(chatId, vars);
-  }, activationPatterns);
+  }, activationPatterns, (messageId) => {
+    if (!isStreamingMessage(document, messageId))
+      scheduleNativeReset(messageId);
+  });
   cleanups.push(display.registerResolver(displayResolver));
   cleanups.push(setupHostServices(ctx));
   const dumpBubble = () => {
