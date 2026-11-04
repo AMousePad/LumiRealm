@@ -17,6 +17,7 @@ function installBrowser(): Window {
     localStorage: win.localStorage,
     CSSStyleSheet: win.CSSStyleSheet,
     MutationObserver: win.MutationObserver,
+    getComputedStyle: win.getComputedStyle.bind(win),
     navigator: win.navigator,
     location: win.location,
   };

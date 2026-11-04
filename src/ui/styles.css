@@ -1061,6 +1061,24 @@
   background: var(--lumiverse-primary, rgba(120, 160, 255, 0.4));
 }
 
+.lr-compat-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.lr-compat-warnings[hidden] {
+  display: none;
+}
+.lr-compat-warning {
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 5px 8px;
+  border: 1px solid var(--lumiverse-warning, rgba(255, 200, 100, 0.5));
+  border-radius: 4px;
+  color: var(--lumiverse-warning, rgba(255, 200, 100, 0.9));
+}
+
 .risu-settings-drawer .rs-status {
   font-size: 11px;
   color: var(--lumiverse-text-muted, rgba(255, 255, 255, 0.55));

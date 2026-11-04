@@ -7,6 +7,7 @@ import { mountSettingsPanel } from './settings-tab.js';
 import { mountModulesPanel } from './modules-tab.js';
 import { mountViewerPanel } from './viewer-tab.js';
 import { mountTogglesPanel } from './toggles-tab.js';
+import { mountCompatWarnings } from './compat-warnings.js';
 // Logs panel now mounts INSIDE settings-tab's Debug subtab (Phase C);
 // the standalone logs mount on the Settings tab was removed.
 
@@ -114,6 +115,7 @@ export function createSidebar(opts: CreateSidebarOptions): SidebarHandle {
   navEl.className = 'lr-sidebar-nav';
   navEl.setAttribute('role', 'tablist');
   root.appendChild(navEl);
+  const unmountCompatWarnings = mountCompatWarnings(root, navEl);
 
   const navButtons = new Map<SidebarTabId, HTMLButtonElement>();
   for (const sub of SUB_TABS) {
@@ -371,6 +373,7 @@ export function createSidebar(opts: CreateSidebarOptions): SidebarHandle {
       try { handle.destroy(); } catch { /* ignore */ }
     }
     panels.clear();
+    unmountCompatWarnings();
     try { tab.destroy(); } catch { /* ignore */ }
   }
 

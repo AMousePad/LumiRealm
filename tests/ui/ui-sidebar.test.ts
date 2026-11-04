@@ -27,6 +27,8 @@ beforeEach(() => {
   (globalThis as unknown as { document: Document }).document = window.document as unknown as Document;
   (globalThis as unknown as { window: typeof window }).window = window;
   (globalThis as unknown as { HTMLElement: typeof window.HTMLElement }).HTMLElement = window.HTMLElement;
+  (globalThis as unknown as { getComputedStyle: unknown }).getComputedStyle = window.getComputedStyle.bind(window);
+  (globalThis as unknown as { MutationObserver: unknown }).MutationObserver = window.MutationObserver;
 });
 
 afterEach(() => {
