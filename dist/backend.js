@@ -11015,7 +11015,7 @@ class LogStore {
         }
       }
     }
-    const text = redactNow ? redact(message) : message;
+    const text = redactNow ? redact(message, category) : message;
     const tagged = typeof userId === "string" && userId.length > 0 ? userId : null;
     const ev = { ts: Date.now(), level, category, message: text, userId: tagged };
     const size = approxBytes(ev);
@@ -11077,14 +11077,42 @@ function approxBytes(ev) {
 var REDACT_PATTERNS = [
   { re: /Bearer\s+[A-Za-z0-9\-_.~+/]+=*/gi, to: "Bearer [REDACTED]" },
   { re: /\bsk-[A-Za-z0-9_-]{20,}/g, to: "sk-[REDACTED]" },
-  { re: /\b(api[_-]?key|secret|password|token)\s*[=:]\s*[^\s,;}]+/gi, to: "$1=[REDACTED]" },
-  { re: /\b(content|content_preview|message|message_preview|text|text_preview|raw|raw_preview|template|prompt|response|reply)\s*=\s*"[^"]*"/gi, to: '$1="[REDACTED]"' },
+  { re: /\b(api[_-]?key|secret|password|token)\s*[=:]\s*[^\s,;}"]+/gi, to: "$1=[REDACTED]" },
   { re: /\b(content|content_preview|message|message_preview|text|text_preview|raw|raw_preview|template|prompt|response|reply)\s*=\s*'[^']*'/gi, to: "$1='[REDACTED]'" },
-  { re: /"[^"\n]{80,}"/g, to: '"[CONTENT_REDACTED]"' },
-  { re: /'[^'\n]{80,}'/g, to: "'[CONTENT_REDACTED]'" }
+  { re: /'[^'\n]{80,}'/g, to: "'[CONTENT_REDACTED]'" },
+  { re: /(https?:\/\/[^\s?"']+)\?[^\s"']*/g, to: "$1?[REDACTED]" },
+  { re: /(?:(?![\x00-\x7F])[\p{L}\p{M}])+/gu, to: "[REDACTED]" }
 ];
-function redact(input) {
-  let out = input;
+var DOUBLE_QUOTED = /"([^"\\]*(?:\\[\s\S][^"\\]*)*)("?)(\s*:)?/g;
+var STRUCTURAL_KEY = /^[\w$.\-:/]{1,64}$/;
+var ALWAYS_SAFE_VALUE = /^(?:-?\d[\d.]*|true|false|null|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i;
+var MACHINE_TOKEN = /^[\w.:/-]{1,80}$/;
+var TOKEN_VALUE_KEY = /^(?:type|phase|status|role|identifier|event|level|mode|source|reason|state|kind|method|action|generationType|binding)$|id$/i;
+var NAMED_EXTENSION_KEY = "extensionName";
+var DEFAULT_LABEL = /^[\w .:/-]{1,80}$/;
+function redactDoubleQuoted(input) {
+  let lastKey = "";
+  return input.replace(DOUBLE_QUOTED, (_whole, body, close, colon) => {
+    const quote = (text) => `"${text}${close}${colon ?? ""}`;
+    if (colon && close) {
+      lastKey = body;
+      return STRUCTURAL_KEY.test(body) ? quote(body) : quote(`[REDACTED] len=${body.length}`);
+    }
+    const suffix = colon ?? "";
+    if (body.startsWith("[REDACTED]") || body.startsWith("[CONTENT_REDACTED]") || ALWAYS_SAFE_VALUE.test(body))
+      return `"${body}${close}${suffix}`;
+    if (TOKEN_VALUE_KEY.test(lastKey) && MACHINE_TOKEN.test(body))
+      return `"${body}${close}${suffix}`;
+    if (lastKey === NAMED_EXTENSION_KEY && DEFAULT_LABEL.test(body))
+      return `"${body}${close}${suffix}`;
+    return `"[REDACTED] len=${body.length}${close}${suffix}`;
+  });
+}
+var WHOLLY_SCRIPT_TEXT_CATEGORY = "runtime.lua";
+function redact(input, category) {
+  if (category === WHOLLY_SCRIPT_TEXT_CATEGORY)
+    return input.startsWith("[REDACTED]") ? input : `[REDACTED] len=${input.length}`;
+  let out = redactDoubleQuoted(input);
   for (const { re, to } of REDACT_PATTERNS)
     out = out.replace(re, to);
   return out;

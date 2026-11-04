@@ -101,7 +101,7 @@ class LogStore {
         if (s.enabled && !s.includeChatData) { redactNow = true; break; }
       }
     }
-    const text = redactNow ? redact(message) : message;
+    const text = redactNow ? redact(message, category) : message;
     const tagged: string | null = typeof userId === 'string' && userId.length > 0 ? userId : null;
     const ev: LogEvent = { ts: Date.now(), level, category, message: text, userId: tagged };
     const size = approxBytes(ev);
@@ -168,15 +168,46 @@ function approxBytes(ev: LogEvent): number {
 const REDACT_PATTERNS: readonly { re: RegExp; to: string }[] = [
   { re: /Bearer\s+[A-Za-z0-9\-_.~+/]+=*/gi, to: 'Bearer [REDACTED]' },
   { re: /\bsk-[A-Za-z0-9_-]{20,}/g, to: 'sk-[REDACTED]' },
-  { re: /\b(api[_-]?key|secret|password|token)\s*[=:]\s*[^\s,;}]+/gi, to: '$1=[REDACTED]' },
-  { re: /\b(content|content_preview|message|message_preview|text|text_preview|raw|raw_preview|template|prompt|response|reply)\s*=\s*"[^"]*"/gi, to: '$1="[REDACTED]"' },
+  { re: /\b(api[_-]?key|secret|password|token)\s*[=:]\s*[^\s,;}"]+/gi, to: '$1=[REDACTED]' },
   { re: /\b(content|content_preview|message|message_preview|text|text_preview|raw|raw_preview|template|prompt|response|reply)\s*=\s*'[^']*'/gi, to: "$1='[REDACTED]'" },
-  { re: /"[^"\n]{80,}"/g, to: '"[CONTENT_REDACTED]"' },
   { re: /'[^'\n]{80,}'/g, to: "'[CONTENT_REDACTED]'" },
+  { re: /(https?:\/\/[^\s?"']+)\?[^\s"']*/g, to: '$1?[REDACTED]' },
+  { re: /(?:(?![\x00-\x7F])[\p{L}\p{M}])+/gu, to: '[REDACTED]' },
 ];
 
-export function redact(input: string): string {
-  let out = input;
+// Tolerates an unterminated string because previews are cut mid-value.
+const DOUBLE_QUOTED = /"([^"\\]*(?:\\[\s\S][^"\\]*)*)("?)(\s*:)?/g;
+const STRUCTURAL_KEY = /^[\w$.\-:/]{1,64}$/;
+const ALWAYS_SAFE_VALUE = /^(?:-?\d[\d.]*|true|false|null|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i;
+const MACHINE_TOKEN = /^[\w.:/-]{1,80}$/;
+const TOKEN_VALUE_KEY = /^(?:type|phase|status|role|identifier|event|level|mode|source|reason|state|kind|method|action|generationType|binding)$|id$/i;
+const NAMED_EXTENSION_KEY = 'extensionName';
+const DEFAULT_LABEL = /^[\w .:/-]{1,80}$/;
+
+// Deny by default: a quoted value survives only when it is structurally machine data, since a blocklist leaks any prose it does not recognize.
+function redactDoubleQuoted(input: string): string {
+  let lastKey = '';
+  return input.replace(DOUBLE_QUOTED, (_whole, body: string, close: string, colon: string | undefined) => {
+    const quote = (text: string): string => `"${text}${close}${colon ?? ''}`;
+    if (colon && close) {
+      lastKey = body;
+      return STRUCTURAL_KEY.test(body) ? quote(body) : quote(`[REDACTED] len=${body.length}`);
+    }
+    const suffix = colon ?? '';
+    if (body.startsWith('[REDACTED]') || body.startsWith('[CONTENT_REDACTED]') || ALWAYS_SAFE_VALUE.test(body)) return `"${body}${close}${suffix}`;
+    if (TOKEN_VALUE_KEY.test(lastKey) && MACHINE_TOKEN.test(body)) return `"${body}${close}${suffix}`;
+    if (lastKey === NAMED_EXTENSION_KEY && DEFAULT_LABEL.test(body)) return `"${body}${close}${suffix}`;
+    return `"[REDACTED] len=${body.length}${close}${suffix}`;
+  });
+}
+
+// Script log() output is arbitrary unquoted text, so no pattern can tell it apart from prose.
+const WHOLLY_SCRIPT_TEXT_CATEGORY = 'runtime.lua';
+
+export function redact(input: string, category?: string): string {
+  if (category === WHOLLY_SCRIPT_TEXT_CATEGORY) return input.startsWith('[REDACTED]') ? input : `[REDACTED] len=${input.length}`;
+  // Strings go first: a pattern that consumes a closing quote would invert quote parity and expose the rest of the line.
+  let out = redactDoubleQuoted(input);
   for (const { re, to } of REDACT_PATTERNS) out = out.replace(re, to);
   return out;
 }

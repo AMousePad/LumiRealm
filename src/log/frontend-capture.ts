@@ -201,8 +201,12 @@ export function buildBundle(args: {
   const snap = logStore.snapshot();
   const frontendEvents: LogEventWire[] = snap.events.map((e) => ({
     ts: e.ts, level: e.level, category: e.category,
-    message: !args.includeChatData ? redact(e.message) : e.message,
+    message: !args.includeChatData ? redact(e.message, e.category) : e.message,
   }));
+  // Events captured while chat data was on must not ship raw after it is turned off.
+  const backendEvents = args.includeChatData
+    ? args.backendEvents
+    : args.backendEvents.map((e) => ({ ...e, message: redact(e.message, e.category) }));
   return {
     schema: 'lumirealm-log-v1',
     exportedAt: new Date().toISOString(),
@@ -213,7 +217,7 @@ export function buildBundle(args: {
       url: location.href,
       viewport: { width: window.innerWidth, height: window.innerHeight },
     },
-    events: { backend: args.backendEvents, frontend: frontendEvents },
+    events: { backend: backendEvents, frontend: frontendEvents },
     domSnapshot: captureDomSnapshot(args.includeChatData),
     stylesheets: captureStylesheets(),
   };
