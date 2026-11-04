@@ -23,7 +23,7 @@ for (const engine of [chromium, firefox]) {
     const result = await page.evaluate(async () => {
       const manager = (window as any).manager;
       document.head.insertAdjacentHTML('beforeend', '<style>.narration{font:23px/31px Georgia;color:rgb(11,22,33)}</style>');
-      document.body.innerHTML = '<div data-message-id="message"><p class="narration">Themed narration</p><div data-lumiverse-html-island></div></div>';
+      document.body.innerHTML = '<div data-message-id="message" style="line-height:1.65"><p class="narration">Themed narration</p><div data-lumiverse-html-island></div></div>';
       const host = document.querySelector('[data-lumiverse-html-island]')!;
       const root = host.attachShadow({ mode: 'open' });
       const base = '<style data-lumi-island-base>:host{font-size:14px;line-height:1.65}h1{font-size:1.35em}*,*::before,*::after{box-sizing:border-box}</style>';
@@ -42,7 +42,13 @@ for (const engine of [chromium, firefox]) {
       const panel = root.querySelector('.panel')!;
       const layer = root.querySelector('.layer')!;
       const heading = root.querySelector('h1')!;
+      const sectionLine = () => getComputedStyle(root.querySelector('section')!).lineHeight;
+      const inheritedLine = sectionLine();
+      document.documentElement.style.setProperty('--lumiverse-font-scale', '1.5');
+      const scaledLine = sectionLine();
+      document.documentElement.style.removeProperty('--lumiverse-font-scale');
       const metrics = {
+        inheritedLine, scaledLine,
         width: getComputedStyle(panel).width, height: getComputedStyle(panel).height,
         position: getComputedStyle(layer).position,
         overlapping: layer.getBoundingClientRect().top === panel.getBoundingClientRect().top,
@@ -65,8 +71,9 @@ for (const engine of [chromium, firefox]) {
       return { metrics, before, after: proseStyle(), replacementHasStyles, cleared, restored, nativeHeadingSize };
     });
     assert.deepEqual(result.metrics, {
+      inheritedLine: '20px', scaledLine: '30px',
       width: '300px', height: '300px', position: 'absolute', overlapping: true,
-      headingSize: '24.75px', lineHeight: 'normal', action: 'preserved', actionColor: 'rgb(44, 55, 66)',
+      headingSize: '24.75px', lineHeight: '20px', action: 'preserved', actionColor: 'rgb(44, 55, 66)',
     });
     assert.deepEqual(result.before, result.after);
     assert(result.replacementHasStyles);

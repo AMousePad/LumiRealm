@@ -23,8 +23,8 @@ export function rescopeRisuEnvironment(css: string): string {
     .replace(/:root\b(?!,)/g, ':root,:host')
     .replace(/--FontColorQuote2:\s*(#[0-9a-fA-F]{3,8})/g,
       '--FontColorQuote2:var(--lumiverse-prose-dialogue,$1)')
-    // Host reader settings replace Risu's app metrics, preserving authored card styles.
-    + '\n:host{font-family:inherit;font-size:inherit;line-height:inherit;overflow:visible !important}\n';
+    // Host reader settings replace Risu's app font. Line height stays a length like Risu's wrapper, because the host's unitless value grows with each element's font size and shifts absolute card layouts.
+    + '\n:host{font-family:inherit;font-size:inherit;line-height:calc(20px * var(--lumiverse-font-scale,1));overflow:visible !important}\n';
 }
 
 export function setupIslandStyles() {

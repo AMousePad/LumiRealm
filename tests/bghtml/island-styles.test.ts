@@ -190,11 +190,13 @@ describe('native island compatibility styles', () => {
     expect(a.root.adoptedStyleSheets[1]!.cssRules[0]!.cssText).toContain('position: relative');
   });
 
-  test('inherits host reader metrics without adding a light DOM wrapper', () => {
+  test('supplies Risu line height as a length without adding a light DOM wrapper', () => {
     const css = rescopeRisuEnvironment('.prose h1{font-size:2.25em}.chattext p{color:red}');
     expect(css).toContain(':host h1{font-size:2.25em}');
     expect(css).toContain('font-size:inherit');
-    expect(css).toContain('line-height:inherit');
+    // Inheriting the host's unitless value makes line boxes grow with each element's font size, which moves absolute card layouts.
+    expect(css).toContain('line-height:calc(20px * var(--lumiverse-font-scale,1))');
+    expect(css).not.toContain('line-height:inherit');
     expect(css).not.toContain('.chattext');
     const a = island();
     manager.setActiveChat('chat');
