@@ -39,7 +39,7 @@ import {
   splitString,
 } from './runtime/strings-regex.js';
 import { toStr } from '../util/coerce.js';
-import { luaMessageData, luaMessageFields } from '../util/lua-message-data.js';
+import { encodeFullChatParts, luaMessageData, luaMessageFields } from '../util/lua-message-data.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import { samplersToWire } from '../util/samplers-wire.js';
 import { risuRoleToLumi, lumiRoleToRisu } from '../util/role-coerce.js';
@@ -1064,6 +1064,7 @@ export async function makeRisuTriggerRuntime(
       getRecentChatsMain: (_id: unknown, count: number) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map(m => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
       getChatLength: (_id: unknown) => readMessages().length,
       getFullChatMain: (_id: unknown) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
+      getFullChatPartsMain: (_id: unknown) => encodeFullChatParts(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
       setFullChatMain: (_id: unknown, value: unknown) => { reconcileFullChat(value); },
       sleep: (_id: unknown, ms: number) => new Promise<boolean>(resolve => setTimeout(() => resolve(true), ms)),
       cbs: luaCbs,

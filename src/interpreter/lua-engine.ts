@@ -5,6 +5,12 @@ import wrapper from './lua-wrapper.lua' with { type: 'text' };
 // lua-wrapper.lua is verbatim luaCodeWrapper from RisuAI e565563a (GPL-3.0).
 // Engine lifetime, access IDs, and error boundaries follow runScripted.
 
+// Replaces the wrapper's getFullChat because decoding every body on each display update grows with chat length.
+// Stays on one line to keep script line numbers identical to Risu, and returns real tables because json.encode reads them raw.
+const FULL_CHAT_FAST_PATH = 'do local parts,decode,find,sub=getFullChatPartsMain,json.decode,string.find,string.sub;getFullChatPartsMain=nil;'
+  + 'if parts then function getFullChat(id) local raw=parts(id);local split=find(raw,"\\n",1,true);local rows=decode(sub(raw,1,split-1));local pos=split+1;'
+  + 'for i=1,#rows do local row=rows[i];local len=row.len;if len then row.data=sub(raw,pos,pos+len-1);pos=pos+len;row.len=nil end end;return rows end end end ';
+
 export class LuaChunkError extends Error {
   constructor(cause: unknown) {
     super(`Lua chunk failed: ${String(cause)}`, { cause });
@@ -120,7 +126,7 @@ export function createLuaExecutor(getFactory: () => Promise<LuaFactory>) {
           current.engine.global.set(name, asyncApis.has(name) ? async (...args: unknown[]) => invoke(...args) : invoke);
         }
         try {
-          await current.engine.doString(wrapper + code + '\n');
+          await current.engine.doString(wrapper + FULL_CHAT_FAST_PATH + code + '\n');
         } catch (cause) { opts.signal?.throwIfAborted(); throw new LuaChunkError(cause); }
       }
       const args = [...(opts.args ?? [])];
