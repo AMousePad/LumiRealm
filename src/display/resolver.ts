@@ -26,6 +26,7 @@ import {
 } from './snapshot.js';
 import { isRisuRegexScript, type FeRegexScript, type FeRegexMatch } from './regex-apply.js';
 import { ActivationPatternError, createActivationPatternCache, type ActivationPatternCache } from './activation-patterns.js';
+import { messageReloadDepKey } from './risu-button-click.js';
 import { applyRegexScriptsCore, formatRuleTimings, type RegexCoreScript } from './regex-core.js';
 import { logStore } from '../log/store.js';
 import { decorateNativeRegexActions } from './regex-actions.js';
@@ -355,6 +356,7 @@ export function createDisplayResolver(
       let feContent: string;
       let processingState: string | undefined;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
+      if (args.context.messageId) recorder.touched.add(messageReloadDepKey(args.context.messageId));
       try {
         const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
         let liveSnap = (snap.luaTriggers.length > 0 || rowlessAtActions.length > 0)
@@ -467,6 +469,7 @@ export function createDisplayResolver(
 
       let feContent: string;
       const recorder: VarReadRecorder = { touched: new Set<string>(), volatile: false };
+      if (args.context.messageId) recorder.touched.add(messageReloadDepKey(args.context.messageId));
       try {
         feContent = args.scripts.length === 0 ? args.content
           : await runApply(snap, args, recorder, activationPatterns, scriptCache);

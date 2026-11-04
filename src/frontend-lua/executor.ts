@@ -9,6 +9,9 @@ import { runListenEditChain, type ListenEditMode } from '../interpreter/listen-e
 import { runRequestTriggerChain } from '../interpreter/request-trigger-runner.js';
 import type { DisplayLuaTrigger } from '../display/snapshot.js';
 import { runAtActionsForPhase, isRowlessAtAction, type RuntimeAtAtAction } from '../interpreter/at-actions-runtime.js';
+import { setCurrentTriggerId } from '../interpreter/current-trigger-id.js';
+
+const TRIGGER_ID_DISPLAY_MS = 100;
 
 export function makeFrontendScriptNS() {
   return makeDispatcherScriptNS((code, globals, opts = {}) => executeWasmoon(code, globals, { ...opts, wasmoonKey: opts.mode ?? 'manual' }));
@@ -87,11 +90,19 @@ export async function runFrontendLuaOperation(operation: FrontendLuaOperation, e
     return dispatchBinding(dispatch(), operation.binding);
   }
   if (operation.kind === 'manual') {
-    await dispatchByManualName(dispatch(), operation.name);
-    return;
+    setCurrentTriggerId(operation.triggerId || null);
+    try {
+      await dispatchByManualName(dispatch(), operation.name);
+    } finally {
+      // Risu keeps the id briefly so the reload that follows the click can still read it.
+      if (operation.triggerId) setTimeout(() => setCurrentTriggerId(null), TRIGGER_ID_DISPLAY_MS);
+    }
+    return env.compiled.length > 0;
   }
+  let ran = false;
   for (const trigger of env.triggers) {
     if (trigger.source.effect[0]?.type !== 'triggerlua') continue;
+    ran = true;
     const runtime = await makeRisuTriggerRuntime(env.api, env.data, scriptNS, {
       ...options(), binding: 'manual', lowLevelAccess: Boolean(trigger.source.lowLevelAccess),
     });
@@ -99,4 +110,5 @@ export async function runFrontendLuaOperation(operation: FrontendLuaOperation, e
       await runtime.runLua(trigger.luaCode, { entry: 'onButtonClick', args: [undefined, operation.value] });
     } finally { await runtime.flush(); }
   }
+  return ran;
 }

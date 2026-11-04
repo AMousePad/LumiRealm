@@ -5,7 +5,7 @@ export type FrontendLuaOperation =
   | { readonly kind: 'intercept'; readonly messages: readonly LlmMessage[]; readonly generationType: string }
   | { readonly kind: 'edit'; readonly mode: string; readonly value: unknown; readonly meta?: Record<string, unknown> }
   | { readonly kind: 'binding'; readonly binding: RisuBinding }
-  | { readonly kind: 'manual'; readonly name: string }
+  | { readonly kind: 'manual'; readonly name: string; readonly triggerId?: string }
   | { readonly kind: 'button'; readonly value: string }
   | { readonly kind: 'request'; readonly messages: readonly LlmMessage[] };
 

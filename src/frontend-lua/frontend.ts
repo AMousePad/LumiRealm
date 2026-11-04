@@ -273,12 +273,12 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
       entry.state.stageVariables(values);
       void entry.state.flush().catch(report);
     },
-    async manual(chatId: string, operation: FrontendLuaOperation): Promise<void> {
+    async manual(chatId: string, operation: FrontendLuaOperation): Promise<boolean> {
       const value = getDisplaySnapshot(chatId);
       if (!value) throw new FrontendLuaUnavailableError('The Lua runtime is not ready for this chat');
       const controller = new AbortController();
       localCalls.add(controller);
-      try { await run(chatId, value.characterId, operation, controller.signal); }
+      try { return await run(chatId, value.characterId, operation, controller.signal) === true; }
       finally { localCalls.delete(controller); }
     },
     owns(chatId: string): boolean { return entries.has(chatId) || loading.has(chatId); },

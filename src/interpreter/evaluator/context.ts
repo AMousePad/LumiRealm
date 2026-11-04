@@ -1,6 +1,7 @@
 // Builds EvaluatorCtx directly for in-worker pipeline runs. Var writes fire a
 // best-effort Spindle writeback for cross-pass visibility.
 
+import { getCurrentTriggerId } from '../current-trigger-id.js';
 import type {
   FunctionRegistry,
   LorebookEntry,
@@ -385,7 +386,7 @@ export function buildEvaluatorContext(input: BuildEvaluatorCtxInput): EvaluatorC
     messages,
     rng,
     clock,
-    triggerId: null,
+    triggerId: getCurrentTriggerId(),
     role: input.currentMessageRoleOverride
       ? normalizeRoleToLumi(input.currentMessageRoleOverride)
       : null,

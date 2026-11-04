@@ -2,7 +2,7 @@ import { setupHostServices } from './host-services/client.js';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
-import { createRisuButtonClickHandler } from './display/risu-button-click.js';
+import { createRisuButtonClickHandler, messageReloadDepKey } from './display/risu-button-click.js';
 import { setupFrontendLua } from './frontend-lua/frontend.js';
 import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
@@ -195,10 +195,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(ctx.dom.addStyle(STYLES));
   flog.info('frontend setup: styles injected');
 
+  const runManualAction = (msg: Extract<FrontendToBackend, { type: 'manual_trigger' | 'manual_button_click' }>): Promise<boolean> =>
+    frontendLua.manual(msg.chatId, msg.type === 'manual_trigger'
+      ? { kind: 'manual', name: msg.triggerName, ...(msg.triggerId !== undefined ? { triggerId: msg.triggerId } : {}) }
+      : { kind: 'button', value: msg.btn });
+
   const sendToBackend = (msg: FrontendToBackend): void => {
     if (msg.type === 'manual_trigger' || msg.type === 'manual_button_click') {
-      void frontendLua.manual(msg.chatId, msg.type === 'manual_trigger'
-        ? { kind: 'manual', name: msg.triggerName } : { kind: 'button', value: msg.btn }).catch(error => flog.error('Frontend Lua action failed', error));
+      void runManualAction(msg).catch(error => flog.error('Frontend Lua action failed', error));
       return;
     }
     if (!isLogTransportNoise(msg.type)) flog.trace(`frontend send: ${msg.type}`, msg);
@@ -309,9 +313,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   const svgRasterizer = setupSvgRasterizer({ log: flog, sendToBackend });
 
-  // Risu Chat.svelte:206-231: clicks on [risu-trigger] call runTrigger(char,'manual',{manualName}).
-  // Capture phase to beat Lumi handlers. risu-trigger/risu-btn/risu-id survive Lumi's sanitizer
-  // (richHtmlSanitizer.ts db9ef7c isAllowedCustomAttributeName).
   let activeRisuChatId: string | null = null;
   // The backend caches every chat it has touched and pushes for all of them,
   // while the DOM only ever shows one. Unknown-yet counts as visible so the
@@ -320,7 +321,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     ctx.getActiveChat().chatId === chatId;
   const onClickCapture = createRisuButtonClickHandler({
     getChatId: () => ctx.getActiveChat().chatId,
-    send: sendToBackend,
+    run: runManualAction,
+    invalidateMessage: messageId => display.invalidate([messageReloadDepKey(messageId)]),
     log: flog,
   });
   document.addEventListener('click', onClickCapture, /* capture */ true);

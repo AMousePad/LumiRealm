@@ -9,63 +9,104 @@ const page = await (await chromium.launch()).newPage();
 const failures: string[] = [];
 page.on('pageerror', (error) => failures.push(String(error)));
 
-const markup = `
+const card = `
   <input type="radio" name="w" id="none" checked><input type="radio" name="w" id="set">
   <label id="open" for="set">open</label>
   <label id="close" for="none" risu-btn="win_close">x</label>
+  <div id="plain-close" risu-btn="plain_close">x</div>
   <input type="checkbox" id="box" risu-btn="box_toggle">
-  <details id="more"><summary id="sum" risu-btn="more">more</summary>body</details>
-  <div risu-btn="wrap"><label><input type="checkbox" id="inner"><span id="wrapped">inner text label</span></label></div>
-  <button id="plain" risu-trigger="fire" risu-id="7">fire</button>`;
+  <input type="text" id="typed" value="initial">
+  <details id="more"><summary id="sum">more</summary>body</details>
+  <details id="open-more" open><summary id="open-sum">more</summary>body</details>
+  <div id="fire" risu-trigger="fire" risu-id="7">fire</div>`;
 
-async function load(install: string): Promise<void> {
-  await page.setContent(markup);
+async function load(install: string, ran = true): Promise<void> {
+  await page.setContent(`
+    <input type="checkbox" id="host-owned">
+    <div id="background" risu-btn="bg">bg</div>
+    <div data-message-id="m1"><div data-component="MessageContent">${card}</div><input type="checkbox" id="host-row"></div>`);
   await page.evaluate(`
     ${handlerSource}
-    window.sent = [];
+    window.sent = []; window.invalidated = []; window.ran = ${ran};
     ${install}
   `);
 }
 
 const fixed = `document.addEventListener('click', createRisuButtonClickHandler({
-  getChatId: () => 'chat', send: (message) => window.sent.push(message), log: { info() {}, warn() {} },
+  getChatId: () => 'chat',
+  run: async (message) => { window.sent.push(message); return window.ran; },
+  invalidateMessage: (id) => window.invalidated.push(id),
+  log: { info() {}, warn() {}, error(message, error) { throw error; } },
 }), true);`;
+
+const settle = () => page.evaluate('new Promise((resolve) => setTimeout(resolve))');
+const checked = (selector: string) => page.isChecked(selector);
 
 await load(fixed);
 await page.click('#open');
-assert.equal(await page.isChecked('#set'), true, 'plain label opens');
+assert.equal(await checked('#set'), true, 'plain label opens');
+assert.deepEqual(await page.evaluate('window.sent'), [], 'plain label dispatches nothing');
 await page.click('#close');
-assert.equal(await page.isChecked('#none'), true, 'label with risu-btn still activates its radio');
+await settle();
+assert.equal(await checked('#none'), true, 'label with risu-btn closes');
+
+await page.click('#open');
+await page.click('#plain-close');
+await settle();
+assert.equal(await checked('#none'), true, 'a button with no native action still closes, through the reload');
+assert.deepEqual(await page.evaluate('window.invalidated'), ['m1', 'm1']);
+
 await page.click('#box');
-assert.equal(await page.isChecked('#box'), true, 'checkbox with risu-btn still toggles');
+await settle();
+assert.equal(await checked('#box'), false, 'checkbox returns to its default after the reload like Risu');
+
+await page.fill('#typed', 'user text');
 await page.click('#sum');
-assert.equal(await page.getAttribute('#more', 'open'), '', 'summary with risu-btn still expands');
-await page.click('#plain');
-assert.deepEqual(await page.evaluate('window.sent'), [
-  { type: 'manual_button_click', btn: 'win_close', chatId: 'chat' },
-  { type: 'manual_button_click', btn: 'box_toggle', chatId: 'chat' },
-  { type: 'manual_button_click', btn: 'more', chatId: 'chat' },
-  { type: 'manual_trigger', triggerName: 'fire', triggerId: '7', chatId: 'chat' },
-]);
+await page.click('#open-sum');
+await page.click('#host-owned');
+await page.click('#host-row');
+await page.click('#plain-close');
+await settle();
+assert.equal(await page.inputValue('#typed'), 'initial', 'typed text resets');
+assert.equal(await page.getAttribute('#more', 'open'), null, 'opened details closes');
+assert.equal(await page.getAttribute('#open-more', 'open'), '', 'closed default-open details reopens');
+assert.equal(await checked('#host-owned'), true, 'controls outside the message are untouched');
+assert.equal(await checked('#host-row'), true, 'host controls in the message row are untouched');
 
-// Risu's handler also sees the click the browser forwards from a label to its control.
-await page.evaluate('window.sent.length = 0');
-await page.click('#wrapped');
-assert.equal(await page.evaluate('window.sent.length'), 2, 'forwarded label click dispatches again, as in Risu');
-assert.equal(await page.isChecked('#inner'), true);
+// A host patch adding `checked` must apply, which a touched control would ignore.
+await page.click('#open');
+await page.click('#plain-close');
+await settle();
+await page.evaluate(`document.getElementById('none').removeAttribute('checked'); document.getElementById('set').setAttribute('checked', '')`);
+assert.equal(await checked('#set'), true, 'later attribute patches still drive the control');
 
-// Two rendered docks repeat the same ids, so a close label targets the first radio in the shared group.
-await page.setContent(`<div id="a">${markup}</div><div id="b">${markup}</div>`);
+await page.evaluate('window.sent.length = 0; window.invalidated.length = 0');
+await page.click('#background');
+await settle();
+assert.deepEqual(await page.evaluate('window.sent'), [], 'buttons outside a message stay inert');
+
+await page.click('#fire');
+await settle();
+assert.deepEqual(await page.evaluate('window.sent'), [{ type: 'manual_trigger', triggerName: 'fire', triggerId: '7', chatId: 'chat' }]);
+
+await load(fixed, false);
+await page.click('#open');
+await page.click('#plain-close');
+await settle();
+assert.equal(await checked('#set'), true, 'no reset when no trigger ran, matching Risu');
+assert.deepEqual(await page.evaluate('window.invalidated'), []);
+
+await page.setContent(`<div data-message-id="m1"><div data-component="MessageContent"><div id="island" data-lumiverse-html-island></div></div></div>`);
 await page.evaluate(`
   ${handlerSource}
-  window.sent = [];
+  window.sent = []; window.invalidated = []; window.ran = true;
+  document.getElementById('island').attachShadow({ mode: 'open' }).innerHTML = ${JSON.stringify(card)};
   ${fixed}
 `);
-await page.click('#b #open');
-assert.equal(await page.isChecked('#a #set'), true, 'duplicate dock opens the first panel');
-await page.click('#b #close');
-assert.equal(await page.isChecked('#a #none'), true, 'close from the second dock reaches the shared group');
-assert.equal(await page.isChecked('#a #set'), false);
+await page.click('#island #open');
+await page.click('#island #plain-close');
+await settle();
+assert.equal(await checked('#island #none'), true, 'controls inside a shadow island reset');
 
 // Control: the same steps must fail with a cancelled click, or this harness proves nothing.
 await load(`document.addEventListener('click', (event) => {
@@ -73,9 +114,7 @@ await load(`document.addEventListener('click', (event) => {
 }, true);`);
 await page.click('#open');
 await page.click('#close');
-assert.equal(await page.isChecked('#set'), true, 'control: cancelled click leaves the panel open');
-await page.click('#box');
-assert.equal(await page.isChecked('#box'), false, 'control: cancelled click reverts the checkbox');
+assert.equal(await checked('#set'), true, 'control: cancelled click leaves the panel open');
 
 assert.deepEqual(failures, []);
 console.log('risu-button-click harness passed');

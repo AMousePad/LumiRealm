@@ -6,6 +6,8 @@ import { createDisplayResolver } from '../../src/display/resolver.js';
 import { mapRegex } from '../../src/core/mappers/regex.js';
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store.js';
 import { clearDisplaySnapshot, getDisplaySnapshot } from '../../src/display/snapshot.js';
+import { messageReloadDepKey } from '../../src/display/risu-button-click.js';
+import { getCurrentTriggerId } from '../../src/interpreter/current-trigger-id.js';
 import type { RuntimeServiceCall } from '../../src/frontend-lua/services.js';
 import type { RuntimeStateDto } from '../../src/frontend-lua/state-contract.js';
 import type { StateRevision } from '../../src/frontend-lua/ordered-state.js';
@@ -179,6 +181,32 @@ test('button Lua keeps the live-variable cache behavior of runLuaButtonTrigger',
   await runtime.manual(config.chatId, { kind: 'button', value: 'select' });
   expect(getDisplaySnapshot(config.chatId)?.vars.local.label).toBe('changed');
   expect(refreshes.filter(Boolean)).toEqual([]);
+});
+
+test('risu-id reaches trigger_id for a manual trigger and clears afterwards', async () => {
+  const { runtime, config } = await fixture(`function readId(id) setChatVar(id,'seen',cbs('{{trigger_id}}')) end`);
+  const seen = () => getDisplaySnapshot(config.chatId)?.vars.local.seen;
+  await runtime.manual(config.chatId, { kind: 'manual', name: 'readId', triggerId: '7' });
+  expect(seen()).toBe('7');
+  await Bun.sleep(150);
+  expect(getCurrentTriggerId()).toBeNull();
+  await runtime.manual(config.chatId, { kind: 'manual', name: 'readId' });
+  expect(seen()).toBe('null');
+});
+
+test('a button reports whether a trigger ran, the condition for the Risu message reload', async () => {
+  const withLua = await fixture(`function onButtonClick(id) end`);
+  expect(await withLua.runtime.manual(withLua.config.chatId, { kind: 'button', value: 'select' })).toBe(true);
+  expect(await withLua.runtime.manual(withLua.config.chatId, { kind: 'manual', name: 'select' })).toBe(true);
+});
+
+test('resolved messages depend on their own reload key so a click re-renders only that message', async () => {
+  const { resolver } = await fixture('');
+  const body = await resolver.resolveBody({ content: 'text', context: { ...context, messageId: 'clicked' } });
+  expect(body?.touchedVars).toContain(messageReloadDepKey('clicked'));
+  expect(body?.touchedVars).not.toContain(messageReloadDepKey('other'));
+  const scripts = await resolver.applyScripts({ content: 'text', scripts: [], context: { ...context, messageId: 'clicked' } });
+  expect(scripts?.touchedVars).toContain(messageReloadDepKey('clicked'));
 });
 
 test.each(['wi_state', 'input_draft', 'extension_data'])('host %s metadata retains rendered regex results across generation and deletion', async key => {

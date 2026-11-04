@@ -21409,6 +21409,10 @@ function getActiveScriptstateDefaults(chatId) {
 
 // src/interpreter/runtime/vars.ts
 var _log = makeSafeLogger("runtime.setVar");
+
+// src/interpreter/current-trigger-id.ts
+var currentTriggerId = null;
+var getCurrentTriggerId = () => currentTriggerId;
 // spindle.json
 var spindle_default = {
   version: "0.12.2",
@@ -21730,7 +21734,7 @@ function buildEvaluatorContext(input) {
     messages,
     rng,
     clock,
-    triggerId: null,
+    triggerId: getCurrentTriggerId(),
     role: input.currentMessageRoleOverride ? normalizeRoleToLumi(input.currentMessageRoleOverride) : null,
     aiModel: input.system?.model ?? "",
     axModel: "",
@@ -31035,7 +31039,7 @@ function createTriggerDispatcher(deps) {
         return { stopSending: false };
       return deps.execute(chatId, active.card.character_id, { kind: "binding", binding }, userId, sessionId, signal);
     },
-    dispatchManualTrigger: (chatId, name, _triggerId, userId, sessionId) => manual(chatId, { kind: "manual", name }, userId, sessionId),
+    dispatchManualTrigger: (chatId, name, triggerId, userId, sessionId) => manual(chatId, { kind: "manual", name, ...triggerId !== undefined ? { triggerId } : {} }, userId, sessionId),
     dispatchButtonClick: (chatId, value, _buttonId, userId, sessionId) => manual(chatId, { kind: "button", value }, userId, sessionId)
   };
 }

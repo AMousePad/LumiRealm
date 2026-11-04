@@ -15031,6 +15031,13 @@ async function uploadImageFile(file, name) {
 
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
+
+// src/interpreter/current-trigger-id.ts
+var currentTriggerId = null;
+var getCurrentTriggerId = () => currentTriggerId;
+function setCurrentTriggerId(triggerId) {
+  currentTriggerId = triggerId;
+}
 // spindle.json
 var spindle_default = {
   version: "0.12.2",
@@ -15349,7 +15356,7 @@ function buildEvaluatorContext(input) {
     messages,
     rng,
     clock,
-    triggerId: null,
+    triggerId: getCurrentTriggerId(),
     role: input.currentMessageRoleOverride ? normalizeRoleToLumi(input.currentMessageRoleOverride) : null,
     aiModel: input.system?.model ?? "",
     axModel: "",
@@ -16249,6 +16256,85 @@ function subscribeActivationPatternChanges(events, cache, invalidate) {
     for (const cleanup of cleanups)
       cleanup();
     cache.invalidate();
+  };
+}
+
+// src/display/risu-button-click.ts
+var messageReloadDepKey = (messageId) => `__risu_message_reload__:${messageId}`;
+var detailsDefaults = new WeakMap;
+function rememberDetailsDefault(target) {
+  const details = target.closest("summary")?.parentElement;
+  if (details?.localName === "details" && !detailsDefaults.has(details))
+    detailsDefaults.set(details, details.open);
+}
+function replaceWithPristineControl(control) {
+  const fresh = control.ownerDocument.createElement(control.localName);
+  for (const { name, value } of Array.from(control.attributes))
+    fresh.setAttribute(name, value);
+  for (const child of Array.from(control.childNodes))
+    fresh.appendChild(child.cloneNode(true));
+  control.replaceWith(fresh);
+}
+function resetNativeControls(root) {
+  for (const control of Array.from(root.querySelectorAll("input, textarea, select")))
+    replaceWithPristineControl(control);
+  for (const details of Array.from(root.querySelectorAll("details"))) {
+    const open = detailsDefaults.get(details);
+    if (open !== undefined)
+      details.open = open;
+    detailsDefaults.delete(details);
+  }
+  for (const island of Array.from(root.querySelectorAll("[data-lumiverse-html-island]"))) {
+    if (island.shadowRoot)
+      resetNativeControls(island.shadowRoot);
+  }
+}
+function findInPath(path, selector) {
+  for (const node of path) {
+    if (typeof node.matches === "function" && node.matches(selector))
+      return node;
+  }
+  return null;
+}
+function createRisuButtonClickHandler(deps) {
+  return (event) => {
+    const path = event.composedPath();
+    const target = path[0];
+    if (!target || typeof target.closest !== "function")
+      return;
+    rememberDetailsDefault(target);
+    const element = target.closest("[risu-trigger], [risu-btn]");
+    if (!element)
+      return;
+    const triggerName = element.getAttribute("risu-trigger");
+    const btn = triggerName ? null : element.getAttribute("risu-btn");
+    if (!triggerName && !btn)
+      return;
+    const messageId = findInPath(path, "[data-message-id]")?.dataset["messageId"];
+    const content = findInPath(path, '[data-component="MessageContent"]');
+    if (!messageId || !content)
+      return;
+    const idAttr = element.getAttribute("risu-id") ?? undefined;
+    const chatId = deps.getChatId();
+    if (!chatId) {
+      deps.log.warn(`manual click: active chat isn't a lumirealm chat, ignoring ${triggerName ?? `btn=${btn}`}`);
+      return;
+    }
+    event.stopPropagation();
+    let message;
+    if (triggerName) {
+      deps.log.info(`manual-trigger click: triggerName=${triggerName} triggerId=${idAttr ?? "<none>"} chatId=${chatId}`);
+      message = { type: "manual_trigger", triggerName, ...idAttr !== undefined ? { triggerId: idAttr } : {}, chatId };
+    } else {
+      deps.log.info(`manual-button click: btn=${btn} btnId=${idAttr ?? "<none>"} chatId=${chatId}`);
+      message = { type: "manual_button_click", btn, ...idAttr !== undefined ? { btnId: idAttr } : {}, chatId };
+    }
+    deps.run(message).then((ran) => {
+      if (!ran)
+        return;
+      resetNativeControls(content);
+      deps.invalidateMessage(messageId);
+    }).catch((error) => deps.log.error("Frontend Lua action failed", error));
   };
 }
 
@@ -21715,6 +21801,7 @@ async function runRequestTriggerChain(messages, opts) {
 }
 
 // src/frontend-lua/executor.ts
+var TRIGGER_ID_DISPLAY_MS = 100;
 function makeFrontendScriptNS() {
   return makeDispatcherScriptNS((code, globals, opts = {}) => executeWasmoon(code, globals, { ...opts, wasmoonKey: opts.mode ?? "manual" }));
 }
@@ -21792,12 +21879,20 @@ async function runFrontendLuaOperation(operation, env, signal) {
     return dispatchBinding(dispatch(), operation.binding);
   }
   if (operation.kind === "manual") {
-    await dispatchByManualName(dispatch(), operation.name);
-    return;
+    setCurrentTriggerId(operation.triggerId || null);
+    try {
+      await dispatchByManualName(dispatch(), operation.name);
+    } finally {
+      if (operation.triggerId)
+        setTimeout(() => setCurrentTriggerId(null), TRIGGER_ID_DISPLAY_MS);
+    }
+    return env.compiled.length > 0;
   }
+  let ran = false;
   for (const trigger of env.triggers) {
     if (trigger.source.effect[0]?.type !== "triggerlua")
       continue;
+    ran = true;
     const runtime = await makeRisuTriggerRuntime(env.api, env.data, scriptNS, {
       ...options(),
       binding: "manual",
@@ -21809,6 +21904,7 @@ async function runFrontendLuaOperation(operation, env, signal) {
       await runtime.flush();
     }
   }
+  return ran;
 }
 
 // src/display/lua-runner.ts
@@ -22438,6 +22534,8 @@ function createDisplayResolver(writeback, activationPatterns = createActivationP
       let feContent;
       let processingState;
       const recorder = { touched: new Set, volatile: false };
+      if (args.context.messageId)
+        recorder.touched.add(messageReloadDepKey(args.context.messageId));
       try {
         const rowlessAtActions = snap.atActions.filter(isRowlessAtAction);
         let liveSnap = snap.luaTriggers.length > 0 || rowlessAtActions.length > 0 ? withCurrentDisplayMessage(snap, args.context, args.content) : snap;
@@ -22536,6 +22634,8 @@ function createDisplayResolver(writeback, activationPatterns = createActivationP
         return null;
       let feContent;
       const recorder = { touched: new Set, volatile: false };
+      if (args.context.messageId)
+        recorder.touched.add(messageReloadDepKey(args.context.messageId));
       try {
         feContent = args.scripts.length === 0 ? args.content : await runApply(snap, args, recorder, activationPatterns, scriptCache);
         if (args.processingState !== feContent) {
@@ -22551,37 +22651,6 @@ function createDisplayResolver(writeback, activationPatterns = createActivationP
         touchedVars: [...recorder.touched],
         cacheable: !recorder.volatile
       };
-    }
-  };
-}
-
-// src/display/risu-button-click.ts
-function createRisuButtonClickHandler(deps) {
-  return (event) => {
-    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-    const target = path[0] ?? event.target;
-    if (!target || typeof target.closest !== "function")
-      return;
-    const element = target.closest("[risu-trigger], [risu-btn]");
-    if (!element)
-      return;
-    const triggerName = element.getAttribute("risu-trigger");
-    const btn = triggerName ? null : element.getAttribute("risu-btn");
-    if (!triggerName && !btn)
-      return;
-    const idAttr = element.getAttribute("risu-id") ?? undefined;
-    const chatId = deps.getChatId();
-    if (!chatId) {
-      deps.log.warn(`manual click: active chat isn't a lumirealm chat, ignoring ${triggerName ?? `btn=${btn}`}`);
-      return;
-    }
-    event.stopPropagation();
-    if (triggerName) {
-      deps.log.info(`manual-trigger click: triggerName=${triggerName} triggerId=${idAttr ?? "<none>"} chatId=${chatId}`);
-      deps.send({ type: "manual_trigger", triggerName, ...idAttr !== undefined ? { triggerId: idAttr } : {}, chatId });
-    } else if (btn) {
-      deps.log.info(`manual-button click: btn=${btn} btnId=${idAttr ?? "<none>"} chatId=${chatId}`);
-      deps.send({ type: "manual_button_click", btn, ...idAttr !== undefined ? { btnId: idAttr } : {}, chatId });
     }
   };
 }
@@ -24050,7 +24119,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       const controller = new AbortController;
       localCalls.add(controller);
       try {
-        await run(chatId, value.characterId, operation, controller.signal);
+        return await run(chatId, value.characterId, operation, controller.signal) === true;
       } finally {
         localCalls.delete(controller);
       }
@@ -43624,9 +43693,10 @@ function setup(ctx) {
   });
   cleanups.push(ctx.dom.addStyle(STYLES));
   flog2.info("frontend setup: styles injected");
+  const runManualAction = (msg) => frontendLua.manual(msg.chatId, msg.type === "manual_trigger" ? { kind: "manual", name: msg.triggerName, ...msg.triggerId !== undefined ? { triggerId: msg.triggerId } : {} } : { kind: "button", value: msg.btn });
   const sendToBackend = (msg) => {
     if (msg.type === "manual_trigger" || msg.type === "manual_button_click") {
-      frontendLua.manual(msg.chatId, msg.type === "manual_trigger" ? { kind: "manual", name: msg.triggerName } : { kind: "button", value: msg.btn }).catch((error) => flog2.error("Frontend Lua action failed", error));
+      runManualAction(msg).catch((error) => flog2.error("Frontend Lua action failed", error));
       return;
     }
     if (!isLogTransportNoise(msg.type))
@@ -43724,7 +43794,8 @@ function setup(ctx) {
   const isVisibleChat = (chatId) => ctx.getActiveChat().chatId === chatId;
   const onClickCapture = createRisuButtonClickHandler({
     getChatId: () => ctx.getActiveChat().chatId,
-    send: sendToBackend,
+    run: runManualAction,
+    invalidateMessage: (messageId) => display.invalidate([messageReloadDepKey(messageId)]),
     log: flog2
   });
   document.addEventListener("click", onClickCapture, true);

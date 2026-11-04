@@ -24,7 +24,7 @@ export function createTriggerDispatcher(deps: TriggerDispatcherDeps) {
       if (!active.card.risuPayload.triggers.length) return { stopSending: false };
       return deps.execute(chatId, active.card.character_id, { kind: 'binding', binding }, userId, sessionId, signal);
     },
-    dispatchManualTrigger: (chatId: string, name: string, _triggerId: string | undefined, userId: string | undefined, sessionId?: string) => manual(chatId, { kind: 'manual', name }, userId, sessionId),
+    dispatchManualTrigger: (chatId: string, name: string, triggerId: string | undefined, userId: string | undefined, sessionId?: string) => manual(chatId, { kind: 'manual', name, ...(triggerId !== undefined ? { triggerId } : {}) }, userId, sessionId),
     dispatchButtonClick: (chatId: string, value: string, _buttonId: string | undefined, userId: string | undefined, sessionId?: string) => manual(chatId, { kind: 'button', value }, userId, sessionId),
   };
 }
