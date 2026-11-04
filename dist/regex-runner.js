@@ -9553,6 +9553,10 @@ var snapshots = new Map;
 
 // src/interpreter/evaluator/pipeline.ts
 init_scanner();
+
+// src/interpreter/current-trigger-id.ts
+var currentTriggerId = null;
+var getCurrentTriggerId = () => currentTriggerId;
 // spindle.json
 var spindle_default = {
   version: "0.12.2",
@@ -9871,7 +9875,7 @@ function buildEvaluatorContext(input) {
     messages,
     rng,
     clock,
-    triggerId: null,
+    triggerId: getCurrentTriggerId(),
     role: input.currentMessageRoleOverride ? normalizeRoleToLumi(input.currentMessageRoleOverride) : null,
     aiModel: input.system?.model ?? "",
     axModel: "",
