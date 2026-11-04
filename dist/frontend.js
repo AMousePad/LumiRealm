@@ -30933,6 +30933,7 @@ function unprefixCssClassSelectors(css) {
 var DEFAULT_OPTS = {
   scopePrefix: ".chattext ",
   rewriteUniversalToHost: true,
+  hostSelector: ":host",
   killDataImports: true,
   rewriteClassNames: true,
   unprefixClassNames: false
@@ -31258,25 +31259,18 @@ function rewriteSelector(selector, opts) {
   } else if (opts.unprefixClassNames) {
     core = core.replace(/(?<![\\])\.x-risu-(-?[_a-zA-Z][\w-]*)/g, (_m, name) => `.${name}`);
   }
-  if (opts.rewriteUniversalToHost) {
-    core = rewriteUniversalLead(core);
-  }
+  const rewrittenUniversal = opts.rewriteUniversalToHost ? rewriteUniversalLead(core, opts.hostSelector) : null;
+  if (rewrittenUniversal !== null)
+    return lead + rewrittenUniversal + tail;
   const startsAtHost = /^:host(\b|[^a-zA-Z_-])/.test(core);
   if (opts.scopePrefix && !startsAtHost) {
     core = opts.scopePrefix + core;
   }
   return lead + core + tail;
 }
-function rewriteUniversalLead(selector) {
-  const bareMatch = /^(body|html|:root|\*)(?=$|\s|[>+~,{])/.exec(selector);
-  if (bareMatch) {
-    return ":host" + selector.slice(bareMatch[1].length);
-  }
-  const compoundMatch = /^(body|html|:root|\*)(?=[.:\[#])/.exec(selector);
-  if (compoundMatch) {
-    return ":host" + selector.slice(compoundMatch[1].length);
-  }
-  return selector;
+function rewriteUniversalLead(selector, hostSelector) {
+  const match = /^(body|html|:root|\*)(?=$|\s|[>+~,{.:\[#])/.exec(selector);
+  return match ? hostSelector + selector.slice(match[1].length) : null;
 }
 function rewriteSelectorList(list, opts) {
   return splitSelectorList(list).map((s) => rewriteSelector(s, opts)).join(",");
@@ -40201,26 +40195,31 @@ async function copyToClipboard(text) {
 }
 
 // src/bghtml/mount.ts
-var HOST_HOST_CSS = `
-:host {
+var BG_HOST_SELECTOR = "[data-risu-bg-host]";
+var BG_CSS_SCOPE = {
+  scopePrefix: `${BG_HOST_SELECTOR} .chattext `,
+  hostSelector: BG_HOST_SELECTOR
+};
+var HOST_BASE_CSS = `
+${BG_HOST_SELECTOR} {
   position: absolute;
   inset: 0;
   pointer-events: none;
   overflow: hidden;
 }
-:host > div.chattext {
+${BG_HOST_SELECTOR} > div.chattext {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
 }
-:host > div.chattext > [data-risu-bg-slot] {
+${BG_HOST_SELECTOR} > div.chattext > [data-risu-bg-slot] {
   width: 100%;
   height: 100%;
   pointer-events: none;
 }
-:host > div.chattext :is(a, button, [role='button'], input, textarea,
+${BG_HOST_SELECTOR} > div.chattext :is(a, button, [role='button'], input, textarea,
   select, [data-rc-trigger]) {
   pointer-events: auto;
 }
@@ -40239,17 +40238,16 @@ function mountBgHost(ctx, opts = {}) {
   } else {
     target.appendChild(host);
   }
-  const shadow = host.attachShadow({ mode: "open" });
   const baseStyle = document.createElement("style");
   baseStyle.setAttribute("data-risu-bg-base", "");
-  baseStyle.textContent = HOST_HOST_CSS;
-  shadow.appendChild(baseStyle);
+  baseStyle.textContent = HOST_BASE_CSS;
+  host.appendChild(baseStyle);
   const cardStyle = document.createElement("style");
   cardStyle.setAttribute("data-risu-bg-card", "");
-  shadow.appendChild(cardStyle);
+  host.appendChild(cardStyle);
   const chattext = document.createElement("div");
   chattext.className = "chattext";
-  shadow.appendChild(chattext);
+  host.appendChild(chattext);
   const slot = document.createElement("div");
   slot.setAttribute("data-risu-bg-slot", "");
   chattext.appendChild(slot);
@@ -40519,7 +40517,7 @@ function setupBgHtmlRenderer(ctx, flog) {
       }
       let bundle;
       try {
-        bundle = splitAndRewriteBgBundle(msg.bgHtml);
+        bundle = splitAndRewriteBgBundle(msg.bgHtml, BG_CSS_SCOPE);
       } catch (err) {
         flog.error("bg-html renderer: rewrite failed", err);
         return;

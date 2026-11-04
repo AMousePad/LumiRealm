@@ -1,7 +1,13 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import { resetNativeControls } from "../display/risu-button-click.js";
 
-// Shadow-DOM mount for a card's background_html. One mount per chat.
+// Risu renders background html in the chat's document: cards pair labels and :has() rules in messages with inputs here, and neither crosses a shadow boundary.
+export const BG_HOST_SELECTOR = "[data-risu-bg-host]";
+
+export const BG_CSS_SCOPE = {
+  scopePrefix: `${BG_HOST_SELECTOR} .chattext `,
+  hostSelector: BG_HOST_SELECTOR,
+} as const;
 
 export interface BgMountOptions {
   readonly target?: HTMLElement;
@@ -11,7 +17,6 @@ export interface BgMountOptions {
 }
 
 export interface BgMountHandle {
-  /** Replace the HTML content of the slot without rebuilding the shadow. */
   updateHtml(html: string): void;
   updateCss(css: string): void;
   resetNativeControls(): void;
@@ -19,26 +24,26 @@ export interface BgMountHandle {
   destroy(): void;
 }
 
-const HOST_HOST_CSS = `
-:host {
+const HOST_BASE_CSS = `
+${BG_HOST_SELECTOR} {
   position: absolute;
   inset: 0;
   pointer-events: none;
   overflow: hidden;
 }
-:host > div.chattext {
+${BG_HOST_SELECTOR} > div.chattext {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
 }
-:host > div.chattext > [data-risu-bg-slot] {
+${BG_HOST_SELECTOR} > div.chattext > [data-risu-bg-slot] {
   width: 100%;
   height: 100%;
   pointer-events: none;
 }
-:host > div.chattext :is(a, button, [role='button'], input, textarea,
+${BG_HOST_SELECTOR} > div.chattext :is(a, button, [role='button'], input, textarea,
   select, [data-rc-trigger]) {
   pointer-events: auto;
 }
@@ -51,7 +56,6 @@ export function mountBgHost(
   const host = ctx.dom.createElement("div", {
     "data-risu-bg-host": "",
   });
-  // Inline fallback in case :host rules haven't computed yet at mount time.
   host.style.position = "absolute";
   host.style.inset = "0";
   host.style.pointerEvents = "none";
@@ -64,20 +68,18 @@ export function mountBgHost(
     target.appendChild(host);
   }
 
-  const shadow = host.attachShadow({ mode: "open" });
-
   const baseStyle = document.createElement("style");
   baseStyle.setAttribute("data-risu-bg-base", "");
-  baseStyle.textContent = HOST_HOST_CSS;
-  shadow.appendChild(baseStyle);
+  baseStyle.textContent = HOST_BASE_CSS;
+  host.appendChild(baseStyle);
 
   const cardStyle = document.createElement("style");
   cardStyle.setAttribute("data-risu-bg-card", "");
-  shadow.appendChild(cardStyle);
+  host.appendChild(cardStyle);
 
   const chattext = document.createElement("div");
   chattext.className = "chattext";
-  shadow.appendChild(chattext);
+  host.appendChild(chattext);
 
   const slot = document.createElement("div");
   slot.setAttribute("data-risu-bg-slot", "");

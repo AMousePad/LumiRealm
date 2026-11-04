@@ -68,6 +68,7 @@ export interface CssRewriteOpts {
   readonly scopePrefix?: string;
   /** Rewrite bare body/html/:root/* to :host. Default true (avoids full-page rules leaking into chrome). */
   readonly rewriteUniversalToHost?: boolean;
+  readonly hostSelector?: string;
   /** Replace @import url(data:*) with data:, Default true. */
   readonly killDataImports?: boolean;
   readonly rewriteClassNames?: boolean;
@@ -105,6 +106,7 @@ export function unprefixCssInStyleBlocks(html: string): string {
 const DEFAULT_OPTS: Required<CssRewriteOpts> = {
   scopePrefix: ".chattext ",
   rewriteUniversalToHost: true,
+  hostSelector: ":host",
   killDataImports: true,
   rewriteClassNames: true,
   unprefixClassNames: false,
@@ -457,9 +459,8 @@ function rewriteSelector(selector: string, opts: Required<CssRewriteOpts>): stri
     );
   }
 
-  if (opts.rewriteUniversalToHost) {
-    core = rewriteUniversalLead(core);
-  }
+  const rewrittenUniversal = opts.rewriteUniversalToHost ? rewriteUniversalLead(core, opts.hostSelector) : null;
+  if (rewrittenUniversal !== null) return lead + rewrittenUniversal + tail;
 
   // :host is already the shadow root anchor, don't add scope prefix.
   const startsAtHost = /^:host(\b|[^a-zA-Z_-])/.test(core);
@@ -470,16 +471,9 @@ function rewriteSelector(selector: string, opts: Required<CssRewriteOpts>): stri
   return lead + core + tail;
 }
 
-function rewriteUniversalLead(selector: string): string {
-  const bareMatch = /^(body|html|:root|\*)(?=$|\s|[>+~,{])/.exec(selector);
-  if (bareMatch) {
-    return ":host" + selector.slice(bareMatch[1]!.length);
-  }
-  const compoundMatch = /^(body|html|:root|\*)(?=[.:\[#])/.exec(selector);
-  if (compoundMatch) {
-    return ":host" + selector.slice(compoundMatch[1]!.length);
-  }
-  return selector;
+function rewriteUniversalLead(selector: string, hostSelector: string): string | null {
+  const match = /^(body|html|:root|\*)(?=$|\s|[>+~,{.:\[#])/.exec(selector);
+  return match ? hostSelector + selector.slice(match[1]!.length) : null;
 }
 
 function rewriteSelectorList(list: string, opts: Required<CssRewriteOpts>): string {

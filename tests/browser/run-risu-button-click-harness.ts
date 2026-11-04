@@ -204,13 +204,25 @@ await page.evaluate(`(() => {
   } } };
   window.background = mountBgHost(ctx, { target: document.getElementById('target') });
   window.background.updateHtml('<input type="checkbox" id="bg-box"><input type="text" id="bg-text" value="initial">');
-  window.backgroundPart = (id) => document.querySelector('[data-risu-bg-host]').shadowRoot.getElementById(id);
+  window.backgroundPart = (id) => document.getElementById(id);
   window.backgroundPart('bg-box').checked = true;
   window.backgroundPart('bg-text').value = 'typed';
   window.background.resetNativeControls();
 })()`);
 assert.equal(await page.evaluate(`window.backgroundPart('bg-box').checked`), false, 'background checkbox resets');
 assert.equal(await page.evaluate(`window.backgroundPart('bg-text').value`), 'initial', 'background text resets');
+
+await page.evaluate(`(() => {
+  const row = document.createElement('div');
+  row.style.cssText = 'position:relative;z-index:1';
+  row.innerHTML = '<style>.bg-win{display:none}.bg-win:is(:root:has(#bg-box:checked) *){display:flex}</style><label id="bg-label" for="bg-box">open</label><div class="bg-win" id="bg-win">win</div>';
+  document.body.appendChild(row);
+})()`);
+const bgWinDisplay = () => page.evaluate(`getComputedStyle(document.getElementById('bg-win')).display`);
+assert.equal(await bgWinDisplay(), 'none', 'panel driven by a background input starts closed');
+await page.click('#bg-label');
+assert.equal(await page.evaluate(`window.backgroundPart('bg-box').checked`), true, 'a message label toggles a background input');
+assert.equal(await bgWinDisplay(), 'flex', 'a message :has() rule sees a background input');
 
 // Control: the same steps must fail with a cancelled click, or this harness proves nothing.
 await load(`document.addEventListener('click', (event) => {

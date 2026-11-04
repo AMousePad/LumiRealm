@@ -5,6 +5,7 @@ import {
   rewriteCss,
   splitAndRewriteBgBundle,
 } from "../../src/bghtml/rewriter.js";
+import { BG_CSS_SCOPE } from "../../src/bghtml/mount.js";
 
 // Evidence for the expected shape of every case below is cited against
 // Risu's parser.svelte.ts.
@@ -122,6 +123,30 @@ describe("rewriteCss — single simple rule", () => {
 });
 
 // ─── CSS rewriter — universal selectors (divergence from Risu) ───────
+
+describe("rewriteCss with the document-mounted background scope", () => {
+  const scope = BG_CSS_SCOPE;
+
+  test("scopes card rules to the background host so they cannot reach the app", () => {
+    expect(rewriteCss(".win{color:red}", scope)).toBe("[data-risu-bg-host] .chattext .x-risu-win{color:red}");
+    expect(rewriteCss("div>a{color:red}", scope)).toBe("[data-risu-bg-host] .chattext div>a{color:red}");
+  });
+
+  test.each(["body", "html", ":root", "*"])("anchors %s on the host, not the page", (selector) => {
+    expect(rewriteCss(`${selector}{color:red}`, scope)).toBe("[data-risu-bg-host]{color:red}");
+    expect(rewriteCss(`${selector} .a{color:red}`, scope)).toBe("[data-risu-bg-host] .x-risu-a{color:red}");
+  });
+
+  test("scopes rules nested in at-rules", () => {
+    expect(rewriteCss("@media (min-width:1px){body{color:red}.a{color:red}}", scope))
+      .toBe("@media (min-width:1px){[data-risu-bg-host]{color:red}[data-risu-bg-host] .chattext .x-risu-a{color:red}}");
+  });
+
+  test("keeps a document-wide :has() inside a scoped selector", () => {
+    expect(rewriteCss(".win:is(:root:has(#box:checked) *){display:flex}", scope))
+      .toBe("[data-risu-bg-host] .chattext .x-risu-win:is(:root:has(#box:checked) *){display:flex}");
+  });
+});
 
 describe("rewriteCss — universal → :host rewrite", () => {
   test("body { ... } → :host { ... }", () => {

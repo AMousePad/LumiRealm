@@ -14293,6 +14293,7 @@ function unprefixCssInStyleBlocks(html) {
 var DEFAULT_OPTS = {
   scopePrefix: ".chattext ",
   rewriteUniversalToHost: true,
+  hostSelector: ":host",
   killDataImports: true,
   rewriteClassNames: true,
   unprefixClassNames: false
@@ -14618,25 +14619,18 @@ function rewriteSelector(selector, opts) {
   } else if (opts.unprefixClassNames) {
     core = core.replace(/(?<![\\])\.x-risu-(-?[_a-zA-Z][\w-]*)/g, (_m, name) => `.${name}`);
   }
-  if (opts.rewriteUniversalToHost) {
-    core = rewriteUniversalLead(core);
-  }
+  const rewrittenUniversal = opts.rewriteUniversalToHost ? rewriteUniversalLead(core, opts.hostSelector) : null;
+  if (rewrittenUniversal !== null)
+    return lead + rewrittenUniversal + tail;
   const startsAtHost = /^:host(\b|[^a-zA-Z_-])/.test(core);
   if (opts.scopePrefix && !startsAtHost) {
     core = opts.scopePrefix + core;
   }
   return lead + core + tail;
 }
-function rewriteUniversalLead(selector) {
-  const bareMatch = /^(body|html|:root|\*)(?=$|\s|[>+~,{])/.exec(selector);
-  if (bareMatch) {
-    return ":host" + selector.slice(bareMatch[1].length);
-  }
-  const compoundMatch = /^(body|html|:root|\*)(?=[.:\[#])/.exec(selector);
-  if (compoundMatch) {
-    return ":host" + selector.slice(compoundMatch[1].length);
-  }
-  return selector;
+function rewriteUniversalLead(selector, hostSelector) {
+  const match = /^(body|html|:root|\*)(?=$|\s|[>+~,{.:\[#])/.exec(selector);
+  return match ? hostSelector + selector.slice(match[1].length) : null;
 }
 function rewriteSelectorList(list, opts) {
   return splitSelectorList(list).map((s) => rewriteSelector(s, opts)).join(",");

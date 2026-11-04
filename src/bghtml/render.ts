@@ -1,6 +1,6 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import { splitAndRewriteBgBundle, unprefixCssClassSelectors } from "./rewriter.js";
-import { mountBgHost, type BgMountHandle } from "./mount.js";
+import { BG_CSS_SCOPE, mountBgHost, type BgMountHandle } from "./mount.js";
 import { stripCssImports, splitCssImports } from "./strip-imports.js";
 import { setupIslandStyles } from "./island-styles.js";
 
@@ -103,7 +103,7 @@ export function setupBgHtmlRenderer(
       }
       let bundle;
       try {
-        bundle = splitAndRewriteBgBundle(msg.bgHtml);
+        bundle = splitAndRewriteBgBundle(msg.bgHtml, BG_CSS_SCOPE);
       } catch (err) {
         flog.error("bg-html renderer: rewrite failed", err);
         return;
