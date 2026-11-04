@@ -181,7 +181,7 @@ import {
 import { resolveAlertDismissal } from './interpreter/alert-bridge.js';
 import { resolvePickResolution } from './interpreter/pick-bridge.js';
 import { userIdAls, currentUserId } from './interpreter/runtime/als.js';
-import { checkHostVersion, readRuntimeVersionInfo } from './util/version-check.js';
+import { checkHostVersion, readHostBuildReport, readRuntimeVersionInfo, type LumiverseBuildInfo } from './util/version-check.js';
 import { decodeModuleCharx } from './core/charx/index.js';
 import { decodeRisum } from './core/risum/index.js';
 import { openRisumUpload, type UploadChunk } from './core/risum/upload-reader.js';
@@ -1641,6 +1641,7 @@ const connectionsHandlers = createConnectionsHandlers({
 });
 const logHandlers = createLogHandlers({
   extensionVersion: EXTENSION_VERSION,
+  readHostBuild: () => readHostBuildReport(runtimeVersionInfo, spindle.version as unknown as { readonly getInfo: () => Promise<LumiverseBuildInfo> }),
   logStore,
   isLogThreshold,
   ensureLogStateLoaded,

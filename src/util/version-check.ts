@@ -33,6 +33,32 @@ export interface RuntimeVersionInfo {
   readonly hostVersion: string;
 }
 
+export interface LumiverseBuildInfo {
+  readonly backend: string;
+  readonly frontend: string;
+  readonly commit: string | null;
+  readonly branch: string | null;
+}
+
+export interface HostBuildReport {
+  readonly hostVersion: string;
+  readonly minimumLumiverseVersion: string;
+  readonly build: LumiverseBuildInfo | null;
+  readonly buildError: string | null;
+}
+
+export async function readHostBuildReport(
+  info: RuntimeVersionInfo,
+  version: { readonly getInfo: () => Promise<LumiverseBuildInfo> },
+): Promise<HostBuildReport> {
+  const base = { hostVersion: info.hostVersion, minimumLumiverseVersion: info.minimumLumiverseVersion };
+  try {
+    return { ...base, build: await version.getInfo(), buildError: null };
+  } catch (err) {
+    return { ...base, build: null, buildError: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export function readRuntimeVersionInfo(source: {
   readonly manifest: {
     readonly version: string;

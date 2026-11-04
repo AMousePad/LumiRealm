@@ -3,6 +3,7 @@
 
 import { logStore, redact } from './store.js';
 import type { LogEventWire } from '../types/messages.js';
+import type { HostBuildReport } from '../util/version-check.js';
 import { isLogTransportNoise } from './transport.js';
 
 const CONSOLE_METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const;
@@ -137,14 +138,46 @@ export function captureStylesheets(): readonly StylesheetCapture[] {
   return out;
 }
 
+export interface ClientEnvironment {
+  readonly host: unknown;
+  readonly brands: readonly { readonly brand: string; readonly version: string }[] | null;
+  readonly platform: string | null;
+  readonly mobile: boolean | null;
+  readonly hardwareConcurrency: number | null;
+  readonly deviceMemoryGb: number | null;
+  readonly devicePixelRatio: number;
+}
+
 export interface BundleSession {
   readonly extensionVersion: string;
+  readonly lumiverse: HostBuildReport;
+  readonly client: ClientEnvironment;
   readonly userId: string | null;
   readonly activeChatId: string | null;
   readonly activeCharacterId: string | null;
   readonly userAgent: string;
   readonly url: string;
   readonly viewport: { width: number; height: number };
+}
+
+export function readClientEnvironment(client: { readonly getInfo: () => unknown } | undefined): ClientEnvironment {
+  const nav = navigator as Navigator & {
+    readonly userAgentData?: {
+      readonly brands?: readonly { readonly brand: string; readonly version: string }[];
+      readonly platform?: string;
+      readonly mobile?: boolean;
+    };
+    readonly deviceMemory?: number;
+  };
+  return {
+    host: client?.getInfo() ?? null,
+    brands: nav.userAgentData?.brands ?? null,
+    platform: nav.userAgentData?.platform ?? nav.platform ?? null,
+    mobile: nav.userAgentData?.mobile ?? null,
+    hardwareConcurrency: nav.hardwareConcurrency ?? null,
+    deviceMemoryGb: nav.deviceMemory ?? null,
+    devicePixelRatio: window.devicePixelRatio,
+  };
 }
 
 export interface LogBundle {

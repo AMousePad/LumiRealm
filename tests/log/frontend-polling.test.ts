@@ -124,7 +124,8 @@ test('frontend status replies do not increase the diagnostic event count', () =>
 });
 
 test.each([0, 20])('log export encodes %s backend records without a combined string', async count => {
-  const harness = makeContext(installBrowser());
+  const win = installBrowser();
+  const harness = makeContext(win);
   let receive: (message: unknown) => void = () => {};
   harness.ctx.onBackendMessage = listener => { receive = listener; return () => {}; };
   teardown = setup(harness.ctx);
@@ -144,9 +145,14 @@ test.each([0, 20])('log export encodes %s backend records without a combined str
     return 'blob:test';
   });
   try {
-    receive({ type: 'log_export_pushed', events, session: { extensionVersion: 'test', userId: null, activeChatId: null, activeCharacterId: null } });
+    const lumiverse = { hostVersion: '1.3.0', minimumLumiverseVersion: '1.3.0', build: { backend: '1.3.0', frontend: '1.3.0', commit: 'abc123', branch: 'staging' }, buildError: null };
+    receive({ type: 'log_export_pushed', events, session: { extensionVersion: 'test', lumiverse, userId: null, activeChatId: null, activeCharacterId: null } });
     expect(downloaded).toBeDefined();
     const bundle = JSON.parse(await downloaded!.text());
+    expect(bundle.session.lumiverse).toEqual(lumiverse);
+    expect(bundle.session.userAgent).toBe(win.navigator.userAgent);
+    expect(bundle.session.client.host).toBeNull();
+    expect(bundle.session.client.devicePixelRatio).toBe(win.devicePixelRatio);
     expect(bundle.events.backend).toEqual(events);
     expect(bundle.events.frontend.map((event: { message: string }) => event.message)).toContain('frontend \"quoted\"\n\ud83d\ude00\ud800');
     expect(bundle.schema).toBe('lumirealm-log-v1');
@@ -166,7 +172,7 @@ test('failed log downloads preserve capture and report the failure', () => {
   const alert = mock(() => {});
   Object.defineProperty(win, 'alert', { configurable: true, value: alert });
   try {
-    receive({ type: 'log_export_pushed', events: [], session: { extensionVersion: 'test', userId: null, activeChatId: null, activeCharacterId: null } });
+    receive({ type: 'log_export_pushed', events: [], session: { extensionVersion: 'test', lumiverse: { hostVersion: '1.3.0', minimumLumiverseVersion: '1.3.0', build: null, buildError: 'unavailable' }, userId: null, activeChatId: null, activeCharacterId: null } });
     expect(harness.events).not.toContain('send:log_set_state');
     expect(logStore.isEnabled()).toBe(true);
     expect(logStore.snapshot().events.some(event => event.message === 'retained evidence')).toBe(true);

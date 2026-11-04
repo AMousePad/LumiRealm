@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { checkHostVersion, readRuntimeVersionInfo } from '../../src/util/version-check.js';
+import { checkHostVersion, readHostBuildReport, readRuntimeVersionInfo } from '../../src/util/version-check.js';
 
 describe('runtime version authority', () => {
   test('extracts extension, minimum, and host versions', () => {
@@ -34,5 +34,22 @@ describe('runtime version authority', () => {
       manifest: { version: '0.8.6', minimum_lumiverse_version: '   ' },
       host: { lumiverseVersion: '1.1.5' },
     })).toThrow('spindle.manifest.minimum_lumiverse_version');
+  });
+});
+
+describe('readHostBuildReport', () => {
+  const info = { extensionVersion: '0.12.2', minimumLumiverseVersion: '1.3.0', hostVersion: '1.3.0' };
+
+  test('reports the running host build', async () => {
+    const build = { backend: '1.3.0', frontend: '1.3.1', commit: 'abc123', branch: 'staging' };
+    expect(await readHostBuildReport(info, { getInfo: async () => build })).toEqual({
+      hostVersion: '1.3.0', minimumLumiverseVersion: '1.3.0', build, buildError: null,
+    });
+  });
+
+  test('keeps the export usable and records why the build is unknown', async () => {
+    expect(await readHostBuildReport(info, { getInfo: async () => { throw new Error('host refused'); } })).toEqual({
+      hostVersion: '1.3.0', minimumLumiverseVersion: '1.3.0', build: null, buildError: 'host refused',
+    });
   });
 });

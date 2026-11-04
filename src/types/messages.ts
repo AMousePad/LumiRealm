@@ -5,6 +5,7 @@ import type {
   RealmBackendToFrontend,
 } from '../realm/messages.js';
 import type { RuntimeConfig } from '../frontend-lua/state-contract.js';
+import type { HostBuildReport } from '../util/version-check.js';
 
 /** One-entry-per-imported-card summary. Backend composes from `StoredRisuCard`
  *  + `spindle.characters.get` name lookup. UI renders directly. */
@@ -862,6 +863,7 @@ export type BackendToFrontend =
       events: readonly LogEventWire[];
       session: {
         readonly extensionVersion: string;
+        readonly lumiverse: HostBuildReport;
         readonly userId: string | null;
         readonly activeChatId: string | null;
         readonly activeCharacterId: string | null;

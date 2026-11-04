@@ -29,6 +29,7 @@ import {
   installConsoleCapture,
   removeConsoleCapture,
   buildBundle,
+  readClientEnvironment,
   downloadBundle,
 } from './log/frontend-capture.js';
 
@@ -450,6 +451,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
           backendEvents: msg.events,
           session: {
             extensionVersion: msg.session.extensionVersion,
+            lumiverse: msg.session.lumiverse,
+            client: readClientEnvironment((ctx as SpindleFrontendContext & { readonly client?: { readonly getInfo: () => unknown } }).client),
             userId: msg.session.userId,
             activeChatId: msg.session.activeChatId ?? activeRisuChatId,
             activeCharacterId: msg.session.activeCharacterId,

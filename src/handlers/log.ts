@@ -2,9 +2,11 @@ import type { Handler, HandlerCallCtx } from './types.js';
 import type { LogState, LogStateSnapshot, LogEvent } from '../log/store.js';
 import type { LogEventWire } from '../types/messages.js';
 import type { UserStorageLike } from '../payload/installer.js';
+import type { HostBuildReport } from '../util/version-check.js';
 
 export interface LogHandlerDeps {
   readonly extensionVersion: string;
+  readonly readHostBuild: () => Promise<HostBuildReport>;
   readonly logStore: {
     readonly setState: (next: Partial<LogState>, userId: string) => void;
     readonly clear: (userId: string) => void;
@@ -52,12 +54,14 @@ export function createLogHandlers(deps: LogHandlerDeps): {
       sendLogState(deps, ctx);
     },
     log_request_export: async (_msg, ctx) => {
+      const lumiverse = await deps.readHostBuild();
       const snap = deps.logStore.snapshot(ctx.userId);
       ctx.send({
         type: 'log_export_pushed',
         events: snap.events as readonly LogEventWire[],
         session: {
           extensionVersion: deps.extensionVersion,
+          lumiverse,
           userId: ctx.userId,
           activeChatId: deps.lastActiveChatByUser.get(ctx.userId) ?? null,
           activeCharacterId: null,
