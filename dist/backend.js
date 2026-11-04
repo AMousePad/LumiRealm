@@ -35471,6 +35471,68 @@ async function probeLumiagentBridge(spindle2) {
   }
 }
 
+// src/agent-docs.ts
+var DOCS_SURFACE = "lumirealm_docs";
+var DOCS_HINT = 'LumiRealm docs: list_external({surface_id:"lumirealm_docs"}), then read_external({surface_id:"lumirealm_docs",item_id:<topic>}). Read authoring before card edits; modules for module edits. Docs are read-only; load only relevant topics.';
+var TOPICS = [
+  { id: "overview", label: "Setup, navigation, capabilities and limits", text: `LumiRealm runs imported RisuAI cards/modules inside Lumiverse: CBS macros, Lua/V2 triggers, lore, regex, assets, background HTML, variables and toggles.
+Setup: enable LumiRealm in Extensions and grant requested permissions. Match host/extension builds; staging needs the current host runtime, not merely the baseline version. Restart the extension and refresh browser tabs after updates. Display processing and frontend Lua need a connected browser.
+UI: Import manages characters/modules/presets/lorebooks/regex; Viewer inspects/edits a selected character or module; State follows the active chat; Settings configures models, diagnostics and cleanup. RisuRealm opens the card browser. Translate changes displayed names/comments, not card prose or runtime keys.
+Agent: read authoring, modules and state for supported tools. Import/export, global-module selection, new asset upload, settings, cleanup and browser workflows below are UI actions, not extra phone-line mutation tools. Use the advertised tools only; UI wire names are not agent tools.
+Compatibility follows RisuAI but is not complete. Lumiverse still owns Markdown, sanitization and HTML-island boundaries; external-page CSS/selectors may differ. Never infer parity from successful import alone. Preserve unrecognized fields and report unsupported operations.` },
+  { id: "import_export", label: "Cards, modules, presets, lorebooks, regex and Realm browser", text: `Import > Characters > Upload file: .charx/.png/.json/.jpg/.jpeg cards. Import > Modules: .risum or module .charx. Follow progress/errors; cancel through the import overlay. Large archives need temporary disk space; archive assets have host size limits. Consent/import warnings require the user's choice. Legacy cards may require reimport when prompted.
+RisuRealm browser: search/browse cards, filter/sort results (including NSFW), inspect details, then download/import; Import by URL/ID accepts a Realm link or identifier. A Realm card identifier/link is not a local character ID. Network/browser failures do not imply the card is unsupported.
+Import > Presets: .risup/.risupreset/.json becomes a native Lumiverse Loom preset: blocks, categories, custom variables, samplers and embedded regex. Optional Translate? uses the selected connection to translate labels into English; stored keys, option values and prompt text remain intact. Select/manage the imported preset in Lumiverse.
+Import > Lorebooks: Risu-native/CCSv3 JSON creates an unattached world book; attach it through Lumiverse. Import > Regex: Risu JSON; choose Global or a character before upload; rules install into a folder.
+Import > Characters > Export card exports the character; attached modules are separate. Import > Modules > Export downloads .lumirealm.module.charx. Export each required module too. Use current exported content for round trips; frozen import snapshots are not current authoring state.` },
+  { id: "modules", label: "Attach/global modules and canonical module editing", text: `Import > Characters: expand a card to attach/detach library modules. Import > Modules: search, inspect, export/delete; Global modules applies to all LumiRealm characters. Deleting a module detaches it from every character. Agent tools module_attach/module_detach handle character attachments; global selection/import/delete/export use UI.
+Agent source: list_external({surface_id:"module_envelope",character_id:<id>}); read_external({surface_id:"module_envelope",item_id:<moduleId>,field:<path>}). Use grep_external, edit_external (strings) or update_external (values) after reading. A character listing filters attached IDs; do not assume it inventories global modules. Edits affect every character using that shared module.
+Writable source fields include module.regex[i].in/out/comment, module.trigger[i].comment/effect[k].code/value/display, module.backgroundEmbedding and module.customModuleToggle. Read the actual structure before editing. The installed module regex rows are mirrors; prefer envelope edits for migration safety. Assets use asset_rename/asset_delete, never registry writes.
+Module lore is the installed world book named Module: <name>, shared across attachments. Find with list({path:"wb"}); edit native wb entries/metadata. module.lorebook is a frozen import bundle and refuses writes. Do not replace the whole module to bypass this gate.
+Toggle DSL is one line per item: key=Label for checkbox; key=Label=text or =textarea; key=Label=select=Option1,Option2. Structural lines use =Title=group, ==groupEnd, =Caption=caption, ==divider. Preserve keys, types, option order and stored values when translating. Toggle values are per-user preferences shared across chats/characters by key (see state), separate from definitions.
+Module cjs is preserved for round-trip but is not executed.` },
+  { id: "authoring", label: "Canonical paths, translation and coupled edits", text: `Read before editing; char is the focused character. Canonical surfaces: char/<field> for name/description/personality/scenario/first_mes/alternate_greetings/system_prompt/post_history_instructions/mes_example; rx/<id> for character regex; wb/<id> for lore. Keep IDs/activation keys, regex flags/patterns, HTML classes and runtime variable names stable during translation.
+Character extension authoring paths start char/extensions/lumirealm.payload.: background_html_source for HTML/CSS; triggers[i].comment for trigger/button identity; triggers[i].effect[k].code for triggerlua/triggercode source; effect[k].value for setvar/addvar/setdefaultvar/settempvar/v2SetVar/v2DeclareLocalVar and runLLM/v2RunLLM text; effect[k].display for alert text; alertSelect.value may contain option labels; scriptstate_defaults for the all-users initial string map. Read effect type/shape first. Translate visible literals in code, never control flow, names, keys or operators.
+Do not edit source, regex_scripts, user_overrides, translator_schema_version or derived payload mirrors (prose, background_html, lua_scripts, raw assets/portals). Refusals give the correct destination. Use modules topic for module sources; module lore uses native wb entries.
+For translation survey_cjk across character/world_books/regex_scripts/extensions, read background_html_source even with no CJK hits, inspect trigger values/displays and explicitly list asset/emotion index keys. Search attached modules with grep_external. Translate all greetings and visible labels, not just prose. apply_glossary coordinates repeated strings.
+Before renaming, grep every reference: getvar NAME binds variable targets/default keys/Lua state calls; risu-trigger="name" and runTrigger("name") bind trigger.comment; lore keys bind prose; asset macro names bind asset registries. Regex find patterns can depend on prose shape. Update coupled references together. A translated value is not a renamed key. Live state edits are temporary chat repairs; fix authoring sources for lasting translations.` },
+  { id: "display_assets", label: "Viewer HTML, assets, lore, triggers and translated labels", text: `Viewer chooses a character/module independently of the active chat; Current jumps to the chat character. Refresh reloads data. Notes shows creator notes. Lore displays folders/entries, enabled/disabled/constant status, per-entry toggles and Open in Lumiverse for the native editor. Module Regex shows rules. Triggers shows bindings/effects and Edit lua/Add lua. Defaults (characters) edits the per-user master-default text, with Save/Revert/Reset to card defaults.
+HTML edits background markup; Save applies it, Revert discards drafts, Reset restores the character baseline. Agent edits char/extensions/lumirealm.payload.background_html_source for character source or module.backgroundEmbedding on the envelope. Plain HTML/CSS path edits work; Viewer > HTML Save additionally runs SVG rasterization, so use it when inline SVG needs rasterization.
+Assets: search/filter; open full media; add files; rename; select/delete individual, selected or all matching assets. Name references include {{img::name}}, {{emotion::name}} and Risu media markup. Character registries payload.asset_index/emotion_index are readable maps with names as keys; raw arrays are derived. Agent asset_rename/asset_delete handles character or module indexes with runtime refresh. New uploads use Viewer > Assets. Check other references when changing names/deleting assets.
+Header Translate toggles English display names/comments (browser translation or Google fallback); it is not full card translation. Original names remain the identity. Preset import label translation is a separate option.
+Background UI/buttons and display regex are browser-rendered. Treat source inspection as diagnostic evidence, not proof that the UI rendered correctly; test the actual chat and its buttons.` },
+  { id: "state", label: "Variables, defaults, Lua state and custom toggles", text: `State > Variables follows the active chat: Local contains Risu chat variables; Lumi shows native global/chat variables read-only. Refresh, filter, Copy JSON, add/edit/delete Local values. Lua state values are JSON-encoded; preserve their encoding/types. Reset restores a default or removes an override where offered.
+LumiAgent list_variables/read_variable inspects runtime values. set_chat_variable writes LumiRealm local chat state (null deletes). set_toggle writes a per-user preference shared across chats/characters using that key (without toggle_ prefix; null clears); chat_id validates the Risu chat and supplies refresh context, not storage scope. set_default_variables_text changes the per-user character default text (null resets to card baseline). Use these tools, not raw metadata/user_overrides writes, so refresh hooks run. Check the tool schema for required IDs.
+Definitions differ from live values: payload.scriptstate_defaults is the all-users baseline; Viewer > Defaults / set_default_variables_text is the user's default-text override; triggers seed/change live state during play. Existing chat values can override defaults and a trigger can overwrite a manual repair. Read both source and current state when debugging.
+State > Toggles combines active modules' customModuleToggle with imported character toggles. Character definitions come first from lumirealm.source.card.data.extensions.risuai.toggles (or source.card.extensions.risuai.toggles for unwrapped cards), falling back to character.extensions.risuai.toggles. The primary source is frozen: do not path-write it or assume editing the fallback overrides it; no supported agent mutation edits character toggle definitions. Module definitions/labels use module envelopes. Checkboxes store "1"/"0", selects store the option index as a string, text/textarea store raw input. Keys feed toggle_KEY and Risu toggle macros; preserve keys and option indices when translating. Module-global enablement belongs in Import, not toggle values.` },
+  { id: "runtime", label: "CBS, Lua/V2 triggers, regex, lore and model calls", text: `CBS expands card/preset/module text: character/persona/chat metadata, getvar/setvar/defaults, conditionals, math/logic, strings/arrays/random, assets and display macros. Keep {{...}} delimiters and control blocks valid. Inspect existing syntax and actual results before inventing a macro.
+Triggers run at their declared lifecycle/manual bindings. Lua/V2 effects can change state/messages, call other triggers, prompt/alert/select/input, run auxiliary/submodel requests and invoke supported image/asset/lore operations. HTML risu-trigger buttons resolve trigger comments; manual clicks require the live browser. Preserve trigger effect type/indent structure. Lua is sandboxed; arbitrary JS or module cjs is not a general execution escape.
+Regex operates by its configured stage: input/output/request transformations versus display-only rewriting. Display regex runs in browser; visible HTML may differ from stored message text/provider prompt. Character rows live in native rx, module definitions in envelopes; do not alter disabled flags, stage, depth, matching options or pattern merely to translate replacement text.
+Lore activation uses imported entry configuration (keys/secondary keys, constant/disabled flags, scan/depth/order/conditions); modules contribute lore alongside characters. Viewer > Lore and native world-book editor inspect/edit live entries. Native prompt assembly controls final injection; examine both entry activation and assembled prompt when debugging missing lore.
+Auxiliary and Sub settings select connections/models and overrides for scripted calls; image settings select image generation. These do not replace the main chat connection. Distinguish frontend display triggers from generation/request processing when measuring latency or side effects. Errors/unsupported APIs are evidence of a specific failing call, not proof the entire card cannot run.` },
+  { id: "settings", label: "Aux/Sub/Image settings, parity and import options", text: `Settings > Auxiliary: connection/model for Lua axLLMMain/axLLM. Sub: V2 runLLM(model='submodel'); empty falls back to Aux. Choose model, Save/Reset; refresh connections where available. Sampler overrides: temperature, maximum response/context, topP/minP/topK, frequency/presence/repetition penalties; unset fields use connection defaults. Prefill compatibility converts an assistant prefill to a user instruction for models without prefill support.
+Settings > Image: choose image connection/model or default connection; Save/Reset/Refresh. NovelAI controls resolution, sampler, steps, guidance, negative prompt, SMEA/SMEA-DYN, quality tags and undesired-content preset; Save NAI settings applies those options. Provider support still governs results.
+Settings > Debug: capture Aux/Sub requests/responses in the debug panel. Legacy media findings ON means strict exact asset-name matching (disables fuzzy fallback). Skip asset thumbnails defaults ON; affects future imports only, reducing work/disk use while full images remain available. Logs and Cleanup are documented in diagnostics.
+Agent phone line does not expose these settings mutations. Guide the user to the relevant tab; do not edit private storage to emulate UI actions.` },
+  { id: "diagnostics", label: "Logs, cleanup, repair and failure triage", text: `Settings > Debug > Logs: Enable logging, reproduce, Download; successful download turns logging off. Include chat data only when message content is intended; inspect before sharing. Clear removes captured logs. Aux/Sub capture helps distinguish bad script inputs from provider/model errors.
+Settings > Cleanup: scan orphaned images, review/select results, delete selected. Repair scans stale character/module regex rows and dead image journals; review repair targets/options before applying. Forced retranslation rebuilds projections and can affect authored projections; prefer canonical sources and export important edits first. Cleanup/repair is UI-only.
+Import failure: inspect progress/error, file type, available disk, host/extension versions/branches and permissions. Keep browser connected for frontend phases. Legacy/reimport warnings mean the current source format needs migration, not permission to overwrite unrelated cards.
+Missing/wrong output: identify exact character, chat, preset, attachments and global modules; inspect canonical prose/regex/lore/triggers/defaults, then live variables and browser rendering. Follow refusal redirects instead of editing derived mirrors. A button failure may be a mismatched trigger comment/caller; stale UI can be mixed frontend/backend builds; missing assets can be name/strict-match issues.
+Bridge unavailable: inspect LumiAgent/LumiRealm permission banners and grant missing declared permissions, then restart/refresh as needed. Docs do not bypass the bridge's caller/permission checks.
+Bug evidence: Lumiverse and LumiRealm versions/branches, browser/device, reproduction, failing feature/call, sanitized logs and equivalent RisuAI behavior. Avoid attributing lag to one stage without matched workload/build evidence.` }
+];
+function listDocs() {
+  return { items: TOPICS.map(({ id, label }) => ({ id, label })), total: TOPICS.length };
+}
+function readDoc(itemId, field) {
+  if (field !== undefined && field !== "text")
+    throw new Error("LumiRealm docs support only the text field.");
+  const topic = TOPICS.find((topic) => topic.id === itemId);
+  if (!topic)
+    throw new Error(`Unknown LumiRealm docs topic: ${itemId}. Use list_external.`);
+  return { value: topic.text };
+}
+
 // src/lumiagent-phoneline.ts
 var EXCLUDE_FROM_SEARCH = [
   "lumirealm.source",
@@ -35497,6 +35559,7 @@ var MANIFEST = {
   extension: { id: "lumirealm", name: "LumiRealm", version: "0.1.0" },
   excludeFromSearch: [...EXCLUDE_FROM_SEARCH],
   surfaces: [
+    { id: DOCS_SURFACE, label: "LumiRealm guide", scope: "global", description: DOCS_HINT },
     {
       id: "module_envelope",
       label: "Risu modules",
@@ -35719,255 +35782,19 @@ function checkReadPath(extPath) {
   }
   return { ok: true };
 }
-var SETVAR_LIKE_TYPES = new Set([
-  "setvar",
-  "addvar",
-  "setdefaultvar",
-  "v2SetVar",
-  "v2DeclareLocalVar",
-  "settempvar"
-]);
-var ALERT_LIKE_TYPES = new Set([
-  "alertNormal",
-  "alertError",
-  "alertSelect",
-  "alertInput",
-  "alertConfirm",
-  "alert"
-]);
-var CODE_EFFECT_TYPES = new Set(["triggerlua", "triggercode"]);
-var CJK_PROBE_RE = /[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7A3]/;
-function summariseTriggers(triggers) {
-  let withCode = 0, withSetvarLike = 0, withAlert = 0, withRunLLM = 0;
-  let hasCjkInEffectStrings = false;
-  const comments = [];
-  for (const tr of triggers) {
-    if (!tr || typeof tr !== "object")
-      continue;
-    const t = tr;
-    const comment = typeof t["comment"] === "string" ? t["comment"].trim() : "";
-    if (comment.length > 0 && comments.length < 12)
-      comments.push(comment);
-    const effects = Array.isArray(t["effect"]) ? t["effect"] : [];
-    let sawCode = false, sawSetvar = false, sawAlert = false, sawRunLLM = false;
-    for (const ef of effects) {
-      if (!ef || typeof ef !== "object")
-        continue;
-      const e = ef;
-      const etype = typeof e["type"] === "string" ? e["type"] : "";
-      if (CODE_EFFECT_TYPES.has(etype))
-        sawCode = true;
-      else if (SETVAR_LIKE_TYPES.has(etype))
-        sawSetvar = true;
-      else if (ALERT_LIKE_TYPES.has(etype))
-        sawAlert = true;
-      else if (etype === "runLLM" || etype === "v2RunLLM")
-        sawRunLLM = true;
-      if (!hasCjkInEffectStrings) {
-        const v = e["value"], d = e["display"];
-        if (typeof v === "string" && CJK_PROBE_RE.test(v))
-          hasCjkInEffectStrings = true;
-        else if (typeof d === "string" && CJK_PROBE_RE.test(d))
-          hasCjkInEffectStrings = true;
-      }
-    }
-    if (sawCode)
-      withCode++;
-    if (sawSetvar)
-      withSetvarLike++;
-    if (sawAlert)
-      withAlert++;
-    if (sawRunLLM)
-      withRunLLM++;
-  }
-  return {
-    total: triggers.length,
-    withCode,
-    withSetvarLike,
-    withAlert,
-    withRunLLM,
-    sampleCommentLabels: comments,
-    hasCjkInEffectStrings
-  };
-}
-var LUMIREALM_DUAL_KEYS = ["first_mes", "description", "personality", "scenario", "system_prompt", "post_history_instructions", "mes_example"];
-function detectContext(c) {
-  const ext = c.extensions ?? {};
-  const lumi = ext["lumirealm"];
-  if (!lumi || typeof lumi !== "object")
-    return null;
-  const payload = lumi["payload"] ?? null;
-  const dualKeys = [];
-  let hasBgHtml = false;
-  let hasBgHtmlSource = false;
-  let hasTriggers = false;
-  let hasScriptstateDefaults = false;
-  let triggerSurfaces = null;
-  if (payload && typeof payload === "object") {
-    for (const k of LUMIREALM_DUAL_KEYS) {
-      if (typeof payload[k] === "string" && payload[k].length > 0)
-        dualKeys.push(k);
-    }
-    hasBgHtml = typeof payload["background_html"] === "string" && payload["background_html"].length > 0;
-    hasBgHtmlSource = typeof payload["background_html_source"] === "string" && payload["background_html_source"].length > 0;
-    const triggers = Array.isArray(payload["triggers"]) ? payload["triggers"] : null;
-    hasTriggers = triggers !== null && triggers.length > 0;
-    if (triggers !== null)
-      triggerSurfaces = summariseTriggers(triggers);
-    const ssd = payload["scriptstate_defaults"];
-    hasScriptstateDefaults = ssd !== null && typeof ssd === "object" && Object.keys(ssd).length > 0;
-  }
-  const overrides = lumi["user_overrides"] ?? null;
-  const attachedModuleCount = overrides && Array.isArray(overrides["attached_module_ids"]) ? overrides["attached_module_ids"].length : 0;
-  const tsv = lumi["translator_schema_version"];
-  const translatorSchemaVersion = typeof tsv === "number" ? tsv : null;
-  const storedRegex = lumi["regex_scripts"];
-  const storedRegexScriptCount = Array.isArray(storedRegex) ? storedRegex.length : 0;
-  return {
-    payloadDualKeys: dualKeys,
-    hasBgHtml,
-    hasBgHtmlSource,
-    hasTriggers,
-    hasScriptstateDefaults,
-    attachedModuleCount,
-    translatorSchemaVersion,
-    storedRegexScriptCount,
-    hasUserOverrides: overrides !== null && typeof overrides === "object" && Object.keys(overrides).length > 0,
-    triggerSurfaces
-  };
-}
-var LUMIREALM_DUAL_KEYS_LIST = "first_mes, description, personality, scenario, system_prompt, post_history_instructions, mes_example";
-var STATIC_SECTION = `# LumiRealm card \u2014 authoring map
-
-This character was imported from Risu. Layered storage:
-
-\`source.*\` (frozen .charx snapshot) -> \`payload.*\` (translator runtime layer) -> canonical character fields + top-level \`regex_scripts.*\` (the live surfaces).
-
-Multiple layers carry related content; only ONE per content kind is the AUTHORING surface. Every other layer is a translator-regenerated mirror that gets clobbered on the next schema bump and on every save. The frozen \`lumirealm.source.*\` snapshot and the \`payload.background_html\` rasterized mirror are OPAQUE: reads and writes both return an error redirecting you to the live surface. Other translator-derived projections (\`payload.lua_scripts\`, the canonical-mirror payload fields like \`payload.first_mes\`) stay readable for diagnostics but refused on write. The walker also filters them all out of \`survey_cjk\`, \`grep\`, and \`audit_card_coverage\` so they don't waste sample budget.
-
-## User-visible authoring surfaces
-
-Every row here can be edited. Translation work, UI rewrites, and content edits all start from this table.
-
-| Surface | Path(s) | What the user sees | Notes |
-|---|---|---|---|
-| Character canonical fields | \`char/<field>\` for ${LUMIREALM_DUAL_KEYS_LIST}, plus \`creator_notes\`, \`creator\`, \`name\` | Prose injected into the LLM prompt; greetings + persona shown in chat history | \`update_character({patch})\` for multi-field, or \`edit\` / \`rewrite\` per field. The \`payload.<same>\` mirrors are refused on write. |
-| Alternate greetings | \`char/alternate_greetings/<idx>\` | Greeting #2..#N shown in the chat-start picker | \`rewrite\` for whole-greeting overwrites; \`create({path:"char/alternate_greetings"})\` / \`delete({path:"char/alternate_greetings/<idx>"})\` for shape changes. |
-| Regex replace_string | \`rx/<scriptId>/replace_string\` | HTML / CSS / text injected into the rendered message DOM \u2014 status panels, settings UI, buttons, popups, scene backgrounds | THIS is where most card UI HTML lives on Risu-imported cards. Look here first for UI labels. |
-| Regex find_regex | \`rx/<scriptId>/find_regex\` | Not user-visible, but anchors the rule: matches against LLM output / message text | Don't translate the pattern. Touch only if the LLM's output shape genuinely changed. |
-| Lorebook content / comment | \`wb/<entryId>/content\` and \`wb/<entryId>/comment\` | Lore text injected into the LLM prompt when keys hit | \`update_world_book_entry\` for metadata (key arrays, decorators, disabled, priority). |
-| Bg-HTML source | \`char/extensions/lumirealm.payload.background_html_source\` | Persistent overlay rendered behind every message in the chat: ambient animations, fixed status panels, scene art | **THE authoring surface for bg-html.** Always \`inspect\` and \`read\` this path on translation / UI / styling tasks. LumiRealm seeds it from the card-side baseline at import so it always resolves on cards that have bg-html. The post-translator \`payload.background_html\` mirror is hidden from the agent's view (refused on read and write); always use \`_source\`. |
-| Trigger button labels | \`char/extensions/lumirealm.payload.triggers[i].comment\` | The \`risu-trigger="<comment>"\` attribute on HTML buttons inside regex \`replace_string\`. Clicking the button fires this trigger. The comment string itself surfaces in the UI as the button's identifier and often as its visible label too. | Renaming requires updating every \`risu-trigger="..."\` reference in regex \`replace_string\` AND in bg-html. Use \`grep\` to find all callers before renaming. |
-| Trigger Lua / JS code | \`char/extensions/lumirealm.payload.triggers[i].effect[k].code\` where \`effect.type == 'triggerlua'\` or \`'triggercode'\` | Behaviour code that runs at trigger time. String literals inside it (button-fed dialog text, popup messages, choice labels) surface to the user via \`alertNormal\` / \`alertSelect\` / DOM rewrites. | For translation: edit only string LITERALS inside \`"..."\` / \`'...'\` / \`[[...]]\`; never touch surrounding control flow, function/variable names, table keys, or operators. Read the trigger with \`read({path: '...triggers[i]'})\` first to locate the right effect index. |
-| Trigger setvar / addvar / setdefaultvar value | \`char/extensions/lumirealm.payload.triggers[i].effect[k].value\` where \`effect.type\` is \`setvar\` / \`addvar\` / \`setdefaultvar\` / \`v2SetVar\` / \`settempvar\` / \`v2DeclareLocalVar\` | **User-visible UI label.** Surfaces via \`{{getvar::<target>}}\` macros embedded in regex \`replace_string\` HTML, lorebook content, bg-html, and prose. Example: an effect with \`target="season", value="\uBD04"\` fills the \`{{getvar::season}}\` slot everywhere it appears. | Translate the \`.value\` string. Leave \`.target\` (variable name), \`.type\` (opcode kind), \`.indent\` (V2 control-flow depth) alone. |
-| Trigger alert display | \`char/extensions/lumirealm.payload.triggers[i].effect[k].display\` where \`effect.type\` is \`alert\` / \`alertNormal\` / \`alertError\` / \`alertSelect\` / \`alertInput\` / \`alertConfirm\` | **User-visible popup text** shown when the trigger fires (alert modal title / body / prompt). | Edit the \`.display\` string verbatim. |
-| Trigger alert option labels | \`char/extensions/lumirealm.payload.triggers[i].effect[k].value\` array entries on \`alertSelect\` effects (often shaped \`[{value, display}, ...]\` or a plain \`string[]\`) | **User-visible choice labels** in a multi-select picker \u2014 the user clicks them. | \`set\` on the array or \`edit\` on each \`.display\` leaf depending on shape. |
-| Trigger runLLM prompt | \`char/extensions/lumirealm.payload.triggers[i].effect[k].value\` where \`effect.type\` is \`runLLM\` / \`v2RunLLM\` | The sub-prompt sent to the aux / submodel LLM; affects what the user sees indirectly through its output. | Translatable. |
-| scriptstate_defaults | \`char/extensions/lumirealm.payload.scriptstate_defaults\` | A flat string\u2192string map of initial chat-var values. Same surfacing path as \`setvar.value\` \u2014 these seed \`{{getvar::*}}\` slots before any trigger fires. Visible in State \u2192 Variables \u2192 Default (card-side column). | \`read\` it, mutate locally, \`set({path, value: <object>})\`. Edits the value EVERY user of this card sees. Per-user overrides live at \`user_overrides.default_variables_*\` and require a UI op the agent doesn't have (see UI-only section below). |
-| Module customModuleToggle DSL | \`edit_external\` / \`update_external\` on \`surface_id='module_envelope'\` field \`module.customModuleToggle\` | A string DSL that defines the checkboxes / selects / text inputs / groups shown in State \u2192 Toggles when this module is attached. Toggle keys flow into \`{{getvar::toggle_KEY}}\` / Risu \`{{#when::toggle::KEY}}\` macros. | DSL syntax is Risu's \`parseToggleSyntax\` (see ported docs in LumiRealm \`core/toggle-syntax.ts\`). Each line is a directive: \`>group Name\`, \`<\`, \`---\`, \`#caption\`, \`?key|Label\`, \`?key|Label|options,comma,separated\`, \`%key|Label|default\` for text. Translate the labels / captions; never touch the leading directive char or the key name (renaming the key breaks every macro consumer). |
-| Module lorebook | \`wb/<id>/content\` and \`wb/<id>/comment\` for the world book named \`Module: <module name>\` | Lore injected into the LLM prompt for every character that has the module attached. The module viewer also reads from this wb directly. | Use the path-based tools (\`read\`, \`edit\`, \`rewrite\`, \`update_world_book_entry\`) on the installed wb. \`list({path: 'wb'})\` shows every world book including the module-installed ones. Edits are shared across every character that has the module attached (one wb per module). \`module.lorebook[i]\` on the envelope is the frozen import bundle and is refused on write. |
-| Module envelope (other) | \`list_external\` / \`read_external\` / \`grep_external\` / \`edit_external\` / \`update_external\` with \`surface_id='module_envelope'\` | Module-scoped regex (\`module.regex[i].in\` / \`.out\` / \`.comment\`), triggers (\`module.trigger[i].comment\` / \`.effect[k].(value|display|code)\`), bg-html (\`module.backgroundEmbedding\`). Module regex is ALSO installed as top-level mirrors (editable via \`rx/\` paths) \u2014 but for migration-safe edits, use the envelope. | Field paths shown above. |
-| Asset name registry (read-only via path) | \`list({path: 'char/extensions/lumirealm.payload.asset_index'})\` then \`read({path: 'char/extensions/lumirealm.payload.asset_index.<name>.ext'})\` (or \`.imageIds[0]\`); same for \`emotion_index\` | The keys of these objects are the asset NAMES referenced by \`{{img::name}}\` / \`{{emotion::name}}\` / \`<img="name">\` macros in regex \`replace_string\` and bg-html. Names are user-visible (they show up in the Viewer \u2192 Assets grid). \`survey_cjk\` won't find CJK in asset names because they live in object KEYS, not leaves \u2014 explicitly \`list\` this path on translation / UI tasks. | READ only via path. Rename / delete have dedicated tools (\`asset_rename\` / \`asset_delete\`); asset ADD is UI-only. Never path-write asset_index. |
-
-If a path is NOT in this table and NOT a top-level \`char/\` / \`rx/\` / \`wb/\` surface, it's either internal (opcode types, indent depth, ids, schema versions, raw asset arrays) or a derived mirror \u2014 leave it alone or write to the redirect target the refusal message gives you.
-
-## Chat-state and module mutations have dedicated tools
-
-These have wired LumiAgent tools. Use the tool, NOT a path write to the underlying storage (path writes bypass refresh hooks / runtime invalidations and the runtime silently diverges):
-
-- Asset rename / delete (character or module): \`asset_rename\` / \`asset_delete\` (\`assetNames\` array, batch in one call).
-- Module attach / detach on a character: \`module_attach\` / \`module_detach\`.
-- Toggle value for a chat: \`set_toggle\` (key as defined in the module \`customModuleToggle\` DSL, without the \`toggle_\` prefix).
-- Chat-scope local variable: \`set_chat_variable\`.
-- Per-user default-variables override text: \`set_default_variables_text\` (\`null\` reverts to the card-side baseline).
-
-For the toggle / chat-var / default-var DEFINITIONS the user authors on the card itself, the authoring surfaces remain: \`customModuleToggle\` DSL via \`edit_external\` on the module envelope, and \`payload.scriptstate_defaults\` for the all-users baseline.
-
-## Surfaces the agent still cannot mutate
-
-| Surface | Where the user does it | Wire op (FE\u2192BE) | What to tell the user |
-|---|---|---|---|
-| Asset ADD (character or module) | Viewer \u2192 Assets | \`add_asset\` / \`add_assets\` | "Adding a new asset is a Viewer \u2192 Assets thing. I can rename or delete existing assets, and read the current asset_index, but I can't upload a new one from here." |
-| Background-html (live SVG raster pipeline) | Viewer \u2192 HTML | \`set_background_html\` runs a SVG-raster pipeline after the write | The agent's path-based \`set\` / \`edit\` on \`payload.background_html_source\` writes the source but won't fire the SVG-raster dispatch. For HTML that contains \`<svg>\` blocks the user wants rasterized, surface that the Viewer \u2192 HTML save button is what triggers raster. Plain HTML / CSS edits via the agent path are fine. |
-
-The pattern: **when a tab in the LumiRealm UI exists for a thing, that's the user's authoritative entry point.** The agent supplements (read for diagnostic context, edit for the surfaces it can reach correctly), it does not replace.
-
-## Cross-surface coupling
-
-Card content is deeply interconnected. After ANY edit (even a one-line replace), check for propagation across:
-
-- **Macros + state binding.** \`{{getvar::NAME}}\` in regex HTML / lorebook / bg-html / prose binds to: (a) every \`setvar\` / \`addvar\` / \`setdefaultvar\` effect's \`.target\`, (b) \`scriptstate_defaults\` keys, (c) Lua \`getState\` / \`setState\` / \`getChatVar\` / \`setChatVar\` calls. Renaming a var requires updating ALL of them together. Renaming a \`.value\` (translation) does NOT \u2014 only the displayed string changes.
-- **Live chat-scope state vs authoring source.** \`{{getvar::NAME}}\` resolves at render time from \`chat.metadata.macro_variables.local\` / \`.chat\` / \`.global\` \u2014 the LIVE runtime values, populated by setvar effects firing during play and seeded once from \`scriptstate_defaults\`. For DIAGNOSTIC reads ("why does this label say X in this chat right now?") use \`list_variables({scope:"chat"|"local"|"global"})\` and \`read_variable({scope, key})\` (deferred tools \u2014 fetch via \`tool_search\` if their schemas aren't loaded yet). For TRANSLATION and label changes, edit the AUTHORING source instead (the relevant \`triggers[i].effect[k].value\` or the \`scriptstate_defaults\` key) so the new label survives every time triggers re-fire. A direct live-var write would be a one-chat patch that the next trigger run overwrites.
-- **Buttons.** A \`risu-trigger="<comment>"\` HTML attribute in regex \`replace_string\` is matched against \`triggers[i].comment\`. Renaming the comment without updating the HTML breaks the button. \`grep\` the comment string before renaming.
-- **Lore activation keys.** World book entry \`key\` arrays match on names / phrases / status labels that appear in greetings, prose, bg-html. Renaming an entity in prose without updating keys silently disables the entry.
-- **Alternate greetings.** They often share a name / tone / opening pattern. Translating one and not the others leaves the chat picker inconsistent. Greetings are also referenced by regex \`find_regex\` patterns that depend on shape (asterisks, brackets, quoted speech, language markers).
-- **Regex find_regex.** Anchors to content shape, not text. A prose rewrite or HTML class rename can de-sync the find side. Translation never touches \`find_regex\`; only structural rewrites do.
-- **Trigger \u2194 trigger call chain.** \`runTrigger("name")\` in one trigger's Lua calls another by its \`comment\`. Renames cascade.
-
-Workflow rule: **before declaring an edit done, \`grep\` the card for every other place the touched token appears.** \`grep\` walks character + world_books + regex + extensions in one pass; \`grep_external\` covers module envelopes. For translation work, start with \`survey_cjk({scopes:["character","world_books","regex_scripts","extensions"]})\` and treat EVERY hit it returns as a real authoring surface \u2014 including hits under \`extensions.lumirealm.payload.triggers[N].effect[K].value\` or \`.display\`, which are user-visible UI strings per the table above, NOT internal state. Use \`apply_glossary\` for coordinated multi-surface replaces (>5 sites for the same token).`;
-function buildSection(c) {
-  const tail = [];
-  if (c.hasBgHtmlSource || c.hasBgHtml) {
-    tail.push("This card has bg-html. Authoring surface: `payload.background_html_source`. Always `inspect` and `read` it on translation / UI tasks even if `survey_cjk` shows no hits there, English labels and structural content may still be worth knowing about.");
-  }
-  if (c.hasTriggers && c.triggerSurfaces) {
-    const ts = c.triggerSurfaces;
-    const parts = [];
-    parts.push(`This card has \`payload.triggers\` (${ts.total} total).`);
-    const kindCounts = [];
-    if (ts.withCode > 0)
-      kindCounts.push(`${ts.withCode} carry triggerlua/triggercode \`.code\` (behaviour)`);
-    if (ts.withSetvarLike > 0)
-      kindCounts.push(`${ts.withSetvarLike} carry setvar/addvar/setdefaultvar effects (their \`.value\` is user-visible UI text via \`{{getvar::*}}\`)`);
-    if (ts.withAlert > 0)
-      kindCounts.push(`${ts.withAlert} carry alert effects (\`.display\` is popup text, \`.value\` may carry option labels)`);
-    if (ts.withRunLLM > 0)
-      kindCounts.push(`${ts.withRunLLM} carry runLLM (\`.value\` is a sub-prompt)`);
-    if (kindCounts.length > 0)
-      parts.push(`Breakdown: ${kindCounts.join(", ")}.`);
-    if (ts.sampleCommentLabels.length > 0) {
-      parts.push(`Sample button labels (\`.comment\`): ${ts.sampleCommentLabels.map((s) => `"${s}"`).join(", ")}.`);
-    }
-    if (ts.hasCjkInEffectStrings) {
-      parts.push("Trigger non-code effect strings contain CJK characters on this card. Those are real user-visible UI text per the table above (translatable), not internal state.");
-    }
-    parts.push("Read the trigger with `read({path: '...triggers[i]'})` first to locate the exact effect index before editing.");
-    tail.push(parts.join(" "));
-  }
-  if (c.hasScriptstateDefaults) {
-    tail.push('`payload.scriptstate_defaults` is a flat string->string map for chat-state seeds. `read` it, mutate it locally, write it back with `set({path: "char/extensions/lumirealm.payload.scriptstate_defaults", value: <object>})`. Coupled to: `{{getvar::KEY}}` macros, Lua `getState/setState` calls, regex `replace_string` references.');
-  }
-  if (c.payloadDualKeys.length > 0) {
-    tail.push(`Canonical character fields with payload mirrors on this card: ${c.payloadDualKeys.join(", ")}. Edit the canonical (top-level) side; the payload mirror is a translator output and is refused.`);
-  }
-  if (c.attachedModuleCount > 0) {
-    tail.push("");
-    tail.push("## Attached modules");
-    tail.push("");
-    tail.push(`${c.attachedModuleCount} module(s) attached. Module-scoped content (lorebook, regex, triggers, lua, bg-html, scriptstate defaults) lives in separate envelopes; the lorebook + regex are also installed as top-level mirrors editable via the normal path-based tools. For migration-safe edits, use the envelope: \`list_external\` / \`read_external\` / \`grep_external\` / \`edit_external\` / \`update_external\` with \`surface_id='module_envelope'\`. When the user mentions content you cannot find on this character's surfaces, check the attached modules before saying it is missing.`);
-  }
-  if (c.translatorSchemaVersion !== null) {
-    tail.push("");
-    tail.push(`Stored translator schema version: ${c.translatorSchemaVersion}.`);
-  }
-  return tail.length > 0 ? `${STATIC_SECTION}
-
-${tail.join(`
-`)}` : STATIC_SECTION;
-}
+var AUTHORING_HINT = "Edit canonical char/rx/wb fields, payload.background_html_source, triggers and scriptstate_defaults; never frozen source, derived mirrors or user_overrides. Use dedicated asset/module/state tools for mutations. Check coupled names/keys/buttons before renaming; translations change visible literals, not code or IDs.";
 async function buildSystemPromptFragment(spindle2, userId, characterId) {
-  let c;
+  let character;
   try {
-    c = await spindle2.characters.get(characterId, userId);
+    character = await spindle2.characters.get(characterId, userId);
   } catch {
     return null;
   }
-  if (!c)
+  const realm = character?.extensions?.["lumirealm"];
+  if (!realm || typeof realm !== "object")
     return null;
-  const ctx = detectContext(c);
-  if (!ctx)
-    return null;
-  return buildSection(ctx);
+  return `${DOCS_HINT}
+${AUTHORING_HINT}`;
 }
 function* walkEnvelopeStringLeaves(value, prefix) {
   if (typeof value === "string") {
@@ -36240,6 +36067,13 @@ function registerLumiagentPhoneline(spindle2, moduleStorage, log = () => {}, onM
       return checkReadPath(req.extPath);
     }
     if (req.op === "list_items" || req.op === "read_item" || req.op === "write_field") {
+      if (req.surfaceId === DOCS_SURFACE) {
+        if (req.op === "list_items")
+          return listDocs();
+        if (req.op === "read_item")
+          return readDoc(req.itemId, req.field);
+        return { ok: false, error: "LumiRealm docs are read-only." };
+      }
       return dispatchModuleSurface(spindle2, moduleStorage, req, onModuleEnvelopeWritten, log);
     }
     if (req.op === "grep_items") {
