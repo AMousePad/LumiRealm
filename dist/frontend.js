@@ -22527,6 +22527,37 @@ function createDisplayResolver(writeback, activationPatterns = createActivationP
   };
 }
 
+// src/display/risu-button-click.ts
+function createRisuButtonClickHandler(deps) {
+  return (event) => {
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const target = path[0] ?? event.target;
+    if (!target || typeof target.closest !== "function")
+      return;
+    const element = target.closest("[risu-trigger], [risu-btn]");
+    if (!element)
+      return;
+    const triggerName = element.getAttribute("risu-trigger");
+    const btn = triggerName ? null : element.getAttribute("risu-btn");
+    if (!triggerName && !btn)
+      return;
+    const idAttr = element.getAttribute("risu-id") ?? undefined;
+    const chatId = deps.getChatId();
+    if (!chatId) {
+      deps.log.warn(`manual click: active chat isn't a lumirealm chat, ignoring ${triggerName ?? `btn=${btn}`}`);
+      return;
+    }
+    event.stopPropagation();
+    if (triggerName) {
+      deps.log.info(`manual-trigger click: triggerName=${triggerName} triggerId=${idAttr ?? "<none>"} chatId=${chatId}`);
+      deps.send({ type: "manual_trigger", triggerName, ...idAttr !== undefined ? { triggerId: idAttr } : {}, chatId });
+    } else if (btn) {
+      deps.log.info(`manual-button click: btn=${btn} btnId=${idAttr ?? "<none>"} chatId=${chatId}`);
+      deps.send({ type: "manual_button_click", btn, ...idAttr !== undefined ? { btnId: idAttr } : {}, chatId });
+    }
+  };
+}
+
 // src/frontend-lua/receiver.ts
 function createFrontendLuaReceiver(sessionId, run, send) {
   const active = new Map;
@@ -43662,45 +43693,11 @@ function setup(ctx) {
   const svgRasterizer = setupSvgRasterizer({ log: flog2, sendToBackend });
   let activeRisuChatId = null;
   const isVisibleChat = (chatId) => ctx.getActiveChat().chatId === chatId;
-  const onClickCapture = (e) => {
-    const path = typeof e.composedPath === "function" ? e.composedPath() : [];
-    const t = path[0] ?? e.target;
-    if (!t || typeof t.closest !== "function")
-      return;
-    const el = t.closest("[risu-trigger], [risu-btn]");
-    if (!el)
-      return;
-    const triggerName = el.getAttribute("risu-trigger");
-    const btn = triggerName ? null : el.getAttribute("risu-btn");
-    if (!triggerName && !btn)
-      return;
-    const idAttr = el.getAttribute("risu-id") ?? undefined;
-    const chatId = ctx.getActiveChat().chatId;
-    if (!chatId) {
-      const label = triggerName ?? `btn=${btn}`;
-      flog2.warn(`manual click: active chat isn't a lumirealm chat, ignoring ${label}`);
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    if (triggerName) {
-      flog2.info(`manual-trigger click: triggerName=${triggerName} triggerId=${idAttr ?? "<none>"} chatId=${chatId}`);
-      sendToBackend({
-        type: "manual_trigger",
-        triggerName,
-        ...idAttr !== undefined ? { triggerId: idAttr } : {},
-        chatId
-      });
-    } else if (btn) {
-      flog2.info(`manual-button click: btn=${btn} btnId=${idAttr ?? "<none>"} chatId=${chatId}`);
-      sendToBackend({
-        type: "manual_button_click",
-        btn,
-        ...idAttr !== undefined ? { btnId: idAttr } : {},
-        chatId
-      });
-    }
-  };
+  const onClickCapture = createRisuButtonClickHandler({
+    getChatId: () => ctx.getActiveChat().chatId,
+    send: sendToBackend,
+    log: flog2
+  });
   document.addEventListener("click", onClickCapture, true);
   cleanups.push(() => document.removeEventListener("click", onClickCapture, true));
   const debugHook = {

@@ -2,6 +2,7 @@ import { setupHostServices } from './host-services/client.js';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
+import { createRisuButtonClickHandler } from './display/risu-button-click.js';
 import { setupFrontendLua } from './frontend-lua/frontend.js';
 import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
@@ -317,44 +318,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   // first push after load is not dropped.
   const isVisibleChat = (chatId: string): boolean =>
     ctx.getActiveChat().chatId === chatId;
-  const onClickCapture = (e: Event): void => {
-    const path = typeof (e as Event & { composedPath?: () => EventTarget[] }).composedPath === 'function'
-      ? (e as Event & { composedPath: () => EventTarget[] }).composedPath()
-      : [];
-    const t = (path[0] as HTMLElement | undefined) ?? (e.target as HTMLElement | null);
-    if (!t || typeof t.closest !== 'function') return;
-    const el = t.closest('[risu-trigger], [risu-btn]') as HTMLElement | null;
-    if (!el) return;
-    const triggerName = el.getAttribute('risu-trigger');
-    const btn = triggerName ? null : el.getAttribute('risu-btn');
-    if (!triggerName && !btn) return;
-    const idAttr = el.getAttribute('risu-id') ?? undefined;
-    const chatId = ctx.getActiveChat().chatId;
-    if (!chatId) {
-      const label = triggerName ?? `btn=${btn}`;
-      flog.warn(`manual click: active chat isn't a lumirealm chat, ignoring ${label}`);
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    if (triggerName) {
-      flog.info(`manual-trigger click: triggerName=${triggerName} triggerId=${idAttr ?? '<none>'} chatId=${chatId}`);
-      sendToBackend({
-        type: 'manual_trigger',
-        triggerName,
-        ...(idAttr !== undefined ? { triggerId: idAttr } : {}),
-        chatId,
-      });
-    } else if (btn) {
-      flog.info(`manual-button click: btn=${btn} btnId=${idAttr ?? '<none>'} chatId=${chatId}`);
-      sendToBackend({
-        type: 'manual_button_click',
-        btn,
-        ...(idAttr !== undefined ? { btnId: idAttr } : {}),
-        chatId,
-      });
-    }
-  };
+  const onClickCapture = createRisuButtonClickHandler({
+    getChatId: () => ctx.getActiveChat().chatId,
+    send: sendToBackend,
+    log: flog,
+  });
   document.addEventListener('click', onClickCapture, /* capture */ true);
   cleanups.push(() => document.removeEventListener('click', onClickCapture, /* capture */ true));
 
