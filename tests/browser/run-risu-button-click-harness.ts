@@ -18,7 +18,11 @@ const card = `
   <input type="text" id="typed" value="initial">
   <details id="more"><summary id="sum">more</summary>body</details>
   <details id="open-more" open><summary id="open-sum">more</summary>body</details>
-  <div id="fire" risu-trigger="fire" risu-id="7">fire</div>`;
+  <div id="fire" risu-trigger="fire" risu-id="7">fire</div>
+  <div risu-btn="wrapped"><label><input type="checkbox" id="wrapped-box"><span id="wrapped-text">wrapped</span></label></div>
+  <a id="link" href="#moved" risu-btn="link">link</a>
+  <div id="scroller" style="height:20px;overflow:auto"><div style="height:400px">tall</div></div>
+  <div id="failing" risu-btn="failing">failing</div>`;
 
 async function load(install: string, ran = true): Promise<void> {
   await page.setContent(`
@@ -34,9 +38,14 @@ async function load(install: string, ran = true): Promise<void> {
 
 const fixed = `document.addEventListener('click', createRisuButtonClickHandler({
   getChatId: () => 'chat',
-  run: async (message) => { window.sent.push(message); return window.ran; },
+  willRun: () => window.ran,
+  run: async (message) => {
+    window.sent.push(message);
+    if (message.btn === 'failing') throw new Error('lua failed');
+    return window.ran;
+  },
   invalidateMessage: (id) => window.invalidated.push(id),
-  log: { info() {}, warn() {}, error(message, error) { throw error; } },
+  log: { info() {}, warn() {}, error(message, error) { if (error.message !== 'lua failed') throw error; } },
 }), true);`;
 
 const settle = () => page.evaluate('new Promise((resolve) => setTimeout(resolve))');
@@ -89,12 +98,36 @@ await page.click('#fire');
 await settle();
 assert.deepEqual(await page.evaluate('window.sent'), [{ type: 'manual_trigger', triggerName: 'fire', triggerId: '7', chatId: 'chat' }]);
 
+await load(fixed);
+await page.click('#wrapped-text');
+await settle();
+assert.equal((await page.evaluate<unknown[]>('window.sent')).length, 1, 'a label inside a button runs its trigger once');
+assert.equal(await checked('#wrapped-box'), false, 'a label inside a running button does not toggle its control');
+
+await page.click('#link');
+await settle();
+assert.equal(await page.evaluate('location.hash'), '', 'a running button does not navigate');
+
+await page.evaluate(`document.getElementById('scroller').scrollTop = 200`);
+await page.click('#plain-close');
+await settle();
+assert.equal(await page.evaluate(`document.getElementById('scroller').scrollTop`), 0, 'scroll position resets');
+
+await page.click('#open');
+await page.click('#failing');
+await settle();
+assert.equal(await checked('#none'), true, 'a failed run still reloads the message');
+
 await load(fixed, false);
 await page.click('#open');
 await page.click('#plain-close');
 await settle();
 assert.equal(await checked('#set'), true, 'no reset when no trigger ran, matching Risu');
 assert.deepEqual(await page.evaluate('window.invalidated'), []);
+
+await page.click('#wrapped-text');
+await settle();
+assert.equal(await checked('#wrapped-box'), true, 'native activation stands when no trigger runs');
 
 await page.setContent(`<div data-message-id="m1"><div data-component="MessageContent"><div id="island" data-lumiverse-html-island></div></div></div>`);
 await page.evaluate(`

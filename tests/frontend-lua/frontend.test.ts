@@ -200,6 +200,14 @@ test('a button reports whether a trigger ran, the condition for the Risu message
   expect(await withLua.runtime.manual(withLua.config.chatId, { kind: 'manual', name: 'select' })).toBe(true);
 });
 
+test.each([
+  ['button', { kind: 'button', value: 'select' }],
+  ['manual trigger', { kind: 'manual', name: 'boom' }],
+] as const)('a Lua error in a %s still reports a run, so the message reloads like Risu', async (_label, operation) => {
+  const { runtime, config } = await fixture(`function onButtonClick(id) error('boom') end function boom(id) error('boom') end`);
+  expect(await runtime.manual(config.chatId, operation)).toBe(true);
+});
+
 test('resolved messages depend on their own reload key so a click re-renders only that message', async () => {
   const { resolver } = await fixture('');
   const body = await resolver.resolveBody({ content: 'text', context: { ...context, messageId: 'clicked' } });

@@ -1,9 +1,15 @@
 import type { FrontendToBackend } from '../types/messages.js';
+import type { DisplayLuaTrigger } from './snapshot.js';
 
 type RisuButtonMessage = Extract<FrontendToBackend, { type: 'manual_trigger' | 'manual_button_click' }>;
 
+export function manualActionWillRun(triggers: readonly DisplayLuaTrigger[], message: RisuButtonMessage): boolean {
+  return message.type === 'manual_trigger' ? triggers.length > 0 : triggers.some(trigger => trigger.source.effect[0]?.type === 'triggerlua');
+}
+
 export interface RisuButtonClickDeps {
   readonly getChatId: () => string | null | undefined;
+  readonly willRun: (message: RisuButtonMessage) => boolean;
   // Resolves true when a trigger ran, the condition under which Risu reloads the message.
   readonly run: (message: RisuButtonMessage) => Promise<boolean>;
   readonly invalidateMessage: (messageId: string) => void;
@@ -39,6 +45,10 @@ export function resetNativeControls(root: ParentNode): void {
     if (open !== undefined) details.open = open;
     detailsDefaults.delete(details);
   }
+  for (const element of Array.from(root.querySelectorAll('*'))) {
+    if (element.scrollTop) element.scrollTop = 0;
+    if (element.scrollLeft) element.scrollLeft = 0;
+  }
   for (const island of Array.from(root.querySelectorAll('[data-lumiverse-html-island]'))) {
     if (island.shadowRoot) resetNativeControls(island.shadowRoot);
   }
@@ -51,8 +61,7 @@ function findInPath(path: readonly EventTarget[], selector: string): HTMLElement
   return null;
 }
 
-// Capture phase to beat Lumi handlers. Never preventDefault: like Risu, cards pair these attributes with
-// native activation such as label[for] radios and checkboxes, which a cancelled click silently undoes.
+// Capture phase to beat Lumi handlers.
 export function createRisuButtonClickHandler(deps: RisuButtonClickDeps): (event: Event) => void {
   return (event) => {
     const path = event.composedPath() as EventTarget[];
@@ -83,10 +92,17 @@ export function createRisuButtonClickHandler(deps: RisuButtonClickDeps): (event:
       deps.log.info(`manual-button click: btn=${btn} btnId=${idAttr ?? '<none>'} chatId=${chatId}`);
       message = { type: 'manual_button_click', btn: btn!, ...(idAttr !== undefined ? { btnId: idAttr } : {}), chatId };
     }
-    void deps.run(message).then((ran) => {
-      if (!ran) return;
+    const willRun = deps.willRun(message);
+    // Risu's reload detaches the row before the browser activates the click, so a run has no label follow-up click or navigation. With no run, activation stands.
+    if (willRun) event.preventDefault();
+    void deps.run(message).catch((error: unknown) => {
+      deps.log.error('Frontend Lua action failed', error);
+      // Activation was already cancelled, so without a reload the click would do nothing.
+      return willRun;
+    }).then((reload) => {
+      if (!reload) return;
       resetNativeControls(content);
       deps.invalidateMessage(messageId);
-    }).catch((error: unknown) => deps.log.error('Frontend Lua action failed', error));
+    }).catch((error: unknown) => deps.log.error('Risu message reload failed', error));
   };
 }

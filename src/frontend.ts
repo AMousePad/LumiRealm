@@ -2,7 +2,7 @@ import { setupHostServices } from './host-services/client.js';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
-import { createRisuButtonClickHandler, messageReloadDepKey } from './display/risu-button-click.js';
+import { createRisuButtonClickHandler, manualActionWillRun, messageReloadDepKey } from './display/risu-button-click.js';
 import { setupFrontendLua } from './frontend-lua/frontend.js';
 import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
@@ -321,6 +321,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     ctx.getActiveChat().chatId === chatId;
   const onClickCapture = createRisuButtonClickHandler({
     getChatId: () => ctx.getActiveChat().chatId,
+    willRun: message => manualActionWillRun(getDisplaySnapshot(message.chatId)?.luaTriggers ?? [], message),
     run: runManualAction,
     invalidateMessage: messageId => display.invalidate([messageReloadDepKey(messageId)]),
     log: flog,

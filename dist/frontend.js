@@ -16260,6 +16260,9 @@ function subscribeActivationPatternChanges(events, cache, invalidate) {
 }
 
 // src/display/risu-button-click.ts
+function manualActionWillRun(triggers, message) {
+  return message.type === "manual_trigger" ? triggers.length > 0 : triggers.some((trigger) => trigger.source.effect[0]?.type === "triggerlua");
+}
 var messageReloadDepKey = (messageId) => `__risu_message_reload__:${messageId}`;
 var detailsDefaults = new WeakMap;
 function rememberDetailsDefault(target) {
@@ -16283,6 +16286,12 @@ function resetNativeControls(root) {
     if (open !== undefined)
       details.open = open;
     detailsDefaults.delete(details);
+  }
+  for (const element of Array.from(root.querySelectorAll("*"))) {
+    if (element.scrollTop)
+      element.scrollTop = 0;
+    if (element.scrollLeft)
+      element.scrollLeft = 0;
   }
   for (const island of Array.from(root.querySelectorAll("[data-lumiverse-html-island]"))) {
     if (island.shadowRoot)
@@ -16329,12 +16338,18 @@ function createRisuButtonClickHandler(deps) {
       deps.log.info(`manual-button click: btn=${btn} btnId=${idAttr ?? "<none>"} chatId=${chatId}`);
       message = { type: "manual_button_click", btn, ...idAttr !== undefined ? { btnId: idAttr } : {}, chatId };
     }
-    deps.run(message).then((ran) => {
-      if (!ran)
+    const willRun = deps.willRun(message);
+    if (willRun)
+      event.preventDefault();
+    deps.run(message).catch((error) => {
+      deps.log.error("Frontend Lua action failed", error);
+      return willRun;
+    }).then((reload) => {
+      if (!reload)
         return;
       resetNativeControls(content);
       deps.invalidateMessage(messageId);
-    }).catch((error) => deps.log.error("Frontend Lua action failed", error));
+    }).catch((error) => deps.log.error("Risu message reload failed", error));
   };
 }
 
@@ -43794,6 +43809,7 @@ function setup(ctx) {
   const isVisibleChat = (chatId) => ctx.getActiveChat().chatId === chatId;
   const onClickCapture = createRisuButtonClickHandler({
     getChatId: () => ctx.getActiveChat().chatId,
+    willRun: (message) => manualActionWillRun(getDisplaySnapshot(message.chatId)?.luaTriggers ?? [], message),
     run: runManualAction,
     invalidateMessage: (messageId) => display.invalidate([messageReloadDepKey(messageId)]),
     log: flog2
