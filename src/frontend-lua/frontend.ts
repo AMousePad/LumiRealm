@@ -4,7 +4,6 @@ import { getDisplaySnapshot, setDisplaySnapshot, clearDisplaySnapshot, diffSnaps
 import { messageReloadDepKey } from '../display/risu-button-click.js';
 import { MSG_DEP_KEY } from '../interpreter/evaluator/context.js';
 import { prepareTriggerSources } from '../interpreter/dispatcher.js';
-import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import { createFrontendLuaReceiver } from './receiver.js';
 import { createRuntimeServices, type RuntimeServiceReply } from './services.js';
 import { FrontendRuntimeState } from './state.js';
@@ -156,7 +155,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
     const row = typeof index === 'string' && !index.trim() ? NaN : Number(index);
     if (!Number.isInteger(row)) return undefined;
     const messages = entry.state.hostMessages();
-    const view = buildRisuChatView({ messages });
+    const view = entry.state.chatView(messages);
     if (row === -1) return view.greeting === undefined ? undefined : messages[0]?.id;
     return view.messages[row]?.id;
   }

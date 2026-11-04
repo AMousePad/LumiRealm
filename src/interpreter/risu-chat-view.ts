@@ -13,6 +13,8 @@ export interface RisuChatView {
 
 export interface BuildRisuChatViewInput {
   readonly messages: readonly HostMessage[];
+  // Empty rows a script wrote are real Risu messages, not the host's generation placeholder.
+  readonly scriptEmptyIds?: ReadonlySet<string>;
 }
 
 export function buildRisuChatView(input: BuildRisuChatViewInput): RisuChatView {
@@ -24,7 +26,7 @@ export function buildRisuChatView(input: BuildRisuChatViewInput): RisuChatView {
   let stripped = 0;
   while (messages.length > 0) {
     const last = messages[messages.length - 1]!;
-    if (last.role === 'assistant' && (!last.content || last.content === '')) {
+    if (last.role === 'assistant' && (!last.content || last.content === '') && !input.scriptEmptyIds?.has(last.id)) {
       messages.pop();
       stripped++;
     } else {

@@ -3,7 +3,7 @@ import { LOCAL_LORE_KEY, readLocalLore, upsertLocalLore } from '../interpreter/r
 import type { HostMessage, HostCharacter, HostPersona, HostWorldInfoEntry, TriggerRuntimeOpts } from '../interpreter/host.js';
 import { OrderedRuntimeState, type StatePatch, type StateRevision } from './ordered-state.js';
 import { runtimeMessage, runtimeCharacter, runtimePersona, runtimeLore, type RuntimeStateDto, type RuntimeStatePatch, type RuntimeStateCommand, type RuntimeStateWrite } from './state-contract.js';
-import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
+import { buildRisuChatView, type RisuChatView } from '../interpreter/risu-chat-view.js';
 import { parseGlobalVars } from '../interpreter/runtime/chat-state.js';
 import { mergeEffectiveGlobals } from '../state/toggle-preferences.js';
 
@@ -17,6 +17,7 @@ export class FrontendRuntimeState {
   readonly messages: HostMessage[] = [];
   private readonly state: OrderedRuntimeState;
   private readonly messageIds = new Set<string>();
+  private readonly scriptEmptyIds = new Set<string>();
   private readonly loreIds = new Set<string>();
   private readonly fieldNames = new Map<string, Set<string>>();
   private observedMessages: HostMessage[] = [];
@@ -91,7 +92,7 @@ export class FrontendRuntimeState {
 
   private publish(keys: readonly string[]): void {
     if (keys.some(key => key.startsWith('["message",'))) {
-      const view = buildRisuChatView({ messages: this.hostMessages() });
+      const view = this.chatView(this.hostMessages());
       this.messages.splice(0, this.messages.length, ...view.messages);
       this.observedMessages = this.messages.map(message => ({ ...message }));
       this.greeting = view.greeting;
@@ -110,6 +111,10 @@ export class FrontendRuntimeState {
     } else this.state.apply(revision, this.patch(patch));
   }
   replace(value: RuntimeStateDto): void { this.state.apply(value.revision, this.snapshotPatch(value)); }
+
+  chatView(messages: readonly HostMessage[]): RisuChatView {
+    return buildRisuChatView({ messages, scriptEmptyIds: this.scriptEmptyIds });
+  }
 
   hostMessages(): HostMessage[] {
     return [...this.messageIds].map(id => this.object('message', id)).filter(value => value.present)
@@ -225,7 +230,7 @@ export class FrontendRuntimeState {
 
   displayChat(initial: readonly HostMessage[], persistence: NonNullable<TriggerRuntimeOpts['luaChat']>['persistence']) {
     const rows = initial.map(message => ({ ...message }));
-    const view = buildRisuChatView({ messages: rows });
+    const view = this.chatView(rows);
     let greeting = view.greeting;
     const chat = this.chatAdapter(view.messages, () => greeting, persistence);
     const lastCanonical = new Map(this.hostMessages().map(message => [message.id, message]));
@@ -245,7 +250,7 @@ export class FrontendRuntimeState {
       const order = new Map([...current.keys()].map((id, index) => [id, index]));
       rows.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
       for (const id of ids) { const message = current.get(id); if (message) lastCanonical.set(id, message); else lastCanonical.delete(id); }
-      const next = buildRisuChatView({ messages: rows });
+      const next = this.chatView(rows);
       greeting = next.greeting;
       view.messages.splice(0, view.messages.length, ...next.messages);
       chat.observed();
@@ -274,6 +279,7 @@ export class FrontendRuntimeState {
         for (const message of messages) {
           if (!message.id) (message as { id: string }).id = v4();
           if (!previous.has(message.id)) inserted = true;
+          if (message.role === 'assistant' && !message.content) this.scriptEmptyIds.add(message.id);
         }
         const indices = new Map<string, number>();
         if (inserted) {

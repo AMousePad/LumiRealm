@@ -21357,7 +21357,7 @@ function buildRisuChatView(input) {
   let stripped = 0;
   while (messages.length > 0) {
     const last = messages[messages.length - 1];
-    if (last.role === "assistant" && (!last.content || last.content === "")) {
+    if (last.role === "assistant" && (!last.content || last.content === "") && !input.scriptEmptyIds?.has(last.id)) {
       messages.pop();
       stripped++;
     } else {

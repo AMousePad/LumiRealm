@@ -39,6 +39,35 @@ test('end insertion stays before trailing assistant placeholders', async () => {
   expect(f.dto.messages.at(-1)?.id).toBe('placeholder');
 });
 
+function greetingOnly() {
+  const seed = frontendRuntime().dto;
+  seed.messages = seed.messages.slice(0, 1);
+  return frontendRuntime(seed);
+}
+
+test('an empty row a script adds stays addressable, like Risu chat.message', async () => {
+  const f = greetingOnly();
+  expect(await f.run("listenEdit('editInput',function(id,text) addChat(id,'char','');local n=getChatLength(id);setChat(id,0,'Scene');return n..'|'..getChatLength(id)..'|'..getChat(id,0).data end)"))
+    .toBe('1|1|Scene');
+  expect(f.writes.map(command => command.kind)).toEqual(['message.create', 'message.edit']);
+  expect(f.dto.messages.map(message => message.content)).toEqual(['Greeting', 'Scene']);
+  expect(f.state.messages.map(message => message.content)).toEqual(['Scene']);
+});
+
+test('a row a script leaves empty stays counted across later runs', async () => {
+  const f = greetingOnly();
+  await f.run("listenEdit('editInput',function(id,text) addChat(id,'char','');return text end)");
+  expect(await f.run("listenEdit('editInput',function(id,text) return getChatLength(id) end)")).toBe(1);
+  expect(f.state.messages.map(message => message.content)).toEqual(['']);
+});
+
+test('a script clearing the last reply keeps the row, like Risu setChat', async () => {
+  const f = frontendRuntime();
+  expect(await f.run("listenEdit('editInput',function(id,text) setChat(id,-1,'');return getChatLength(id)..'|'..getChat(id,-1).data end)"))
+    .toBe('2|');
+  expect(f.state.messages.map(message => message.content)).toEqual(['Hello', '']);
+});
+
 test('ordinary trigger adoption also preserves roles and insertion order', async () => {
   const f = frontendRuntime();
   await f.run("function onInput(id) setChatRole(id,0,'char');insertChat(id,1,'user','Inserted') end", { kind: 'binding', binding: 'input' });

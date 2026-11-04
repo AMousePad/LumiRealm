@@ -16785,7 +16785,7 @@ function buildRisuChatView(input) {
   let stripped = 0;
   while (messages.length > 0) {
     const last = messages[messages.length - 1];
-    if (last.role === "assistant" && (!last.content || last.content === "")) {
+    if (last.role === "assistant" && (!last.content || last.content === "") && !input.scriptEmptyIds?.has(last.id)) {
       messages.pop();
       stripped++;
     } else {
@@ -23006,6 +23006,7 @@ class FrontendRuntimeState {
   messages = [];
   state;
   messageIds = new Set;
+  scriptEmptyIds = new Set;
   loreIds = new Set;
   fieldNames = new Map;
   observedMessages = [];
@@ -23092,7 +23093,7 @@ class FrontendRuntimeState {
   }
   publish(keys) {
     if (keys.some((key) => key.startsWith('["message",'))) {
-      const view = buildRisuChatView({ messages: this.hostMessages() });
+      const view = this.chatView(this.hostMessages());
       this.messages.splice(0, this.messages.length, ...view.messages);
       this.observedMessages = this.messages.map((message) => ({ ...message }));
       this.greeting = view.greeting;
@@ -23115,6 +23116,9 @@ class FrontendRuntimeState {
   }
   replace(value) {
     this.state.apply(value.revision, this.snapshotPatch(value));
+  }
+  chatView(messages) {
+    return buildRisuChatView({ messages, scriptEmptyIds: this.scriptEmptyIds });
   }
   hostMessages() {
     return [...this.messageIds].map((id) => this.object("message", id)).filter((value) => value.present).sort((a, b) => Number(a.index) - Number(b.index)).map(({ index: _index, present: _present, ...value }) => value);
@@ -23277,7 +23281,7 @@ class FrontendRuntimeState {
   }
   displayChat(initial, persistence) {
     const rows = initial.map((message) => ({ ...message }));
-    const view = buildRisuChatView({ messages: rows });
+    const view = this.chatView(rows);
     let greeting = view.greeting;
     const chat = this.chatAdapter(view.messages, () => greeting, persistence);
     const lastCanonical = new Map(this.hostMessages().map((message) => [message.id, message]));
@@ -23306,7 +23310,7 @@ class FrontendRuntimeState {
         else
           lastCanonical.delete(id);
       }
-      const next = buildRisuChatView({ messages: rows });
+      const next = this.chatView(rows);
       greeting = next.greeting;
       view.messages.splice(0, view.messages.length, ...next.messages);
       chat.observed();
@@ -23335,6 +23339,8 @@ class FrontendRuntimeState {
             message.id = v4_default();
           if (!previous.has(message.id))
             inserted = true;
+          if (message.role === "assistant" && !message.content)
+            this.scriptEmptyIds.add(message.id);
         }
         const indices = new Map;
         if (inserted) {
@@ -23989,7 +23995,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
     if (!Number.isInteger(row))
       return;
     const messages = entry.state.hostMessages();
-    const view = buildRisuChatView({ messages });
+    const view = entry.state.chatView(messages);
     if (row === -1)
       return view.greeting === undefined ? undefined : messages[0]?.id;
     return view.messages[row]?.id;
