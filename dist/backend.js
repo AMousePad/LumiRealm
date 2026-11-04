@@ -21822,6 +21822,7 @@ var validate = import_dist.default.validate;
 var stringify = import_dist.default.stringify;
 var parse = import_dist.default.parse;
 // src/interpreter/lua-engine.ts
+var FULL_CHAT_FAST_PATH = "do local parts,decode,find,sub=getFullChatPartsMain,json.decode,string.find,string.sub;getFullChatPartsMain=nil;" + 'if parts then function getFullChat(id) local raw=parts(id);local split=find(raw,"\\n",1,true);local rows=decode(sub(raw,1,split-1));local pos=split+1;' + "for i=1,#rows do local row=rows[i];local len=row.len;if len then row.data=sub(raw,pos,pos+len-1);pos=pos+len;row.len=nil end end;return rows end end end ";
 var safeApis = new Set([
   "stopChat",
   "alertError",
@@ -21970,6 +21971,7 @@ var _clock = Date.now;
 var _log2 = makeSafeLogger("runtime.runLLM");
 
 // src/util/lua-message-data.ts
+var utf8 = new TextEncoder;
 function hostLuaMessageData(message) {
   const own = message.ownContentMetadata ?? message.extra?.spindle_content_metadata?.lumirealm;
   return own && typeof own === "object" && !Array.isArray(own) ? own : null;
@@ -24870,12 +24872,14 @@ function createLogHandlers(deps) {
       sendLogState(deps, ctx);
     },
     log_request_export: async (_msg, ctx) => {
+      const lumiverse = await deps.readHostBuild();
       const snap = deps.logStore.snapshot(ctx.userId);
       ctx.send({
         type: "log_export_pushed",
         events: snap.events,
         session: {
           extensionVersion: deps.extensionVersion,
+          lumiverse,
           userId: ctx.userId,
           activeChatId: deps.lastActiveChatByUser.get(ctx.userId) ?? null,
           activeCharacterId: null
@@ -29389,6 +29393,15 @@ function buildRisuWorldInfoChatPlacements(active, entries, localLore = []) {
   return placements;
 }
 
+// src/display/regex-core.ts
+var LEGACY_NAME_TAG_RE = /<(user|char|bot)>/i;
+function hasCbsSyntax(s) {
+  return s.includes("{{") || s.includes("{#") || LEGACY_NAME_TAG_RE.test(s);
+}
+function formatRuleTimings(rules, limit = 8) {
+  return [...rules].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([name, ms]) => `${name}=${ms.toFixed(1)}ms`).join(", ");
+}
+
 // src/interceptors/prompt-regex-apply.ts
 var PROMPT_REGEX_PHASE = "commit";
 async function fetchMessages(chatId, log, errMsg) {
@@ -29489,6 +29502,7 @@ function rowToPromptScript(r) {
   const rawMatchActions = metadata?.["match_actions"];
   const matchActions = Array.isArray(rawMatchActions) ? rawMatchActions.filter((action) => action === "move_top" || action === "move_bottom" || action === "repeat_back") : [];
   return {
+    ...typeof row.name === "string" ? { name: row.name } : {},
     find_regex: row.find_regex,
     replace_string: typeof row.replace_string === "string" ? row.replace_string : "",
     flags: typeof row.flags === "string" ? row.flags : "g",
@@ -29836,8 +29850,10 @@ function createLumiInterceptors(deps) {
         stage.mark("stripSetvar");
         if (deps.isPromptRegexAuthoritative(chatId)) {
           try {
+            const regexStart = Date.now();
             const scripts = await listLivePromptRegexScripts(active.card.character_id, chatId, userId);
             if (scripts.length > 0) {
+              const listed = Date.now();
               const prebuilt = await buildBackendPipelineInput(chatId, active.card.character_id, userId, {
                 activeCardByChat,
                 getCachedSettingsSync: deps.getCachedSettingsSync,
@@ -29846,7 +29862,12 @@ function createLumiInterceptors(deps) {
                 errMsg
               }, ctx.personaId ?? undefined);
               const target = out === messages ? out.slice() : out;
+              const built = Date.now();
               const result = await deps.dispatchPromptRegex(prebuilt, scripts, target, userId);
+              if (result.ruleMs) {
+                const ruleMs = result.ruleMs;
+                log.debug(`interceptor.promptRegex.timing chat=${chatId} list=${listed - regexStart}ms prebuilt=${built - listed}ms ` + `runner=${Date.now() - built}ms regex=${ruleMs.reduce((sum, ms) => sum + ms, 0).toFixed(1)}ms ` + `top=[${formatRuleTimings(scripts.map((script, index) => [script.name ?? `#${index}`, ruleMs[index] ?? 0]))}]`);
+              }
               if (result.ok && result.changed) {
                 log.info(`interceptor.promptRegex: chat=${chatId} applied scripts=${scripts.length} messages=${result.messages.length} (via runner)`);
                 out = result.messages;
@@ -29911,7 +29932,7 @@ function createLumiInterceptors(deps) {
         stage.mark("frontendLua");
         const interceptorMs = stage.elapsed();
         if (interceptorMs >= SLOW_INTERCEPTOR_WARN_MS) {
-          log.warn(`interceptor slow chat=${chatId} total=${interceptorMs}ms host_budget_default=10000ms stages=[${stage.summary()}]`);
+          log.warn(`interceptor slow chat=${chatId} total=${interceptorMs}ms stages=[${stage.summary()}]`);
         }
         return out;
       });
@@ -30647,7 +30668,7 @@ function createPromptRegexRunnerClient(deps) {
       pending.set(requestId, { resolve, timer });
     });
     try {
-      active.send({ requestId, prebuilt, scripts, messages });
+      active.send({ requestId, prebuilt, scripts, messages, ...logStore.shouldEmit("debug", userId) ? { timeRules: true } : {} });
     } catch (err) {
       const p = pending.get(requestId);
       if (p) {
@@ -30660,7 +30681,7 @@ function createPromptRegexRunnerClient(deps) {
     }
     const reply = await replyPromise;
     if (reply.ok) {
-      return { ok: true, changed: reply.changed, messages: reply.messages };
+      return { ok: true, changed: reply.changed, messages: reply.messages, ...reply.ruleMs ? { ruleMs: reply.ruleMs } : {} };
     }
     log.error(`prompt-regex runner request failed (${reply.error}); killing + respawning runner, shipping prompt without inline regex (host already skipped its pass)`);
     respawnAfterFault();
@@ -30781,17 +30802,21 @@ function createReadonlyResolver(deps) {
       log.warn(`resolveReadonlyMany: userId not captured chat=${chatId}, returning templates verbatim`);
       return [...templates];
     }
+    const evaluated = templates.filter(hasCbsSyntax).length;
     const t0 = Date.now();
     try {
       const messages = await fetchMessages(chatId);
+      const fetched = Date.now();
       const ctxInput = await buildCtxInput(chatId, characterId, userId, messages, opts?.cbsContext === true);
-      const resolved = templates.map((template) => runPipeline({
+      const built = Date.now();
+      const resolved = templates.map((template) => hasCbsSyntax(template) ? runPipeline({
         ...ctxInput,
         template,
         phase: "display",
         ...opts?.rmVar === true ? { rmVar: true } : {}
-      }));
-      log.debug(`resolveReadonlyMany: DONE chat=${chatId} entries=${templates.length} ` + `elapsed=${Date.now() - t0}ms`);
+      }) : template);
+      const done = Date.now();
+      log.debug(`resolveReadonlyMany: DONE chat=${chatId} entries=${templates.length} evaluated=${evaluated} ` + `fetch=${fetched - t0}ms ctx=${built - fetched}ms eval=${done - built}ms elapsed=${done - t0}ms`);
       return resolved;
     } catch (err) {
       if (err instanceof TogglePreferencesError)
@@ -35191,6 +35216,14 @@ function compareVersions(a, b) {
   }
   return 0;
 }
+async function readHostBuildReport(info, version) {
+  const base = { hostVersion: info.hostVersion, minimumLumiverseVersion: info.minimumLumiverseVersion };
+  try {
+    return { ...base, build: await version.getInfo(), buildError: null };
+  } catch (err) {
+    return { ...base, build: null, buildError: err instanceof Error ? err.message : String(err) };
+  }
+}
 function readRuntimeVersionInfo(source) {
   const minimumLumiverseVersion = source.manifest.minimum_lumiverse_version?.trim();
   if (!minimumLumiverseVersion) {
@@ -37386,6 +37419,7 @@ var connectionsHandlers = createConnectionsHandlers({
 });
 var logHandlers = createLogHandlers({
   extensionVersion: EXTENSION_VERSION,
+  readHostBuild: () => readHostBuildReport(runtimeVersionInfo, spindle.version),
   logStore,
   isLogThreshold,
   ensureLogStateLoaded,

@@ -15926,6 +15926,19 @@ function luaMessageData(message) {
 function luaMessageFields(value) {
   return { content: toStr(value), luaData: typeof value === "string" ? undefined : { value } };
 }
+var LUA_UNSAFE_STRING = /[\0\p{Cs}]/u;
+var utf8 = new TextEncoder;
+function encodeFullChatParts(rows) {
+  const bodies = [];
+  const head = rows.map(({ role, data, time }) => {
+    if (typeof data !== "string" || LUA_UNSAFE_STRING.test(data))
+      return { role, data, time };
+    bodies.push(data);
+    return { role, time, len: utf8.encode(data).length };
+  });
+  return `${JSON.stringify(head)}
+${bodies.join("")}`;
+}
 function hostLuaMessageData(message) {
   const own = message.ownContentMetadata ?? message.extra?.spindle_content_metadata?.lumirealm;
   return own && typeof own === "object" && !Array.isArray(own) ? own : null;
@@ -16216,7 +16229,22 @@ var LEGACY_NAME_TAG_RE = /<(user|char|bot)>/i;
 function hasCbsSyntax(s) {
   return s.includes("{{") || s.includes("{#") || LEGACY_NAME_TAG_RE.test(s);
 }
+function formatRuleTimings(rules, limit = 8) {
+  return [...rules].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([name, ms]) => `${name}=${ms.toFixed(1)}ms`).join(", ");
+}
 function applyRegexScriptsCore(content, scripts, opts) {
+  const { onRuleTiming } = opts;
+  if (!onRuleTiming)
+    return applyRules(content, scripts, opts);
+  let result = content;
+  for (const script of scripts) {
+    const startedAt = performance.now();
+    result = applyRules(result, [script], opts);
+    onRuleTiming(script, performance.now() - startedAt);
+  }
+  return result;
+}
+function applyRules(content, scripts, opts) {
   const {
     placement,
     depth,
@@ -17071,6 +17099,8 @@ end)\r
 `;
 
 // src/interpreter/lua-engine.ts
+var FULL_CHAT_FAST_PATH = "do local parts,decode,find,sub=getFullChatPartsMain,json.decode,string.find,string.sub;getFullChatPartsMain=nil;" + 'if parts then function getFullChat(id) local raw=parts(id);local split=find(raw,"\\n",1,true);local rows=decode(sub(raw,1,split-1));local pos=split+1;' + "for i=1,#rows do local row=rows[i];local len=row.len;if len then row.data=sub(raw,pos,pos+len-1);pos=pos+len;row.len=nil end end;return rows end end end ";
+
 class LuaChunkError extends Error {
   constructor(cause) {
     super(`Lua chunk failed: ${String(cause)}`, { cause });
@@ -17189,7 +17219,7 @@ function createLuaExecutor(getFactory) {
           current.engine.global.set(name, asyncApis.has(name) ? async (...args) => invoke(...args) : invoke);
         }
         try {
-          await current.engine.doString(lua_wrapper_default + code + `
+          await current.engine.doString(lua_wrapper_default + FULL_CHAT_FAST_PATH + code + `
 `);
         } catch (cause) {
           opts.signal?.throwIfAborted();
@@ -19508,6 +19538,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       getRecentChatsMain: (_id, count) => JSON.stringify(readMessages().slice(Math.max(0, messagesCache.length - Math.max(0, Math.floor(count || 0)))).map((m) => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
       getChatLength: (_id) => readMessages().length,
       getFullChatMain: (_id) => JSON.stringify(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
+      getFullChatPartsMain: (_id) => encodeFullChatParts(readMessages().map((m) => ({ role: lumiRoleToRisu(m.role), data: luaMessageData(m), time: m.createdAt ?? 0 }))),
       setFullChatMain: (_id, value) => {
         reconcileFullChat(value);
       },
@@ -22199,6 +22230,7 @@ function toCoreScript(script, nativeEval, prepared) {
   const risu = script.metadata?.["_risu"];
   const unicodeFlags = risu?.["unicode_flags"];
   return {
+    ...script.name !== undefined ? { name: script.name } : {},
     find_regex: script.find_regex,
     replace_string: script.replace_string,
     flags: isRisu && typeof unicodeFlags === "string" && script.flags === (unicodeFlags.replace(/u/g, "") || "u") ? unicodeFlags : script.flags,
@@ -22266,6 +22298,7 @@ async function runApply(snap, args, recorder, activationPatterns, cache) {
   const nativeEval = nativeTemplateResolver(snap, ctx, recorder);
   const presetIds = new Set(ctx.presetRegexIds);
   const presetEval = presetIds.size ? nativeTemplateResolver(snap, ctx, recorder, true) : nativeEval;
+  const ruleMs = logStore.shouldEmit("debug") ? new Map : undefined;
   for (let start = 0;start < plan.length; ) {
     const risu = isRisuRegexScript(plan[start].script);
     let end = start + 1;
@@ -22322,6 +22355,10 @@ async function runApply(snap, args, recorder, activationPatterns, cache) {
           placement,
           depth: ctx.depth,
           ...behaviorContext,
+          ...ruleMs ? { onRuleTiming: (script, ms) => {
+            const name = script.name ?? "?";
+            ruleMs.set(name, (ruleMs.get(name) ?? 0) + ms);
+          } } : {},
           evalTemplate: (text) => {
             try {
               return evalTemplate(snap, text, ctx, reads);
@@ -22347,6 +22384,8 @@ async function runApply(snap, args, recorder, activationPatterns, cache) {
     }
     start = end;
   }
+  if (ruleMs?.size)
+    log5.debug(`applyScripts.rules chat=${snap.chatId} msg=${args.context.messageId ?? "?"} top=[${formatRuleTimings(ruleMs, 5)}]`);
   return content;
 }
 function createDisplayResolver(writeback, activationPatterns = createActivationPatternCache()) {
@@ -43302,6 +43341,18 @@ function captureStylesheets() {
   }
   return out;
 }
+function readClientEnvironment(client) {
+  const nav = navigator;
+  return {
+    host: client?.getInfo() ?? null,
+    brands: nav.userAgentData?.brands ?? null,
+    platform: nav.userAgentData?.platform ?? nav.platform ?? null,
+    mobile: nav.userAgentData?.mobile ?? null,
+    hardwareConcurrency: nav.hardwareConcurrency ?? null,
+    deviceMemoryGb: nav.deviceMemory ?? null,
+    devicePixelRatio: window.devicePixelRatio
+  };
+}
 function buildBundle(args) {
   const snap = logStore.snapshot();
   const frontendEvents = snap.events.map((e) => ({
@@ -43747,6 +43798,8 @@ function setup(ctx) {
           backendEvents: msg.events,
           session: {
             extensionVersion: msg.session.extensionVersion,
+            lumiverse: msg.session.lumiverse,
+            client: readClientEnvironment(ctx.client),
             userId: msg.session.userId,
             activeChatId: msg.session.activeChatId ?? activeRisuChatId,
             activeCharacterId: msg.session.activeCharacterId

@@ -9,10 +9,11 @@ export interface RegexRunnerRequest {
   readonly prebuilt: PrebuiltPipelineInput;
   readonly scripts: readonly RegexCoreScript[];
   readonly messages: LlmMessage[];
+  readonly timeRules?: boolean;
 }
 
 export type RegexRunnerReply =
-  | { readonly requestId: string; readonly ok: true; readonly changed: boolean; readonly messages: LlmMessage[] }
+  | { readonly requestId: string; readonly ok: true; readonly changed: boolean; readonly messages: LlmMessage[]; readonly ruleMs?: readonly number[] }
   | { readonly requestId: string; readonly ok: false; readonly error: string };
 
 function isRequest(payload: unknown): payload is RegexRunnerRequest {
@@ -30,8 +31,15 @@ function isRequest(payload: unknown): payload is RegexRunnerRequest {
 export async function runRegexRequest(req: RegexRunnerRequest): Promise<RegexRunnerReply> {
   try {
     const messages = req.messages.slice();
-    const { changed } = await applyPromptRegexToArray(messages, req.prebuilt, req.scripts);
-    return { requestId: req.requestId, ok: true, changed, messages };
+    if (!req.timeRules) {
+      const { changed } = await applyPromptRegexToArray(messages, req.prebuilt, req.scripts);
+      return { requestId: req.requestId, ok: true, changed, messages };
+    }
+    const totals = new Map<RegexCoreScript, number>();
+    const { changed } = await applyPromptRegexToArray(messages, req.prebuilt, req.scripts, (script, ms) => {
+      totals.set(script, (totals.get(script) ?? 0) + ms);
+    });
+    return { requestId: req.requestId, ok: true, changed, messages, ruleMs: req.scripts.map((script) => totals.get(script) ?? 0) };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { requestId: req.requestId, ok: false, error: message };

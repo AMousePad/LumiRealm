@@ -26,7 +26,8 @@ import {
 } from './snapshot.js';
 import { isRisuRegexScript, type FeRegexScript, type FeRegexMatch } from './regex-apply.js';
 import { ActivationPatternError, createActivationPatternCache, type ActivationPatternCache } from './activation-patterns.js';
-import { applyRegexScriptsCore, type RegexCoreScript } from './regex-core.js';
+import { applyRegexScriptsCore, formatRuleTimings, type RegexCoreScript } from './regex-core.js';
+import { logStore } from '../log/store.js';
 import { decorateNativeRegexActions } from './regex-actions.js';
 import { createNativeVariableMacros, type NativePresetVariables } from './native-variable-macros.js';
 import { runEditDisplayChain, runEditDisplayAtActions } from './lua-runner.js';
@@ -147,6 +148,7 @@ function toCoreScript(script: FeRegexScript, nativeEval: (text: string) => strin
   const risu = script.metadata?.['_risu'] as Record<string, unknown> | undefined;
   const unicodeFlags = risu?.['unicode_flags'];
   return {
+    ...(script.name !== undefined ? { name: script.name } : {}),
     find_regex: script.find_regex,
     replace_string: script.replace_string,
     flags: isRisu && typeof unicodeFlags === 'string'
@@ -258,6 +260,7 @@ async function runApply(
   const nativeEval = nativeTemplateResolver(snap, ctx, recorder);
   const presetIds = new Set(ctx.presetRegexIds);
   const presetEval = presetIds.size ? nativeTemplateResolver(snap, ctx, recorder, true) : nativeEval;
+  const ruleMs = logStore.shouldEmit('debug') ? new Map<string, number>() : undefined;
 
   // Risu processScriptFull caches after Lua/CBS, including evaluated <cbs> inputs.
   // Native rows stay live and split cache batches without changing execution order.
@@ -304,6 +307,10 @@ async function runApply(
           placement,
           depth: ctx.depth,
           ...behaviorContext,
+          ...(ruleMs ? { onRuleTiming: (script: RegexCoreScript, ms: number) => {
+            const name = script.name ?? '?';
+            ruleMs.set(name, (ruleMs.get(name) ?? 0) + ms);
+          } } : {}),
           evalTemplate: text => {
             try { return evalTemplate(snap, text, ctx, reads); }
             catch (err) { reads.volatile = true; throw err; }
@@ -322,6 +329,7 @@ async function runApply(
     }
     start = end;
   }
+  if (ruleMs?.size) log.debug(`applyScripts.rules chat=${snap.chatId} msg=${args.context.messageId ?? '?'} top=[${formatRuleTimings(ruleMs, 5)}]`);
   return content;
 }
 

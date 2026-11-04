@@ -181,8 +181,10 @@ export async function applyPromptRegexToArray(
   messages: LlmMessage[],
   prebuilt: PrebuiltPipelineInput,
   scripts: readonly RegexCoreScript[],
+  onRuleTiming?: (script: RegexCoreScript, ms: number) => void,
 ): Promise<{ changed: boolean }> {
   if (scripts.length === 0) return { changed: false };
+  const timing = onRuleTiming ? { onRuleTiming } : {};
 
   // Build the depth frame from genuine chat-history turns only
   const hasHistoryFlag = messages.some(
@@ -275,6 +277,7 @@ export async function applyPromptRegexToArray(
 
     if (typeof msg.content === 'string') {
       const next = applyRegexScriptsCore(msg.content, scripts, {
+        ...timing,
         placement,
         depth,
         evalTemplate,
@@ -290,6 +293,7 @@ export async function applyPromptRegexToArray(
       const nextParts = msg.content.map((part) => {
         if (part.type === 'text') {
           const next = applyRegexScriptsCore(part.text, scripts, {
+            ...timing,
             placement,
             depth,
             evalTemplate,
@@ -314,6 +318,7 @@ export async function applyPromptRegexToArray(
 }
 
 interface RawRegexRow {
+  name?: unknown;
   scope?: unknown;
   scope_id?: unknown;
   disabled?: unknown;
@@ -349,6 +354,7 @@ function rowToPromptScript(r: unknown): RegexCoreScript | null {
       )
     : [];
   return {
+    ...(typeof row.name === 'string' ? { name: row.name } : {}),
     find_regex: row.find_regex,
     replace_string: typeof row.replace_string === 'string' ? row.replace_string : '',
     flags: typeof row.flags === 'string' ? row.flags : 'g',

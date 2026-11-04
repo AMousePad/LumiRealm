@@ -6,6 +6,7 @@ import {
 } from './regex-apply.js';
 
 export interface RegexCoreScript {
+  readonly name?: string;
   readonly find_regex: string;
   readonly replace_string: string;
   readonly flags: string;
@@ -39,16 +40,41 @@ export interface ApplyRegexCoreOptions {
   readonly reResolveAfterRule?: boolean;
   /** Nearest earlier same-role message, or the greeting when none exists. */
   readonly previousContent?: string;
+  readonly onRuleTiming?: (script: RegexCoreScript, ms: number) => void;
 }
 
 const LEGACY_NAME_TAG_RE = /<(user|char|bot)>/i;
 
 // Mirrors the evaluator's trigger set, including tags it normalizes at entry.
-function hasCbsSyntax(s: string): boolean {
+export function hasCbsSyntax(s: string): boolean {
   return s.includes("{{") || s.includes("{#") || LEGACY_NAME_TAG_RE.test(s);
 }
 
+export function formatRuleTimings(rules: Iterable<readonly [string, number]>, limit = 8): string {
+  return [...rules]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, ms]) => `${name}=${ms.toFixed(1)}ms`)
+    .join(', ');
+}
+
 export function applyRegexScriptsCore(
+  content: string,
+  scripts: readonly RegexCoreScript[],
+  opts: ApplyRegexCoreOptions,
+): string {
+  const { onRuleTiming } = opts;
+  if (!onRuleTiming) return applyRules(content, scripts, opts);
+  let result = content;
+  for (const script of scripts) {
+    const startedAt = performance.now();
+    result = applyRules(result, [script], opts);
+    onRuleTiming(script, performance.now() - startedAt);
+  }
+  return result;
+}
+
+function applyRules(
   content: string,
   scripts: readonly RegexCoreScript[],
   opts: ApplyRegexCoreOptions,

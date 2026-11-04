@@ -4,6 +4,7 @@ import type { RegexCoreScript } from '../display/regex-core.js';
 import type { PrebuiltPipelineInput } from './prompt-regex-apply.js';
 import type { LlmMessage } from '../adapters/spindle-extras.js';
 import type { RegexRunnerReply } from '../regex-runner.js';
+import { logStore } from '../log/store.js';
 import type { BackendProcessHandle } from 'lumiverse-spindle-types';
 
 const RUNNER_ENTRY = 'dist/regex-runner.js';
@@ -33,6 +34,7 @@ export interface RunnerDispatchResult {
   readonly ok: boolean;
   readonly changed: boolean;
   readonly messages: LlmMessage[];
+  readonly ruleMs?: readonly number[];
 }
 
 export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
@@ -161,7 +163,7 @@ export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
     });
 
     try {
-      active.send({ requestId, prebuilt, scripts, messages });
+      active.send({ requestId, prebuilt, scripts, messages, ...(logStore.shouldEmit('debug', userId) ? { timeRules: true } : {}) });
     } catch (err) {
       const p = pending.get(requestId);
       if (p) {
@@ -175,7 +177,7 @@ export function createPromptRegexRunnerClient(deps: RunnerClientDeps) {
 
     const reply = await replyPromise;
     if (reply.ok) {
-      return { ok: true, changed: reply.changed, messages: reply.messages };
+      return { ok: true, changed: reply.changed, messages: reply.messages, ...(reply.ruleMs ? { ruleMs: reply.ruleMs } : {}) };
     }
 
     log.error(

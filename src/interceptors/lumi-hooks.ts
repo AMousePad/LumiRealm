@@ -61,6 +61,7 @@ import {
   listLivePromptRegexScripts,
 } from './prompt-regex-apply.js';
 import type { RunnerDispatchResult } from './prompt-regex-runner-client.js';
+import { formatRuleTimings } from '../display/regex-core.js';
 import { applyRisuChatRanges } from './risu-chat-ranges.js';
 
 export interface CreateLumiInterceptorsDeps {
@@ -544,8 +545,10 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
 
         if (deps.isPromptRegexAuthoritative(chatId)) {
           try {
+            const regexStart = Date.now();
             const scripts = await listLivePromptRegexScripts(active.card.character_id, chatId, userId);
             if (scripts.length > 0) {
+              const listed = Date.now();
               const prebuilt = await buildBackendPipelineInput(
                 chatId,
                 active.card.character_id,
@@ -560,7 +563,16 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
                 ctx.personaId ?? undefined,
               );
               const target = out === messages ? out.slice() : out;
+              const built = Date.now();
               const result = await deps.dispatchPromptRegex(prebuilt, scripts, target, userId);
+              if (result.ruleMs) {
+                const ruleMs = result.ruleMs;
+                log.debug(
+                  `interceptor.promptRegex.timing chat=${chatId} list=${listed - regexStart}ms prebuilt=${built - listed}ms ` +
+                    `runner=${Date.now() - built}ms regex=${ruleMs.reduce((sum, ms) => sum + ms, 0).toFixed(1)}ms ` +
+                    `top=[${formatRuleTimings(scripts.map((script, index) => [script.name ?? `#${index}`, ruleMs[index] ?? 0] as const))}]`,
+                );
+              }
               if (result.ok && result.changed) {
                 log.info(
                   `interceptor.promptRegex: chat=${chatId} applied scripts=${scripts.length} messages=${result.messages.length} (via runner)`,
@@ -653,10 +665,7 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
 
         const interceptorMs = stage.elapsed();
         if (interceptorMs >= SLOW_INTERCEPTOR_WARN_MS) {
-          log.warn(
-            `interceptor slow chat=${chatId} total=${interceptorMs}ms ` +
-              `host_budget_default=10000ms stages=[${stage.summary()}]`,
-          );
+          log.warn(`interceptor slow chat=${chatId} total=${interceptorMs}ms stages=[${stage.summary()}]`);
         }
 
         return out;

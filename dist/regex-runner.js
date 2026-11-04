@@ -10016,6 +10016,18 @@ function hasCbsSyntax(s) {
   return s.includes("{{") || s.includes("{#") || LEGACY_NAME_TAG_RE.test(s);
 }
 function applyRegexScriptsCore(content, scripts, opts) {
+  const { onRuleTiming } = opts;
+  if (!onRuleTiming)
+    return applyRules(content, scripts, opts);
+  let result = content;
+  for (const script of scripts) {
+    const startedAt = performance.now();
+    result = applyRules(result, [script], opts);
+    onRuleTiming(script, performance.now() - startedAt);
+  }
+  return result;
+}
+function applyRules(content, scripts, opts) {
   const {
     placement,
     depth,
@@ -10237,9 +10249,10 @@ function placementForRole(role) {
     return "ai_output";
   return "world_info";
 }
-async function applyPromptRegexToArray(messages, prebuilt, scripts) {
+async function applyPromptRegexToArray(messages, prebuilt, scripts, onRuleTiming) {
   if (scripts.length === 0)
     return { changed: false };
+  const timing = onRuleTiming ? { onRuleTiming } : {};
   const hasHistoryFlag = messages.some((m) => m.__isChatHistory === true);
   const isHistory = (m) => hasHistoryFlag ? m.__isChatHistory === true : m.role !== "system";
   const historyIndices = [];
@@ -10284,6 +10297,7 @@ async function applyPromptRegexToArray(messages, prebuilt, scripts) {
     })();
     if (typeof msg.content === "string") {
       const next = applyRegexScriptsCore(msg.content, scripts, {
+        ...timing,
         placement,
         depth,
         evalTemplate,
@@ -10299,6 +10313,7 @@ async function applyPromptRegexToArray(messages, prebuilt, scripts) {
       const nextParts = msg.content.map((part) => {
         if (part.type === "text") {
           const next = applyRegexScriptsCore(part.text, scripts, {
+            ...timing,
             placement,
             depth,
             evalTemplate,
@@ -10331,8 +10346,15 @@ function isRequest(payload) {
 async function runRegexRequest(req) {
   try {
     const messages = req.messages.slice();
-    const { changed } = await applyPromptRegexToArray(messages, req.prebuilt, req.scripts);
-    return { requestId: req.requestId, ok: true, changed, messages };
+    if (!req.timeRules) {
+      const { changed } = await applyPromptRegexToArray(messages, req.prebuilt, req.scripts);
+      return { requestId: req.requestId, ok: true, changed, messages };
+    }
+    const totals = new Map;
+    const { changed } = await applyPromptRegexToArray(messages, req.prebuilt, req.scripts, (script, ms) => {
+      totals.set(script, (totals.get(script) ?? 0) + ms);
+    });
+    return { requestId: req.requestId, ok: true, changed, messages, ruleMs: req.scripts.map((script) => totals.get(script) ?? 0) };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { requestId: req.requestId, ok: false, error: message };

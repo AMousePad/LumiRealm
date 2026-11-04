@@ -8,6 +8,7 @@ import { presetToggleValues } from './preset-toggle-values.js';
 import type { ActiveCard } from '../interpreter/dispatch.js';
 import type { StoredRisuCard } from '../payload/types.js';
 import { runPipeline } from '../interpreter/evaluator/pipeline.js';
+import { hasCbsSyntax } from '../display/regex-core.js';
 import { buildEvaluatorContext, type BuildEvaluatorCtxInput } from '../interpreter/evaluator/context.js';
 import { evaluate } from '../interpreter/evaluator/scanner.js';
 import { stripSetvarSpans, hasSetvarFamily } from '../interpreter/evaluator/strip-setvar.js';
@@ -243,9 +244,11 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
       return [...templates];
     }
 
+    const evaluated = templates.filter(hasCbsSyntax).length;
     const t0 = Date.now();
     try {
       const messages = await fetchMessages(chatId);
+      const fetched = Date.now();
       const ctxInput = await buildCtxInput(
         chatId,
         characterId,
@@ -253,17 +256,21 @@ export function createReadonlyResolver(deps: ReadonlyResolverDeps): ReadonlyReso
         messages,
         opts?.cbsContext === true,
       );
+      const built = Date.now();
       const resolved = templates.map((template) =>
-        runPipeline({
-          ...ctxInput,
-          template,
-          phase: 'display',
-          ...(opts?.rmVar === true ? { rmVar: true } : {}),
-        }),
+        hasCbsSyntax(template)
+          ? runPipeline({
+              ...ctxInput,
+              template,
+              phase: 'display',
+              ...(opts?.rmVar === true ? { rmVar: true } : {}),
+            })
+          : template,
       );
+      const done = Date.now();
       log.debug(
-        `resolveReadonlyMany: DONE chat=${chatId} entries=${templates.length} ` +
-          `elapsed=${Date.now() - t0}ms`,
+        `resolveReadonlyMany: DONE chat=${chatId} entries=${templates.length} evaluated=${evaluated} ` +
+          `fetch=${fetched - t0}ms ctx=${built - fetched}ms eval=${done - built}ms elapsed=${done - t0}ms`,
       );
       return resolved;
     } catch (err) {

@@ -131,7 +131,6 @@ describe('lumi-hooks interceptor budget report', () => {
     expect(slow.length).toBe(1);
     expect(slow[0]).toContain('chat=chat-1');
     expect(slow[0]).toMatch(/total=(?:8\d{3}|9000)ms/);
-    expect(slow[0]).toContain('host_budget_default=10000ms');
     expect(slow[0]).toMatch(/stages=\[messageVarPass=(?:8\d{3}|9000)ms/);
     expect(slow[0]).toContain('frontendLua=');
     expect(out.length).toBe(messages.length);
