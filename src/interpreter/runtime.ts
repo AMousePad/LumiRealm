@@ -214,7 +214,7 @@ export async function makeRisuTriggerRuntime(
   const portalChatId: string | undefined = opts.chatId ?? dispatchCtx.chatId;
   const rememberOurWrite: ((chatId: string, msgId: string, content: string) => void) | undefined =
     opts.rememberOurWrite ?? dispatchCtx.rememberOurWrite;
-  const stateChanged: ((source?: string) => void) | undefined =
+  const stateChanged: ((source?: string, index?: unknown) => void) | undefined =
     opts.stateChanged ?? dispatchCtx.stateChanged;
   const auxConnectionId: string | null =
     (opts.auxConnectionId ?? dispatchCtx.auxConnectionId ?? null);
@@ -240,13 +240,13 @@ export async function makeRisuTriggerRuntime(
     Boolean(opts.auxPrefillCompat ?? dispatchCtx.auxPrefillCompat ?? false);
   const submodelPrefillCompat: boolean =
     Boolean(opts.submodelPrefillCompat ?? dispatchCtx.submodelPrefillCompat ?? auxPrefillCompat);
-  function notifyStateChanged(source: string): void {
+  function notifyStateChanged(source: string, index?: unknown): void {
     if (!stateChanged) {
       _logStateChanged.info(`source=${source} → <no-callback> (no-op)`);
       return;
     }
     _logStateChanged.info(`source=${source} → calling backend`);
-    try { stateChanged(source); }
+    try { stateChanged(source, index); }
     catch (err) {
       _logStateChanged.warn(`callback threw: ${(err as Error).message}`);
     }
@@ -603,7 +603,7 @@ export async function makeRisuTriggerRuntime(
   const loopCounter: { value: number } = { value: 0 };
   const additionalSysPrompt = invocation.live!.additionalSysPrompt;
 
-  const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage, deferSystemPrompt: Boolean(opts.invocationState) }, (src) => notifyStateChanged(src));
+  const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage, deferSystemPrompt: Boolean(opts.invocationState) }, notifyStateChanged);
   const {
     getMessageCount, getLastMessage, getMessageAtIndex,
     getLastUserMessage, getLastCharMessage, getFirstMessage,
@@ -1076,8 +1076,8 @@ export async function makeRisuTriggerRuntime(
       updateDisplay: (_id: unknown) => {
         notifyStateChanged('updateDisplay');
       },
-      reloadChat: (_id: unknown, _index: unknown) => {
-        notifyStateChanged('reloadChat');
+      reloadChat: (_id: unknown, index: unknown) => {
+        notifyStateChanged('reloadChat', index);
       },
       getName: (_id: unknown) => luaState!.character?.name,
       setName: (_id: unknown, name: unknown) => {

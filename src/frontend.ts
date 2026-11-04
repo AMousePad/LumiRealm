@@ -2,7 +2,7 @@ import { setupHostServices } from './host-services/client.js';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
 import { createDisplayResolver } from './display/resolver.js';
-import { createRisuButtonClickHandler, manualActionWillRun, messageReloadDepKey } from './display/risu-button-click.js';
+import { createNativeResetScheduler, createRisuButtonClickHandler, manualActionWillRun, messageReloadDepKey } from './display/risu-button-click.js';
 import { setupFrontendLua } from './frontend-lua/frontend.js';
 import { ACTIVATION_INPUT_DEP_KEY, createActivationPatternCache, subscribeActivationPatternChanges } from './display/activation-patterns.js';
 import {
@@ -109,10 +109,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (activationPatterns.invalidate(chatId, changed)) changed.push(ACTIVATION_INPUT_DEP_KEY);
   };
   let auxCaptureId = 0;
-  const frontendLua = setupFrontendLua(ctx, (chatId, changed, resetScripts) => {
+  const scheduleNativeReset = createNativeResetScheduler(document, () => bgRenderer.resetNativeControls());
+  const frontendLua = setupFrontendLua(ctx, (chatId, changed, resetScripts, reload) => {
     if (resetScripts) displayResolver.resetScriptCache();
     invalidateActivationVars(chatId, changed);
-    if (isVisibleChat(chatId)) display.invalidate(changed);
+    if (!isVisibleChat(chatId)) return;
+    if (reload) scheduleNativeReset(reload.messageId);
+    display.invalidate(changed);
   }, error => flog.error('Frontend Lua failed', error), (chatId, event) => {
     auxDebug?.handleBackendMessage({ type: 'aux_debug_capture', id: ++auxCaptureId, ts: Date.now(), chatId, ...event });
   });
@@ -468,7 +471,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       void frontendLua.snapshot(msg.snapshot).then(() => {
         if (msg.reason === 'gui-reload') {
           displayResolver.resetScriptCache();
-          if (isVisibleChat(msg.snapshot.chatId)) display.invalidate(['*']);
+          if (isVisibleChat(msg.snapshot.chatId)) {
+            scheduleNativeReset();
+            display.invalidate(['*']);
+          }
         }
       }).catch(error => flog.error('Frontend Lua snapshot failed', error));
       return;

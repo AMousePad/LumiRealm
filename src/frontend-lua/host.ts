@@ -11,7 +11,7 @@ export interface FrontendHostServices {
   call<T>(request: RuntimeService): Promise<T>;
   ui: NonNullable<HostApi['ui']>;
   expression(name: string): Promise<void>;
-  invalidate(source?: string): void;
+  invalidate(source?: string, index?: unknown): void;
   synchronize(): Promise<void>;
   capture?: (event: import('../interpreter/runtime.js').AuxDebugCaptureEvent) => void;
 }

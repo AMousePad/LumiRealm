@@ -36,6 +36,7 @@ async function fixture(code: string, configure?: (state: RuntimeStateDto) => voi
   const resolver = createDisplayResolver();
   const refreshes: boolean[] = [];
   const invalidations: string[][] = [];
+  const reloads: { readonly messageId?: string }[] = [];
   const activeChat = { chatId: config.chatId, characterId: config.characterId };
   const bootstrapReply = Promise.withResolvers<void>();
   let runtime!: ReturnType<typeof setupFrontendLua>;
@@ -64,9 +65,10 @@ async function fixture(code: string, configure?: (state: RuntimeStateDto) => voi
     },
     ui: {}, display: { setExpression() {} },
   } as unknown as SpindleFrontendContext;
-  runtime = setupFrontendLua(ctx, (_chatId, _keys, resetScripts) => {
+  runtime = setupFrontendLua(ctx, (_chatId, _keys, resetScripts, reload) => {
     refreshes.push(!!resetScripts);
     invalidations.push(_keys);
+    if (reload) reloads.push(reload);
     if (resetScripts) resolver.resetScriptCache();
     if (getDisplaySnapshot(config.chatId)?.vars.local.entered === '1') entered.resolve();
   }, error => failures.push(error));
@@ -76,7 +78,7 @@ async function fixture(code: string, configure?: (state: RuntimeStateDto) => voi
       chatId: config.chatId, characterId: config.characterId, operation: bootstrap.operation });
     await bootstrapReply.promise;
   } else await runtime.snapshot(config);
-  return { runtime, config, state, calls, events, failures, resolver, refreshes, invalidations, activeChat, ctx, entered: entered.promise };
+  return { runtime, config, state, calls, events, failures, resolver, refreshes, invalidations, reloads, activeChat, ctx, entered: entered.promise };
 }
 
 test.each([
@@ -206,6 +208,49 @@ test.each([
 ] as const)('a Lua error in a %s still reports a run, so the message reloads like Risu', async (_label, operation) => {
   const { runtime, config } = await fixture(`function onButtonClick(id) error('boom') end function boom(id) error('boom') end`);
   expect(await runtime.manual(config.chatId, operation)).toBe(true);
+});
+
+test.each([
+  ['reloadDisplay(id)', { }, ['*']],
+  ['reloadChat(id, 0)', { messageId: 'user-message' }, [messageReloadDepKey('user-message')]],
+  ['reloadChat(id, -1)', { messageId: 'greeting' }, [messageReloadDepKey('greeting')]],
+] as const)('%s requests a Risu rebuild of the rows it names', async (call, reload, keys) => {
+  const { runtime, config, reloads, invalidations } = await fixture(`function onButtonClick(id) ${call} end`);
+  invalidations.length = 0;
+  await runtime.manual(config.chatId, { kind: 'button', value: 'select' });
+  expect(reloads).toEqual([reload]);
+  expect(invalidations).toContainEqual([...keys]);
+});
+
+test.each(['5', '-2', '0.5'])('reloadChat with no row at index %s reloads nothing', async index => {
+  const { runtime, config, reloads, invalidations } = await fixture(`function onButtonClick(id) reloadChat(id, ${index}) end`);
+  invalidations.length = 0;
+  await runtime.manual(config.chatId, { kind: 'button', value: 'select' });
+  expect(reloads).toEqual([]);
+  expect(invalidations).toEqual([]);
+});
+
+test('a manual trigger reloads every row when it changes a variable, not when the value is unchanged', async () => {
+  const { runtime, config, reloads } = await fixture(`function selectMode(id) setChatVar(id, 'label', 'Prompt') end`);
+  await runtime.manual(config.chatId, { kind: 'manual', name: 'selectMode' });
+  expect(reloads).toEqual([{}]);
+  reloads.length = 0;
+  await runtime.manual(config.chatId, { kind: 'manual', name: 'selectMode' });
+  expect(reloads).toEqual([]);
+});
+
+test('a button changing a variable does not reload other rows, like runLuaButtonTrigger', async () => {
+  const { runtime, config, reloads } = await fixture(`function onButtonClick(id) setChatVar(id, 'label', 'Prompt') end`);
+  await runtime.manual(config.chatId, { kind: 'button', value: 'select' });
+  expect(reloads).toEqual([]);
+});
+
+test('display Lua never requests a native reset, since it runs on every render', async () => {
+  const { config, reloads } = await fixture(`listenEdit('editDisplay', function(id, data) reloadDisplay(id); reloadChat(id, 0); return data end)`);
+  const context = { chatId: config.chatId, messageId: 'user-message', role: 'user', isUser: true, depth: 0 };
+  const current = withCurrentDisplayMessage(getDisplaySnapshot(config.chatId)!, context, 'text');
+  await runEditDisplayChain(current, 'rendered', context, text => text, () => {});
+  expect(reloads).toEqual([]);
 });
 
 test('resolved messages depend on their own reload key so a click re-renders only that message', async () => {

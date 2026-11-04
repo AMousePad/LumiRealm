@@ -242,7 +242,7 @@ export interface TriggerRuntimeOpts {
   readonly moduleLorebooks?: readonly unknown[];
   // Backend uses this to filter MESSAGE_EDITED self-echoes from Lua setChat.
   readonly rememberOurWrite?: (chatId: string, msgId: string, content: string) => void;
-  readonly stateChanged?: (source?: string) => void;
+  readonly stateChanged?: (source?: string, index?: unknown) => void;
   readonly auxConnectionId?: string | null;
   readonly auxModelOverride?: string | null;
   readonly auxSamplers?: {

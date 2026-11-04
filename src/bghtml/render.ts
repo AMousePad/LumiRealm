@@ -42,6 +42,7 @@ export interface BgHtmlClearMessage {
 export interface BgHtmlRenderer {
   setActiveChat(chatId: string | null): void;
   handleMessage(msg: BgHtmlMessage | BgHtmlClearMessage): void;
+  resetNativeControls(): void;
   destroy(): void;
 }
 
@@ -169,6 +170,9 @@ export function setupBgHtmlRenderer(
       flog.info(
         `bg-html renderer: applied chatId=${msg.chatId} html_len=${bundle.html.length} css_len=${bundle.css.length} css_changed=${cssChanged}`,
       );
+    },
+    resetNativeControls(): void {
+      handle?.resetNativeControls();
     },
     destroy(): void {
       dismount();

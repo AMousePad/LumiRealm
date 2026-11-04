@@ -157,9 +157,8 @@ backend Lua: Risu returns `7`, both browser probes return the unchanged `2`.
 A fix must retain operator isolation and permission checks; accepting arbitrary
 browser-supplied IDs would not be a valid solution.
 
-Other source-confirmed older adaptations remain: `reloadChat(id,index)` discards
-the index and requests a broad refresh, chat persistence catches some failures,
-and an empty author note can fall back to the legacy variable mapping. The legacy
+Other source-confirmed older adaptations remain: chat persistence catches some
+failures, and an empty author note can fall back to the legacy variable mapping. The legacy
 note probe returns empty in Risu and the stored fallback in LumiRealm. Provider,
 lore activation, complete DOM/CSS behavior and every concurrent navigation case
 remain outside this audit's executable coverage.

@@ -1,4 +1,5 @@
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
+import { resetNativeControls } from "../display/risu-button-click.js";
 
 // Shadow-DOM mount for a card's background_html. One mount per chat.
 
@@ -13,6 +14,7 @@ export interface BgMountHandle {
   /** Replace the HTML content of the slot without rebuilding the shadow. */
   updateHtml(html: string): void;
   updateCss(css: string): void;
+  resetNativeControls(): void;
   /** Unmount and remove from DOM. Idempotent. */
   destroy(): void;
 }
@@ -91,6 +93,9 @@ export function mountBgHost(
       if (destroyed) return;
       if (cardStyle.textContent === css) return;
       cardStyle.textContent = css;
+    },
+    resetNativeControls(): void {
+      if (!destroyed) resetNativeControls(slot);
     },
     destroy(): void {
       if (destroyed) return;

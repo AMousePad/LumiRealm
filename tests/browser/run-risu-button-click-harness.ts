@@ -141,6 +141,59 @@ await page.click('#island #plain-close');
 await settle();
 assert.equal(await checked('#island #none'), true, 'controls inside a shadow island reset');
 
+const row = (id: string) => `<div data-message-id="${id}"><div data-component="MessageContent">
+  <input type="checkbox" id="box-${id}"><div id="scroll-${id}" style="height:20px;overflow:auto"><div style="height:400px">tall</div></div>
+</div><input type="checkbox" id="host-${id}"></div>`;
+await page.setContent(`${row('a')}${row('b')}`);
+await page.evaluate(`
+  ${handlerSource}
+  window.backgroundResets = 0;
+  window.schedule = createNativeResetScheduler(document, () => window.backgroundResets++);
+`);
+const dirtyRows = async () => {
+  for (const id of ['a', 'b']) {
+    await page.check(`#box-${id}`);
+    await page.check(`#host-${id}`);
+    await page.evaluate(`document.getElementById('scroll-${id}').scrollTop = 200`);
+  }
+};
+const rowState = async (id: string) => [await checked(`#box-${id}`), await page.evaluate(`document.getElementById('scroll-${id}').scrollTop > 0`)];
+
+await dirtyRows();
+await page.evaluate(`window.schedule('a')`);
+await settle();
+assert.deepEqual(await rowState('a'), [false, false], 'a targeted reload resets its row');
+assert.deepEqual(await rowState('b'), [true, true], 'a targeted reload leaves other rows');
+assert.equal(await page.evaluate('window.backgroundResets'), 0, 'a targeted reload leaves the background');
+
+await dirtyRows();
+await page.evaluate(`for (let i = 0; i < 5; i++) window.schedule(); window.schedule('a')`);
+await settle();
+assert.deepEqual([await rowState('a'), await rowState('b')], [[false, false], [false, false]], 'a full reload resets every row');
+assert.equal(await page.evaluate('window.backgroundResets'), 1, 'repeated reloads in one task reset once');
+assert.equal(await checked('#host-a'), true, 'a full reload leaves host controls in the row');
+
+const mountBuild = await Bun.build({ entrypoints: ['src/bghtml/mount.ts'], target: 'browser', format: 'esm' });
+assert.equal(mountBuild.success, true);
+const mountSource = (await mountBuild.outputs[0]!.text()).replace(/export\s*\{[^}]*\};?/, '');
+await page.setContent('<div id="target"></div>');
+await page.evaluate(`(() => {
+  ${mountSource}
+  const ctx = { dom: { createElement: (tag, attributes) => {
+    const element = document.createElement(tag);
+    for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+    return element;
+  } } };
+  window.background = mountBgHost(ctx, { target: document.getElementById('target') });
+  window.background.updateHtml('<input type="checkbox" id="bg-box"><input type="text" id="bg-text" value="initial">');
+  window.backgroundPart = (id) => document.querySelector('[data-risu-bg-host]').shadowRoot.getElementById(id);
+  window.backgroundPart('bg-box').checked = true;
+  window.backgroundPart('bg-text').value = 'typed';
+  window.background.resetNativeControls();
+})()`);
+assert.equal(await page.evaluate(`window.backgroundPart('bg-box').checked`), false, 'background checkbox resets');
+assert.equal(await page.evaluate(`window.backgroundPart('bg-text').value`), 'initial', 'background text resets');
+
 // Control: the same steps must fail with a cancelled click, or this harness proves nothing.
 await load(`document.addEventListener('click', (event) => {
   if (event.target.closest('[risu-btn]')) { event.preventDefault(); event.stopPropagation(); }

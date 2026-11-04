@@ -270,10 +270,12 @@ describe('chat.updateGUI / updateChatAt', () => {
     expect(h.notified).toEqual(['updateGUI']);
   });
 
-  test('updateChatAt fires notifyStateChanged with source', async () => {
-    const h = newChat();
-    await h.chat.updateChatAt(2);
-    expect(h.notified).toEqual(['updateChatAt']);
+  test('updateChatAt fires notifyStateChanged with source and row index', async () => {
+    const fake = newChat().fake;
+    const notified: unknown[][] = [];
+    const chat = makeChatApi(fake.api, newChat().state, (source, index) => notified.push([source, index]));
+    await chat.updateChatAt(2);
+    expect(notified).toEqual([['updateChatAt', 2]]);
   });
 });
 

@@ -16298,6 +16298,32 @@ function resetNativeControls(root) {
       resetNativeControls(island.shadowRoot);
   }
 }
+var MESSAGE_CONTENT_SELECTOR = '[data-message-id] [data-component="MessageContent"]';
+function createNativeResetScheduler(root, resetBackground) {
+  let all = false;
+  const ids = new Set;
+  const flush = () => {
+    const everything = all;
+    const targets = new Set(ids);
+    all = false;
+    ids.clear();
+    for (const content of Array.from(root.querySelectorAll(MESSAGE_CONTENT_SELECTOR))) {
+      const id = content.closest("[data-message-id]")?.dataset["messageId"];
+      if (everything || id && targets.has(id))
+        resetNativeControls(content);
+    }
+    if (everything)
+      resetBackground();
+  };
+  return (messageId) => {
+    if (!all && ids.size === 0)
+      queueMicrotask(flush);
+    if (messageId === undefined)
+      all = true;
+    else
+      ids.add(messageId);
+  };
+}
 function findInPath(path, selector) {
   for (const node of path) {
     if (typeof node.matches === "function" && node.matches(selector))
@@ -17802,8 +17828,8 @@ function makeChatApi(api, state, notifyStateChanged) {
   async function updateGUI() {
     notifyStateChanged("updateGUI");
   }
-  async function updateChatAt(_i) {
-    notifyStateChanged("updateChatAt");
+  async function updateChatAt(index) {
+    notifyStateChanged("updateChatAt", index);
   }
   function tokenize(value) {
     return unsupported("tokenize", "requires api.llm.countTokens; corpus usage = 0 effects");
@@ -18908,14 +18934,14 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const submodelParamsWire = samplersToWire(submodelSamplers);
   const auxPrefillCompat = Boolean(opts.auxPrefillCompat ?? dispatchCtx.auxPrefillCompat ?? false);
   const submodelPrefillCompat = Boolean(opts.submodelPrefillCompat ?? dispatchCtx.submodelPrefillCompat ?? auxPrefillCompat);
-  function notifyStateChanged(source) {
+  function notifyStateChanged(source, index) {
     if (!stateChanged) {
       _logStateChanged.info(`source=${source} → <no-callback> (no-op)`);
       return;
     }
     _logStateChanged.info(`source=${source} → calling backend`);
     try {
-      stateChanged(source);
+      stateChanged(source, index);
     } catch (err) {
       _logStateChanged.warn(`callback threw: ${err.message}`);
     }
@@ -19212,7 +19238,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   let sendAIprompt = false;
   const loopCounter = { value: 0 };
   const additionalSysPrompt = invocation.live.additionalSysPrompt;
-  const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage, deferSystemPrompt: Boolean(opts.invocationState) }, (src) => notifyStateChanged(src));
+  const _chat = makeChatApi(api, { messagesCache, loopCounter, additionalSysPrompt, firstMessage, deferSystemPrompt: Boolean(opts.invocationState) }, notifyStateChanged);
   const {
     getMessageCount,
     getLastMessage,
@@ -19682,8 +19708,8 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       updateDisplay: (_id) => {
         notifyStateChanged("updateDisplay");
       },
-      reloadChat: (_id, _index) => {
-        notifyStateChanged("reloadChat");
+      reloadChat: (_id, index) => {
+        notifyStateChanged("reloadChat", index);
       },
       getName: (_id) => luaState.character?.name,
       setName: (_id, name) => {
@@ -23926,6 +23952,26 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
     loading.set(chatId, { characterId, promise, events });
     return promise;
   }
+  function risuRowMessageId(entry, index) {
+    const row = typeof index === "string" && !index.trim() ? NaN : Number(index);
+    if (!Number.isInteger(row))
+      return;
+    const messages = entry.state.hostMessages();
+    const view = buildRisuChatView({ messages });
+    if (row === -1)
+      return view.greeting === undefined ? undefined : messages[0]?.id;
+    return view.messages[row]?.id;
+  }
+  function reloadRequested(entry, source, index, resetNative) {
+    const { chatId } = entry.state;
+    if (source === "reloadChat" || source === "updateChatAt") {
+      const messageId = risuRowMessageId(entry, index);
+      if (messageId)
+        invalidate(chatId, [messageReloadDepKey(messageId)], false, resetNative ? { messageId } : undefined);
+      return;
+    }
+    invalidate(chatId, ["*"], true, resetNative ? {} : undefined);
+  }
   function environment(entry, signal) {
     const { chatId, characterId } = entry.state;
     return createFrontendHost(entry.state, () => {
@@ -23942,7 +23988,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
         if (imageId)
           ctx.display.setExpression({ chatId, characterId, label, imageId });
       },
-      invalidate: (source) => invalidate(chatId, ["*"], source !== "reloadChat" && source !== "updateChatAt"),
+      invalidate: (source, index) => reloadRequested(entry, source, index, true),
       synchronize: () => entry.updates,
       ...capture ? { capture: (event) => capture(chatId, event) } : {}
     }, entry.config.attachedModuleWorldBookIds);
@@ -23959,6 +24005,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       api: host.api,
       options: {
         ...options,
+        stateChanged: (source, index) => reloadRequested(entry, source, index, false),
         luaSignal: entry.lifetime.signal,
         luaChat: view.chat,
         preloaded: { ...options.preloaded, messagesRaw: snapshot.messagesHost }
@@ -40120,6 +40167,10 @@ function mountBgHost(ctx, opts = {}) {
         return;
       cardStyle.textContent = css;
     },
+    resetNativeControls() {
+      if (!destroyed)
+        resetNativeControls(slot);
+    },
     destroy() {
       if (destroyed)
         return;
@@ -40415,6 +40466,9 @@ function setupBgHtmlRenderer(ctx, flog) {
         flog.info(`bg-html renderer: chat-scope CSS injected css_len=${chatScopeCss.length} ` + `(imports_hoisted_len=${imports.length}, body_len=${rest.length}, ` + `+img-reset +bubble-containment preambles)`);
       }
       flog.info(`bg-html renderer: applied chatId=${msg.chatId} html_len=${bundle.html.length} css_len=${bundle.css.length} css_changed=${cssChanged}`);
+    },
+    resetNativeControls() {
+      handle?.resetNativeControls();
     },
     destroy() {
       dismount();
@@ -43629,12 +43683,16 @@ function setup(ctx) {
       changed.push(ACTIVATION_INPUT_DEP_KEY);
   };
   let auxCaptureId = 0;
-  const frontendLua = setupFrontendLua(ctx, (chatId, changed, resetScripts) => {
+  const scheduleNativeReset = createNativeResetScheduler(document, () => bgRenderer.resetNativeControls());
+  const frontendLua = setupFrontendLua(ctx, (chatId, changed, resetScripts, reload) => {
     if (resetScripts)
       displayResolver.resetScriptCache();
     invalidateActivationVars(chatId, changed);
-    if (isVisibleChat(chatId))
-      display.invalidate(changed);
+    if (!isVisibleChat(chatId))
+      return;
+    if (reload)
+      scheduleNativeReset(reload.messageId);
+    display.invalidate(changed);
   }, (error) => flog2.error("Frontend Lua failed", error), (chatId, event) => {
     auxDebug?.handleBackendMessage({ type: "aux_debug_capture", id: ++auxCaptureId, ts: Date.now(), chatId, ...event });
   });
@@ -43950,8 +44008,10 @@ function setup(ctx) {
       frontendLua.snapshot(msg.snapshot).then(() => {
         if (msg.reason === "gui-reload") {
           displayResolver.resetScriptCache();
-          if (isVisibleChat(msg.snapshot.chatId))
+          if (isVisibleChat(msg.snapshot.chatId)) {
+            scheduleNativeReset();
             display.invalidate(["*"]);
+          }
         }
       }).catch((error) => flog2.error("Frontend Lua snapshot failed", error));
       return;

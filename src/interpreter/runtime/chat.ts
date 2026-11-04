@@ -64,7 +64,7 @@ export interface ChatApi {
 export function makeChatApi(
   api: HostApi,
   state: ChatState,
-  notifyStateChanged: (source: string) => void,
+  notifyStateChanged: (source: string, index?: unknown) => void,
 ): ChatApi {
   function getMessagesTail(n: number): readonly HostMessage[] {
     return state.messagesCache.slice(0 - n);
@@ -162,9 +162,8 @@ export function makeChatApi(
   async function updateGUI(): Promise<void> {
     notifyStateChanged('updateGUI');
   }
-  async function updateChatAt(_i: unknown): Promise<void> {
-    void _i;
-    notifyStateChanged('updateChatAt');
+  async function updateChatAt(index: unknown): Promise<void> {
+    notifyStateChanged('updateChatAt', index);
   }
 
   function tokenize(value: unknown): never {

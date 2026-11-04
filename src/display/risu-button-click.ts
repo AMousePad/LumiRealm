@@ -54,6 +54,30 @@ export function resetNativeControls(root: ParentNode): void {
   }
 }
 
+const MESSAGE_CONTENT_SELECTOR = '[data-message-id] [data-component="MessageContent"]';
+
+// Coalesced because a card can request reloads in a loop, and each reset walks the whole row.
+export function createNativeResetScheduler(root: ParentNode, resetBackground: () => void): (messageId?: string) => void {
+  let all = false;
+  const ids = new Set<string>();
+  const flush = (): void => {
+    const everything = all;
+    const targets = new Set(ids);
+    all = false;
+    ids.clear();
+    for (const content of Array.from(root.querySelectorAll(MESSAGE_CONTENT_SELECTOR))) {
+      const id = content.closest<HTMLElement>('[data-message-id]')?.dataset['messageId'];
+      if (everything || (id && targets.has(id))) resetNativeControls(content);
+    }
+    if (everything) resetBackground();
+  };
+  return (messageId) => {
+    if (!all && ids.size === 0) queueMicrotask(flush);
+    if (messageId === undefined) all = true;
+    else ids.add(messageId);
+  };
+}
+
 function findInPath(path: readonly EventTarget[], selector: string): HTMLElement | null {
   for (const node of path) {
     if (typeof (node as Element).matches === 'function' && (node as Element).matches(selector)) return node as HTMLElement;

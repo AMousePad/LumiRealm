@@ -1,8 +1,10 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { DisplaySnapshot } from '../display/snapshot.js';
 import { getDisplaySnapshot, setDisplaySnapshot, clearDisplaySnapshot, diffSnapshotVars, snapshotMessagesChanged } from '../display/snapshot.js';
+import { messageReloadDepKey } from '../display/risu-button-click.js';
 import { MSG_DEP_KEY } from '../interpreter/evaluator/context.js';
 import { prepareTriggerSources } from '../interpreter/dispatcher.js';
+import { buildRisuChatView } from '../interpreter/risu-chat-view.js';
 import { createFrontendLuaReceiver } from './receiver.js';
 import { createRuntimeServices, type RuntimeServiceReply } from './services.js';
 import { FrontendRuntimeState } from './state.js';
@@ -23,7 +25,7 @@ function displayConfiguration(snapshot: DisplaySnapshot) {
   return configuration;
 }
 
-export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatId: string, keys: string[], resetScripts?: boolean) => void, report: (error: unknown) => void,
+export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatId: string, keys: string[], resetScripts?: boolean, reload?: { readonly messageId?: string }) => void, report: (error: unknown) => void,
   capture?: (chatId: string, event: import('../interpreter/runtime.js').AuxDebugCaptureEvent) => void) {
   const sessionId = (ctx as SpindleFrontendContext & { frontendSessionId?: string }).frontendSessionId;
   if (!sessionId) throw new FrontendLuaUnavailableError('Frontend Lua requires Lumiverse browser session routing');
@@ -149,6 +151,26 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
     return promise;
   }
 
+  // Risu's row index excludes the greeting, which is row -1.
+  function risuRowMessageId(entry: Entry, index: unknown): string | undefined {
+    const row = typeof index === 'string' && !index.trim() ? NaN : Number(index);
+    if (!Number.isInteger(row)) return undefined;
+    const messages = entry.state.hostMessages();
+    const view = buildRisuChatView({ messages });
+    if (row === -1) return view.greeting === undefined ? undefined : messages[0]?.id;
+    return view.messages[row]?.id;
+  }
+
+  function reloadRequested(entry: Entry, source: string | undefined, index: unknown, resetNative: boolean): void {
+    const { chatId } = entry.state;
+    if (source === 'reloadChat' || source === 'updateChatAt') {
+      const messageId = risuRowMessageId(entry, index);
+      if (messageId) invalidate(chatId, [messageReloadDepKey(messageId)], false, resetNative ? { messageId } : undefined);
+      return;
+    }
+    invalidate(chatId, ['*'], true, resetNative ? {} : undefined);
+  }
+
   function environment(entry: Entry, signal?: AbortSignal) {
     const { chatId, characterId } = entry.state;
     return createFrontendHost(entry.state, () => {
@@ -159,7 +181,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
     }, entry.settings, {
       call: request => services.call(chatId, characterId, request), ui: ui.api(signal),
       expression: async label => { const imageId = entry.config.character.emotionImages[label]?.imageIds[0]; if (imageId) ctx.display!.setExpression({ chatId, characterId, label, imageId }); },
-      invalidate: source => invalidate(chatId, ['*'], source !== 'reloadChat' && source !== 'updateChatAt'), synchronize: () => entry.updates,
+      invalidate: (source, index) => reloadRequested(entry, source, index, true), synchronize: () => entry.updates,
       ...(capture ? { capture: (event: import('../interpreter/runtime.js').AuxDebugCaptureEvent) => capture(chatId, event) } : {}),
     }, entry.config.attachedModuleWorldBookIds);
   }
@@ -171,7 +193,8 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
     const options = host.prepareRuntime();
     // Render arguments may precede persistence; keep that invocation's raw row without publishing it as stored state.
     const view = entry.state.displayChat(snapshot.messagesHost, options.luaChat?.persistence);
-    return { api: host.api, options: { ...options, luaSignal: entry.lifetime.signal, luaChat: view.chat,
+    // Display Lua runs on every render, so a native reset here would wipe user state each time.
+    return { api: host.api, options: { ...options, stateChanged: (source, index) => reloadRequested(entry, source, index, false), luaSignal: entry.lifetime.signal, luaChat: view.chat,
       preloaded: { ...options.preloaded, messagesRaw: snapshot.messagesHost } },
       async flush() { try { await entry.state.flush(); } finally { view.release(); } } };
   });
