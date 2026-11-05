@@ -22915,6 +22915,9 @@ class OrderedRuntimeState {
   get(key) {
     return this.visible.get(key);
   }
+  confirmedValue(key) {
+    return this.confirmed.get(key);
+  }
   keys() {
     return [...this.visible.keys()];
   }
@@ -23174,16 +23177,30 @@ class FrontendRuntimeState {
     }
     this.changed(keys);
   }
+  shiftAfterInsert(message, patch) {
+    if (this.state.confirmedValue(key("message", message.id, "present")))
+      return;
+    for (const id of this.messageIds) {
+      if (id === message.id || !this.state.confirmedValue(key("message", id, "present")))
+        continue;
+      const index = Number(this.state.confirmedValue(key("message", id, "index")));
+      if (index >= message.index_in_chat)
+        patch.set(key("message", id, "index"), index + 1);
+    }
+  }
   apply(revision, patch, mutationId, final = false) {
     const pending = mutationId ? this.mutations.get(mutationId) : undefined;
+    const statePatch = this.patch(patch);
+    if (patch.message)
+      this.shiftAfterInsert(patch.message, statePatch);
     if (pending) {
-      this.state.settleMany(final && pending.partialOwned ? [...pending.ids, pending.partial] : pending.ids, revision, this.patch(patch), pending.partial);
+      this.state.settleMany(final && pending.partialOwned ? [...pending.ids, pending.partial] : pending.ids, revision, statePatch, pending.partial);
       if (pending.partial && !final)
         pending.ids = [];
       else
         this.mutations.delete(mutationId);
     } else
-      this.state.apply(revision, this.patch(patch));
+      this.state.apply(revision, statePatch);
   }
   replace(value) {
     this.state.apply(value.revision, this.snapshotPatch(value));

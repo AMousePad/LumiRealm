@@ -103,13 +103,25 @@ export class FrontendRuntimeState {
     this.changed(keys);
   }
 
+  // The host reports only the new row of a mid-chat insert and moves later rows itself. The write reply and the event can both arrive, so only the first sighting shifts.
+  private shiftAfterInsert(message: NonNullable<RuntimeStatePatch['message']>, patch: Map<string, unknown>): void {
+    if (this.state.confirmedValue(key('message', message.id, 'present'))) return;
+    for (const id of this.messageIds) {
+      if (id === message.id || !this.state.confirmedValue(key('message', id, 'present'))) continue;
+      const index = Number(this.state.confirmedValue(key('message', id, 'index')));
+      if (index >= message.index_in_chat) patch.set(key('message', id, 'index'), index + 1);
+    }
+  }
+
   apply(revision: StateRevision, patch: RuntimeStatePatch, mutationId?: string, final = false): void {
     const pending = mutationId ? this.mutations.get(mutationId) : undefined;
+    const statePatch = this.patch(patch);
+    if (patch.message) this.shiftAfterInsert(patch.message, statePatch);
     if (pending) {
-      this.state.settleMany(final && pending.partialOwned ? [...pending.ids, pending.partial!] : pending.ids, revision, this.patch(patch), pending.partial);
+      this.state.settleMany(final && pending.partialOwned ? [...pending.ids, pending.partial!] : pending.ids, revision, statePatch, pending.partial);
       if (pending.partial && !final) pending.ids = [];
       else this.mutations.delete(mutationId!);
-    } else this.state.apply(revision, this.patch(patch));
+    } else this.state.apply(revision, statePatch);
   }
   replace(value: RuntimeStateDto): void { this.state.apply(value.revision, this.snapshotPatch(value)); }
 

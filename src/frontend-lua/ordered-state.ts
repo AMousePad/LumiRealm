@@ -38,6 +38,10 @@ export class OrderedRuntimeState {
     return this.visible.get(key);
   }
 
+  confirmedValue(key: string): unknown {
+    return this.confirmed.get(key);
+  }
+
   keys(): string[] {
     return [...this.visible.keys()];
   }

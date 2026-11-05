@@ -34,7 +34,7 @@ export function frontendRuntime(initial?: RuntimeStateDto, hostSupport?: { messa
       const before = command.beforeId ? dto.messages.find(row => row.id === command.beforeId) : undefined;
       if (command.beforeId && !before) throw new Error('Insertion target unavailable');
       const index = before?.index_in_chat ?? Math.max(-1, ...dto.messages.map(row => row.index_in_chat)) + 1;
-      if (before) for (const row of dto.messages.filter(row => row.index_in_chat >= index)) { row.index_in_chat++; event({ message: row }, mutationId); }
+      if (before) for (const row of dto.messages.filter(row => row.index_in_chat >= index)) row.index_in_chat++;
       const message = { id: command.id, role: command.role, content: command.content, index_in_chat: index, send_date: 1900000000,
         extra: { spindle_metadata: { lumirealm: command.ownMetadata } } };
       dto.messages.push(message); dto.messages.sort((a, b) => a.index_in_chat - b.index_in_chat); patch = { message };
