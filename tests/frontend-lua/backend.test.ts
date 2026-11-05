@@ -12,10 +12,14 @@ function fixture() {
   const reads: unknown[][] = [], writes: unknown[][] = [], configurations: unknown[][] = [];
   const state = { revision: { epoch: 'host', sequence: 1 }, globalVariables: { unset: null } };
   const capabilities: Record<string, number> = Object.fromEntries(['frontend-session-routing-v1', 'runtime-state-v1', 'required-context-handlers-v1', 'required-interceptors-v1'].map(key => [key, 1]));
+  const contracts: Record<string, number> = { runtimeMessageMutations: 1, worldInfoAdditionalEntries: 1 };
+  const world: { resolveForChat?: unknown } = { resolveForChat: async () => [] };
   const host = {
     generate: { raw: async () => { throw new Error('Unexpected generation'); } },
     userStorage: { getJson: async () => null },
     host: { capabilities },
+    contracts,
+    world_books: world,
     runtimeState: {
       async read(...args: unknown[]) { reads.push(args); return state; },
       async write(...args: unknown[]) { writes.push(args); return { revision: state.revision, patch: {} }; },
@@ -27,9 +31,9 @@ function fixture() {
   (globalThis as any).spindle = host;
   const bootstrap = async (...args: unknown[]) => {
     configurations.push(args);
-    return { snapshot: { chatId: args[0] }, settings: {} } as Omit<RuntimeBootstrap, 'state' | 'hostSupport'>;
+    return { snapshot: { chatId: args[0] }, settings: {} } as Omit<RuntimeBootstrap, 'state'>;
   };
-  return { host, bootstrap, sent, reads, writes, configurations, capabilities, state };
+  return { host, bootstrap, sent, reads, writes, configurations, capabilities, contracts, world, state };
 }
 
 test('state refresh carries current user toggle preferences and preserves unrelated null values', async () => {
@@ -86,6 +90,15 @@ test('production backend refuses missing host contracts and unowned invocations'
     expect(() => createFrontendLuaBackend(f.host, f.bootstrap)).toThrow(FrontendLuaUnavailableError);
     f.capabilities[capability] = 1;
   }
+  for (const contract of Object.keys(f.contracts)) {
+    f.contracts[contract] = 0;
+    expect(() => createFrontendLuaBackend(f.host, f.bootstrap)).toThrow(FrontendLuaUnavailableError);
+    f.contracts[contract] = 1;
+  }
+  const resolveForChat = f.world.resolveForChat;
+  delete f.world.resolveForChat;
+  expect(() => createFrontendLuaBackend(f.host, f.bootstrap)).toThrow(FrontendLuaUnavailableError);
+  f.world.resolveForChat = resolveForChat;
   const backend = createFrontendLuaBackend(f.host, f.bootstrap);
   try {
     for (const [user, session] of [[undefined, 'document'], ['user', undefined]]) {
@@ -133,36 +146,8 @@ test('state services use authenticated ownership and preserve mutation correlati
 
 const stateWrite = (command: unknown) => ({ type: 'lua_service', requestId: 'request', chatId: 'chat', characterId: 'character', request: { kind: 'state.write', command, mutationId: 'mutation' } });
 
-test('hosts without message mutations still take plain creates and edits, without the Lua time', async () => {
-  const f = fixture(), backend = createFrontendLuaBackend(f.host, f.bootstrap);
-  try {
-    const time = { ownMetadata: { luaMessageTime: 0 } };
-    await backend.receive(stateWrite({ kind: 'message.create', id: 'row', content: 'text', role: 'assistant', ...time }), 'owner', 'document');
-    await backend.receive(stateWrite({ kind: 'message.edit', id: 'row', content: 'next', ...time }), 'owner', 'document');
-    expect(f.writes).toEqual([
-      ['chat', { kind: 'message.create', id: 'row', content: 'text', role: 'assistant' }, 'owner', 'mutation'],
-      ['chat', { kind: 'message.edit', id: 'row', content: 'next' }, 'owner', 'mutation'],
-    ]);
-    expect(f.sent.every(message => message.payload.ok)).toBe(true);
-  } finally { backend.dispose(); }
-});
-
-test('hosts without message mutations refuse writes that would land wrong', async () => {
-  const f = fixture(), backend = createFrontendLuaBackend(f.host, f.bootstrap);
-  try {
-    for (const command of [
-      { kind: 'message.create', id: 'row', content: 'text', role: 'assistant', beforeId: 'later' },
-      { kind: 'message.edit', id: 'row', role: 'user' },
-      { kind: 'message.edit', id: 'row', content: 'next', ownMetadata: { luaData: { value: 1, text: 'stamp' } } },
-    ]) await backend.receive(stateWrite(command), 'owner', 'document');
-    expect(f.writes).toEqual([]);
-    expect(f.sent.map(message => message.payload.ok)).toEqual([false, false, false]);
-  } finally { backend.dispose(); }
-});
-
-test('hosts with message mutations keep the Lua time', async () => {
+test('message writes keep the Lua time', async () => {
   const f = fixture();
-  (f.host as unknown as { contracts: unknown }).contracts = { runtimeMessageMutations: 1 };
   const backend = createFrontendLuaBackend(f.host, f.bootstrap);
   try {
     const command = { kind: 'message.create', id: 'row', content: 'text', role: 'assistant', ownMetadata: { luaMessageTime: 5 } };

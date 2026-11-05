@@ -22020,10 +22020,6 @@ function sortLorebookEntriesBySourceOrder(entries) {
   }).map(({ entry }) => entry);
 }
 
-// src/interpreter/evaluator/index.ts
-init_scanner();
-init_dispatch();
-
 // src/interpreter/runtime/request.ts
 var _logRequest = makeSafeLogger("runtime.lua.request");
 var _clock = Date.now;
@@ -28408,30 +28404,6 @@ function resolvePickResolution(requestId, responderUserId, value) {
   return { ok: true };
 }
 
-// src/frontend-lua/state-contract.ts
-function messageWriteForHost(command, contracts) {
-  if (contracts?.runtimeMessageMutations || command.kind !== "message.create" && command.kind !== "message.edit")
-    return command;
-  if (command.kind === "message.edit" ? command.role !== undefined : command.beforeId !== undefined)
-    return null;
-  if (readLuaOwnMetadata(command.ownMetadata).luaData)
-    return null;
-  const { ownMetadata: _time, ...rest } = command;
-  return rest;
-}
-function runtimeMessage(message) {
-  const luaData = hostLuaMessageData(message);
-  return {
-    id: message.id,
-    content: message.content,
-    ...luaData ? { luaData } : {},
-    role: message.role ?? (message.is_user ? "user" : message.extra?.spindle_role === "system" ? "system" : "assistant"),
-    createdAt: hostMessageTime(message),
-    ...message.name ? { speaker: message.name } : {},
-    ...typeof message.extra?.greeting_index === "number" ? { greetingIndex: message.extra.greeting_index } : {}
-  };
-}
-
 // src/interpreter/spindle-host.ts
 var log5 = makeSafeLogger("spindle-host.llm.generate");
 function makeSpindleHost(ctx) {
@@ -28450,10 +28422,9 @@ function makeSpindleHost(ctx) {
       };
     });
   }
-  async function writeMessage(original) {
+  async function writeMessage(command) {
     const runtime = spindle.runtimeState;
-    const command = messageWriteForHost(original, spindle.contracts);
-    if (!runtime || !uid || !command)
+    if (!runtime || !uid)
       throw new RisuCompatUnsupportedError("Lua message mutation", "requires native runtime message mutations");
     return runtime.write(chatId, command, uid);
   }
@@ -28603,10 +28574,6 @@ function makeSpindleHost(ctx) {
     }
   };
   const host = {
-    hostSupport: {
-      messageMutations: Boolean(spindle.contracts?.runtimeMessageMutations),
-      resolvedLore: typeof spindle.world_books?.resolveForChat === "function"
-    },
     luaStateScope: backendLuaStateScope(userId),
     ...uid !== undefined ? { userId: uid } : {},
     corsFetch: async (url, init) => await spindle.cors(url, { method: init?.method ?? "GET" }),
@@ -31162,6 +31129,20 @@ function createFrontendLuaRpc(send) {
   };
 }
 
+// src/frontend-lua/state-contract.ts
+function runtimeMessage(message) {
+  const luaData = hostLuaMessageData(message);
+  return {
+    id: message.id,
+    content: message.content,
+    ...luaData ? { luaData } : {},
+    role: message.role ?? (message.is_user ? "user" : message.extra?.spindle_role === "system" ? "system" : "assistant"),
+    createdAt: hostMessageTime(message),
+    ...message.name ? { speaker: message.name } : {},
+    ...typeof message.extra?.greeting_index === "number" ? { greetingIndex: message.extra.greeting_index } : {}
+  };
+}
+
 // src/state/display-snapshot-assembly.ts
 function buildDisplayChatStateFromView(view) {
   const messages = view.messages.map((m) => ({
@@ -31235,6 +31216,13 @@ function createFrontendLuaBackend(host, bootstrap) {
     if (!host.host?.capabilities?.[capability])
       throw new FrontendLuaUnavailableError(`Frontend Lua requires Lumiverse capability: ${capability}`);
   }
+  const contracts = host.contracts;
+  for (const contract of ["runtimeMessageMutations", "worldInfoAdditionalEntries"]) {
+    if (!contracts?.[contract])
+      throw new FrontendLuaUnavailableError(`Frontend Lua requires Lumiverse contract: ${contract}`);
+  }
+  if (typeof host.world_books?.resolveForChat !== "function")
+    throw new FrontendLuaUnavailableError("Frontend Lua requires Lumiverse world_books.resolveForChat");
   const send = (message, userId) => host.sendToFrontend(message, userId, { frontendSessionId: message.sessionId });
   const rpc = createFrontendLuaRpc(send);
   async function readState(chatId, characterId, userId) {
@@ -31269,10 +31257,7 @@ function createFrontendLuaBackend(host, bootstrap) {
         switch (call.request.kind) {
           case "bootstrap": {
             const config = await bootstrap(call.chatId, call.characterId, userId);
-            value = { ...config, state: await readState(call.chatId, call.characterId, userId), hostSupport: {
-              messageMutations: Boolean(host.contracts?.runtimeMessageMutations),
-              resolvedLore: typeof host.world_books?.resolveForChat === "function"
-            } };
+            value = { ...config, state: await readState(call.chatId, call.characterId, userId) };
             break;
           }
           case "state.read":
@@ -31292,9 +31277,6 @@ function createFrontendLuaBackend(host, bootstrap) {
             break;
           }
           case "state.write": {
-            const command = messageWriteForHost(call.request.command, host.contracts);
-            if (!command)
-              throw new FrontendLuaUnavailableError("Lua message changes require native runtime message mutations");
             if (call.request.command.kind === "lore.upsertLocal" || call.request.command.kind === "lore.replaceLocal") {
               await host.runtimeState.read(call.chatId, call.characterId, userId);
               if (call.request.command.kind === "lore.upsertLocal")
@@ -31304,7 +31286,7 @@ function createFrontendLuaBackend(host, bootstrap) {
               const state = await host.runtimeState.read(call.chatId, call.characterId, userId);
               value = { revision: state.revision, patch: { chat: state.chat }, value: undefined };
             } else
-              value = await host.runtimeState.write(call.chatId, command, userId, call.request.mutationId);
+              value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId);
             break;
           }
           case "llm.generate":

@@ -19,6 +19,7 @@ test('successive native lore queries resolve CBS against the latest validated fr
     registerInterceptor() {}, registerWorldInfoInterceptor() {}, registerContextHandler() {},
     chats: { get: async () => ({ metadata: {} }) }, userStorage: { getJson: async () => null },
     generate: { raw: async () => ({}) },
+    contracts: { runtimeMessageMutations: 1, worldInfoAdditionalEntries: 1 },
     host: { capabilities: Object.fromEntries(['frontend-session-routing-v1', 'runtime-state-v1', 'required-context-handlers-v1', 'required-interceptors-v1'].map(name => [name, 1])) },
     runtimeState: { read: async (chatId: string, characterId: string, userId: string) => {
       expect([chatId, characterId, userId]).toEqual(['lore-cache', 'character', 'owner']); return { messages };

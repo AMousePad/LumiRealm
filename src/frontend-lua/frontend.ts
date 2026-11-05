@@ -17,7 +17,7 @@ import type { RuntimeBootstrap, RuntimeConfig, RuntimeSettings, RuntimeStateDto,
 import { sameStateValue, type StateRevision } from './ordered-state.js';
 
 type StateEvent = { event: string; payload: Record<string, unknown>; revision: StateRevision; mutationId?: string };
-interface Entry { config: RuntimeConfig; settings: RuntimeSettings; hostSupport: RuntimeBootstrap['hostSupport']; state: FrontendRuntimeState; updates: Promise<void>; lifetime: AbortController }
+interface Entry { config: RuntimeConfig; settings: RuntimeSettings; state: FrontendRuntimeState; updates: Promise<void>; lifetime: AbortController }
 
 function displayConfiguration(snapshot: DisplaySnapshot) {
   const { configVersion: _version, vars: _vars, chat: _chat, messagesHost: _messages, ...configuration } = snapshot;
@@ -139,7 +139,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
       const state = new FrontendRuntimeState(value.state, (command, mutationId) => services.call(chatId, characterId, { kind: 'state.write', command, mutationId }), keys => {
         if (entry) publish(entry, keys);
       });
-      entry = { config: value.snapshot, settings: value.settings, hostSupport: value.hostSupport, state, updates: Promise.resolve(), lifetime: new AbortController() };
+      entry = { config: value.snapshot, settings: value.settings, state, updates: Promise.resolve(), lifetime: new AbortController() };
       state.setToggles(updateSharedPreferences(value.snapshot), value.snapshot.presetToggles);
       entries.set(chatId, entry);
       for (const event of events) observe(entry, event);
@@ -182,7 +182,7 @@ export function setupFrontendLua(ctx: SpindleFrontendContext, invalidate: (chatI
       expression: async label => { const imageId = entry.config.character.emotionImages[label]?.imageIds[0]; if (imageId) ctx.display!.setExpression({ chatId, characterId, label, imageId }); },
       invalidate: (source, index) => reloadRequested(entry, source, index, true), synchronize: () => entry.updates,
       ...(capture ? { capture: (event: import('../interpreter/runtime.js').AuxDebugCaptureEvent) => capture(chatId, event) } : {}),
-    }, entry.config.attachedModuleWorldBookIds, entry.hostSupport);
+    }, entry.config.attachedModuleWorldBookIds);
   }
   setDisplayLuaEnvironment(snapshot => {
     const entry = entries.get(snapshot.chatId);

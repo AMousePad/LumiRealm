@@ -8,7 +8,7 @@ import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { createCharacterLoreEntry } from '../state/character-lorebook.js';
 import { persistLocalLore, replaceLocalLore, type LocalLoreHost } from '../state/local-lore.js';
-import { messageWriteForHost, runtimeMessage } from './state-contract.js';
+import { runtimeMessage } from './state-contract.js';
 import { buildDisplayChatState } from '../state/display-snapshot-assembly.js';
 import { setCachedMessages } from '../interpreter/messages-cache.js';
 import { invalidateMacroInterceptorForChat } from '../state/macro-interceptor-cache.js';
@@ -21,10 +21,15 @@ export interface FrontendLuaHostContract {
   sendToFrontend(payload: unknown, userId: string, options: { frontendSessionId: string }): void;
 }
 
-export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLuaHostContract> & FrontendLuaHostContract, bootstrap: (chatId: string, characterId: string, userId: string) => Promise<Omit<RuntimeBootstrap, 'state' | 'hostSupport'>>) {
+export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLuaHostContract> & FrontendLuaHostContract, bootstrap: (chatId: string, characterId: string, userId: string) => Promise<Omit<RuntimeBootstrap, 'state'>>) {
   for (const capability of ['frontend-session-routing-v1', 'runtime-state-v1', 'required-context-handlers-v1', 'required-interceptors-v1']) {
     if (!host.host?.capabilities?.[capability]) throw new FrontendLuaUnavailableError(`Frontend Lua requires Lumiverse capability: ${capability}`);
   }
+  const contracts = (host as { contracts?: Readonly<Record<string, number>> }).contracts;
+  for (const contract of ['runtimeMessageMutations', 'worldInfoAdditionalEntries']) {
+    if (!contracts?.[contract]) throw new FrontendLuaUnavailableError(`Frontend Lua requires Lumiverse contract: ${contract}`);
+  }
+  if (typeof (host.world_books as { resolveForChat?: unknown } | undefined)?.resolveForChat !== 'function') throw new FrontendLuaUnavailableError('Frontend Lua requires Lumiverse world_books.resolveForChat');
   const send = (message: { sessionId: string }, userId: string) => host.sendToFrontend(message, userId, { frontendSessionId: message.sessionId });
   const rpc = createFrontendLuaRpc(send);
   async function readState(chatId: string, characterId: string, userId: string): Promise<RuntimeStateDto> {
@@ -54,10 +59,7 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
         switch (call.request.kind) {
           case 'bootstrap': {
             const config = await bootstrap(call.chatId, call.characterId, userId);
-            value = { ...config, state: await readState(call.chatId, call.characterId, userId), hostSupport: {
-              messageMutations: Boolean(host.contracts?.runtimeMessageMutations),
-              resolvedLore: typeof (host.world_books as { resolveForChat?: unknown } | undefined)?.resolveForChat === 'function',
-            } };
+            value = { ...config, state: await readState(call.chatId, call.characterId, userId) };
             break;
           }
           case 'state.read': value = await readState(call.chatId, call.characterId, userId); break;
@@ -75,15 +77,13 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
             break;
           }
           case 'state.write': {
-            const command = messageWriteForHost(call.request.command, host.contracts);
-            if (!command) throw new FrontendLuaUnavailableError('Lua message changes require native runtime message mutations');
             if (call.request.command.kind === 'lore.upsertLocal' || call.request.command.kind === 'lore.replaceLocal') {
               await host.runtimeState.read(call.chatId, call.characterId, userId);
               if (call.request.command.kind === 'lore.upsertLocal') await persistLocalLore(host as typeof host & LocalLoreHost, call.chatId, userId, call.request.command.entry);
               else await replaceLocalLore(host as typeof host & LocalLoreHost, call.chatId, userId, call.request.command.entries);
               const state = await host.runtimeState.read(call.chatId, call.characterId, userId);
               value = { revision: state.revision, patch: { chat: state.chat }, value: undefined };
-            } else value = await host.runtimeState.write(call.chatId, command, userId, call.request.mutationId);
+            } else value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId);
             break;
           }
           case 'llm.generate': value = await api().llm!.generate(call.request.request); break;

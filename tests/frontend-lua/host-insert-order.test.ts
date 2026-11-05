@@ -49,3 +49,17 @@ test('a plain append moves nothing', async () => {
   expect(f.dto.messages.slice(0, before.length).map(message => message.index_in_chat)).toEqual(before);
   expect(order(f)).toEqual(stored(f));
 });
+
+test('an insert at the end stays a plain append', async () => {
+  const f = frontendRuntime();
+  await f.run("listenEdit('editInput',function(id,text) insertChat(id,2,'user','Inserted');return text end)");
+  expect(f.writes.map(write => write.kind)).toEqual(['message.create']);
+  expect((f.writes[0] as { beforeId?: string }).beforeId).toBeUndefined();
+});
+
+test('a role edit keeps every row', async () => {
+  const f = frontendRuntime();
+  await f.run("listenEdit('editInput',function(id,text) setChatRole(id,0,'char');return text end)");
+  expect(f.writes.map(write => write.kind)).toEqual(['message.edit']);
+  expect(f.dto.messages.map(message => message.id)).toEqual(['greeting', 'user', 'reply']);
+});

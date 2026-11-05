@@ -3,7 +3,7 @@ import type { HostApi, HostMessage, HostCharacter, HostPersona, HostWorldInfoEnt
 import type { DisplaySnapshot } from '../display/snapshot.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 import { hostMessageTime } from '../util/message-time.js';
-import { hostLuaMessageData, readLuaOwnMetadata } from '../util/lua-message-data.js';
+import { hostLuaMessageData } from '../util/lua-message-data.js';
 
 export interface RuntimeMessageDto {
   id: string; content: string; role?: string; is_user?: boolean; name?: string;
@@ -40,15 +40,6 @@ export type RuntimeStateCommand =
   | { kind: 'lore.update'; id: string; patch: Record<string, unknown> }
   | { kind: 'lore.delete'; id: string };
 
-// Null means the host cannot apply this write correctly. Time alone is droppable: reads then use send_date instead of Risu's stored time.
-export function messageWriteForHost(command: RuntimeStateCommand, contracts: { runtimeMessageMutations?: unknown } | undefined): RuntimeStateCommand | null {
-  if (contracts?.runtimeMessageMutations || (command.kind !== 'message.create' && command.kind !== 'message.edit')) return command;
-  if (command.kind === 'message.edit' ? command.role !== undefined : command.beforeId !== undefined) return null;
-  if (readLuaOwnMetadata(command.ownMetadata).luaData) return null;
-  const { ownMetadata: _time, ...rest } = command;
-  return rest;
-}
-
 export type RuntimeSettings = Pick<RisuCompatSettings, 'auxConnectionId' | 'auxModelOverride' | 'auxSamplers' | 'auxPrefillCompat'
   | 'submodelConnectionId' | 'submodelModelOverride' | 'submodelSamplers' | 'submodelPrefillCompat' | 'auxDebugCaptureRequest' | 'auxDebugCaptureResponse'
   | 'imageConnectionId' | 'imageModelOverride' | 'naiSettings'>;
@@ -61,7 +52,7 @@ export type RuntimeConfig = Pick<DisplaySnapshot, 'configVersion' | 'chatId' | '
     readonly attachedModuleWorldBookIds: readonly string[];
     readonly character: Pick<DisplaySnapshot['character'], 'jailbreakPrompt' | 'globalNote' | 'authorsNote' | 'additionalAssets' | 'emotionImages'>;
   };
-export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: RuntimeConfig; settings: RuntimeSettings; hostSupport: NonNullable<HostApi['hostSupport']> }
+export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: RuntimeConfig; settings: RuntimeSettings }
 export type RuntimeService =
   | { kind: 'lore.resolve'; reserveTokens?: number }
   | { kind: 'lore.createCharacter'; entry: Record<string, unknown> }

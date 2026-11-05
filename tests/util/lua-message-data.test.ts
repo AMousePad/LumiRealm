@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import type { HostMessage } from '../../src/interpreter/host.js';
 import { hostLuaMessageData, hostLuaOwnMetadata, luaMessageData, luaMessageEdit, luaMessageFields, luaOwnMetadata, luaPlainTextEditOptions } from '../../src/util/lua-message-data.js';
 import { hostMessageTime } from '../../src/util/message-time.js';
-import { messageWriteForHost } from '../../src/frontend-lua/state-contract.js';
 
 const row = (value: unknown, extra: Partial<HostMessage> = {}): HostMessage => ({ id: 'row', role: 'user', createdAt: 5, ...luaMessageFields(value), ...extra });
 const stored = (message: HostMessage, options: Parameters<typeof luaOwnMetadata>[0]) => ({ content: message.content, ...luaOwnMetadata(options) });
@@ -45,13 +44,4 @@ test('time and data read through every host message shape', () => {
     expect(luaMessageData({ content: '42', luaData: hostLuaMessageData({ content: '42', ...shape }) })).toBe(42);
   }
   expect(hostLuaOwnMetadata({ ownMetadata: { luaMessageTime: 'bad', luaData: [] } })).toEqual({});
-});
-
-test('hosts without message mutations drop time but refuse writes that would lose data or land wrong', () => {
-  const time = { kind: 'message.edit', id: 'row', content: 'x', ...luaOwnMetadata({ createdAt: 1 }) } as const;
-  expect(messageWriteForHost(time, undefined)).toEqual({ kind: 'message.edit', id: 'row', content: 'x' });
-  expect(messageWriteForHost(time, { runtimeMessageMutations: 1 })).toBe(time);
-  expect(messageWriteForHost({ kind: 'message.edit', id: 'row', ...luaOwnMetadata({ luaData: row(42).luaData! }) }, undefined)).toBeNull();
-  expect(messageWriteForHost({ kind: 'message.edit', id: 'row', role: 'user' }, undefined)).toBeNull();
-  expect(messageWriteForHost({ kind: 'message.create', id: 'row', content: '', role: 'user', beforeId: 'later' }, undefined)).toBeNull();
 });
