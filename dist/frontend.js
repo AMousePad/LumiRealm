@@ -15040,7 +15040,7 @@ function setCurrentTriggerId(triggerId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.12.3",
+  version: "0.12.4",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
