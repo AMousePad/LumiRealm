@@ -39,7 +39,7 @@ import {
   splitString,
 } from './runtime/strings-regex.js';
 import { toStr } from '../util/coerce.js';
-import { encodeFullChatParts, luaMessageData, luaMessageFields } from '../util/lua-message-data.js';
+import { encodeFullChatParts, luaMessageData, luaMessageEdit, luaMessageFields } from '../util/lua-message-data.js';
 import { makeSafeLogger } from '../util/safe-log.js';
 import { samplersToWire } from '../util/samplers-wire.js';
 import { risuRoleToLumi, lumiRoleToRisu } from '../util/role-coerce.js';
@@ -488,12 +488,8 @@ export async function makeRisuTriggerRuntime(
     if (rememberOurWrite && portalChatId) {
       try { rememberOurWrite(portalChatId, id, next.content); } catch { /* */ }
     }
-    const dataChanged = luaMessageData(previous) !== luaMessageData(next);
-    await (opts.luaChat?.persistence ?? api.chat).editMessage(id, dataChanged ? next.content : undefined, {
-      ...(dataChanged && next.luaData ? { luaData: next.luaData } : {}),
-      ...(previous.role !== next.role ? { role: next.role } : {}),
-      ...((previous.createdAt ?? 0) !== (next.createdAt ?? 0) ? { createdAt: next.createdAt ?? 0 } : {}),
-    });
+    const edit = luaMessageEdit(previous, next);
+    if (edit) await (opts.luaChat?.persistence ?? api.chat).editMessage(id, edit.content, edit.options);
   }
 
   function reconcileFullChat(value: unknown): void {

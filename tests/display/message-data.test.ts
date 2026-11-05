@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { withCurrentDisplayMessage } from '../../src/display/host-shim.js';
 import { snapshotMessagesChanged } from '../../src/display/snapshot.js';
-import { luaMessageData } from '../../src/util/lua-message-data.js';
+import { luaMessageData, luaMessageFields } from '../../src/util/lua-message-data.js';
 import { frontendRuntime } from '../helpers/frontend-mutation-runtime.js';
 import { snapshot } from '../helpers/display-lua-fixture.js';
 
@@ -18,7 +18,7 @@ test('pending display text supersedes raw Lua data and type-only changes invalid
 test('native position updates preserve pending display data while type-only updates reach canonical views', async () => {
   const f = frontendRuntime();
   const native = f.dto.messages[1]!;
-  native.content = '42'; native.extra = { spindle_content_metadata: { lumirealm: { value: 42 } } };
+  native.content = '42'; native.extra = { spindle_metadata: { lumirealm: { luaData: luaMessageFields(42).luaData } } };
   f.event({ message: native });
   const canonical = f.state.displayChat(f.state.hostMessages(), undefined);
   const pending = f.state.displayChat(f.state.hostMessages().map(message => message.id === native.id ? { ...message, content: 'Pending', luaData: null } : message), undefined);
@@ -26,7 +26,7 @@ test('native position updates preserve pending display data while type-only upda
     f.event({ message: { ...native, index_in_chat: 2 } });
     expect(luaMessageData(pending.chat.messages.find(message => message.id === native.id)!)).toBe('Pending');
     expect(luaMessageData(canonical.chat.messages.find(message => message.id === native.id)!)).toBe(42);
-    delete native.extra.spindle_content_metadata;
+    delete native.extra.spindle_metadata;
     f.event({ message: native });
     expect(luaMessageData(canonical.chat.messages.find(message => message.id === native.id)!)).toBe('42');
   } finally { canonical.release(); pending.release(); }

@@ -1,5 +1,5 @@
 import type { HostApi, HostMessage } from '../host.js';
-import { luaMessageData } from '../../util/lua-message-data.js';
+import { luaMessageEdit } from '../../util/lua-message-data.js';
 import { saveVars } from './chat-state.js';
 import { createLocalLoreFrame, characterLocalLore, publishLocalLoreFrame, type LocalLoreAccess, type LocalLoreFrame } from './local-lore.js';
 
@@ -145,13 +145,9 @@ export async function commitInvocation(state: TriggerInvocationState, chatId?: s
         ...(message.luaData ? { luaData: message.luaData } : {}),
         ...(anchors[index] ? { beforeId: anchors[index] } : {}) });
       (message as { id: string }).id = result.id;
-    } else if (luaMessageData(previous) !== luaMessageData(message) || previous.role !== message.role || (previous.createdAt ?? 0) !== (message.createdAt ?? 0)) {
-      const dataChanged = luaMessageData(previous) !== luaMessageData(message);
-      await live.api.chat.editMessage(message.id, dataChanged ? message.content : undefined, {
-        ...(dataChanged && message.luaData ? { luaData: message.luaData } : {}),
-        ...(previous.role !== message.role ? { role: message.role } : {}),
-        ...((previous.createdAt ?? 0) !== (message.createdAt ?? 0) ? { createdAt: message.createdAt ?? 0 } : {}),
-      });
+    } else {
+      const edit = luaMessageEdit(previous, message);
+      if (edit) await live.api.chat.editMessage(message.id, edit.content, edit.options);
     }
   }
   if (injectPrompts && !state.stopSending) {

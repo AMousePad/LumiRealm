@@ -3,14 +3,13 @@ import type { HostApi, HostMessage, HostCharacter, HostPersona, HostWorldInfoEnt
 import type { DisplaySnapshot } from '../display/snapshot.js';
 import type { RisuCompatSettings } from '../state/settings-store.js';
 import { hostMessageTime } from '../util/message-time.js';
-import { hostLuaMessageData } from '../util/lua-message-data.js';
+import { hostLuaMessageData, readLuaOwnMetadata } from '../util/lua-message-data.js';
 
 export interface RuntimeMessageDto {
   id: string; content: string; role?: string; is_user?: boolean; name?: string;
   index_in_chat: number; created_at?: number; send_date?: number;
   ownMetadata?: unknown;
-  ownContentMetadata?: unknown;
-  extra?: { greeting_index?: number; spindle_role?: string; spindle_metadata?: Record<string, unknown>; spindle_content_metadata?: Record<string, unknown> };
+  extra?: { greeting_index?: number; spindle_role?: string; spindle_metadata?: Record<string, unknown> };
 }
 export interface RuntimeStateDto {
   revision: StateRevision;
@@ -32,18 +31,20 @@ export type RuntimeStateCommand =
   | { kind: 'lore.replaceLocal'; entries: readonly import('../core/schemas/lorebook.js').LoreBook[] }
   | { kind: 'chat.metadata'; key: string; value: unknown }
   | { kind: 'chat.variables'; values: Record<string, string | null> }
-  | { kind: 'message.edit'; id: string; content?: string; role?: string; ownMetadata?: unknown; ownContentMetadata?: unknown }
+  | { kind: 'message.edit'; id: string; content?: string; role?: string; ownMetadata?: unknown }
   | { kind: 'message.delete'; id: string }
-  | { kind: 'message.create'; id: string; content: string; role: string; beforeId?: string; ownMetadata?: unknown; ownContentMetadata?: unknown }
+  | { kind: 'message.create'; id: string; content: string; role: string; beforeId?: string; ownMetadata?: unknown }
   | { kind: 'character.update'; id: string; patch: { name?: string; description?: string; first_mes?: string } }
   | { kind: 'persona.update'; id: string; patch: { name?: string; description?: string } }
   | { kind: 'lore.create'; bookId: string; patch: Record<string, unknown> }
   | { kind: 'lore.update'; id: string; patch: Record<string, unknown> }
   | { kind: 'lore.delete'; id: string };
 
-// Time is the one mutation field a host can lack without losing the write: reads then use send_date instead of Risu's stored time.
-export function dropUnsupportedMessageTime(command: RuntimeStateCommand, contracts: { runtimeMessageMutations?: unknown } | undefined): RuntimeStateCommand {
+// Null means the host cannot apply this write correctly. Time alone is droppable: reads then use send_date instead of Risu's stored time.
+export function messageWriteForHost(command: RuntimeStateCommand, contracts: { runtimeMessageMutations?: unknown } | undefined): RuntimeStateCommand | null {
   if (contracts?.runtimeMessageMutations || (command.kind !== 'message.create' && command.kind !== 'message.edit')) return command;
+  if (command.kind === 'message.edit' ? command.role !== undefined : command.beforeId !== undefined) return null;
+  if (readLuaOwnMetadata(command.ownMetadata).luaData) return null;
   const { ownMetadata: _time, ...rest } = command;
   return rest;
 }

@@ -15470,6 +15470,77 @@ function toStr(v) {
   }
 }
 
+// src/util/fnv1a.ts
+function fnv1a(s) {
+  let h = 2166136261;
+  for (let i = 0;i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+  }
+  return h >>> 0;
+}
+
+// src/util/lua-message-data.ts
+var textStamp = (text) => `${text.length}:${fnv1a(text)}`;
+function luaMessageData(message) {
+  return message.luaData ? message.luaData.value : message.content;
+}
+function luaMessageFields(value) {
+  const content = toStr(value);
+  return { content, luaData: typeof value === "string" ? undefined : { value, text: textStamp(content) } };
+}
+var LUA_UNSAFE_STRING = /[\0\p{Cs}]/u;
+var utf8 = new TextEncoder;
+function encodeFullChatParts(rows) {
+  const bodies = [];
+  const head = rows.map(({ role, data, time }) => {
+    if (typeof data !== "string" || LUA_UNSAFE_STRING.test(data))
+      return { role, data, time };
+    bodies.push(data);
+    return { role, time, len: utf8.encode(data).length };
+  });
+  return `${JSON.stringify(head)}
+${bodies.join("")}`;
+}
+function luaOwnMetadata(options) {
+  if (options?.createdAt === undefined && !options?.luaData)
+    return {};
+  return { ownMetadata: {
+    ...options.createdAt !== undefined ? { luaMessageTime: options.createdAt } : {},
+    ...options.luaData ? { luaData: options.luaData } : {}
+  } };
+}
+function readLuaOwnMetadata(own) {
+  const fields = own && typeof own === "object" ? own : {};
+  const { luaMessageTime: time, luaData: data } = fields;
+  return {
+    ...typeof time === "number" && Number.isFinite(time) ? { createdAt: time } : {},
+    ...data && typeof data === "object" && !Array.isArray(data) ? { luaData: data } : {}
+  };
+}
+function hostLuaOwnMetadata(message) {
+  return readLuaOwnMetadata(message.ownMetadata ?? message.metadata?.lumirealm ?? message.extra?.spindle_metadata?.lumirealm);
+}
+function hostLuaMessageData(message) {
+  const data = hostLuaOwnMetadata(message).luaData;
+  return data && data.text === textStamp(message.content) ? data : null;
+}
+function luaMessageEdit(previous, next) {
+  const dataChanged = luaMessageData(previous) !== luaMessageData(next);
+  const timeChanged = (previous.createdAt ?? 0) !== (next.createdAt ?? 0);
+  const roleChanged = previous.role !== next.role;
+  if (!dataChanged && !timeChanged && !roleChanged)
+    return null;
+  const ownChanged = timeChanged || dataChanged && Boolean(previous.luaData || next.luaData);
+  return { content: dataChanged ? next.content : undefined, options: {
+    ...roleChanged ? { role: next.role } : {},
+    ...ownChanged ? { createdAt: next.createdAt ?? 0, ...next.luaData ? { luaData: next.luaData } : {} } : {}
+  } };
+}
+function luaPlainTextEditOptions(message) {
+  return message.luaData ? { createdAt: message.createdAt ?? 0 } : undefined;
+}
+
 // src/log/store.ts
 var LEVEL_RANK = {
   silent: 0,
@@ -15883,7 +15954,7 @@ async function persistCurrentText(ctx, data) {
   const message = messages[ctx.chatIndex + 1];
   if (!message)
     return;
-  await ctx.api.chat.editMessage(message.id, data);
+  await ctx.api.chat.editMessage(message.id, data, luaPlainTextEditOptions(message));
 }
 function applyMove(data, regex, outScript, direction) {
   const matched = data.match(regex);
@@ -15957,39 +16028,6 @@ function primaryFlagAction(actions) {
 // src/state/macro-interceptor-cache.ts
 var log2 = makeSafeLogger("macro-interceptor-cache");
 var cache = new Map;
-function fnv1a(s) {
-  let h = 2166136261;
-  for (let i = 0;i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
-  }
-  return h >>> 0;
-}
-
-// src/util/lua-message-data.ts
-function luaMessageData(message) {
-  return message.luaData ? message.luaData.value : message.content;
-}
-function luaMessageFields(value) {
-  return { content: toStr(value), luaData: typeof value === "string" ? undefined : { value } };
-}
-var LUA_UNSAFE_STRING = /[\0\p{Cs}]/u;
-var utf8 = new TextEncoder;
-function encodeFullChatParts(rows) {
-  const bodies = [];
-  const head = rows.map(({ role, data, time }) => {
-    if (typeof data !== "string" || LUA_UNSAFE_STRING.test(data))
-      return { role, data, time };
-    bodies.push(data);
-    return { role, time, len: utf8.encode(data).length };
-  });
-  return `${JSON.stringify(head)}
-${bodies.join("")}`;
-}
-function hostLuaMessageData(message) {
-  const own = message.ownContentMetadata ?? message.extra?.spindle_content_metadata?.lumirealm;
-  return own && typeof own === "object" && !Array.isArray(own) ? own : null;
-}
 
 // src/display/snapshot.ts
 var snapshots = new Map;
@@ -17839,7 +17877,7 @@ function makeChatApi(api, state, notifyStateChanged) {
       const realIdx = n >= 0 ? n : state.messagesCache.length + n;
       const pick = state.messagesCache[realIdx];
       if (pick) {
-        await api.chat.editMessage(pick.id, toStr(value));
+        await api.chat.editMessage(pick.id, toStr(value), luaPlainTextEditOptions(pick));
         state.messagesCache[realIdx] = { ...pick, content: toStr(value), luaData: undefined };
       }
     } catch {}
@@ -18803,13 +18841,10 @@ async function commitInvocation(state, chatId, injectPrompts = false, adoptLocal
         ...anchors[index] ? { beforeId: anchors[index] } : {}
       });
       message.id = result.id;
-    } else if (luaMessageData(previous) !== luaMessageData(message) || previous.role !== message.role || (previous.createdAt ?? 0) !== (message.createdAt ?? 0)) {
-      const dataChanged = luaMessageData(previous) !== luaMessageData(message);
-      await live.api.chat.editMessage(message.id, dataChanged ? message.content : undefined, {
-        ...dataChanged && message.luaData ? { luaData: message.luaData } : {},
-        ...previous.role !== message.role ? { role: message.role } : {},
-        ...(previous.createdAt ?? 0) !== (message.createdAt ?? 0) ? { createdAt: message.createdAt ?? 0 } : {}
-      });
+    } else {
+      const edit = luaMessageEdit(previous, message);
+      if (edit)
+        await live.api.chat.editMessage(message.id, edit.content, edit.options);
     }
   }
   if (injectPrompts && !state.stopSending) {
@@ -19158,12 +19193,9 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         rememberOurWrite(portalChatId, id, next.content);
       } catch {}
     }
-    const dataChanged = luaMessageData(previous) !== luaMessageData(next);
-    await (opts.luaChat?.persistence ?? api.chat).editMessage(id, dataChanged ? next.content : undefined, {
-      ...dataChanged && next.luaData ? { luaData: next.luaData } : {},
-      ...previous.role !== next.role ? { role: next.role } : {},
-      ...(previous.createdAt ?? 0) !== (next.createdAt ?? 0) ? { createdAt: next.createdAt ?? 0 } : {}
-    });
+    const edit = luaMessageEdit(previous, next);
+    if (edit)
+      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, edit.content, edit.options);
   }
   function reconcileFullChat(value) {
     const parsed = JSON.parse(value);
@@ -22984,9 +23016,8 @@ class OrderedRuntimeState {
 
 // src/util/message-time.ts
 function hostMessageTime(message) {
-  const own = message.ownMetadata ?? message.metadata?.lumirealm ?? message.extra?.spindle_metadata?.lumirealm;
-  const override = own?.luaMessageTime;
-  if (typeof override === "number" && Number.isFinite(override))
+  const override = hostLuaOwnMetadata(message).createdAt;
+  if (override !== undefined)
     return override;
   const seconds = typeof message.send_date === "number" ? message.send_date : typeof message.created_at === "number" ? message.created_at : 0;
   return seconds * 1000;
@@ -23243,14 +23274,15 @@ class FrontendRuntimeState {
       case "persona.update":
         this.record(patch, "persona", "", command.patch);
         break;
-      case "message.edit":
+      case "message.edit": {
+        const own = readLuaOwnMetadata(command.ownMetadata);
         this.record(patch, "message", command.id, {
           ...command.content !== undefined ? { content: command.content, luaData: undefined } : {},
           ...command.role !== undefined ? { role: command.role } : {},
-          ...command.ownContentMetadata !== undefined ? { luaData: command.ownContentMetadata } : {},
-          ...command.ownMetadata?.luaMessageTime !== undefined ? { createdAt: command.ownMetadata.luaMessageTime } : {}
+          ...command.ownMetadata !== undefined ? { luaData: own.luaData, ...own.createdAt !== undefined ? { createdAt: own.createdAt } : {} } : {}
         });
         break;
+      }
       case "message.delete":
         this.record(patch, "message", command.id, { present: false });
         break;
@@ -23265,15 +23297,15 @@ class FrontendRuntimeState {
             if (id !== command.id && current.present && Number(current.index) >= index)
               this.record(patch, "message", id, { index: Number(current.index) + 1 });
           }
-        const time = command.ownMetadata?.luaMessageTime;
+        const own = readLuaOwnMetadata(command.ownMetadata);
         this.record(patch, "message", command.id, {
           id: command.id,
           content: command.content,
           role: command.role,
           index,
           present: true,
-          ...command.ownContentMetadata !== undefined ? { luaData: command.ownContentMetadata } : {},
-          ...time !== undefined ? { createdAt: time } : {}
+          ...own.luaData ? { luaData: own.luaData } : {},
+          ...own.createdAt !== undefined ? { createdAt: own.createdAt } : {}
         });
         break;
       }
@@ -23476,8 +23508,7 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
         id,
         content,
         ...beforeId ? { beforeId } : {},
-        ...options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {},
-        ...options?.luaData ? { ownContentMetadata: options.luaData } : {},
+        ...luaOwnMetadata(options),
         role: role === "sys" || role === "system" ? "system" : ["char", "bot", "assistant"].includes(role) ? "assistant" : "user"
       }, optimistic);
       return { id };
@@ -23488,8 +23519,7 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
         id,
         ...content !== undefined ? { content } : {},
         ...options?.role !== undefined ? { role: options.role } : {},
-        ...options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {},
-        ...options?.luaData ? { ownContentMetadata: options.luaData } : {}
+        ...luaOwnMetadata(options)
       }, optimistic);
     },
     async deleteMessage(id) {

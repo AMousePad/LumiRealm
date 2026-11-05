@@ -41,12 +41,12 @@ test.each(['{"role":"user"}', '{"role":"user","data":null}', '{"role":"user","da
   expect(await frontendRuntime(f.dto).run("listenEdit('editInput',function(id,text) return getFullChatMain(id) end)")).toBe(expected);
 });
 
-test('native same-text edit replaces raw data and role/time edits preserve it', async () => {
+test('native text edits replace raw data and role/time edits preserve it', async () => {
   const f = frontendRuntime();
   await f.run("listenEdit('editInput',function(id,text) setChat(id,0,42);setChatRole(id,0,'char');return text end)");
   expect(await f.run(`listenEdit('editInput',function(id,text) return ${readers} end)`)).toBe('number|number|number|number');
   const message = f.dto.messages[1]!;
-  delete message.extra!.spindle_content_metadata;
+  message.content = 'Edited natively';
   f.event({ message });
   expect(await f.run(`listenEdit('editInput',function(id,text) return ${readers} end)`)).toBe('string|string|string|string');
 });

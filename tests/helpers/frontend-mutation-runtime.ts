@@ -26,10 +26,9 @@ export function frontendRuntime(initial?: RuntimeStateDto, hostSupport?: { messa
     writes.push(structuredClone(command)); let patch: RuntimeStatePatch;
     if (command.kind === 'message.edit') {
       const message = dto.messages.find(row => row.id === command.id)!;
-      if (command.content !== undefined) { message.content = command.content; if (message.extra) delete message.extra.spindle_content_metadata; }
+      if (command.content !== undefined) message.content = command.content;
       if (command.role !== undefined) message.role = command.role;
       if (command.ownMetadata !== undefined) message.extra = { ...message.extra, spindle_metadata: { lumirealm: command.ownMetadata } };
-      if (command.ownContentMetadata !== undefined) message.extra = { ...message.extra, spindle_content_metadata: { lumirealm: command.ownContentMetadata } };
       patch = { message };
     } else if (command.kind === 'message.create') {
       const before = command.beforeId ? dto.messages.find(row => row.id === command.beforeId) : undefined;
@@ -37,7 +36,7 @@ export function frontendRuntime(initial?: RuntimeStateDto, hostSupport?: { messa
       const index = before?.index_in_chat ?? Math.max(-1, ...dto.messages.map(row => row.index_in_chat)) + 1;
       if (before) for (const row of dto.messages.filter(row => row.index_in_chat >= index)) { row.index_in_chat++; event({ message: row }, mutationId); }
       const message = { id: command.id, role: command.role, content: command.content, index_in_chat: index, send_date: 1900000000,
-        extra: { spindle_metadata: { lumirealm: command.ownMetadata }, spindle_content_metadata: { lumirealm: command.ownContentMetadata } } };
+        extra: { spindle_metadata: { lumirealm: command.ownMetadata } } };
       dto.messages.push(message); dto.messages.sort((a, b) => a.index_in_chat - b.index_in_chat); patch = { message };
     } else if (command.kind === 'message.delete') {
       dto.messages = dto.messages.filter(row => row.id !== command.id); patch = { deletedMessageId: command.id };

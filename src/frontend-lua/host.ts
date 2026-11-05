@@ -1,3 +1,4 @@
+import { luaOwnMetadata } from '../util/lua-message-data.js';
 import { v4 } from 'uuid';
 import type { HostApi, HostWorldInfoEntry, TriggerRuntimeOpts } from '../interpreter/host.js';
 import type { DisplaySnapshot } from '../display/snapshot.js';
@@ -24,15 +25,13 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
       const beforeId = options?.beforeId ?? state.insertionContext(id).trailing[0]?.id;
       await state.write({ kind: 'message.create', id, content,
         ...(beforeId ? { beforeId } : {}),
-        ...(options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}),
-        ...(options?.luaData ? { ownContentMetadata: options.luaData } : {}),
+        ...luaOwnMetadata(options),
         role: role === 'sys' || role === 'system' ? 'system' : ['char', 'bot', 'assistant'].includes(role) ? 'assistant' : 'user' }, optimistic);
       return { id };
     },
     async editMessage(id, content, options) { await state.write({ kind: 'message.edit', id, ...(content !== undefined ? { content } : {}),
       ...(options?.role !== undefined ? { role: options.role } : {}),
-      ...(options?.createdAt !== undefined ? { ownMetadata: { luaMessageTime: options.createdAt } } : {}),
-      ...(options?.luaData ? { ownContentMetadata: options.luaData } : {}),
+      ...luaOwnMetadata(options),
     }, optimistic); },
     async deleteMessage(id) { await state.write({ kind: 'message.delete', id }, optimistic); },
   });

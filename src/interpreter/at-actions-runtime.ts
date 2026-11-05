@@ -2,6 +2,7 @@
 // the corresponding live host row remains authoritative for editable fields.
 // Risu source: process/scripts.ts.
 
+import { luaPlainTextEditOptions } from '../util/lua-message-data.js';
 import type { HostApi, HostMessage } from './host.js';
 import { errMsg } from '../util/coerce.js';
 import { makeSafeLogger } from '../util/safe-log.js';
@@ -344,7 +345,7 @@ async function persistCurrentText(
   const messages = await ctx.api.chat.getMessages();
   const message = messages[ctx.chatIndex + 1];
   if (!message) return;
-  await ctx.api.chat.editMessage(message.id, data);
+  await ctx.api.chat.editMessage(message.id, data, luaPlainTextEditOptions(message));
 }
 
 function applyMove(

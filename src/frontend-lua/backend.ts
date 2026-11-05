@@ -8,7 +8,7 @@ import { readEffectiveGlobals } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { createCharacterLoreEntry } from '../state/character-lorebook.js';
 import { persistLocalLore, replaceLocalLore, type LocalLoreHost } from '../state/local-lore.js';
-import { dropUnsupportedMessageTime, runtimeMessage } from './state-contract.js';
+import { messageWriteForHost, runtimeMessage } from './state-contract.js';
 import { buildDisplayChatState } from '../state/display-snapshot-assembly.js';
 import { setCachedMessages } from '../interpreter/messages-cache.js';
 import { invalidateMacroInterceptorForChat } from '../state/macro-interceptor-cache.js';
@@ -75,15 +75,8 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
             break;
           }
           case 'state.write': {
-            const command = dropUnsupportedMessageTime(call.request.command, host.contracts);
-              if ((command.kind === 'message.create' || command.kind === 'message.edit') && command.ownContentMetadata !== undefined && !host.contracts?.runtimeMessageContentMetadata) {
-                throw new FrontendLuaUnavailableError('Lua message data requires native content metadata');
-              }
-            if ((command.kind === 'message.create' || command.kind === 'message.edit') &&
-              ((command.kind === 'message.edit' && command.role !== undefined) ||
-                (command.kind === 'message.create' && command.beforeId !== undefined)) && !host.contracts?.runtimeMessageMutations) {
-              throw new FrontendLuaUnavailableError('Lua message changes require native runtime message mutations');
-            }
+            const command = messageWriteForHost(call.request.command, host.contracts);
+            if (!command) throw new FrontendLuaUnavailableError('Lua message changes require native runtime message mutations');
             if (call.request.command.kind === 'lore.upsertLocal' || call.request.command.kind === 'lore.replaceLocal') {
               await host.runtimeState.read(call.chatId, call.characterId, userId);
               if (call.request.command.kind === 'lore.upsertLocal') await persistLocalLore(host as typeof host & LocalLoreHost, call.chatId, userId, call.request.command.entry);

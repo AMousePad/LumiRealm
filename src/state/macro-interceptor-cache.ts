@@ -2,6 +2,7 @@
 // fire 3+ times per chat-open on module-heavy cards.
 
 import { makeSafeLogger } from '../util/safe-log.js';
+import { fnv1a } from '../util/fnv1a.js';
 
 const log = makeSafeLogger('macro-interceptor-cache');
 
@@ -25,14 +26,7 @@ const cache = new Map<string, CacheEntry>();
 let hitCount = 0;
 let missCount = 0;
 
-export function fnv1a(s: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-  }
-  return h >>> 0;
-}
+export { fnv1a };
 
 function key(chatId: string, template: string, commit: boolean, ctxKey: string): string {
   return `${chatId}::${commit ? 'c' : 'd'}::${ctxKey}::${template.length}::${fnv1a(template)}`;

@@ -1,6 +1,7 @@
 // Risu triggers.ts,2364,2367. Chat-message accessors and mutators.
 // Reads from messagesCache; writes through host API.
 
+import { luaPlainTextEditOptions } from '../../util/lua-message-data.js';
 import { toStr } from '../../util/coerce.js';
 import { risuRoleToLumi } from '../../util/role-coerce.js';
 import { unsupported } from './unsupported.js';
@@ -153,7 +154,7 @@ export function makeChatApi(
       const realIdx = n >= 0 ? n : state.messagesCache.length + n;
       const pick = state.messagesCache[realIdx];
       if (pick) {
-        await api.chat.editMessage(pick.id, toStr(value));
+        await api.chat.editMessage(pick.id, toStr(value), luaPlainTextEditOptions(pick));
         state.messagesCache[realIdx] = { ...pick, content: toStr(value), luaData: undefined };
       }
     } catch { /* */ }

@@ -153,7 +153,7 @@ test('hosts without message mutations refuse writes that would land wrong', asyn
     for (const command of [
       { kind: 'message.create', id: 'row', content: 'text', role: 'assistant', beforeId: 'later' },
       { kind: 'message.edit', id: 'row', role: 'user' },
-      { kind: 'message.edit', id: 'row', content: 'next', ownContentMetadata: { data: 1 } },
+      { kind: 'message.edit', id: 'row', content: 'next', ownMetadata: { luaData: { value: 1, text: 'stamp' } } },
     ]) await backend.receive(stateWrite(command), 'owner', 'document');
     expect(f.writes).toEqual([]);
     expect(f.sent.map(message => message.payload.ok)).toEqual([false, false, false]);

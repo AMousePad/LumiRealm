@@ -6,7 +6,7 @@ export interface HostMessage {
   readonly id: string;
   readonly content: string;
   /** Native text stays a string; Lua can retain a different data type. */
-  readonly luaData?: { readonly value?: unknown } | null | undefined;
+  readonly luaData?: { readonly value?: unknown; readonly text?: string } | null | undefined;
   readonly role: 'user' | 'assistant' | 'system' | string;
   /** Milliseconds since the Unix epoch, matching Risu chat.message.time. */
   readonly createdAt?: number;

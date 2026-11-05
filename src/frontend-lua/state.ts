@@ -1,3 +1,4 @@
+import { readLuaOwnMetadata } from '../util/lua-message-data.js';
 import { v4 } from 'uuid';
 import { LOCAL_LORE_KEY, readLocalLore, upsertLocalLore } from '../interpreter/runtime/local-lore.js';
 import type { HostMessage, HostCharacter, HostPersona, HostWorldInfoEntry, TriggerRuntimeOpts } from '../interpreter/host.js';
@@ -174,12 +175,14 @@ export class FrontendRuntimeState {
       case 'chat.variables': this.record(patch, 'vars', '', command.values); break;
       case 'character.update': this.record(patch, 'character', '', command.patch); break;
       case 'persona.update': this.record(patch, 'persona', '', command.patch); break;
-      case 'message.edit': this.record(patch, 'message', command.id, {
-        ...(command.content !== undefined ? { content: command.content, luaData: undefined } : {}), ...(command.role !== undefined ? { role: command.role } : {}),
-        ...(command.ownContentMetadata !== undefined ? { luaData: command.ownContentMetadata } : {}),
-        ...((command.ownMetadata as { luaMessageTime?: number } | undefined)?.luaMessageTime !== undefined
-          ? { createdAt: (command.ownMetadata as { luaMessageTime: number }).luaMessageTime } : {}),
-      }); break;
+      case 'message.edit': {
+        const own = readLuaOwnMetadata(command.ownMetadata);
+        this.record(patch, 'message', command.id, {
+          ...(command.content !== undefined ? { content: command.content, luaData: undefined } : {}), ...(command.role !== undefined ? { role: command.role } : {}),
+          ...(command.ownMetadata !== undefined ? { luaData: own.luaData, ...(own.createdAt !== undefined ? { createdAt: own.createdAt } : {}) } : {}),
+        });
+        break;
+      }
       case 'message.delete': this.record(patch, 'message', command.id, { present: false }); break;
       case 'message.create': {
         this.messageIds.add(command.id);
@@ -190,10 +193,10 @@ export class FrontendRuntimeState {
           const current = this.object('message', id);
           if (id !== command.id && current.present && Number(current.index) >= index) this.record(patch, 'message', id, { index: Number(current.index) + 1 });
         }
-        const time = (command.ownMetadata as { luaMessageTime?: number } | undefined)?.luaMessageTime;
+        const own = readLuaOwnMetadata(command.ownMetadata);
         this.record(patch, 'message', command.id, { id: command.id, content: command.content, role: command.role, index, present: true,
-          ...(command.ownContentMetadata !== undefined ? { luaData: command.ownContentMetadata } : {}),
-          ...(time !== undefined ? { createdAt: time } : {}) });
+          ...(own.luaData ? { luaData: own.luaData } : {}),
+          ...(own.createdAt !== undefined ? { createdAt: own.createdAt } : {}) });
         break;
       }
       case 'lore.update': this.record(patch, 'lore', command.id, { ...command.patch, ...(command.patch.order_value !== undefined ? { orderValue: command.patch.order_value } : {}) }); break;

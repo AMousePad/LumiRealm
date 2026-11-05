@@ -11199,13 +11199,7 @@ function makeSafeLogger(prefix) {
   };
 }
 
-// src/state/macro-interceptor-cache.ts
-var log = makeSafeLogger("macro-interceptor-cache");
-var TTL_MS = 5000;
-var MAX_ENTRIES = 500;
-var cache = new Map;
-var hitCount = 0;
-var missCount = 0;
+// src/util/fnv1a.ts
 function fnv1a(s) {
   let h = 2166136261;
   for (let i = 0;i < s.length; i++) {
@@ -11214,6 +11208,14 @@ function fnv1a(s) {
   }
   return h >>> 0;
 }
+
+// src/state/macro-interceptor-cache.ts
+var log = makeSafeLogger("macro-interceptor-cache");
+var TTL_MS = 5000;
+var MAX_ENTRIES = 500;
+var cache = new Map;
+var hitCount = 0;
+var missCount = 0;
 function key(chatId, template, commit, ctxKey) {
   return `${chatId}::${commit ? "c" : "d"}::${ctxKey}::${template.length}::${fnv1a(template)}`;
 }
@@ -11450,11 +11452,40 @@ function toStr(v) {
   }
 }
 
+// src/util/lua-message-data.ts
+var textStamp = (text) => `${text.length}:${fnv1a(text)}`;
+var utf8 = new TextEncoder;
+function luaOwnMetadata(options) {
+  if (options?.createdAt === undefined && !options?.luaData)
+    return {};
+  return { ownMetadata: {
+    ...options.createdAt !== undefined ? { luaMessageTime: options.createdAt } : {},
+    ...options.luaData ? { luaData: options.luaData } : {}
+  } };
+}
+function readLuaOwnMetadata(own) {
+  const fields = own && typeof own === "object" ? own : {};
+  const { luaMessageTime: time, luaData: data } = fields;
+  return {
+    ...typeof time === "number" && Number.isFinite(time) ? { createdAt: time } : {},
+    ...data && typeof data === "object" && !Array.isArray(data) ? { luaData: data } : {}
+  };
+}
+function hostLuaOwnMetadata(message) {
+  return readLuaOwnMetadata(message.ownMetadata ?? message.metadata?.lumirealm ?? message.extra?.spindle_metadata?.lumirealm);
+}
+function hostLuaMessageData(message) {
+  const data = hostLuaOwnMetadata(message).luaData;
+  return data && data.text === textStamp(message.content) ? data : null;
+}
+function luaPlainTextEditOptions(message) {
+  return message.luaData ? { createdAt: message.createdAt ?? 0 } : undefined;
+}
+
 // src/util/message-time.ts
 function hostMessageTime(message) {
-  const own = message.ownMetadata ?? message.metadata?.lumirealm ?? message.extra?.spindle_metadata?.lumirealm;
-  const override = own?.luaMessageTime;
-  if (typeof override === "number" && Number.isFinite(override))
+  const override = hostLuaOwnMetadata(message).createdAt;
+  if (override !== undefined)
     return override;
   const seconds = typeof message.send_date === "number" ? message.send_date : typeof message.created_at === "number" ? message.created_at : 0;
   return seconds * 1000;
@@ -22000,13 +22031,6 @@ var _clock = Date.now;
 // src/interpreter/runtime/llm.ts
 var _log2 = makeSafeLogger("runtime.runLLM");
 
-// src/util/lua-message-data.ts
-var utf8 = new TextEncoder;
-function hostLuaMessageData(message) {
-  const own = message.ownContentMetadata ?? message.extra?.spindle_content_metadata?.lumirealm;
-  return own && typeof own === "object" && !Array.isArray(own) ? own : null;
-}
-
 // src/state/settings-store.ts
 var SAMPLER_KEYS = [
   "temperature",
@@ -27785,7 +27809,7 @@ async function persistCurrentText(ctx, data) {
   const message = messages[ctx.chatIndex + 1];
   if (!message)
     return;
-  await ctx.api.chat.editMessage(message.id, data);
+  await ctx.api.chat.editMessage(message.id, data, luaPlainTextEditOptions(message));
 }
 function applyMove(data, regex, outScript, direction) {
   const matched = data.match(regex);
@@ -28385,9 +28409,13 @@ function resolvePickResolution(requestId, responderUserId, value) {
 }
 
 // src/frontend-lua/state-contract.ts
-function dropUnsupportedMessageTime(command, contracts) {
+function messageWriteForHost(command, contracts) {
   if (contracts?.runtimeMessageMutations || command.kind !== "message.create" && command.kind !== "message.edit")
     return command;
+  if (command.kind === "message.edit" ? command.role !== undefined : command.beforeId !== undefined)
+    return null;
+  if (readLuaOwnMetadata(command.ownMetadata).luaData)
+    return null;
   const { ownMetadata: _time, ...rest } = command;
   return rest;
 }
@@ -28424,12 +28452,9 @@ function makeSpindleHost(ctx) {
   }
   async function writeMessage(original) {
     const runtime = spindle.runtimeState;
-    const command = dropUnsupportedMessageTime(original, spindle.contracts);
-    const needsMutations = command.kind === "message.edit" && command.role !== undefined || command.kind === "message.create" && command.beforeId !== undefined;
-    if (!runtime || !uid || needsMutations && !spindle.contracts?.runtimeMessageMutations)
+    const command = messageWriteForHost(original, spindle.contracts);
+    if (!runtime || !uid || !command)
       throw new RisuCompatUnsupportedError("Lua message mutation", "requires native runtime message mutations");
-    if ("ownContentMetadata" in command && command.ownContentMetadata !== undefined && !spindle.contracts?.runtimeMessageContentMetadata)
-      throw new RisuCompatUnsupportedError("Lua message data", "requires native content metadata");
     return runtime.write(chatId, command, uid);
   }
   async function sendMessage(content, opts) {
@@ -28442,9 +28467,8 @@ function makeSpindleHost(ctx) {
         id,
         content,
         role,
-        ...opts.luaData ? { ownContentMetadata: opts.luaData } : {},
-        ...opts.beforeId ? { beforeId: opts.beforeId } : {},
-        ...opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}
+        ...luaOwnMetadata(opts),
+        ...opts.beforeId ? { beforeId: opts.beforeId } : {}
       });
       return { id };
     }
@@ -28458,8 +28482,7 @@ function makeSpindleHost(ctx) {
         id,
         ...content !== undefined ? { content } : {},
         ...opts.role !== undefined ? { role: opts.role } : {},
-        ...opts.luaData ? { ownContentMetadata: opts.luaData } : {},
-        ...opts.createdAt !== undefined ? { ownMetadata: { luaMessageTime: opts.createdAt } } : {}
+        ...luaOwnMetadata(opts)
       });
       return;
     }
@@ -31269,13 +31292,9 @@ function createFrontendLuaBackend(host, bootstrap) {
             break;
           }
           case "state.write": {
-            const command = dropUnsupportedMessageTime(call.request.command, host.contracts);
-            if ((command.kind === "message.create" || command.kind === "message.edit") && command.ownContentMetadata !== undefined && !host.contracts?.runtimeMessageContentMetadata) {
-              throw new FrontendLuaUnavailableError("Lua message data requires native content metadata");
-            }
-            if ((command.kind === "message.create" || command.kind === "message.edit") && (command.kind === "message.edit" && command.role !== undefined || command.kind === "message.create" && command.beforeId !== undefined) && !host.contracts?.runtimeMessageMutations) {
+            const command = messageWriteForHost(call.request.command, host.contracts);
+            if (!command)
               throw new FrontendLuaUnavailableError("Lua message changes require native runtime message mutations");
-            }
             if (call.request.command.kind === "lore.upsertLocal" || call.request.command.kind === "lore.replaceLocal") {
               await host.runtimeState.read(call.chatId, call.characterId, userId);
               if (call.request.command.kind === "lore.upsertLocal")
