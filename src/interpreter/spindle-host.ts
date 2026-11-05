@@ -202,6 +202,10 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   };
 
   const host: HostApi = {
+    hostSupport: {
+      messageMutations: Boolean(spindle.contracts?.runtimeMessageMutations),
+      resolvedLore: typeof (spindle.world_books as { resolveForChat?: unknown } | undefined)?.resolveForChat === 'function',
+    },
     luaStateScope: backendLuaStateScope(userId),
     ...(uid !== undefined ? { userId: uid } : {}),
     corsFetch: async (url: string, init?: { readonly method?: string }) =>

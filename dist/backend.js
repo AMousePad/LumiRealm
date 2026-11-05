@@ -21989,6 +21989,10 @@ function sortLorebookEntriesBySourceOrder(entries) {
   }).map(({ entry }) => entry);
 }
 
+// src/interpreter/evaluator/index.ts
+init_scanner();
+init_dispatch();
+
 // src/interpreter/runtime/request.ts
 var _logRequest = makeSafeLogger("runtime.lua.request");
 var _clock = Date.now;
@@ -28576,6 +28580,10 @@ function makeSpindleHost(ctx) {
     }
   };
   const host = {
+    hostSupport: {
+      messageMutations: Boolean(spindle.contracts?.runtimeMessageMutations),
+      resolvedLore: typeof spindle.world_books?.resolveForChat === "function"
+    },
     luaStateScope: backendLuaStateScope(userId),
     ...uid !== undefined ? { userId: uid } : {},
     corsFetch: async (url, init) => await spindle.cors(url, { method: init?.method ?? "GET" }),
@@ -31238,7 +31246,10 @@ function createFrontendLuaBackend(host, bootstrap) {
         switch (call.request.kind) {
           case "bootstrap": {
             const config = await bootstrap(call.chatId, call.characterId, userId);
-            value = { ...config, state: await readState(call.chatId, call.characterId, userId) };
+            value = { ...config, state: await readState(call.chatId, call.characterId, userId), hostSupport: {
+              messageMutations: Boolean(host.contracts?.runtimeMessageMutations),
+              resolvedLore: typeof host.world_books?.resolveForChat === "function"
+            } };
             break;
           }
           case "state.read":

@@ -27,7 +27,7 @@ function fixture() {
   (globalThis as any).spindle = host;
   const bootstrap = async (...args: unknown[]) => {
     configurations.push(args);
-    return { snapshot: { chatId: args[0] }, settings: {} } as Omit<RuntimeBootstrap, 'state'>;
+    return { snapshot: { chatId: args[0] }, settings: {} } as Omit<RuntimeBootstrap, 'state' | 'hostSupport'>;
   };
   return { host, bootstrap, sent, reads, writes, configurations, capabilities, state };
 }

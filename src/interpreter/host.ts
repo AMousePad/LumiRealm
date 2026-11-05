@@ -80,6 +80,7 @@ export interface HostApi {
   readonly luaStateScope?: object;
   readonly userId?: string;
   readonly getGlobalVariables?: () => Promise<Record<string, string>>;
+  readonly hostSupport?: { readonly messageMutations: boolean; readonly resolvedLore: boolean };
   readonly chat: {
     getChatId?: () => string | null;
     getMessages(): Promise<readonly HostMessage[]>;

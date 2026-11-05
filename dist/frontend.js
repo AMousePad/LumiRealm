@@ -18178,6 +18178,10 @@ function makeLorebookApi(api, lorebook, afterCharacterSave) {
   };
 }
 
+// src/interpreter/evaluator/index.ts
+init_scanner();
+init_dispatch();
+
 // src/interpreter/runtime/display-state.ts
 function makeDisplayStateApi(initialDisplayState = "", initialRequestState = []) {
   const displayState = { text: toStr(initialDisplayState) };
@@ -19648,6 +19652,12 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         const role = value === "user" ? "user" : "assistant";
         if (previous.role === role)
           return;
+        if (api.hostSupport?.messageMutations === false) {
+          const desired = messagesCache.map((message) => ({ role: lumiRoleToRisu(message.role), data: luaMessageData(message) }));
+          desired[n] = { ...desired[n], role: lumiRoleToRisu(role) };
+          reconcileFullChat(JSON.stringify(desired));
+          return;
+        }
         const next = { ...previous, role };
         messagesCache[n] = next;
         inheritPendingSend(previous, next);
@@ -19693,6 +19703,12 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       insertChat: (_id, index, role, value) => {
         const n = Math.trunc(Number(index)) || 0;
         const at = n < 0 ? Math.max(0, messagesCache.length + n) : Math.min(n, messagesCache.length);
+        if (api.hostSupport?.messageMutations === false && at < messagesCache.length) {
+          const desired = messagesCache.map((message) => ({ role: lumiRoleToRisu(message.role), data: luaMessageData(message) }));
+          desired.splice(at, 0, { role: role === "user" ? "user" : "char", data: value ?? "" });
+          reconcileFullChat(JSON.stringify(desired));
+          return;
+        }
         const before = messagesCache[at];
         const entry = { id: "", role: role === "user" ? "user" : "assistant", ...luaMessageFields(value ?? ""), createdAt: 0 };
         messagesCache.splice(at, 0, entry);
@@ -20028,6 +20044,33 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
       loadLoreBooksMain: async (_id, reserve) => {
         if (!lowLevelAccess)
           return;
+        if (api.hostSupport?.resolvedLore === false) {
+          const evalCtx = buildEvaluatorContext({
+            chatId: portalChatId ?? "",
+            commit: false,
+            suppressVarPersist: true,
+            userName: "User",
+            charName: "Char",
+            character: { description: "" },
+            chat: { messages: messagesCache.map((m) => ({ role: m.role === "user" ? "user" : m.role === "system" ? "system" : "assistant", content: m.content, createdAt: m.createdAt ?? Date.now() })) },
+            variables: { global: { ...globalVarsCache }, local: { ...varsCache }, chat: { ...varsCache } }
+          });
+          return JSON.stringify(lorebook.entries.map((entry) => {
+            let content = toStr(entry.content);
+            if (content.includes("{{"))
+              content = evaluate(content, evalCtx);
+            return {
+              ...entry,
+              data: content,
+              name: toStr(entry.comment || entry.id),
+              comment: toStr(entry.comment),
+              content,
+              key: Array.isArray(entry.key) ? entry.key.join(", ") : toStr(entry.key),
+              order: entry.orderValue ?? 100,
+              alwaysActive: !entry.disabled
+            };
+          }));
+        }
         if (!api.worldInfo?.resolveForChat)
           throw new RisuCompatUnsupportedError("loadLoreBooks", "requires native resolved world info");
         await flush();
@@ -23422,7 +23465,7 @@ class FrontendRuntimeState {
 }
 
 // src/frontend-lua/host.ts
-function createFrontendHost(state, snapshot, settings, services, attachedModuleWorldBookIds) {
+function createFrontendHost(state, snapshot, settings, services, attachedModuleWorldBookIds, hostSupport) {
   const chatWrites = (optimistic) => ({
     async sendMessage(content, options) {
       const role = options?.role ?? "user";
@@ -23462,6 +23505,7 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
     ...value.constant !== undefined ? { constant: value.constant } : {}
   });
   const api = {
+    ...hostSupport ? { hostSupport } : {},
     chat: {
       ...chatWrites(true),
       getChatId: () => state.chatId,
@@ -23973,7 +24017,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
         if (entry)
           publish(entry, keys);
       });
-      entry = { config: value.snapshot, settings: value.settings, state, updates: Promise.resolve(), lifetime: new AbortController };
+      entry = { config: value.snapshot, settings: value.settings, hostSupport: value.hostSupport, state, updates: Promise.resolve(), lifetime: new AbortController };
       state.setToggles(updateSharedPreferences(value.snapshot), value.snapshot.presetToggles);
       entries.set(chatId, entry);
       for (const event of events)
@@ -24026,7 +24070,7 @@ function setupFrontendLua(ctx, invalidate, report, capture) {
       invalidate: (source, index) => reloadRequested(entry, source, index, true),
       synchronize: () => entry.updates,
       ...capture ? { capture: (event) => capture(chatId, event) } : {}
-    }, entry.config.attachedModuleWorldBookIds);
+    }, entry.config.attachedModuleWorldBookIds, entry.hostSupport);
   }
   setDisplayLuaEnvironment((snapshot) => {
     const entry = entries.get(snapshot.chatId);

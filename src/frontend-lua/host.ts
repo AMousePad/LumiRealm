@@ -16,7 +16,7 @@ export interface FrontendHostServices {
   capture?: (event: import('../interpreter/runtime.js').AuxDebugCaptureEvent) => void;
 }
 
-export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => DisplaySnapshot, settings: RuntimeSettings, services: FrontendHostServices, attachedModuleWorldBookIds: readonly string[]) {
+export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => DisplaySnapshot, settings: RuntimeSettings, services: FrontendHostServices, attachedModuleWorldBookIds: readonly string[], hostSupport?: NonNullable<HostApi['hostSupport']>) {
   const chatWrites = (optimistic: boolean): Pick<HostApi['chat'], 'sendMessage' | 'editMessage' | 'deleteMessage'> => ({
     async sendMessage(content, options) {
       const role = options?.role ?? 'user';
@@ -45,6 +45,7 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
     ...(value.constant !== undefined ? { constant: value.constant } : {}),
   });
   const api: HostApi = {
+    ...(hostSupport ? { hostSupport } : {}),
     chat: {
       ...chatWrites(true), getChatId: () => state.chatId,
       getMessages: async () => state.hostMessages(),

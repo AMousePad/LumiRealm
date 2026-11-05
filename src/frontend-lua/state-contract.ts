@@ -60,7 +60,7 @@ export type RuntimeConfig = Pick<DisplaySnapshot, 'configVersion' | 'chatId' | '
     readonly attachedModuleWorldBookIds: readonly string[];
     readonly character: Pick<DisplaySnapshot['character'], 'jailbreakPrompt' | 'globalNote' | 'authorsNote' | 'additionalAssets' | 'emotionImages'>;
   };
-export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: RuntimeConfig; settings: RuntimeSettings }
+export interface RuntimeBootstrap { state: RuntimeStateDto; snapshot: RuntimeConfig; settings: RuntimeSettings; hostSupport: NonNullable<HostApi['hostSupport']> }
 export type RuntimeService =
   | { kind: 'lore.resolve'; reserveTokens?: number }
   | { kind: 'lore.createCharacter'; entry: Record<string, unknown> }

@@ -21,7 +21,7 @@ export interface FrontendLuaHostContract {
   sendToFrontend(payload: unknown, userId: string, options: { frontendSessionId: string }): void;
 }
 
-export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLuaHostContract> & FrontendLuaHostContract, bootstrap: (chatId: string, characterId: string, userId: string) => Promise<Omit<RuntimeBootstrap, 'state'>>) {
+export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLuaHostContract> & FrontendLuaHostContract, bootstrap: (chatId: string, characterId: string, userId: string) => Promise<Omit<RuntimeBootstrap, 'state' | 'hostSupport'>>) {
   for (const capability of ['frontend-session-routing-v1', 'runtime-state-v1', 'required-context-handlers-v1', 'required-interceptors-v1']) {
     if (!host.host?.capabilities?.[capability]) throw new FrontendLuaUnavailableError(`Frontend Lua requires Lumiverse capability: ${capability}`);
   }
@@ -54,7 +54,10 @@ export function createFrontendLuaBackend(host: Omit<SpindleAPI, keyof FrontendLu
         switch (call.request.kind) {
           case 'bootstrap': {
             const config = await bootstrap(call.chatId, call.characterId, userId);
-            value = { ...config, state: await readState(call.chatId, call.characterId, userId) };
+            value = { ...config, state: await readState(call.chatId, call.characterId, userId), hostSupport: {
+              messageMutations: Boolean(host.contracts?.runtimeMessageMutations),
+              resolvedLore: typeof (host.world_books as { resolveForChat?: unknown } | undefined)?.resolveForChat === 'function',
+            } };
             break;
           }
           case 'state.read': value = await readState(call.chatId, call.characterId, userId); break;
