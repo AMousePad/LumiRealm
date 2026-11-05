@@ -152,3 +152,14 @@ for (const mode of ['plain', 'async'] as const) {
     expect(f.writes).toEqual(['edit', 'send']);
   });
 }
+
+test('a rejected backend chat write fails the Lua run instead of only logging', async () => {
+  const f = await fixture();
+  const api = { ...f.host.api, chat: { ...f.host.api.chat, editMessage: async () => { throw new Error('Edit rejected'); } } };
+  const runtime = await makeRisuTriggerRuntime(api, {}, { require: async () => f.executor }, {
+    characterId: 'test-character', chatId: 'test-chat', binding: 'start',
+    preloaded: f.host.preloaded, templateContext: basicTriggerContext,
+  });
+  await runtime.runLua(`function onStart(id) setChat(id,0,'Earlier') end`);
+  await expect(runtime.flush()).rejects.toThrow('Edit rejected');
+});

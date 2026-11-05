@@ -41,6 +41,13 @@ export type RuntimeStateCommand =
   | { kind: 'lore.update'; id: string; patch: Record<string, unknown> }
   | { kind: 'lore.delete'; id: string };
 
+// Time is the one mutation field a host can lack without losing the write: reads then use send_date instead of Risu's stored time.
+export function dropUnsupportedMessageTime(command: RuntimeStateCommand, contracts: { runtimeMessageMutations?: unknown } | undefined): RuntimeStateCommand {
+  if (contracts?.runtimeMessageMutations || (command.kind !== 'message.create' && command.kind !== 'message.edit')) return command;
+  const { ownMetadata: _time, ...rest } = command;
+  return rest;
+}
+
 export type RuntimeSettings = Pick<RisuCompatSettings, 'auxConnectionId' | 'auxModelOverride' | 'auxSamplers' | 'auxPrefillCompat'
   | 'submodelConnectionId' | 'submodelModelOverride' | 'submodelSamplers' | 'submodelPrefillCompat' | 'auxDebugCaptureRequest' | 'auxDebugCaptureResponse'
   | 'imageConnectionId' | 'imageModelOverride' | 'naiSettings'>;

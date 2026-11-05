@@ -131,6 +131,46 @@ test('state services use authenticated ownership and preserve mutation correlati
   } finally { backend.dispose(); }
 });
 
+const stateWrite = (command: unknown) => ({ type: 'lua_service', requestId: 'request', chatId: 'chat', characterId: 'character', request: { kind: 'state.write', command, mutationId: 'mutation' } });
+
+test('hosts without message mutations still take plain creates and edits, without the Lua time', async () => {
+  const f = fixture(), backend = createFrontendLuaBackend(f.host, f.bootstrap);
+  try {
+    const time = { ownMetadata: { luaMessageTime: 0 } };
+    await backend.receive(stateWrite({ kind: 'message.create', id: 'row', content: 'text', role: 'assistant', ...time }), 'owner', 'document');
+    await backend.receive(stateWrite({ kind: 'message.edit', id: 'row', content: 'next', ...time }), 'owner', 'document');
+    expect(f.writes).toEqual([
+      ['chat', { kind: 'message.create', id: 'row', content: 'text', role: 'assistant' }, 'owner', 'mutation'],
+      ['chat', { kind: 'message.edit', id: 'row', content: 'next' }, 'owner', 'mutation'],
+    ]);
+    expect(f.sent.every(message => message.payload.ok)).toBe(true);
+  } finally { backend.dispose(); }
+});
+
+test('hosts without message mutations refuse writes that would land wrong', async () => {
+  const f = fixture(), backend = createFrontendLuaBackend(f.host, f.bootstrap);
+  try {
+    for (const command of [
+      { kind: 'message.create', id: 'row', content: 'text', role: 'assistant', beforeId: 'later' },
+      { kind: 'message.edit', id: 'row', role: 'user' },
+      { kind: 'message.edit', id: 'row', content: 'next', ownContentMetadata: { data: 1 } },
+    ]) await backend.receive(stateWrite(command), 'owner', 'document');
+    expect(f.writes).toEqual([]);
+    expect(f.sent.map(message => message.payload.ok)).toEqual([false, false, false]);
+  } finally { backend.dispose(); }
+});
+
+test('hosts with message mutations keep the Lua time', async () => {
+  const f = fixture();
+  (f.host as unknown as { contracts: unknown }).contracts = { runtimeMessageMutations: 1 };
+  const backend = createFrontendLuaBackend(f.host, f.bootstrap);
+  try {
+    const command = { kind: 'message.create', id: 'row', content: 'text', role: 'assistant', ownMetadata: { luaMessageTime: 5 } };
+    await backend.receive(stateWrite(command), 'owner', 'document');
+    expect(f.writes).toEqual([['chat', command, 'owner', 'mutation']]);
+  } finally { backend.dispose(); }
+});
+
 test('native state failures return an explicit error to the originating document', async () => {
   const f = fixture();
   f.host.runtimeState.read = async () => { throw new Error('Access denied'); };

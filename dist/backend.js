@@ -28380,6 +28380,26 @@ function resolvePickResolution(requestId, responderUserId, value) {
   return { ok: true };
 }
 
+// src/frontend-lua/state-contract.ts
+function dropUnsupportedMessageTime(command, contracts) {
+  if (contracts?.runtimeMessageMutations || command.kind !== "message.create" && command.kind !== "message.edit")
+    return command;
+  const { ownMetadata: _time, ...rest } = command;
+  return rest;
+}
+function runtimeMessage(message) {
+  const luaData = hostLuaMessageData(message);
+  return {
+    id: message.id,
+    content: message.content,
+    ...luaData ? { luaData } : {},
+    role: message.role ?? (message.is_user ? "user" : message.extra?.spindle_role === "system" ? "system" : "assistant"),
+    createdAt: hostMessageTime(message),
+    ...message.name ? { speaker: message.name } : {},
+    ...typeof message.extra?.greeting_index === "number" ? { greetingIndex: message.extra.greeting_index } : {}
+  };
+}
+
 // src/interpreter/spindle-host.ts
 var log5 = makeSafeLogger("spindle-host.llm.generate");
 function makeSpindleHost(ctx) {
@@ -28398,9 +28418,11 @@ function makeSpindleHost(ctx) {
       };
     });
   }
-  async function writeMessage(command) {
+  async function writeMessage(original) {
     const runtime = spindle.runtimeState;
-    if (!runtime || !uid || !spindle.contracts?.runtimeMessageMutations)
+    const command = dropUnsupportedMessageTime(original, spindle.contracts);
+    const needsMutations = command.kind === "message.edit" && command.role !== undefined || command.kind === "message.create" && command.beforeId !== undefined;
+    if (!runtime || !uid || needsMutations && !spindle.contracts?.runtimeMessageMutations)
       throw new RisuCompatUnsupportedError("Lua message mutation", "requires native runtime message mutations");
     if ("ownContentMetadata" in command && command.ownContentMetadata !== undefined && !spindle.contracts?.runtimeMessageContentMetadata)
       throw new RisuCompatUnsupportedError("Lua message data", "requires native content metadata");
@@ -31109,20 +31131,6 @@ function createFrontendLuaRpc(send) {
   };
 }
 
-// src/frontend-lua/state-contract.ts
-function runtimeMessage(message) {
-  const luaData = hostLuaMessageData(message);
-  return {
-    id: message.id,
-    content: message.content,
-    ...luaData ? { luaData } : {},
-    role: message.role ?? (message.is_user ? "user" : message.extra?.spindle_role === "system" ? "system" : "assistant"),
-    createdAt: hostMessageTime(message),
-    ...message.name ? { speaker: message.name } : {},
-    ...typeof message.extra?.greeting_index === "number" ? { greetingIndex: message.extra.greeting_index } : {}
-  };
-}
-
 // src/state/display-snapshot-assembly.ts
 function buildDisplayChatStateFromView(view) {
   const messages = view.messages.map((m) => ({
@@ -31250,11 +31258,11 @@ function createFrontendLuaBackend(host, bootstrap) {
             break;
           }
           case "state.write": {
-            const command = call.request.command;
+            const command = dropUnsupportedMessageTime(call.request.command, host.contracts);
             if ((command.kind === "message.create" || command.kind === "message.edit") && command.ownContentMetadata !== undefined && !host.contracts?.runtimeMessageContentMetadata) {
               throw new FrontendLuaUnavailableError("Lua message data requires native content metadata");
             }
-            if ((command.kind === "message.create" || command.kind === "message.edit") && (command.ownMetadata !== undefined || command.kind === "message.edit" && command.role !== undefined || command.kind === "message.create" && command.beforeId !== undefined) && !host.contracts?.runtimeMessageMutations) {
+            if ((command.kind === "message.create" || command.kind === "message.edit") && (command.kind === "message.edit" && command.role !== undefined || command.kind === "message.create" && command.beforeId !== undefined) && !host.contracts?.runtimeMessageMutations) {
               throw new FrontendLuaUnavailableError("Lua message changes require native runtime message mutations");
             }
             if (call.request.command.kind === "lore.upsertLocal" || call.request.command.kind === "lore.replaceLocal") {
@@ -31266,7 +31274,7 @@ function createFrontendLuaBackend(host, bootstrap) {
               const state = await host.runtimeState.read(call.chatId, call.characterId, userId);
               value = { revision: state.revision, patch: { chat: state.chat }, value: undefined };
             } else
-              value = await host.runtimeState.write(call.chatId, call.request.command, userId, call.request.mutationId);
+              value = await host.runtimeState.write(call.chatId, command, userId, call.request.mutationId);
             break;
           }
           case "llm.generate":

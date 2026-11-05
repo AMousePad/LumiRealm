@@ -30,6 +30,7 @@ import { awaitPickResolution } from './pick-bridge.js';
 import { backendLuaStateScope, hostCharacterState } from './runtime/lua-state.js';
 import { hostMessageTime } from '../util/message-time.js';
 import { hostLuaMessageData } from '../util/lua-message-data.js';
+import { dropUnsupportedMessageTime, type RuntimeStateCommand } from '../frontend-lua/state-contract.js';
 
 const log = makeSafeLogger('spindle-host.llm.generate');
 
@@ -56,9 +57,11 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     }; });
   }
 
-  async function writeMessage(command: import('../frontend-lua/state-contract.js').RuntimeStateCommand) {
+  async function writeMessage(original: RuntimeStateCommand) {
     const runtime = (spindle as typeof spindle & { runtimeState?: { write(chatId: string, command: unknown, userId: string): Promise<{ value: unknown }> } }).runtimeState;
-    if (!runtime || !uid || !spindle.contracts?.runtimeMessageMutations) throw new RisuCompatUnsupportedError('Lua message mutation', 'requires native runtime message mutations');
+    const command = dropUnsupportedMessageTime(original, spindle.contracts);
+    const needsMutations = (command.kind === 'message.edit' && command.role !== undefined) || (command.kind === 'message.create' && command.beforeId !== undefined);
+    if (!runtime || !uid || (needsMutations && !spindle.contracts?.runtimeMessageMutations)) throw new RisuCompatUnsupportedError('Lua message mutation', 'requires native runtime message mutations');
     if ('ownContentMetadata' in command && command.ownContentMetadata !== undefined && !spindle.contracts?.runtimeMessageContentMetadata) throw new RisuCompatUnsupportedError('Lua message data', 'requires native content metadata');
     return runtime.write(chatId, command, uid);
   }

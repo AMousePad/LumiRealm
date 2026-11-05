@@ -19087,15 +19087,24 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
   const pendingSendIds = new WeakMap;
   let chatMutationTail = Promise.resolve();
   let cutChatFailure;
+  let chatMutationFailures = [];
   function enqueueChatMutation(label, operation) {
     const next = opts.luaChat?.enqueue ? opts.luaChat.enqueue(operation) : chatMutationTail.then(operation);
     chatMutationTail = next.catch((err) => {
       _logSetFullChat.warn(`${label} failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (!opts.luaChat?.enqueue)
+        chatMutationFailures.push(err);
     });
     return chatMutationTail;
   }
   async function drainChatMutations() {
     await chatMutationTail;
+    const failures = chatMutationFailures;
+    chatMutationFailures = [];
+    if (failures.length === 1)
+      throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, "Lua chat writes failed");
     if (cutChatFailure) {
       const { cause, previous } = cutChatFailure;
       cutChatFailure = undefined;
@@ -19119,50 +19128,38 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
     return pendingSendIds.get(entry) ?? entry.id;
   }
   async function persistChatSend(entry, before) {
-    try {
-      const beforeId = before ? await resolveHostMessageId(before) : undefined;
-      const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, {
-        role: entry.role,
-        createdAt: entry.createdAt ?? 0,
-        ...entry.luaData ? { luaData: entry.luaData } : {},
-        ...beforeId ? { beforeId } : {},
-        ...opts.luaChat?.enqueue ? { messageId: entry.id } : {}
-      });
-      const id = result && typeof result.id === "string" ? result.id : "";
-      if (id)
-        entry.id = id;
-    } catch (err) {
-      _logSetFullChat.warn(`send threw: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const beforeId = before ? await resolveHostMessageId(before) : undefined;
+    const result = await (opts.luaChat?.persistence ?? api.chat).sendMessage(entry.content, {
+      role: entry.role,
+      createdAt: entry.createdAt ?? 0,
+      ...entry.luaData ? { luaData: entry.luaData } : {},
+      ...beforeId ? { beforeId } : {},
+      ...opts.luaChat?.enqueue ? { messageId: entry.id } : {}
+    });
+    const id = result && typeof result.id === "string" ? result.id : "";
+    if (id)
+      entry.id = id;
   }
   async function persistChatDelete(entry) {
-    try {
-      const id = await resolveHostMessageId(entry);
-      if (id)
-        await (opts.luaChat?.persistence ?? api.chat).deleteMessage(id);
-    } catch (err) {
-      _logSetFullChat.warn(`delete msgId=${entry.id} threw: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const id = await resolveHostMessageId(entry);
+    if (id)
+      await (opts.luaChat?.persistence ?? api.chat).deleteMessage(id);
   }
   async function persistChatEdit(previous, next) {
-    try {
-      const id = await resolveHostMessageId(previous);
-      if (!id)
-        return;
-      if (rememberOurWrite && portalChatId) {
-        try {
-          rememberOurWrite(portalChatId, id, next.content);
-        } catch {}
-      }
-      const dataChanged = luaMessageData(previous) !== luaMessageData(next);
-      await (opts.luaChat?.persistence ?? api.chat).editMessage(id, dataChanged ? next.content : undefined, {
-        ...dataChanged && next.luaData ? { luaData: next.luaData } : {},
-        ...previous.role !== next.role ? { role: next.role } : {},
-        ...(previous.createdAt ?? 0) !== (next.createdAt ?? 0) ? { createdAt: next.createdAt ?? 0 } : {}
-      });
-    } catch (err) {
-      _logSetFullChat.warn(`edit msgId=${previous.id} threw: ${err instanceof Error ? err.message : String(err)}`);
+    const id = await resolveHostMessageId(previous);
+    if (!id)
+      return;
+    if (rememberOurWrite && portalChatId) {
+      try {
+        rememberOurWrite(portalChatId, id, next.content);
+      } catch {}
     }
+    const dataChanged = luaMessageData(previous) !== luaMessageData(next);
+    await (opts.luaChat?.persistence ?? api.chat).editMessage(id, dataChanged ? next.content : undefined, {
+      ...dataChanged && next.luaData ? { luaData: next.luaData } : {},
+      ...previous.role !== next.role ? { role: next.role } : {},
+      ...(previous.createdAt ?? 0) !== (next.createdAt ?? 0) ? { createdAt: next.createdAt ?? 0 } : {}
+    });
   }
   function reconcileFullChat(value) {
     const parsed = JSON.parse(value);

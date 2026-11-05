@@ -18,6 +18,7 @@ function host() {
   (globalThis as { spindle?: unknown }).spindle = {
     generate: { raw: async () => { throw new Error('Unexpected model request'); } },
     chat: { getMessages: async () => rows, appendMessage: async () => ({ id: 'added' }) },
+    runtimeState: { write: async () => ({ value: undefined }) },
     chats: { get: async () => ({ metadata: {} }) },
     characters: { get: async () => ({ name: 'Character', world_book_ids: [] }) },
     personas: { getActive: async () => ({ name: 'User' }) },
