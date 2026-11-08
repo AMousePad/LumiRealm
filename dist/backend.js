@@ -15227,6 +15227,8 @@ function transformPresetTemplate(template) {
   result = rewriteMacroBody(result, "array", (body) => splitMacroArgs(body).join("\xA7"));
   result = result.replace(/\{\{contains::/g, "{{risuContains::");
   result = result.replace(/\{\{length::/g, "{{risuLength::");
+  result = result.replace(/\{\{\s*last[\s_-]*message[\s_-]*(?:id|index)\s*(?::[^{}]*)?\}\}/gi, "{{risuLastMessageId}}");
+  result = result.replace(/\{\{\s*previous[\s_-]*chat[\s_-]*log\s*::?/gi, "{{risuChatLog::");
   result = result.replace(/\{\{and::/g, "{{risuAnd::");
   result = result.replace(/\{\{or::/g, "{{risuOr::");
   result = result.replace(/\{\{any::/g, "{{risuAny::");
@@ -30470,7 +30472,11 @@ async function resolveAuthornoteMacro(ctx) {
     return "";
   }
 }
-function resolveChatLogMacro(ctx) {
+function risuChatMessages(messages) {
+  const first = messages[0];
+  return first && first.is_user !== true ? messages.slice(1) : messages;
+}
+function resolveChatLogMacro(ctx, frame = (m) => m) {
   const env = ctx?.env;
   const messages = env?.extra?.["messages"];
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -30480,7 +30486,7 @@ function resolveChatLogMacro(ctx) {
   }
   const args = ctx?.args;
   const index = Array.isArray(args) && args.length > 0 ? Number(args[0]) : Number.NaN;
-  const content = messages[index]?.content;
+  const content = frame(messages)[index]?.content;
   return typeof content === "string" ? content : "";
 }
 function registerSpindleMacros() {
@@ -30553,6 +30559,25 @@ function registerSpindleMacros() {
       aliases: ["risuNot", "risuAnd", "risuOr"].includes(name) ? [name.replace("risu", "littleDevil")] : [],
       handler: (ctx) => registry.get(source).handler(buildEvaluatorContext({ chatId: "", userName: "", charName: "", character: {}, chat: {}, variables: {}, commit: false }), getArgs(ctx), "")
     })),
+    {
+      name: "risuLastMessageId",
+      category: MACRO_CATEGORY,
+      description: "Index of the last message in Risu's chat.message, which excludes the greeting. -1 when empty.",
+      returnType: "integer",
+      handler: (ctx) => {
+        const messages = ctx?.env?.extra?.["messages"];
+        if (!Array.isArray(messages))
+          throw new Error("risuLastMessageId: no chat history in this evaluation");
+        return String(risuChatMessages(messages).length - 1);
+      }
+    },
+    {
+      name: "risuChatLog",
+      category: MACRO_CATEGORY,
+      description: "Reads one message by index from Risu's chat.message, which excludes the greeting.",
+      returnType: "string",
+      handler: (ctx) => resolveChatLogMacro(ctx, risuChatMessages)
+    },
     {
       name: "previous_chat_log",
       aliases: ["previouschatlog"],
