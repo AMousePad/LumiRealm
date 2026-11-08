@@ -15052,7 +15052,7 @@ function parseRisuToggleSyntax(template) {
   return groups.filter((g) => g.variables.length > 0);
 }
 function namePresetBlockClosers(template) {
-  const blocks = [];
+  const blocksByDepth = new Map;
   const openings = [];
   let result = "";
   let copied = 0;
@@ -15063,8 +15063,11 @@ function namePresetBlockClosers(template) {
       continue;
     }
     const start = openings.pop();
-    if (start === undefined || openings.length > 0)
+    if (start === undefined)
       continue;
+    blocksByDepth.delete(openings.length + 1);
+    const blocks = blocksByDepth.get(openings.length) ?? [];
+    blocksByDepth.set(openings.length, blocks);
     const inner = template.slice(start + 2, offset);
     const opener = /^#([a-zA-Z_]+)\b/.exec(inner);
     if (opener) {
@@ -15221,6 +15224,7 @@ function transformPresetTemplate(template) {
   });
   result = result.replace(/\{\{#if_pure\b/g, "{{#if");
   result = result.replace(/\{\{\/if_pure\}\}/g, "{{/if}}");
+  result = result.replace(/\{\{#when(?=::| |\}\})/g, "{{#risuWhen::when");
   result = namePresetBlockClosers(result);
   result = trimEachBodies(result);
   result = rewriteMacroBody(result, "#each", translateEachHeader, "{{#each");
@@ -15235,6 +15239,13 @@ function transformPresetTemplate(template) {
   result = result.replace(/\{\{notequal::/g, "{{risuNotEqual::");
   result = result.replace(/\{\{not_equal::/g, "{{risuNotEqual::");
   return result;
+}
+function fillPresetSlot(innerFormat, value) {
+  return innerFormat.split(`
+`).map((line) => line.includes("{{slot}}") ? line.replaceAll("{{:else}}", `
+{{:else}}
+`) : line).join(`
+`).replaceAll("{{slot}}", value);
 }
 var isFromEnd = (bound) => Number.isInteger(bound) && bound < 0;
 function risuChatRanges(template) {
@@ -15355,7 +15366,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
         }
       } else if (type === "persona") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
-        const personaContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{persona}}") : rawInner) : text || "{{persona}}";
+        const personaContent = rawInner ? transformPresetTemplate(fillPresetSlot(rawInner, "{{persona}}")) : text || "{{persona}}";
         const personaMarker = !seenPersona && personaContent === "{{persona}}" ? "persona_description" : null;
         seenPersona = true;
         blocks.push({
@@ -15374,7 +15385,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
         });
       } else if (type === "description") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
-        const descContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{description}}") : rawInner) : text || "{{description}}";
+        const descContent = rawInner ? transformPresetTemplate(fillPresetSlot(rawInner, "{{description}}")) : text || "{{description}}";
         blocks.push({
           id: newUuid(),
           name: name || "Character Description",
@@ -15406,7 +15417,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
         });
       } else if (type === "authornote") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
-        const anContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{authornote}}") : rawInner) : text || "{{authornote}}";
+        const anContent = rawInner ? transformPresetTemplate(fillPresetSlot(rawInner, "{{authornote}}")) : text || "{{authornote}}";
         blocks.push({
           id: newUuid(),
           name: name || "Author's Note",
@@ -30457,6 +30468,17 @@ async function resolveGlobalVarMacro(ctx) {
     return "";
   return (await effectiveGlobals(ctx, `risuGlobalVar(${key})`))[key] ?? "null";
 }
+async function evalRisuWhen(ctx) {
+  const { isScoped, body } = ctx;
+  if (!isScoped)
+    throw new Error("{{#when}} has no closing {{/}}");
+  const globals = await effectiveGlobals(ctx, "risuWhen");
+  const vars = {
+    get: (scope, name) => scope === "global" ? globals[name] ?? "null" : readChatVar(ctx, name)
+  };
+  const match = blockStartMatcher(`#${getArgs(ctx).join("::")}`, { vars });
+  return blockEndMatcher(String(body ?? "").replaceAll("{{::else}}", "{{:else}}"), match);
+}
 async function resolveAuthornoteMacro(ctx) {
   const chatId = readChatId(ctx);
   if (!chatId)
@@ -30515,6 +30537,13 @@ function registerSpindleMacros() {
       description: "Parses a Risu array (JSON, else \xA7 separated) into the \xA7 list a translated {{#each}} loops over.",
       returnType: "string",
       handler: (ctx) => parseArray2(getArgs(ctx).join("::")).map((item) => typeof item === "string" ? item : JSON.stringify(item)).join("\xA7")
+    },
+    {
+      name: "risuWhen",
+      category: MACRO_CATEGORY,
+      description: "Risu {{#when}} block: keeps the branch its statement selects, with Risu whitespace rules.",
+      returnType: "string",
+      handler: (ctx) => evalRisuWhen(ctx)
     },
     {
       name: "risuContains",

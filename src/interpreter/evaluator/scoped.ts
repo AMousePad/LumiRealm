@@ -25,7 +25,7 @@ export function risuEscape(text: string): string {
   });
 }
 
-export function blockStartMatcher(input: string, ctx: EvaluatorCtx): BlockMatch {
+export function blockStartMatcher(input: string, ctx: Pick<EvaluatorCtx, "vars">): BlockMatch {
   const p1 = input;
   if (p1.startsWith("#if") || p1.startsWith("#if_pure ")) {
     const statement = p1.split(" ", 2);
