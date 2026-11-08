@@ -4,6 +4,7 @@ import { encode as encodeMsgpack } from '@msgpack/msgpack';
 import { encodeRPack } from '../../src/core/rpack/rpack.js';
 import { decodeRisuPreset, isRisuPresetBytes } from '../../src/core/preset/risup-decoder.js';
 import {
+  RISU_DESCRIPTION_SLOT,
   parseRisuToggleSyntax,
   translateRisuPromptBlocks,
   translateRisuPreset,
@@ -256,7 +257,7 @@ describe('Risu preset translator', () => {
     const description = blocks.find((b) => b.name === 'Char Body')!;
     expect(description.marker).toBeNull();
     expect(description.content).toBe(
-      '{{#if {{risuContains::{{risuGlobalVar::toggle_tags}}::ship}}}}{{description}}{{/if}}',
+      `{{#if {{risuContains::{{risuGlobalVar::toggle_tags}}::ship}}}}${RISU_DESCRIPTION_SLOT}{{/if}}`,
     );
 
     const authornote = blocks.find((b) => b.name === 'Note Slot')!;
@@ -360,8 +361,18 @@ describe('Risu preset translator', () => {
       expect(block.content).not.toBe('{{persona}}');
     }
 
-    // The single description item keeps its marker.
-    expect(blocks.find((b) => b.name === 'Card Body')!.marker).toBe('char_description');
+    // Risu's description carries the personality and scenario, which the host's marker would drop.
+    const cardBody = blocks.find((b) => b.name === 'Card Body')!;
+    expect(cardBody.marker).toBeNull();
+    expect(cardBody.content).toBe(RISU_DESCRIPTION_SLOT);
+  });
+
+  test('a description item without a format still carries the personality and scenario', () => {
+    const { blocks } = translateRisuPromptBlocks([{ type: 'description', name: 'Card Body', text: '' }], []);
+    expect(blocks[0]!.marker).toBeNull();
+    expect(blocks[0]!.content).toBe(RISU_DESCRIPTION_SLOT);
+    expect(blocks[0]!.content).toContain('\n\nDescription of {{char}}: {{personality}}');
+    expect(blocks[0]!.content).toContain('\n\nCircumstances and context of the dialogue: {{scenario}}');
   });
 
   test('retains framing text for an unconditional persona item', () => {

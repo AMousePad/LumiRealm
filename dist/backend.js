@@ -15259,6 +15259,11 @@ function risuChatRanges(template) {
   }
   return ranges;
 }
+var RISU_DESCRIPTION_SLOT = "{{description}}" + `{{#if {{risuLength::{{personality}}}}}}
+
+Description of {{char}}: {{personality}}{{/if}}` + `{{#if {{risuLength::{{scenario}}}}}}
+
+Circumstances and context of the dialogue: {{scenario}}{{/if}}`;
 function translateRisuPromptBlocks(template, toggleGroups) {
   const blocks = [];
   const defaultsByBlockId = {};
@@ -15374,7 +15379,7 @@ function translateRisuPromptBlocks(template, toggleGroups) {
         });
       } else if (type === "description") {
         const rawInner = typeof item["innerFormat"] === "string" && item["innerFormat"].trim().length > 0 ? item["innerFormat"] : null;
-        const descContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", "{{description}}") : rawInner) : text || "{{description}}";
+        const descContent = rawInner ? transformPresetTemplate(rawInner.includes("{{slot}}") ? rawInner.replace("{{slot}}", RISU_DESCRIPTION_SLOT) : rawInner) : text || RISU_DESCRIPTION_SLOT;
         blocks.push({
           id: newUuid(),
           name: name || "Character Description",
