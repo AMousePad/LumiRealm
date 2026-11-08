@@ -20,6 +20,12 @@ export interface WorldInfoEntryView {
   /** Order for inject_lore application (sort desc). */
   readonly priority: number;
   readonly extensions: Readonly<Record<string, unknown>>;
+  /** Activation inputs for pt_* slot fillers, which the host never activates. */
+  readonly constant?: boolean;
+  readonly selective?: boolean;
+  readonly scan_depth?: number | null;
+  /** Risu's insertorder, which orders the actives a pt_* slot joins. */
+  readonly order_value?: number;
 }
 
 export interface WorldInfoMessageView {
@@ -40,6 +46,8 @@ export interface WorldInfoCtx {
 }
 
 const RISU_FALLBACK_SCAN_DEPTH = 4;
+// Risu's loreBookDepth default, for hosts whose null scan depth would otherwise mean the whole chat.
+const RISU_DEFAULT_LORE_DEPTH = 5;
 
 export interface DecoratorRecord {
   readonly name: string;
@@ -544,6 +552,14 @@ export function readPositionPtName(decorators: readonly DecoratorRecord[]): stri
   return null;
 }
 
+const risuSourceRank = (entry: WorldInfoEntryView): number =>
+  entry.extensions['_risu_chat_local'] === true ? 1 : 0;
+
+function risuArrayIndex(entry: WorldInfoEntryView): number {
+  const index = entry.extensions['_risu_array_index'];
+  return typeof index === 'number' ? index : Number.MAX_SAFE_INTEGER;
+}
+
 /**
  * Compute Tier 3 inject + position outputs for survivors. Sorts by priority
  * desc (closest Lumi analog to Risu's order desc). Successive injectors stack
@@ -554,6 +570,8 @@ export function computeInjectAndPositionPlans(
   entries: readonly WorldInfoEntryView[],
   /** Disabled entry ids, not eligible as inject_lore targets. */
   disabledIds: ReadonlySet<string>,
+  /** Whether an entry feeding a pt_* slot is among Risu's actives. */
+  slotFillerActive: (entry: WorldInfoEntryView) => boolean = () => true,
 ): {
   readonly mutated: readonly MutatedEntry[];
   readonly injectAt: readonly InjectAtPlan[];
@@ -606,10 +624,15 @@ export function computeInjectAndPositionPlans(
     if (!c.plan.lore) continue;
 
     // Find target by comment match.
+    // Risu takes injectors and targets from its actives, so an inactive injector cannot write into a slot.
+    // It still resolves its target as before, so skipping a slot cannot redirect it onto another entry.
+    const injectorActive = slotFillerActive(c.entry);
     const target = classified.find(
-      (t) => t.plan === null && t.entry.comment === c.plan!.location,
+      (t) => t.plan === null && t.entry.comment === c.plan!.location
+        && (t.posPt === null || !injectorActive || slotFillerActive(t.entry)),
     );
     if (!target) continue;
+    if (target.posPt !== null && !injectorActive) continue;
 
     const current = targetContent.get(target.entry.id) ?? getStrippedContent(target.entry);
     const merged = applyInjectMerge(
@@ -623,8 +646,17 @@ export function computeInjectAndPositionPlans(
 
   // pt_*: each pt_<NAME> contributes under NAME. Reads from targetContent
   // so post-merge content surfaces. Injectors carry stripped content.
-  for (const c of classified) {
-    if (c.posPt === null) continue;
+  // Risu's stable sorts start from book entries then chat lore, each in array order, whereas host ties follow random ids.
+  // It then sorts actives by priority desc and order desc and reverses them (lorebook.svelte.ts).
+  const classifiedById = new Map(classified.map((c) => [c.entry.id, c]));
+  const inRisuOrder = [...survivors]
+    .sort((a, b) => risuSourceRank(a) - risuSourceRank(b) || risuArrayIndex(a) - risuArrayIndex(b))
+    .sort((a, b) => b.priority - a.priority)
+    .sort((a, b) => (b.order_value ?? 0) - (a.order_value ?? 0))
+    .reverse()
+    .map((e) => classifiedById.get(e.id)!);
+  for (const c of inRisuOrder) {
+    if (c.posPt === null || !slotFillerActive(c.entry)) continue;
     const content = c.plan === null
       ? (targetContent.get(c.entry.id) ?? getStrippedContent(c.entry))
       : getStrippedContent(c.entry);
@@ -676,6 +708,28 @@ export function computeInjectAndPositionPlans(
   return { mutated, injectAt, positionPt, addDisabled };
 }
 
+// The host never activates pt_* slot fillers, so this approximates Risu's loadLoreBookV3Prompt.
+// Deliberate divergence: recursion and token budget need host activation, and probability, regex or whole-word keys, card-level or inline @@scan_depth, inline @@additional_keys, the short-chat window, @@@ fallbacks, ties across books and the import mapper's folding of decorators into fields are not matched.
+function slotFillerActivated(entry: WorldInfoEntryView, ctx: WorldInfoCtx, forced: boolean): boolean {
+  // Risu skips an entry that is neither always active nor keyed before reading its decorators.
+  if (entry.constant !== true && entry.key.length === 0) return false;
+  // Hand-written entries keep these decorators inline, and only imports map them to fields.
+  // The last one wins in Risu.
+  const force = readDecorators(entry)
+    .filter((d) => !d.fallback && (d.name === 'activate' || d.name === 'dont_activate'))
+    .pop();
+  if (force?.name === 'dont_activate') return false;
+  if (entry.constant === true || forced || force) return true;
+  const window = buildScanWindow(
+    ctx.messages,
+    entry.scan_depth ?? ctx.defaultScanDepth ?? RISU_DEFAULT_LORE_DEPTH,
+  );
+  if (!scanKeysMatch(window, entry.key, false)) return false;
+  return entry.selective !== true
+    || entry.keysecondary.length === 0
+    || scanKeysMatch(window, entry.keysecondary, false);
+}
+
 export function runWorldInfoInterceptor(
   ctx: WorldInfoCtx,
   verbose?: (msg: string) => void,
@@ -712,7 +766,12 @@ export function runWorldInfoInterceptor(
 
   // Pass 2: Tier 3 inject + position over Tier-2 survivors only.
   const disabledSet = new Set<string>(disabled);
-  const t3 = computeInjectAndPositionPlans(ctx.entries, disabledSet);
+  const forcedSet = new Set<string>(forced);
+  const t3 = computeInjectAndPositionPlans(
+    ctx.entries,
+    disabledSet,
+    (entry) => slotFillerActivated(entry, ctx, forcedSet.has(entry.id)),
+  );
   for (const id of t3.addDisabled) {
     if (!disabledSet.has(id)) {
       disabled.push(id);
