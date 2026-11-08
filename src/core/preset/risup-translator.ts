@@ -317,11 +317,28 @@ export function transformPresetTemplate(template: string): string {
   result = result.replace(/\{\{and::/g, '{{risuAnd::');
   result = result.replace(/\{\{or::/g, '{{risuOr::');
   result = result.replace(/\{\{any::/g, '{{risuAny::');
+  // The host's all is an alias of its list iterator, so Risu's boolean form would run as a loop.
+  result = result.replace(/\{\{all::/g, '{{risuAll::');
   result = result.replace(/\{\{not::/g, '{{risuNot::');
   result = result.replace(/\{\{equal::/g, '{{risuEqual::');
   // Risu's primary name and its alias both mean the same macro (cbs.ts notequal).
   result = result.replace(/\{\{notequal::/g, '{{risuNotEqual::');
   result = result.replace(/\{\{not_equal::/g, '{{risuNotEqual::');
+  // The host's replace takes (find, with, text); Risu's takes (text, find, with).
+  result = result.replace(/\{\{replace::/g, '{{risuReplace::');
+  result = result.replace(/\{\{greater::/g, '{{risuGreater::');
+  result = result.replace(/\{\{less::/g, '{{risuLess::');
+  // Risu's primary names and their aliases (cbs.ts greaterequal, lessequal).
+  result = result.replace(/\{\{greater_?equal::/g, '{{risuGreaterEqual::');
+  result = result.replace(/\{\{less_?equal::/g, '{{risuLessEqual::');
+  // The host's roll only takes NdS, its random reads two numbers as a range, and its time takes a UTC offset.
+  result = result.replace(/\{\{roll(?=::|\}\})/gi, '{{risuRoll');
+  result = result.replace(/\{\{random(?=::|\}\})/gi, '{{risuRandom');
+  result = result.replace(/\{\{time(?=::|\}\})/gi, '{{risuTime');
+  // Unscoped, the host's trim is a post-processing marker that returns "" and loses its argument.
+  result = result.replace(/\{\{trim::/gi, '{{risuTrim::');
+  // Risu's primary name and its aliases (cbs.ts xordecrypt). The host has no such macro.
+  result = result.replace(/\{\{xor(?:decrypt|decode|d)::/gi, '{{risuXorDecrypt::');
 
   return result;
 }

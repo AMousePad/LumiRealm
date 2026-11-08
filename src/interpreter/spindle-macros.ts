@@ -4,7 +4,11 @@ declare const spindle: any;
 // Allows Lumiverse native prompt assembly and Loom blocks to evaluate Risu-style expressions,
 // calculations, boolean operators, and string utilities.
 
+import '../risu-compat/handlers/context-reads.js';
 import '../risu-compat/handlers/logic.js';
+import '../risu-compat/handlers/misc.js';
+import '../risu-compat/handlers/random.js';
+import '../risu-compat/handlers/strings.js';
 import { registry } from '../risu-compat/registry.js';
 import { buildEvaluatorContext } from './evaluator/context.js';
 import { getActiveScriptstateDefaults } from './defaults-cache.js';
@@ -276,11 +280,16 @@ export function registerSpindleMacros(): void {
     },
     ...[
       ['risuEqual', 'equal'], ['risuNotEqual', 'notequal'],
-      ['risuNot', 'not'], ['risuAnd', 'and'], ['risuOr', 'or'], ['risuAny', 'any'],
+      ['risuNot', 'not'], ['risuAnd', 'and'], ['risuOr', 'or'], ['risuAny', 'any'], ['risuAll', 'all'],
+      ['risuGreater', 'greater'], ['risuLess', 'less'],
+      ['risuGreaterEqual', 'greaterequal'], ['risuLessEqual', 'lessequal'],
+      ['risuReplace', 'replace'], ['risuTrim', 'trim'], ['risuXorDecrypt', 'xordecrypt'],
+      ['risuRoll', 'roll'], ['risuRandom', 'random'], ['risuTime', 'time'],
     ].map(([name, source]) => ({
-      name: name!, category: MACRO_CATEGORY, returnType: 'integer',
-      description: `Risu ${source} comparison returning 1 or 0.`,
+      name: name!, category: MACRO_CATEGORY, returnType: 'string',
+      description: `Risu ${source} with Risu's argument rules.`,
       aliases: ['risuNot', 'risuAnd', 'risuOr'].includes(name!) ? [name!.replace('risu', 'littleDevil')] : [],
+      volatile: ['risuRoll', 'risuRandom', 'risuTime'].includes(name!),
       handler: (ctx: unknown) => registry.get(source!)!.handler(
         buildEvaluatorContext({ chatId: '', userName: '', charName: '', character: {}, chat: {}, variables: {}, commit: false }),
         getArgs(ctx), '',
@@ -313,6 +322,7 @@ export function registerSpindleMacros(): void {
         category: m.category,
         description: m.description,
         returnType: m.returnType,
+        ...('volatile' in m ? { volatile: m.volatile } : {}),
         handler: m.handler,
       });
       if (m.aliases) {
