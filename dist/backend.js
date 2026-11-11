@@ -14726,10 +14726,21 @@ function transformPresetTemplate(template) {
   result = result.replace(/\{\{and::/g, "{{risuAnd::");
   result = result.replace(/\{\{or::/g, "{{risuOr::");
   result = result.replace(/\{\{any::/g, "{{risuAny::");
+  result = result.replace(/\{\{all::/g, "{{risuAll::");
   result = result.replace(/\{\{not::/g, "{{risuNot::");
   result = result.replace(/\{\{equal::/g, "{{risuEqual::");
   result = result.replace(/\{\{notequal::/g, "{{risuNotEqual::");
   result = result.replace(/\{\{not_equal::/g, "{{risuNotEqual::");
+  result = result.replace(/\{\{replace::/g, "{{risuReplace::");
+  result = result.replace(/\{\{greater::/g, "{{risuGreater::");
+  result = result.replace(/\{\{less::/g, "{{risuLess::");
+  result = result.replace(/\{\{greater_?equal::/g, "{{risuGreaterEqual::");
+  result = result.replace(/\{\{less_?equal::/g, "{{risuLessEqual::");
+  result = result.replace(/\{\{roll(?=::|\}\})/gi, "{{risuRoll");
+  result = result.replace(/\{\{random(?=::|\}\})/gi, "{{risuRandom");
+  result = result.replace(/\{\{time(?=::|\}\})/gi, "{{risuTime");
+  result = result.replace(/\{\{trim::/gi, "{{risuTrim::");
+  result = result.replace(/\{\{xor(?:decrypt|decode|d)::/gi, "{{risuXorDecrypt::");
   return result;
 }
 var isFromEnd = (bound) => Number.isInteger(bound) && bound < 0;
@@ -29827,7 +29838,11 @@ async function translatePresetLabels(preset, opts, deps) {
 }
 
 // src/interpreter/spindle-macros.ts
+init_context_reads();
 init_logic();
+init_misc();
+init_random();
+init_strings();
 init_registry();
 init_risu_helpers();
 var log6 = makeSafeLogger("spindle-macros");
@@ -30028,13 +30043,25 @@ function registerSpindleMacros() {
       ["risuNot", "not"],
       ["risuAnd", "and"],
       ["risuOr", "or"],
-      ["risuAny", "any"]
+      ["risuAny", "any"],
+      ["risuAll", "all"],
+      ["risuGreater", "greater"],
+      ["risuLess", "less"],
+      ["risuGreaterEqual", "greaterequal"],
+      ["risuLessEqual", "lessequal"],
+      ["risuReplace", "replace"],
+      ["risuTrim", "trim"],
+      ["risuXorDecrypt", "xordecrypt"],
+      ["risuRoll", "roll"],
+      ["risuRandom", "random"],
+      ["risuTime", "time"]
     ].map(([name, source]) => ({
       name,
       category: MACRO_CATEGORY,
-      returnType: "integer",
-      description: `Risu ${source} comparison returning 1 or 0.`,
+      returnType: "string",
+      description: `Risu ${source} with Risu's argument rules.`,
       aliases: ["risuNot", "risuAnd", "risuOr"].includes(name) ? [name.replace("risu", "littleDevil")] : [],
+      volatile: ["risuRoll", "risuRandom", "risuTime"].includes(name),
       handler: (ctx) => registry.get(source).handler(buildEvaluatorContext({ chatId: "", userName: "", charName: "", character: {}, chat: {}, variables: {}, commit: false }), getArgs(ctx), "")
     })),
     {
@@ -30061,6 +30088,7 @@ function registerSpindleMacros() {
         category: m.category,
         description: m.description,
         returnType: m.returnType,
+        ..."volatile" in m ? { volatile: m.volatile } : {},
         handler: m.handler
       });
       if (m.aliases) {
