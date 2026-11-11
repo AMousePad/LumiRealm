@@ -314,6 +314,10 @@ export function transformPresetTemplate(template: string): string {
   result = rewriteMacroBody(result, 'array', (body) => splitMacroArgs(body).join('§'));
   result = result.replace(/\{\{contains::/g, '{{risuContains::');
   result = result.replace(/\{\{length::/g, '{{risuLength::');
+  // The host's message count includes the greeting, so a pair split across frames reads the wrong message.
+  // These match Risu's matcher: case, whitespace, _ and - in names, either separator, ignored id arguments.
+  result = result.replace(/\{\{\s*last[\s_-]*message[\s_-]*(?:id|index)\s*(?::[^{}]*)?\}\}/gi, '{{risuLastMessageId}}');
+  result = result.replace(/\{\{\s*previous[\s_-]*chat[\s_-]*log\s*::?/gi, '{{risuChatLog::');
   result = result.replace(/\{\{and::/g, '{{risuAnd::');
   result = result.replace(/\{\{or::/g, '{{risuOr::');
   result = result.replace(/\{\{any::/g, '{{risuAny::');
