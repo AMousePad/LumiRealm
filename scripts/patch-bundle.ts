@@ -1,9 +1,17 @@
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const distBackend = join(import.meta.dir, '..', 'dist', 'backend.js');
 const distRunner = join(import.meta.dir, '..', 'dist', 'regex-runner.js');
+const distFrontend = join(import.meta.dir, '..', 'dist', 'frontend.js');
+
+// The frontend bundle must not reference crypto. Wasmoon only reads this for its /dev/random device, and check:fe-hazards fails the build if this stops matching.
+const WASMOON_RANDOM_DEVICE = /(\w+) = \(\) => \{\s*if \(typeof crypto == "object"[\s\S]*?g\("no cryptographic support[^\n]*\);\s*\}/;
+writeFileSync(distFrontend, readFileSync(distFrontend, 'utf-8').replace(
+  WASMOON_RANDOM_DEVICE,
+  '$1 = () => (c) => { for (let i = 0; i < c.length; i++) c[i] = Math.random() * 256 | 0; return c; }',
+));
 
 interface Check {
   readonly label: string;

@@ -43,11 +43,13 @@ const BUNDLE_RULES: { rule: string; re: RegExp }[] = [
   { rule: 'node-Buffer', re: /new Buffer\(/g },
   { rule: 'node-process', re: /\bprocess\.(env|cwd|platform)\b/g },
   { rule: 'bun-global', re: /\bBun\.[a-zA-Z]/g },
+  { rule: 'crypto', re: /\bcrypto\b/g },
 ];
 
 // _hasBuffer is js-base64's `typeof Buffer !== 'undefined'` self-guard pulled in
-// via tus-js-client. The Buffer path is dead in the browser.
-const SANCTION_MARKERS: RegExp[] = [/process\.stdin\.fd/, /_hasBuffer/];
+// via tus-js-client. The Buffer path is dead in the browser. The crypto alias is
+// the name of Risu's {{crypto}} macro, plain catalog data.
+const SANCTION_MARKERS: RegExp[] = [/process\.stdin\.fd/, /_hasBuffer/, /aliases: \[\s*"crypto"/];
 const SANCTION_WINDOW = 80;
 
 function isSanctioned(text: string, idx: number): boolean {

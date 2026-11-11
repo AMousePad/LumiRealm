@@ -1,5 +1,5 @@
 import { luaOwnMetadata } from '../util/lua-message-data.js';
-import { v4 } from 'uuid';
+import { newUuid } from '../util/uuid.js';
 import type { HostApi, HostWorldInfoEntry, TriggerRuntimeOpts } from '../interpreter/host.js';
 import type { DisplaySnapshot } from '../display/snapshot.js';
 import { sortLorebookEntriesBySourceOrder, withModuleLorebooks } from '../interpreter/runtime/lorebook.js';
@@ -21,7 +21,7 @@ export function createFrontendHost(state: FrontendRuntimeState, snapshot: () => 
   const chatWrites = (optimistic: boolean): Pick<HostApi['chat'], 'sendMessage' | 'editMessage' | 'deleteMessage'> => ({
     async sendMessage(content, options) {
       const role = options?.role ?? 'user';
-      const id = options?.messageId || v4();
+      const id = options?.messageId || newUuid();
       const beforeId = options?.beforeId ?? state.insertionContext(id).trailing[0]?.id;
       await state.write({ kind: 'message.create', id, content,
         ...(beforeId ? { beforeId } : {}),

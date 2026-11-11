@@ -1,4 +1,3 @@
-import { v4 } from 'uuid';
 import { FrontendLuaExecutionError, FrontendLuaUnavailableError, type FrontendLuaCall, type FrontendLuaReply } from './protocol.js';
 
 type CallInput = Omit<FrontendLuaCall, 'type' | 'requestId'>;
@@ -21,7 +20,7 @@ export function createFrontendLuaRpc(send: (message: FrontendLuaCall | { type: '
       if (!userId || !input.sessionId) return Promise.reject(new FrontendLuaUnavailableError('Lua requires the browser session that owns this operation'));
       if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) return Promise.reject(new RangeError('Lua operation requires a positive finite deadline'));
       if (options.signal?.aborted) return Promise.reject(new FrontendLuaUnavailableError('Lua operation was cancelled'));
-      const requestId = v4();
+      const requestId = crypto.randomUUID();
       return new Promise((resolve, reject) => {
         const aborted = () => cancel(requestId, new FrontendLuaUnavailableError('Lua operation was cancelled'));
         const timer = setTimeout(() => cancel(requestId, new FrontendLuaUnavailableError('The browser Lua operation did not complete before its deadline')), options.timeoutMs);

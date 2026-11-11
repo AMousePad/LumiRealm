@@ -8,6 +8,7 @@ import {
   type HostMessage,
   RisuCompatUnsupportedError,
 } from './host.js';
+import { sha256Hex } from '../util/sha256.js';
 import { buildRisuChatView } from './risu-chat-view.js';
 import { makeVarsApi, createTriggerLocalState } from './runtime/vars.js';
 import { createLuaTemplateParser, createTriggerTemplateParser } from './runtime/template.js';
@@ -1214,21 +1215,7 @@ export async function makeRisuTriggerRuntime(
         const r = await api.llm.generate({ messages: [{ role: 'user', content: toStr(prompt) }], ...(auxPrefillCompat ? { prefillCompat: true } : {}) });
         return { success: true, result: toStr(r && r.content) };
       },
-      hash: (_id: unknown, value: unknown) => {
-        if (typeof crypto === 'undefined' || !crypto.subtle) {
-          return Promise.reject(new Error('risu-compat: lua.hash requires globalThis.crypto.subtle'));
-        }
-        const dataBytes = new TextEncoder().encode(toStr(value));
-        return crypto.subtle.digest('SHA-256', dataBytes).then((buf) => {
-          const bytes = new Uint8Array(buf);
-          let hex = '';
-          for (let i = 0; i < bytes.length; i++) {
-            const b = bytes[i]!.toString(16);
-            hex += b.length === 1 ? '0' + b : b;
-          }
-          return hex;
-        });
-      },
+      hash: (_id: unknown, value: unknown) => Promise.resolve(sha256Hex(new TextEncoder().encode(toStr(value)))),
       // Falls back to length/4 when host doesn't expose tokens.
       getTokens: async (_id: unknown, value: unknown): Promise<number> => {
         const text = toStr(value);

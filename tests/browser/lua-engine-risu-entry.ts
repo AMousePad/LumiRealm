@@ -1,3 +1,4 @@
+import '../helpers/uuid-stub.js';
 import { LuaFactory } from 'wasmoon';
 import { GLUE_WASM_DATA_URI } from '../../src/display/_glue-wasm-b64';
 import { executeWasmoon } from '../../src/interpreter/lua-wasmoon';

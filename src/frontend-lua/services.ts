@@ -1,4 +1,4 @@
-import { v4 } from 'uuid';
+import { newUuid } from '../util/uuid.js';
 import type { RuntimeService } from './state-contract.js';
 import { FrontendLuaUnavailableError, FrontendLuaExecutionError } from './protocol.js';
 
@@ -13,7 +13,7 @@ export function createRuntimeServices(send: (request: RuntimeServiceCall) => voi
   return {
     call<T>(chatId: string, characterId: string, request: RuntimeService): Promise<T> {
       return new Promise<T>((resolve, reject) => {
-        const requestId = v4();
+        const requestId = newUuid();
         pending.set(requestId, { resolve: value => resolve(value as T), reject });
         try { send({ type: 'lua_service', requestId, chatId, characterId, request }); }
         catch (error) { pending.delete(requestId); reject(error); }

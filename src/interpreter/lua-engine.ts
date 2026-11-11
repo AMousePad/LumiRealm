@@ -1,5 +1,5 @@
 import type { LuaEngine, LuaFactory } from 'wasmoon';
-import { v4 } from 'uuid';
+import { newUuid } from '../util/uuid.js';
 import wrapper from './lua-wrapper.lua' with { type: 'text' };
 
 // lua-wrapper.lua is verbatim luaCodeWrapper from RisuAI e565563a (GPL-3.0).
@@ -130,7 +130,7 @@ export function createLuaExecutor(getFactory: () => Promise<LuaFactory>) {
         } catch (cause) { opts.signal?.throwIfAborted(); throw new LuaChunkError(cause); }
       }
       const args = [...(opts.args ?? [])];
-      const accessKey = opts.enforceAccess ? v4() : undefined;
+      const accessKey = opts.enforceAccess ? newUuid() : undefined;
       if (accessKey) {
         args[opts.entry === 'callListenMain' ? 1 : 0] = accessKey;
         if (mode === 'editDisplay') access.displayIds.add(accessKey);
