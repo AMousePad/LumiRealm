@@ -11529,19 +11529,7 @@ ${traceback}`;
           a = a.replace(/\/$/, "");
           var b = a.lastIndexOf("/");
           return b === -1 ? a : a.substr(b + 1);
-        }, ab = (a, b) => P(a + "/" + b), bb = () => {
-          if (typeof crypto == "object" && typeof crypto.getRandomValues == "function")
-            return (c) => crypto.getRandomValues(c);
-          if (n)
-            try {
-              var a = require$1("crypto");
-              if (a.randomFillSync)
-                return (c) => a.randomFillSync(c);
-              var b = a.randomBytes;
-              return (c) => (c.set(b(c.byteLength)), c);
-            } catch (c) {}
-          g("no cryptographic support found for randomDevice. consider polyfilling it if you want to use something insecure like Math.random(), e.g. put this in a --pre-js: var crypto = { getRandomValues: (array) => { for (var i = 0; i < array.length; i++) array[i] = (Math.random()*256)|0 } };");
-        }, cb = (a) => (cb = bb())(a);
+        }, ab = (a, b) => P(a + "/" + b), bb = () => (c) => { for (let i = 0; i < c.length; i++) c[i] = Math.random() * 256 | 0; return c; }, cb = (a) => (cb = bb())(a);
         function db() {
           for (var a = "", b = false, c = arguments.length - 1;-1 <= c && !b; c--) {
             b = 0 <= c ? arguments[c] : R.cwd();
@@ -14891,53 +14879,20 @@ var require_url_parse = __commonJS(function(exports, module) {
   Url.qs = qs;
   module.exports = Url;
 });
-// node_modules/uuid/dist/esm-browser/native.js
-var randomUUID = typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID.bind(crypto);
-var native_default = {
-  randomUUID
-};
 
-// node_modules/uuid/dist/esm-browser/rng.js
-var getRandomValues;
-var rnds8 = new Uint8Array(16);
-function rng() {
-  if (!getRandomValues) {
-    getRandomValues = typeof crypto !== "undefined" && crypto.getRandomValues && crypto.getRandomValues.bind(crypto);
-    if (!getRandomValues) {
-      throw new Error("crypto.getRandomValues() not supported. See https://github.com/uuidjs/uuid#getrandomvalues-not-supported");
-    }
-  }
-  return getRandomValues(rnds8);
+// src/util/uuid.ts
+var source;
+function setupUuid(ctx) {
+  if (!ctx.uuid)
+    throw new Error("LumiRealm requires Lumiverse capability: frontend-uuid-v1");
+  source = ctx.uuid;
+}
+function newUuid() {
+  if (!source)
+    throw new Error("newUuid called before setupUuid");
+  return source.v7();
 }
 
-// node_modules/uuid/dist/esm-browser/stringify.js
-var byteToHex = [];
-for (let i = 0;i < 256; ++i) {
-  byteToHex.push((i + 256).toString(16).slice(1));
-}
-function unsafeStringify(arr, offset = 0) {
-  return byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]];
-}
-
-// node_modules/uuid/dist/esm-browser/v4.js
-function v4(options, buf, offset) {
-  if (native_default.randomUUID && !buf && !options) {
-    return native_default.randomUUID();
-  }
-  options = options || {};
-  const rnds = options.random || (options.rng || rng)();
-  rnds[6] = rnds[6] & 15 | 64;
-  rnds[8] = rnds[8] & 63 | 128;
-  if (buf) {
-    offset = offset || 0;
-    for (let i = 0;i < 16; ++i) {
-      buf[offset + i] = rnds[i];
-    }
-    return buf;
-  }
-  return unsafeStringify(rnds);
-}
-var v4_default = v4;
 // src/host-services/protocol.ts
 class HostServiceError extends Error {
   name = "HostServiceError";
@@ -14966,7 +14921,7 @@ function createHostClient(ctx) {
       if (disposed)
         return Promise.reject(new HostServiceError("Host service connection closed"));
       return new Promise((resolve, reject) => {
-        const requestId = v4_default();
+        const requestId = newUuid();
         const timer = setTimeout(() => {
           pending.delete(requestId);
           reject(new HostServiceError(`Host operation timed out: ${operation}`));
@@ -15040,7 +14995,7 @@ function setCurrentTriggerId(triggerId) {
 }
 // spindle.json
 var spindle_default = {
-  version: "0.12.4",
+  version: "0.12.5",
   name: "LumiRealm",
   identifier: "lumirealm",
   author: "amousepad",
@@ -16816,6 +16771,127 @@ var DEGRADED_HOST_FEATURES = new Set([
   "utilityBot",
   "displayTriggerSemantics"
 ]);
+// src/util/sha256.ts
+var K = /* @__PURE__ */ new Uint32Array([
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+]);
+var rotr = (x, n) => x >>> n | x << 32 - n;
+function sha256Hex(input) {
+  const paddedLength = Math.ceil((input.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(input);
+  padded[input.length] = 128;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLength - 8, Math.floor(input.length / 536870912));
+  view.setUint32(paddedLength - 4, input.length * 8 >>> 0);
+  const w = new Uint32Array(64);
+  let h0 = 1779033703, h1 = 3144134277, h2 = 1013904242, h3 = 2773480762;
+  let h4 = 1359893119, h5 = 2600822924, h6 = 528734635, h7 = 1541459225;
+  for (let block = 0;block < paddedLength; block += 64) {
+    for (let t = 0;t < 16; t++)
+      w[t] = view.getUint32(block + t * 4);
+    for (let t = 16;t < 64; t++) {
+      const a = w[t - 15];
+      const b = w[t - 2];
+      const s0 = rotr(a, 7) ^ rotr(a, 18) ^ a >>> 3;
+      const s1 = rotr(b, 17) ^ rotr(b, 19) ^ b >>> 10;
+      w[t] = w[t - 16] + s0 + w[t - 7] + s1 | 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (let t = 0;t < 64; t++) {
+      const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = e & f ^ ~e & g;
+      const t1 = h + s1 + ch + K[t] + w[t] | 0;
+      const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = a & b ^ a & c ^ b & c;
+      const t2 = s0 + maj | 0;
+      h = g;
+      g = f;
+      f = e;
+      e = d + t1 | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = t1 + t2 | 0;
+    }
+    h0 = h0 + a | 0;
+    h1 = h1 + b | 0;
+    h2 = h2 + c | 0;
+    h3 = h3 + d | 0;
+    h4 = h4 + e | 0;
+    h5 = h5 + f | 0;
+    h6 = h6 + g | 0;
+    h7 = h7 + h | 0;
+  }
+  let hex = "";
+  for (const word of [h0, h1, h2, h3, h4, h5, h6, h7])
+    hex += (word >>> 0).toString(16).padStart(8, "0");
+  return hex;
+}
+
 // src/interpreter/risu-chat-view.ts
 function buildRisuChatView(input) {
   const messages = input.messages.map((m) => ({ ...m }));
@@ -17439,7 +17515,7 @@ function createLuaExecutor(getFactory) {
         }
       }
       const args = [...opts.args ?? []];
-      const accessKey = opts.enforceAccess ? v4_default() : undefined;
+      const accessKey = opts.enforceAccess ? newUuid() : undefined;
       if (accessKey) {
         args[opts.entry === "callListenMain" ? 1 : 0] = accessKey;
         if (mode === "editDisplay")
@@ -19907,21 +19983,7 @@ async function makeRisuTriggerRuntime(api, data, scriptNs, opts = {}) {
         const r = await api.llm.generate({ messages: [{ role: "user", content: toStr(prompt) }], ...auxPrefillCompat ? { prefillCompat: true } : {} });
         return { success: true, result: toStr(r && r.content) };
       },
-      hash: (_id, value) => {
-        if (typeof crypto === "undefined" || !crypto.subtle) {
-          return Promise.reject(new Error("risu-compat: lua.hash requires globalThis.crypto.subtle"));
-        }
-        const dataBytes = new TextEncoder().encode(toStr(value));
-        return crypto.subtle.digest("SHA-256", dataBytes).then((buf) => {
-          const bytes = new Uint8Array(buf);
-          let hex = "";
-          for (let i = 0;i < bytes.length; i++) {
-            const b = bytes[i].toString(16);
-            hex += b.length === 1 ? "0" + b : b;
-          }
-          return hex;
-        });
-      },
+      hash: (_id, value) => Promise.resolve(sha256Hex(new TextEncoder().encode(toStr(value)))),
       getTokens: async (_id, value) => {
         const text = toStr(value);
         if (!api.tokens?.count) {
@@ -22800,7 +22862,7 @@ function createRuntimeServices(send) {
   return {
     call(chatId, characterId, request) {
       return new Promise((resolve, reject) => {
-        const requestId = v4_default();
+        const requestId = newUuid();
         pending.set(requestId, { resolve: (value) => resolve(value), reject });
         try {
           send({ type: "lua_service", requestId, chatId, characterId, request });
@@ -23296,7 +23358,7 @@ class FrontendRuntimeState {
   }
   write(command, optimistic = true, staged = []) {
     const id = this.state.begin(optimistic ? this.optimistic(command) : new Map);
-    const mutationId = v4_default();
+    const mutationId = newUuid();
     const partialOwned = optimistic && command.kind === "message.create" && command.beforeId !== undefined;
     this.mutations.set(mutationId, {
       ids: partialOwned ? staged : [id, ...staged],
@@ -23382,7 +23444,7 @@ class FrontendRuntimeState {
         let inserted = false;
         for (const message of messages) {
           if (!message.id)
-            message.id = v4_default();
+            message.id = newUuid();
           if (!previous.has(message.id))
             inserted = true;
           if (message.role === "assistant" && !message.content)
@@ -23475,7 +23537,7 @@ function createFrontendHost(state, snapshot, settings, services, attachedModuleW
   const chatWrites = (optimistic) => ({
     async sendMessage(content, options) {
       const role = options?.role ?? "user";
-      const id = options?.messageId || v4_default();
+      const id = options?.messageId || newUuid();
       const beforeId = options?.beforeId ?? state.insertionContext(id).trailing[0]?.id;
       await state.write({
         kind: "message.create",
@@ -35878,7 +35940,7 @@ function mountModulesPanel(opts) {
   function sendModuleAction(message, label, key) {
     if (currentTask())
       return;
-    const id = v4_default();
+    const id = newUuid();
     pendingAction = { id, key };
     if (!startTask({ id, kind: "module", label })) {
       pendingAction = null;
@@ -43838,6 +43900,7 @@ function setup(ctx) {
   hydrateLogStateFromLocalStorage();
   flog2.info("frontend setup: begin");
   const cleanups = [];
+  setupUuid(ctx);
   ctx.deferReady();
   const display = ctx.display;
   if (!display)
