@@ -9,6 +9,8 @@ import { registry } from '../risu-compat/registry.js';
 import { buildEvaluatorContext } from './evaluator/context.js';
 import { getActiveScriptstateDefaults } from './defaults-cache.js';
 import { calcString, parseArray } from '../risu-compat/risu-helpers.js';
+import { transformPresetTemplate } from '../core/preset/risup-translator.js';
+import { getDecoratorBuffers } from './decorator-buffers.js';
 import { collectLegacyGlobals, mergeEffectiveGlobals, readTogglePreferences } from '../state/toggle-preferences.js';
 import { presetToggleValues } from '../state/preset-toggle-values.js';
 import { readChatAuthorsNote } from '../state/authors-note-cache.js';
@@ -304,6 +306,22 @@ export function registerSpindleMacros(): void {
       returnType: 'string',
       handler: (ctx: unknown) => resolveAuthornoteMacro(ctx),
     },
+    {
+      name: 'position',
+      category: MACRO_CATEGORY,
+      description: 'Joined content of the active lorebook entries decorated with @@position pt_NAME.',
+      returnType: 'string',
+      volatile: true,
+      // Registered under Risu's own name so stored presets and lore text resolve without a re-import.
+      // Risu's positionRegex takes everything up to }} as the name, and a name without entries is empty.
+      // Lore is untranslated Risu text and the host expands this result, so it gets the preset rewrites.
+      // Deliberate divergence: a self-referencing slot leaves its literal macro in the output, where Risu's resolvePosition strips it after five passes.
+      handler: (ctx: unknown) => {
+        const positions = getDecoratorBuffers(readChatId(ctx))?.positionPt;
+        const name = getArgs(ctx).join('::');
+        return positions && Object.hasOwn(positions, name) ? transformPresetTemplate(positions[name]!) : '';
+      },
+    },
   ];
 
   for (const m of macros) {
@@ -313,6 +331,7 @@ export function registerSpindleMacros(): void {
         category: m.category,
         description: m.description,
         returnType: m.returnType,
+        ...('volatile' in m ? { volatile: m.volatile } : {}),
         handler: m.handler,
       });
       if (m.aliases) {

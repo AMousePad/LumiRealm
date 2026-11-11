@@ -10095,7 +10095,11 @@ function readPositionPtName(decorators) {
   }
   return null;
 }
-function computeInjectAndPositionPlans(entries, disabledIds) {
+function risuArrayIndex2(entry) {
+  const index = entry.extensions["_risu_array_index"];
+  return typeof index === "number" ? index : Number.MAX_SAFE_INTEGER;
+}
+function computeInjectAndPositionPlans(entries, disabledIds, slotFillerActive = () => true) {
   const mutated = [];
   const injectAt = [];
   const positionPtByName = new Map;
@@ -10125,15 +10129,20 @@ function computeInjectAndPositionPlans(entries, disabledIds) {
       continue;
     if (!c.plan.lore)
       continue;
-    const target = classified.find((t) => t.plan === null && t.entry.comment === c.plan.location);
+    const injectorActive = slotFillerActive(c.entry);
+    const target = classified.find((t) => t.plan === null && t.entry.comment === c.plan.location && (t.posPt === null || !injectorActive || slotFillerActive(t.entry)));
     if (!target)
+      continue;
+    if (target.posPt !== null && !injectorActive)
       continue;
     const current = targetContent.get(target.entry.id) ?? getStrippedContent(target.entry);
     const merged = applyInjectMerge(current, getStrippedContent(c.entry), c.plan.operation, c.plan.param);
     targetContent.set(target.entry.id, merged);
   }
-  for (const c of classified) {
-    if (c.posPt === null)
+  const classifiedById = new Map(classified.map((c) => [c.entry.id, c]));
+  const inRisuOrder = [...survivors].sort((a, b) => risuSourceRank(a) - risuSourceRank(b) || risuArrayIndex2(a) - risuArrayIndex2(b)).sort((a, b) => b.priority - a.priority).sort((a, b) => (b.order_value ?? 0) - (a.order_value ?? 0)).reverse().map((e) => classifiedById.get(e.id));
+  for (const c of inRisuOrder) {
+    if (c.posPt === null || !slotFillerActive(c.entry))
       continue;
     const content = c.plan === null ? targetContent.get(c.entry.id) ?? getStrippedContent(c.entry) : getStrippedContent(c.entry);
     const list = positionPtByName.get(c.posPt) ?? [];
@@ -10177,6 +10186,19 @@ function computeInjectAndPositionPlans(entries, disabledIds) {
   }
   return { mutated, injectAt, positionPt, addDisabled };
 }
+function slotFillerActivated(entry, ctx, forced) {
+  if (entry.constant !== true && entry.key.length === 0)
+    return false;
+  const force = readDecorators(entry).filter((d) => !d.fallback && (d.name === "activate" || d.name === "dont_activate")).pop();
+  if (force?.name === "dont_activate")
+    return false;
+  if (entry.constant === true || forced || force)
+    return true;
+  const window = buildScanWindow(ctx.messages, entry.scan_depth ?? ctx.defaultScanDepth ?? RISU_DEFAULT_LORE_DEPTH);
+  if (!scanKeysMatch(window, entry.key, false))
+    return false;
+  return entry.selective !== true || entry.keysecondary.length === 0 || scanKeysMatch(window, entry.keysecondary, false);
+}
 function runWorldInfoInterceptor(ctx, verbose) {
   const disabled = [];
   const forced = [];
@@ -10207,7 +10229,8 @@ function runWorldInfoInterceptor(ctx, verbose) {
       stickyWrites.push(...writes);
   }
   const disabledSet = new Set(disabled);
-  const t3 = computeInjectAndPositionPlans(ctx.entries, disabledSet);
+  const forcedSet = new Set(forced);
+  const t3 = computeInjectAndPositionPlans(ctx.entries, disabledSet, (entry) => slotFillerActivated(entry, ctx, forcedSet.has(entry.id)));
   for (const id of t3.addDisabled) {
     if (!disabledSet.has(id)) {
       disabled.push(id);
@@ -10300,7 +10323,7 @@ ${plan.content}` });
   }
   return { messages: out, mutationCount, synthesizedCount, fallbackAppendCount, perPlan };
 }
-var RISU_FALLBACK_SCAN_DEPTH = 4, TIER2_PRE_ACTIVATION_GATES, INJECT_DECORATOR_NAMES, RISU_SLOT_TOKENS;
+var RISU_FALLBACK_SCAN_DEPTH = 4, RISU_DEFAULT_LORE_DEPTH = 5, TIER2_PRE_ACTIVATION_GATES, INJECT_DECORATOR_NAMES, risuSourceRank = (entry) => entry.extensions["_risu_chat_local"] === true ? 1 : 0, RISU_SLOT_TOKENS;
 var init_lorebook_decorator_runtime = __esm(() => {
   TIER2_PRE_ACTIVATION_GATES = new Set([
     "is_greeting",
@@ -29565,7 +29588,11 @@ function createLumiInterceptors(deps) {
           keysecondary: Array.isArray(e.keysecondary) ? e.keysecondary : [],
           content: typeof e.content === "string" ? e.content : "",
           priority: typeof e.priority === "number" ? e.priority : 0,
-          extensions: e.extensions
+          extensions: e.extensions,
+          constant: e.constant,
+          selective: e.selective,
+          scan_depth: e.scan_depth,
+          order_value: e.order_value
         })),
         messages: ctx.messages.map((m) => ({
           role: m.role,
@@ -30052,6 +30079,18 @@ function registerSpindleMacros() {
       description: "Reads the chat's author's note (chat metadata authors_note.content).",
       returnType: "string",
       handler: (ctx) => resolveAuthornoteMacro(ctx)
+    },
+    {
+      name: "position",
+      category: MACRO_CATEGORY,
+      description: "Joined content of the active lorebook entries decorated with @@position pt_NAME.",
+      returnType: "string",
+      volatile: true,
+      handler: (ctx) => {
+        const positions = getDecoratorBuffers(readChatId(ctx))?.positionPt;
+        const name = getArgs(ctx).join("::");
+        return positions && Object.hasOwn(positions, name) ? transformPresetTemplate(positions[name]) : "";
+      }
     }
   ];
   for (const m of macros) {
@@ -30061,6 +30100,7 @@ function registerSpindleMacros() {
         category: m.category,
         description: m.description,
         returnType: m.returnType,
+        ..."volatile" in m ? { volatile: m.volatile } : {},
         handler: m.handler
       });
       if (m.aliases) {

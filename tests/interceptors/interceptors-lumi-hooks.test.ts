@@ -11,6 +11,7 @@ import { DEFAULT_SETTINGS } from '../../src/state/settings-store.js';
 import { resetMacroInterceptorCache } from '../../src/state/macro-interceptor-cache.js';
 import { resetListenEditPreloadCache } from '../../src/interpreter/listenedit-preload.js';
 import { invalidateLocalLore } from '../../src/state/local-lore.js';
+import { clearDecoratorBuffers, getDecoratorBuffers } from '../../src/interpreter/decorator-buffers.js';
 
 interface CapturedHandlers {
   macroInterceptor: ((ctx: unknown) => Promise<unknown>) | null;
@@ -158,6 +159,10 @@ function worldInfoEntry(
     priority: number;
     extensions: Readonly<Record<string, unknown>>;
     book_source: string;
+    constant: boolean;
+    selective: boolean;
+    scan_depth: number;
+    order_value: number;
   }> = {},
 ) {
   return {
@@ -519,6 +524,36 @@ describe('createLumiInterceptors', () => {
       chatMetadata: {},
     });
     expect(result).toBeUndefined();
+  });
+
+  test('worldInfoInterceptor: forwards the host fields that decide pt_ slots', async () => {
+    setupSpindle(stub, captured);
+    stub.chatsGetReturn = () => ({ metadata: {} });
+    const { deps } = makeMockDeps();
+    deps.activeCardByChat.set('chat-1', makeStubActiveCard());
+    createLumiInterceptors(deps).registerAll();
+    const extensions = { _risu_decorators: [{ name: 'position', args: ['pt_S'] }] };
+
+    await captured.worldInfoInterceptor!({
+      chatId: 'chat-1',
+      characterId: 'char-1',
+      userId: 'user-1',
+      entries: [
+        worldInfoEntry('low', { content: 'low', constant: true, order_value: 1, extensions }),
+        worldInfoEntry('high', { content: 'high', constant: true, order_value: 2, extensions }),
+        worldInfoEntry('outOfDepth', { content: 'outOfDepth', key: ['dragon'], scan_depth: 1, extensions }),
+        worldInfoEntry('selective', { content: 'selective', key: ['knight'], keysecondary: ['neverpresent'], selective: true, extensions }),
+      ],
+      messages: [worldInfoMessage('message-1', 'a dragon'), worldInfoMessage('message-2', 'a knight')],
+      chatTurn: 1,
+      chatMetadata: {},
+      activationSettings: { globalScanDepth: 5 },
+      generationType: 'normal',
+      dryRun: false,
+    });
+
+    expect(getDecoratorBuffers('chat-1')?.positionPt).toEqual({ S: 'low\nhigh' });
+    clearDecoratorBuffers('chat-1');
   });
 
   test('worldInfoInterceptor: persists sticky keep-activate writes via one chats.update', async () => {
