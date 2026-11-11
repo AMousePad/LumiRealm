@@ -358,6 +358,12 @@ function risuChatRanges(template: readonly Record<string, unknown>[]): RisuChatR
   return ranges;
 }
 
+// Risu's sendChat appends the card's personality and scenario to its description prompt.
+// risuLength gates them because the host's {{#if}} would read a comparison operator in the text.
+export const RISU_DESCRIPTION_SLOT = '{{description}}'
+  + '{{#if {{risuLength::{{personality}}}}}}\n\nDescription of {{char}}: {{personality}}{{/if}}'
+  + '{{#if {{risuLength::{{scenario}}}}}}\n\nCircumstances and context of the dialogue: {{scenario}}{{/if}}';
+
 export function translateRisuPromptBlocks(
   template: readonly Record<string, unknown>[] | undefined,
   toggleGroups: readonly ParsedToggleGroup[],
@@ -501,8 +507,8 @@ export function translateRisuPromptBlocks(
       } else if (type === 'description') {
         const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
         const descContent = rawInner
-          ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{description}}') : rawInner)
-          : (text || '{{description}}');
+          ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', RISU_DESCRIPTION_SLOT) : rawInner)
+          : (text || RISU_DESCRIPTION_SLOT);
         blocks.push({
           id: newUuid(),
           name: name || 'Character Description',
