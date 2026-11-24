@@ -781,6 +781,10 @@ export function createLumiInterceptors(deps: CreateLumiInterceptorsDeps): LumiIn
             content: typeof e.content === 'string' ? e.content : '',
             priority: typeof e.priority === 'number' ? e.priority : 0,
             extensions: e.extensions,
+            constant: e.constant,
+            selective: e.selective,
+            scan_depth: e.scan_depth,
+            order_value: e.order_value,
           })),
           messages: ctx.messages.map((m) => ({
             role: m.role,

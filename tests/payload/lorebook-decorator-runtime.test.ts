@@ -874,23 +874,177 @@ describe("computeInjectAndPositionPlans — position pt_*", () => {
     expect(r.positionPt).toEqual([{ name: "FOO", content: "Foo content" }]);
   });
 
-  test("multiple pt_<SAME-NAME> entries joined with newline (Risu :583)", () => {
+  test("multiple pt_<SAME-NAME> entries join with newline ascending by insert order (Risu :583)", () => {
     const entries: WorldInfoEntryView[] = [
       entry({
         id: "a",
         priority: 10,
-        content: "First",
+        order_value: 20,
+        content: "Second",
         extensions: { _risu_decorators: [{ name: "position", args: ["pt_LIST"] }] },
       }),
       entry({
         id: "b",
         priority: 5,
-        content: "Second",
+        order_value: 10,
+        content: "First",
         extensions: { _risu_decorators: [{ name: "position", args: ["pt_LIST"] }] },
       }),
     ];
     const r = computeInjectAndPositionPlans(entries, new Set());
     expect(r.positionPt).toEqual([{ name: "LIST", content: "First\nSecond" }]);
+  });
+
+  test("runtime: a pt_ entry only fills its slot when Risu would activate it", () => {
+    const ptEntry = (id: string, fields: Partial<WorldInfoEntryView>) => entry({
+      id,
+      content: id,
+      extensions: { _risu_decorators: [{ name: "position", args: ["pt_S"] }] },
+      ...fields,
+    });
+    const outcome = runWorldInfoInterceptor({
+      entries: [
+        ptEntry("always", { constant: true }),
+        ptEntry("hit", { key: ["dragon"] }),
+        ptEntry("miss", { key: ["neverpresent"] }),
+        ptEntry("keyless", {}),
+        ptEntry("selectiveHit", { key: ["dragon"], keysecondary: ["castle"], selective: true }),
+        ptEntry("selectiveMiss", { key: ["dragon"], keysecondary: ["neverpresent"], selective: true }),
+        ptEntry("selectiveNoSecondary", { key: ["dragon"], keysecondary: [], selective: true }),
+        ptEntry("outOfDepth", { key: ["ancient"], scan_depth: 1 }),
+      ],
+      messages: [
+        { role: "user", content: "the ancient map" },
+        { role: "user", content: "a dragon at the castle" },
+      ],
+      chatTurn: 0,
+      chatMetadata: {},
+      defaultScanDepth: 4,
+    } as never);
+    const filled = outcome.positionPt[0]!.content.split("\n").sort();
+    expect(filled).toEqual(["always", "hit", "selectiveHit", "selectiveNoSecondary"]);
+    const inline = runWorldInfoInterceptor({
+      entries: [
+        entry({ id: "on", key: ["neverpresent"], content: "@@position pt_I\n@@activate\non" }),
+        entry({ id: "keylessActivate", content: "@@position pt_I\n@@activate\nkeylessActivate" }),
+        entry({ id: "off", constant: true, content: "@@position pt_I\n@@dont_activate\noff" }),
+      ],
+      messages: [],
+      chatTurn: 0,
+      chatMetadata: {},
+      defaultScanDepth: 4,
+    } as never);
+    expect(inline.positionPt).toEqual([{ name: "I", content: "on" }]);
+    // Inactive fillers still stay out of the host's normal placement.
+    for (const id of ["miss", "keyless", "selectiveMiss", "outOfDepth"]) expect(outcome.disabled).toContain(id);
+  });
+
+  test("pt_ entries with equal order join in Risu's priority order, highest last", () => {
+    const pt = (id: string, priority: number) => entry({
+      id,
+      priority,
+      order_value: 100,
+      constant: true,
+      content: id,
+      extensions: { _risu_decorators: [{ name: "position", args: ["pt_S"] }] },
+    });
+    const r = computeInjectAndPositionPlans([pt("low", 1), pt("high", 10)], new Set());
+    expect(r.positionPt).toEqual([{ name: "S", content: "low\nhigh" }]);
+    const swapped = computeInjectAndPositionPlans([pt("high", 10), pt("low", 1)], new Set());
+    expect(swapped.positionPt).toEqual([{ name: "S", content: "low\nhigh" }]);
+  });
+
+  test("pt_ entries tied on order and priority join in reversed source order, chat lore first", () => {
+    const pt = (id: string, extensions: Record<string, unknown>) => entry({
+      id,
+      constant: true,
+      content: id,
+      extensions: { _risu_decorators: [{ name: "position", args: ["pt_S"] }], ...extensions },
+    });
+    const first = pt("first", { _risu_array_index: 0 });
+    const second = pt("second", { _risu_array_index: 1 });
+    const local = pt("local", { _risu_array_index: 0, _risu_chat_local: true });
+    const r = computeInjectAndPositionPlans([local, second, first], new Set());
+    expect(r.positionPt).toEqual([{ name: "S", content: "local\nsecond\nfirst" }]);
+  });
+
+  test("runtime: inject_lore targets the active pt_ entry when an inactive one shares its comment", () => {
+    const decorators = [{ name: "position", args: ["pt_S"] }];
+    const outcome = runWorldInfoInterceptor(ctx({
+      entries: [
+        entry({ id: "inactive", comment: "T", priority: 10, key: ["neverpresent"], content: "inactive", extensions: { _risu_decorators: decorators } }),
+        entry({ id: "active", comment: "T", constant: true, content: "active", extensions: { _risu_decorators: decorators } }),
+        entry({ id: "injector", constant: true, content: "EXTRA", extensions: { _risu_decorators: [{ name: "inject_lore", args: ["T"] }] } }),
+      ],
+    }));
+    expect(outcome.positionPt).toEqual([{ name: "S", content: "active EXTRA" }]);
+  });
+
+  test("runtime: an inactive inject_lore entry does not write into a pt_ slot", () => {
+    const inject = [{ name: "inject_lore", args: ["T"] }];
+    const outcome = runWorldInfoInterceptor(ctx({
+      entries: [
+        entry({ id: "slot", comment: "T", constant: true, content: "slot", extensions: { _risu_decorators: [{ name: "position", args: ["pt_S"] }] } }),
+        entry({ id: "keyedMiss", key: ["neverpresent"], content: "A", extensions: { _risu_decorators: inject } }),
+        entry({ id: "keyless", content: "B", extensions: { _risu_decorators: inject } }),
+        entry({ id: "active", constant: true, content: "C", extensions: { _risu_decorators: inject } }),
+      ],
+    }));
+    expect(outcome.positionPt).toEqual([{ name: "S", content: "slot C" }]);
+  });
+
+  test("runtime: an inactive inject_lore entry is not redirected past an inactive slot onto a plain entry", () => {
+    const outcome = runWorldInfoInterceptor(ctx({
+      entries: [
+        entry({ id: "slot", comment: "T", priority: 10, key: ["neverpresent"], content: "SLOT", extensions: { _risu_decorators: [{ name: "position", args: ["pt_S"] }] } }),
+        entry({ id: "plain", comment: "T", constant: true, content: "PLAIN" }),
+        entry({ id: "injector", key: ["neverpresent"], content: "INJ", extensions: { _risu_decorators: [{ name: "inject_lore", args: ["T"] }] } }),
+      ],
+    }));
+    expect(outcome.mutated).toEqual([]);
+    expect(outcome.positionPt).toEqual([]);
+  });
+
+  test("runtime: a sticky keep_activate var does not fill a keyless pt_ entry", () => {
+    const decorators = [
+      { name: "position", args: ["pt_S"] },
+      { name: "keep_activate_after_match", args: [] },
+    ];
+    const outcome = runWorldInfoInterceptor(ctx({
+      entries: [
+        entry({ id: "keyless", content: "keyless", extensions: { _risu_decorators: decorators } }),
+        entry({ id: "keyed", key: ["neverpresent"], content: "keyed", extensions: { _risu_decorators: decorators } }),
+      ],
+      chatMetadata: { chat_variables: { __internal_ka_keyless: "1", __internal_ka_keyed: "1" } },
+    }));
+    expect(outcome.positionPt).toEqual([{ name: "S", content: "keyed" }]);
+  });
+
+  test("runtime: the last @@activate or @@dont_activate wins for pt_ entries and a @@@ fallback does not run", () => {
+    const outcome = runWorldInfoInterceptor(ctx({
+      entries: [
+        entry({ id: "on", key: ["neverpresent"], content: "@@position pt_S\n@@dont_activate\n@@activate\non" }),
+        entry({ id: "off", key: ["neverpresent"], content: "@@position pt_S\n@@activate\n@@dont_activate\noff" }),
+        entry({ id: "kept", constant: true, content: "@@position pt_S\n@@@dont_activate\nkept" }),
+      ],
+    }));
+    expect(outcome.positionPt[0]!.content.split("\n").sort()).toEqual(["kept", "on"]);
+  });
+
+  test("runtime: a null host scan depth uses Risu's default loreBookDepth for pt_ entries", () => {
+    const outcome = runWorldInfoInterceptor({
+      entries: ["old", "recent"].map((key) => entry({
+        id: key,
+        key: [key],
+        content: key,
+        extensions: { _risu_decorators: [{ name: "position", args: ["pt_S"] }] },
+      })),
+      messages: ["old", "a", "b", "c", "d", "recent"].map((content) => ({ role: "user", content })),
+      chatTurn: 0,
+      chatMetadata: {},
+      defaultScanDepth: null,
+    } as never);
+    expect(outcome.positionPt).toEqual([{ name: "S", content: "recent" }]);
   });
 
   test("pt_<NAME> entry excluded when in disabledIds", () => {
@@ -1017,6 +1171,7 @@ describe("runWorldInfoInterceptor — Tier 3 integration", () => {
         }),
         entry({
           id: "pt_e",
+          constant: true,
           content: "anchor content",
           extensions: { _risu_decorators: [{ name: "position", args: ["pt_HEADER"] }] },
         }),
@@ -1063,7 +1218,8 @@ describe("runWorldInfoInterceptor — inline decorator fallback", () => {
       entries: [
         entry({
           id: "lumi-authored",
-          content: "@@position pt_MOD1\n@@activate\n- TestExtra-Hyun, TestExtra-Min",
+          constant: true,
+          content: "@@position pt_MOD1\n- TestExtra-Hyun, TestExtra-Min",
           extensions: {}, // no _risu_decorators
         }),
       ],
@@ -1107,6 +1263,7 @@ describe("runWorldInfoInterceptor — inline decorator fallback", () => {
       entries: [
         entry({
           id: "stashed",
+          constant: true,
           // Inline content has @@position pt_FOO but stash has @@position pt_BAR.
           // Stash wins.
           content: "@@position pt_FOO\nstashed-body",
