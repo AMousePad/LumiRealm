@@ -179,6 +179,46 @@ test('reads the chat history at an absolute 0-based index, whatever the role', a
   expect(await readAt(handlers, '+1')).toBe('SYNTH-M1');
 });
 
+test('a stored preset row keeps reading the last message through the host index', async () => {
+  const { handlers } = install({});
+  // The host's lastmessageid counts the greeting, so the pair must stay in that frame until re-import.
+  const hostLastMessageId = String(SYNTH_MESSAGES.length - 1);
+  expect(await readAt(handlers, hostLastMessageId)).toBe('SYNTH-M2');
+});
+
+const risuReadAt = (handlers: Map<string, MacroHandler>, index: string, messages: unknown[] = SYNTH_MESSAGES) =>
+  call(handlers, 'risuchatlog', { args: [index], messages });
+
+test('risuChatLog reads at a 0-based index after the greeting, whatever the role', async () => {
+  const { handlers } = install({});
+  expect(await risuReadAt(handlers, '0')).toBe('SYNTH-M1');
+  expect(await risuReadAt(handlers, '1')).toBe('SYNTH-M2');
+  for (const index of ['2', '-1', 'abc']) expect(await risuReadAt(handlers, index)).toBe('');
+});
+
+test('a chat that opens with the user has no greeting to skip', async () => {
+  const { handlers } = install({});
+  const messages = SYNTH_MESSAGES.slice(1);
+  expect(await risuReadAt(handlers, '0', messages)).toBe('SYNTH-M1');
+  expect(await call(handlers, 'risulastmessageid', { messages })).toBe('1');
+});
+
+test('risuLastMessageId indexes the last message risuChatLog can read', async () => {
+  const { handlers } = install({});
+  const lastId = (messages: unknown[]) => call(handlers, 'risulastmessageid', { messages });
+  expect(await lastId(SYNTH_MESSAGES)).toBe('1');
+  expect(await risuReadAt(handlers, await lastId(SYNTH_MESSAGES))).toBe('SYNTH-M2');
+  // Only a greeting, and no messages at all, are both Risu's empty chat.message.
+  expect(await lastId(SYNTH_MESSAGES.slice(0, 1))).toBe('-1');
+  expect(await lastId([])).toBe('-1');
+  expect(await risuReadAt(handlers, '0', SYNTH_MESSAGES.slice(0, 1))).toBe('');
+});
+
+test('risuLastMessageId fails loudly when the evaluation carries no chat', () => {
+  const { handlers } = install({});
+  expect(() => call(handlers, 'risulastmessageid')).toThrow('no chat history');
+});
+
 test('resolves a message that does not exist to the empty string, not the Risu sentinel', async () => {
   const { handlers } = install({});
   // Past the end, a negative index (Risu does not wrap from the end), a float

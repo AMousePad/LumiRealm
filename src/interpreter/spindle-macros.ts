@@ -189,11 +189,16 @@ async function resolveAuthornoteMacro(ctx: unknown): Promise<string> {
 
 // ─── Chat history reads (`{{previous_chat_log::N}}`) ─────────────────────────
 
-// Risu's previouschatlog reads chat.message[Number(arg)] (cbs.ts), the same
-// array its lastmessageid counts. The host already serializes that array onto
-// env.extra.messages, so the read is served from it: one frame with
-// {{lastmessageid}}, one source of truth, and no RPC per occurrence.
-function resolveChatLogMacro(ctx: unknown): string {
+// Risu's previouschatlog and lastmessageid both use chat.message (cbs.ts), which excludes the
+// greeting. The host serializes the chat with the greeting first, so both read through this frame.
+function risuChatMessages(messages: readonly unknown[]): readonly unknown[] {
+  const first = messages[0] as { is_user?: unknown } | null | undefined;
+  return first && first.is_user !== true ? messages.slice(1) : messages;
+}
+
+// Presets are translated once at import. Stored rows pair previous_chat_log with the host's own
+// lastmessageid, so that macro keeps the host's frame and new imports use risuChatLog instead.
+function resolveChatLogMacro(ctx: unknown, frame: (messages: readonly unknown[]) => readonly unknown[] = (m) => m): string {
   const env = (ctx as { env?: { extra?: Record<string, unknown> } })?.env;
   const messages = env?.extra?.['messages'];
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -211,7 +216,7 @@ function resolveChatLogMacro(ctx: unknown): string {
   // evaluates and no sentinel text can reach the prompt.
   const args = (ctx as { args?: unknown[] })?.args;
   const index = Array.isArray(args) && args.length > 0 ? Number(args[0]) : Number.NaN;
-  const content = (messages as ReadonlyArray<{ content?: unknown } | null>)[index]?.content;
+  const content = (frame(messages) as ReadonlyArray<{ content?: unknown } | null>)[index]?.content;
   return typeof content === 'string' ? content : '';
 }
 
@@ -286,6 +291,24 @@ export function registerSpindleMacros(): void {
         getArgs(ctx), '',
       ),
     })),
+    {
+      name: 'risuLastMessageId',
+      category: MACRO_CATEGORY,
+      description: "Index of the last message in Risu's chat.message, which excludes the greeting. -1 when empty.",
+      returnType: 'integer',
+      handler: (ctx: unknown) => {
+        const messages = (ctx as { env?: { extra?: Record<string, unknown> } })?.env?.extra?.['messages'];
+        if (!Array.isArray(messages)) throw new Error('risuLastMessageId: no chat history in this evaluation');
+        return String(risuChatMessages(messages).length - 1);
+      },
+    },
+    {
+      name: 'risuChatLog',
+      category: MACRO_CATEGORY,
+      description: "Reads one message by index from Risu's chat.message, which excludes the greeting.",
+      returnType: 'string',
+      handler: (ctx: unknown) => resolveChatLogMacro(ctx, risuChatMessages),
+    },
     {
       name: 'previous_chat_log',
       // Risu's primary spelling for the same macro (cbs.ts previouschatlog).
