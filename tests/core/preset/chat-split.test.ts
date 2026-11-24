@@ -19,7 +19,7 @@ test('places items between Risu chat items inside the history where the earlier 
     ['Before', 'pre_history', 0, null],
     ['Older', 'in_history', 0, 'chat_history'],
     ['Main', 'in_history', 6, null],
-    ['Card', 'in_history', 4, 'char_description'],
+    ['Card', 'in_history', 4, null],
     ['Note', 'in_history', 4, 'jailbreak'],
     ['After', 'post_history', 0, null],
   ]);
