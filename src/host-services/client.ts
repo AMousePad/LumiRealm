@@ -1,5 +1,5 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
-import { v4 } from 'uuid';
+import { newUuid } from '../util/uuid.js';
 import { HostServiceError, type HostOperations, type HostReply, type HostRequest } from './protocol.js';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> };
@@ -22,7 +22,7 @@ export function createHostClient(ctx: Transport) {
     call<K extends keyof HostOperations>(operation: K, input: HostOperations[K]['input']): Promise<HostOperations[K]['output']> {
       if (disposed) return Promise.reject(new HostServiceError('Host service connection closed'));
       return new Promise((resolve, reject) => {
-        const requestId = v4();
+        const requestId = newUuid();
         const timer = setTimeout(() => {
           pending.delete(requestId);
           reject(new HostServiceError(`Host operation timed out: ${operation}`));

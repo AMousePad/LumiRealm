@@ -1,3 +1,4 @@
+import '../helpers/uuid-stub.js';
 import {
   clearWasmoonEngine,
   executeWasmoon,

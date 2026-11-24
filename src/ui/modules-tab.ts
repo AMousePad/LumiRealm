@@ -17,7 +17,7 @@ import { sendImportText } from './import-text-upload.js';
 import * as tus from 'tus-js-client';
 import { pickNativeFile } from './native-file-picker.js';
 import { currentTask, startTask, finishTask, subscribeTask, setButtonBusy } from './busy.js';
-import { v4 } from 'uuid';
+import { newUuid } from '../util/uuid.js';
 
 type ConnectionWire = Extract<BackendToFrontend, { type: 'connections_list_pushed' }>['connections'][number];
 
@@ -142,7 +142,7 @@ export function mountModulesPanel(opts: MountModulesPanelOptions): ModulesPanelH
 
   function sendModuleAction(message: Extract<FrontendToBackend, { type: 'attach_module' | 'detach_module' | 'delete_module' | 'set_global_modules' }>, label: string, key: string): void {
     if (currentTask()) return;
-    const id = v4();
+    const id = newUuid();
     pendingAction = { id, key };
     if (!startTask({ id, kind: 'module', label })) { pendingAction = null; return; }
     try { sendToBackend({ ...message, requestId: id }); }

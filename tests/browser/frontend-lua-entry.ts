@@ -1,3 +1,4 @@
+import '../helpers/uuid-stub.js';
 import { snapshot } from '../helpers/display-lua-fixture.js';
 import { buildPreloaded } from '../../src/display/host-shim.js';
 import { setDisplaySnapshot, getDisplaySnapshot, applyVarDelta } from '../../src/display/snapshot.js';

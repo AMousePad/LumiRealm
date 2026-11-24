@@ -1,3 +1,4 @@
+import { testUuid } from '../helpers/uuid-stub.js';
 import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
@@ -51,6 +52,7 @@ function makeContext(win: Window, withDisplay = true, settingsReady = true): {
     frontendSessionId: '0123456789abcdef0123456789abcdef',
     getActiveChat: () => ({ chatId: null, characterId: null }),
     events: { on() { return () => {}; } },
+    uuid: testUuid,
     deferReady(): void { events.push('defer'); },
     ready(): void { events.push('ready'); },
     ...(withDisplay ? { display } : {}),

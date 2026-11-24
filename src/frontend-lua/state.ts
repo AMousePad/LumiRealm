@@ -1,5 +1,5 @@
 import { readLuaOwnMetadata } from '../util/lua-message-data.js';
-import { v4 } from 'uuid';
+import { newUuid } from '../util/uuid.js';
 import { LOCAL_LORE_KEY, readLocalLore, upsertLocalLore } from '../interpreter/runtime/local-lore.js';
 import type { HostMessage, HostCharacter, HostPersona, HostWorldInfoEntry, TriggerRuntimeOpts } from '../interpreter/host.js';
 import { OrderedRuntimeState, type StatePatch, type StateRevision } from './ordered-state.js';
@@ -220,7 +220,7 @@ export class FrontendRuntimeState {
 
   write(command: RuntimeStateCommand, optimistic = true, staged: readonly symbol[] = []): Promise<unknown> {
     const id = this.state.begin(optimistic ? this.optimistic(command) : new Map());
-    const mutationId = v4();
+    const mutationId = newUuid();
     const partialOwned = optimistic && command.kind === 'message.create' && command.beforeId !== undefined;
     this.mutations.set(mutationId, { ids: partialOwned ? staged : [id, ...staged],
       ...(partialOwned ? { partial: id, partialOwned: true } : {}),
@@ -292,7 +292,7 @@ export class FrontendRuntimeState {
         const previous = new Map((messages === owner.messages ? this.observedMessages : observed).map(message => [message.id, message]));
         let inserted = false;
         for (const message of messages) {
-          if (!message.id) (message as { id: string }).id = v4();
+          if (!message.id) (message as { id: string }).id = newUuid();
           if (!previous.has(message.id)) inserted = true;
           if (message.role === 'assistant' && !message.content) this.scriptEmptyIds.add(message.id);
         }

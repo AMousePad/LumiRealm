@@ -10,7 +10,7 @@ import type { TriggerScript } from '../../src/core/schemas/triggerscript.js';
 import type { FrontendLuaOperation } from '../../src/frontend-lua/protocol.js';
 import './lua-bridge.js';
 
-export function frontendRuntime(initial?: RuntimeStateDto, hostSupport?: { messageMutations: boolean; resolvedLore: boolean }) {
+export function frontendRuntime(initial?: RuntimeStateDto) {
   const dto: RuntimeStateDto = structuredClone(initial ?? { revision: { epoch: 'host', sequence: 1 }, chat: { id: 'chat', metadata: { chat_variables: { x: '2' } } },
     character: { id: 'character', name: 'Character', first_mes: 'Greeting', scenario: 'Old scenario', world_book_ids: [] }, persona: null,
     messages: [{ id: 'greeting', role: 'assistant', content: 'Greeting', index_in_chat: 0, send_date: 0 },
@@ -51,7 +51,7 @@ export function frontendRuntime(initial?: RuntimeStateDto, hostSupport?: { messa
   const host = createFrontendHost(state, () => runtimeDisplaySnapshot(config, state), DEFAULT_SETTINGS, {
     call: async () => { serviceCalls++; throw new Error('Unexpected service'); },
     ui: { prompt: async () => { entered.resolve(); return resume.promise; } }, expression: async () => {}, invalidate() {}, synchronize: async () => {},
-  }, [], hostSupport);
+  }, []);
   host.api.personas!.getActive = async () => { personaReads++; throw new Error('Unrelated persona unavailable'); };
   return { state, dto, writes, host, entered, resume, event, counts: () => ({ serviceCalls, personaReads }), notifications: () => notifications,
     async run(code: string, operation: FrontendLuaOperation = { kind: 'edit', mode: 'editInput', value: 'input' }) {

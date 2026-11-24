@@ -30,7 +30,7 @@ import { awaitPickResolution } from './pick-bridge.js';
 import { backendLuaStateScope, hostCharacterState } from './runtime/lua-state.js';
 import { hostMessageTime } from '../util/message-time.js';
 import { hostLuaMessageData, luaOwnMetadata } from '../util/lua-message-data.js';
-import { messageWriteForHost, type RuntimeStateCommand } from '../frontend-lua/state-contract.js';
+import type { RuntimeStateCommand } from '../frontend-lua/state-contract.js';
 
 const log = makeSafeLogger('spindle-host.llm.generate');
 
@@ -57,10 +57,9 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
     }; });
   }
 
-  async function writeMessage(original: RuntimeStateCommand) {
+  async function writeMessage(command: RuntimeStateCommand) {
     const runtime = (spindle as typeof spindle & { runtimeState?: { write(chatId: string, command: unknown, userId: string): Promise<{ value: unknown }> } }).runtimeState;
-    const command = messageWriteForHost(original, spindle.contracts);
-    if (!runtime || !uid || !command) throw new RisuCompatUnsupportedError('Lua message mutation', 'requires native runtime message mutations');
+    if (!runtime || !uid) throw new RisuCompatUnsupportedError('Lua message mutation', 'requires native runtime message mutations');
     return runtime.write(chatId, command, uid);
   }
   async function sendMessage(content: string, opts?: Parameters<HostApi['chat']['sendMessage']>[1]): Promise<{ id: string }> {
@@ -198,10 +197,6 @@ export function makeSpindleHost(ctx: SpindleHostCtx): HostApi {
   };
 
   const host: HostApi = {
-    hostSupport: {
-      messageMutations: Boolean(spindle.contracts?.runtimeMessageMutations),
-      resolvedLore: typeof (spindle.world_books as { resolveForChat?: unknown } | undefined)?.resolveForChat === 'function',
-    },
     luaStateScope: backendLuaStateScope(userId),
     ...(uid !== undefined ? { userId: uid } : {}),
     corsFetch: async (url: string, init?: { readonly method?: string }) =>

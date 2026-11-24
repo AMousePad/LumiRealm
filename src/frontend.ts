@@ -1,3 +1,4 @@
+import { setupUuid } from './util/uuid.js';
 import { setupHostServices } from './host-services/client.js';
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types';
 import type { BackendToFrontend, FrontendToBackend } from './types/messages.js';
@@ -97,6 +98,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   flog.info('frontend setup: begin');
   const cleanups: (() => void)[] = [];
 
+  setupUuid(ctx);
   ctx.deferReady();
 
   const display = ctx.display;

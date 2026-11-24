@@ -1,3 +1,4 @@
+import { testUuid } from '../helpers/uuid-stub.js';
 import { setup } from '../../src/frontend';
 import { clearDisplaySnapshot, getDisplaySnapshot } from '../../src/display/snapshot';
 import { DEFAULT_SETTINGS } from '../../src/state/settings-store';
@@ -40,6 +41,7 @@ env.__runDisplayHost = async () => {
     state: { get: () => null, subscribe: () => () => {} },
     settings: { core: { isReady: () => true } },
     getActiveChat: () => ({ chatId: snap.chatId, characterId: snap.characterId }),
+    uuid: testUuid,
     deferReady() {}, ready() {}, dom: { addStyle: () => () => {} },
     events: { on(name: string, fn: any) {
       const set = listeners.get(name) ?? new Set(); set.add(fn); listeners.set(name, set); return () => set.delete(fn);

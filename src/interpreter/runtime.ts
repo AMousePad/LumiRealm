@@ -8,6 +8,7 @@ import {
   type HostMessage,
   RisuCompatUnsupportedError,
 } from './host.js';
+import { sha256Hex } from '../util/sha256.js';
 import { buildRisuChatView } from './risu-chat-view.js';
 import { makeVarsApi, createTriggerLocalState } from './runtime/vars.js';
 import { createLuaTemplateParser, createTriggerTemplateParser } from './runtime/template.js';
@@ -26,8 +27,6 @@ import {
   withModuleLorebooks,
   type LorebookCache,
 } from './runtime/lorebook.js';
-import { evaluate } from './evaluator/index.js';
-import { buildEvaluatorContext } from './evaluator/context.js';
 import { makeDisplayStateApi } from './runtime/display-state.js';
 import { makeLuaRequest } from './runtime/request.js';
 import { runLLM as _runLLM, parseLuaPromptArg } from './runtime/llm.js';
@@ -995,13 +994,6 @@ export async function makeRisuTriggerRuntime(
         const previous = messagesCache[n]!;
         const role = value === 'user' ? 'user' : 'assistant';
         if (previous.role === role) return;
-        // Without host role edits the row and everything after it are recreated, losing their swipes and attachments.
-        if (api.hostSupport?.messageMutations === false) {
-          const desired = messagesCache.map(message => ({ role: lumiRoleToRisu(message.role), data: luaMessageData(message) }));
-          desired[n] = { ...desired[n]!, role: lumiRoleToRisu(role) };
-          reconcileFullChat(JSON.stringify(desired));
-          return;
-        }
         const next = { ...previous, role };
         messagesCache[n] = next;
         inheritPendingSend(previous, next);
@@ -1048,13 +1040,6 @@ export async function makeRisuTriggerRuntime(
       insertChat: (_id: unknown, index: unknown, role: unknown, value: unknown) => {
         const n = Math.trunc(Number(index)) || 0;
         const at = n < 0 ? Math.max(0, messagesCache.length + n) : Math.min(n, messagesCache.length);
-        // Without host insertion later rows are rewritten or recreated to shift them, so swipes can land on the wrong text.
-        if (api.hostSupport?.messageMutations === false && at < messagesCache.length) {
-          const desired = messagesCache.map(message => ({ role: lumiRoleToRisu(message.role), data: luaMessageData(message) as unknown }));
-          desired.splice(at, 0, { role: role === 'user' ? 'user' : 'char', data: value ?? '' });
-          reconcileFullChat(JSON.stringify(desired));
-          return;
-        }
         const before = messagesCache[at];
         const entry: HostMessage = { id: '', role: role === 'user' ? 'user' : 'assistant', ...luaMessageFields(value ?? ''), createdAt: 0 };
         messagesCache.splice(at, 0, entry);
@@ -1230,21 +1215,7 @@ export async function makeRisuTriggerRuntime(
         const r = await api.llm.generate({ messages: [{ role: 'user', content: toStr(prompt) }], ...(auxPrefillCompat ? { prefillCompat: true } : {}) });
         return { success: true, result: toStr(r && r.content) };
       },
-      hash: (_id: unknown, value: unknown) => {
-        if (typeof crypto === 'undefined' || !crypto.subtle) {
-          return Promise.reject(new Error('risu-compat: lua.hash requires globalThis.crypto.subtle'));
-        }
-        const dataBytes = new TextEncoder().encode(toStr(value));
-        return crypto.subtle.digest('SHA-256', dataBytes).then((buf) => {
-          const bytes = new Uint8Array(buf);
-          let hex = '';
-          for (let i = 0; i < bytes.length; i++) {
-            const b = bytes[i]!.toString(16);
-            hex += b.length === 1 ? '0' + b : b;
-          }
-          return hex;
-        });
-      },
+      hash: (_id: unknown, value: unknown) => Promise.resolve(sha256Hex(new TextEncoder().encode(toStr(value)))),
       // Falls back to length/4 when host doesn't expose tokens.
       getTokens: async (_id: unknown, value: unknown): Promise<number> => {
         const text = toStr(value);
@@ -1379,20 +1350,6 @@ export async function makeRisuTriggerRuntime(
       },
       loadLoreBooksMain: async (_id: unknown, reserve: unknown) => {
         if (!lowLevelAccess) return undefined;
-        // Without host activation this returns every entry, ignoring keys and the reserve budget.
-        if (api.hostSupport?.resolvedLore === false) {
-          const evalCtx = buildEvaluatorContext({
-            chatId: portalChatId ?? '', commit: false, suppressVarPersist: true, userName: 'User', charName: 'Char', character: { description: '' },
-            chat: { messages: messagesCache.map(m => ({ role: m.role === 'user' ? 'user' as const : m.role === 'system' ? 'system' as const : 'assistant' as const, content: m.content, createdAt: m.createdAt ?? Date.now() })) },
-            variables: { global: { ...globalVarsCache }, local: { ...varsCache }, chat: { ...varsCache } },
-          });
-          return JSON.stringify(lorebook.entries.map(entry => {
-            let content = toStr(entry.content);
-            if (content.includes('{{')) content = evaluate(content, evalCtx);
-            return { ...entry, data: content, name: toStr(entry.comment || entry.id), comment: toStr(entry.comment), content,
-              key: Array.isArray(entry.key) ? entry.key.join(', ') : toStr(entry.key), order: entry.orderValue ?? 100, alwaysActive: !entry.disabled };
-          }));
-        }
         if (!api.worldInfo?.resolveForChat) throw new RisuCompatUnsupportedError('loadLoreBooks', 'requires native resolved world info');
         await flush();
         // Native activation and the host's configured lore budget remain authoritative.
