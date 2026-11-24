@@ -22,6 +22,10 @@ bun run typecheck:all   # whole-tree typecheck including tests
 
 `dist/` is committed. Any change to `src/` must be followed by `bun run build` and the rebuilt `dist/` included in the same commit.
 
+## Branches
+
+`main` is the only development branch. Branch from it and target it with PRs. `staging` is a read-only mirror of `main`, kept for users who installed from it, and a workflow fast-forwards it on every push to `main`. Never commit to `staging`.
+
 ## Rules
 
 1. **Single scope.** One change per branch/PR: a single fix or one narrowly-scoped feature. Do not bundle large refactors, formatting, or unrelated improvements with a fix. Large multi-scope changes are rejected on the spot. Minimize lines changed and blast radius.

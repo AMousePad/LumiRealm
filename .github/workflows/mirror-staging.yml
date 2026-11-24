@@ -1,0 +1,30 @@
+name: Mirror main to staging
+
+# Lumiverse updates an installed extension only from the branch it was installed from, so staging must keep receiving releases.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-staging
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The workflow token cannot push commits that change workflow files, so those pushes need a manual `git push origin main:staging`.
+      - name: Fast-forward staging
+        run: |
+          if ! git push origin "$GITHUB_SHA:refs/heads/staging"; then
+            echo "::error::Could not fast-forward staging to main. If staging diverged or main changed a workflow file, run: git push origin main:staging"
+            exit 1
+          fi
