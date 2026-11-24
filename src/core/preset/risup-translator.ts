@@ -100,7 +100,8 @@ export function parseRisuToggleSyntax(template: string | undefined): ParsedToggl
 // Risu's risuChatParser closes the innermost block regardless of the closing label.
 // The host instead requires a closing macro whose name matches its opener.
 function namePresetBlockClosers(template: string): string {
-  const blocks: string[] = [];
+  // A block inside a macro argument pairs within that argument, so each nesting depth has its own stack.
+  const blocksByDepth = new Map<number, string[]>();
   const openings: number[] = [];
   let result = '';
   let copied = 0;
@@ -111,7 +112,10 @@ function namePresetBlockClosers(template: string): string {
       continue;
     }
     const start = openings.pop();
-    if (start === undefined || openings.length > 0) continue;
+    if (start === undefined) continue;
+    blocksByDepth.delete(openings.length + 1);
+    const blocks = blocksByDepth.get(openings.length) ?? [];
+    blocksByDepth.set(openings.length, blocks);
     const inner = template.slice(start + 2, offset);
     const opener = /^#([a-zA-Z_]+)\b/.exec(inner);
     if (opener) {
@@ -303,6 +307,9 @@ export function transformPresetTemplate(template: string): string {
   // 4. Normalize pure-if conditionals: {{#if_pure ...}} -> {{#if ...}}, {{/if_pure}} -> {{/if}}
   result = result.replace(/\{\{#if_pure\b/g, '{{#if');
   result = result.replace(/\{\{\/if_pure\}\}/g, '{{/if}}');
+  // The host outputs the body of a block it does not know. Keeping Risu's statement as the
+  // arguments lets the macro run Risu's blockStartMatcher on every header form.
+  result = result.replace(/\{\{#when(?=::| |\}\})/g, '{{#risuWhen::when');
 
   result = namePresetBlockClosers(result);
   result = trimEachBodies(result);
@@ -324,6 +331,17 @@ export function transformPresetTemplate(template: string): string {
   result = result.replace(/\{\{not_equal::/g, '{{risuNotEqual::');
 
   return result;
+}
+
+// Risu fills {{slot}} after the format's blocks end, so a multi-line value cannot hide an inline
+// {{:else}} from blockEndMatcher. Filling first here needs that else on its own line, and every slot
+// filled because the selected branch is unknown; two slots left in one branch diverge, as Risu fills only the first.
+function fillPresetSlot(innerFormat: string, value: string): string {
+  return innerFormat
+    .split('\n')
+    .map((line) => (line.includes('{{slot}}') ? line.replaceAll('{{:else}}', '\n{{:else}}\n') : line))
+    .join('\n')
+    .replaceAll('{{slot}}', value);
 }
 
 /** A Risu chat item's slice as offsets from the chat end (0 is the end); a null start is the first message. */
@@ -477,7 +495,7 @@ export function translateRisuPromptBlocks(
         // translation the plain path applies to `text`.
         const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
         const personaContent = rawInner
-          ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{persona}}') : rawInner)
+          ? transformPresetTemplate(fillPresetSlot(rawInner, '{{persona}}'))
           : (text || '{{persona}}');
         // Host structural markers ignore content, including wrappers and placement gates.
         const personaMarker: PromptBlockDTO['marker'] = !seenPersona && personaContent === '{{persona}}'
@@ -501,7 +519,7 @@ export function translateRisuPromptBlocks(
       } else if (type === 'description') {
         const rawInner = typeof item['innerFormat'] === 'string' && item['innerFormat'].trim().length > 0 ? item['innerFormat'] : null;
         const descContent = rawInner
-          ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{description}}') : rawInner)
+          ? transformPresetTemplate(fillPresetSlot(rawInner, '{{description}}'))
           : (text || '{{description}}');
         blocks.push({
           id: newUuid(),
@@ -539,7 +557,7 @@ export function translateRisuPromptBlocks(
         // neither it nor {{authors_note}} is registered in the host macro
         // registry, so this slot needs a host macro to resolve.
         const anContent = rawInner
-          ? transformPresetTemplate(rawInner.includes('{{slot}}') ? rawInner.replace('{{slot}}', '{{authornote}}') : rawInner)
+          ? transformPresetTemplate(fillPresetSlot(rawInner, '{{authornote}}'))
           : (text || '{{authornote}}');
         blocks.push({
           id: newUuid(),

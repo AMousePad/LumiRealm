@@ -7,6 +7,8 @@ declare const spindle: any;
 import '../risu-compat/handlers/logic.js';
 import { registry } from '../risu-compat/registry.js';
 import { buildEvaluatorContext } from './evaluator/context.js';
+import { blockEndMatcher, blockStartMatcher } from './evaluator/scoped.js';
+import type { EvaluatorCtx } from './evaluator/types.js';
 import { getActiveScriptstateDefaults } from './defaults-cache.js';
 import { calcString, parseArray } from '../risu-compat/risu-helpers.js';
 import { collectLegacyGlobals, mergeEffectiveGlobals, readTogglePreferences } from '../state/toggle-preferences.js';
@@ -164,6 +166,23 @@ async function resolveGlobalVarMacro(ctx: unknown): Promise<string> {
   return (await effectiveGlobals(ctx, `risuGlobalVar(${key})`))[key] ?? 'null';
 }
 
+// ─── Conditional blocks (`{{#when}}`) ────────────────────────────────────────
+
+// The body arrives evaluated, as in Risu, which also runs a false branch's macros. A false `legacy`
+// block is the one divergence: Risu skips its body. Rejoining the arguments matches Risu's split of
+// the resolved statement, so a value holding `::` splits alike.
+async function evalRisuWhen(ctx: unknown): Promise<string> {
+  const { isScoped, body } = ctx as { isScoped?: boolean; body?: unknown };
+  if (!isScoped) throw new Error('{{#when}} has no closing {{/}}');
+  const globals = await effectiveGlobals(ctx, 'risuWhen');
+  const vars = {
+    get: (scope: string, name: string) => (scope === 'global' ? globals[name] ?? 'null' : readChatVar(ctx, name)),
+  } as unknown as EvaluatorCtx['vars'];
+  const match = blockStartMatcher(`#${getArgs(ctx).join('::')}`, { vars });
+  // The host parses {{:else}} as a nameless macro and reconstructs it as {{::else}}.
+  return blockEndMatcher(String(body ?? '').replaceAll('{{::else}}', '{{:else}}'), match);
+}
+
 // ─── Chat author's note (`{{authornote}}`) ───────────────────────────────────
 
 // The host engine has no author's-note slot, so the translated `{{authornote}}`
@@ -251,6 +270,13 @@ export function registerSpindleMacros(): void {
       handler: (ctx: unknown) => parseArray(getArgs(ctx).join('::'))
         .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
         .join('§'),
+    },
+    {
+      name: 'risuWhen',
+      category: MACRO_CATEGORY,
+      description: 'Risu {{#when}} block: keeps the branch its statement selects, with Risu whitespace rules.',
+      returnType: 'string',
+      handler: (ctx: unknown) => evalRisuWhen(ctx),
     },
     {
       name: 'risuContains',
